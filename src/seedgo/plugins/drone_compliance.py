@@ -17,6 +17,38 @@ from pathlib import Path
 
 from seedgo.models import CheckItem, CheckResult, Severity
 
+
+def _get_missing_drone_module_keys(tree: ast.AST, required_keys: set[str]) -> set[str]:
+    """Extract keys from DRONE_MODULE dict and return missing required keys.
+
+    Args:
+        tree: AST tree to search
+        required_keys: Set of required key names
+
+    Returns:
+        Set of missing key names
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "DRONE_MODULE" for t in node.targets):
+            continue
+
+        # Found DRONE_MODULE assignment, check if value is a dict
+        if not isinstance(node.value, ast.Dict):
+            continue
+
+        # Extract string keys from the dict
+        found_keys = set()
+        for key in node.value.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                found_keys.add(key.value)
+
+        return required_keys - found_keys
+
+    # DRONE_MODULE not found or not a dict
+    return required_keys
+
 PLUGIN_NAME = "drone-compliance"
 PLUGIN_DESCRIPTION = "Verify modules provide drone adapter interface"
 PLUGIN_VERSION = "1.0.0"
@@ -151,6 +183,29 @@ def check(file_path: str, config: dict | None = None) -> CheckResult:
         )
     )
 
+    # Check 2b: DRONE_MODULE dict has required keys (name, version, description)
+    if has_meta:
+        required_keys = {"name", "version", "description"}
+        missing_keys = _get_missing_drone_module_keys(tree, required_keys)
+        has_all_keys = len(missing_keys) == 0
+        checks.append(
+            CheckItem(
+                name="drone-module-keys",
+                passed=has_all_keys,
+                message=(
+                    "DRONE_MODULE has all required keys (name, version, description)"
+                    if has_all_keys
+                    else f"DRONE_MODULE missing required keys: {', '.join(sorted(missing_keys))}"
+                ),
+                severity=Severity.ERROR if not has_all_keys else Severity.INFO,
+                fix_hint=(
+                    f"Add missing keys to DRONE_MODULE: {', '.join(sorted(missing_keys))}"
+                    if not has_all_keys
+                    else None
+                ),
+            )
+        )
+
     # Check 3: handle_command() function exists
     functions = [
         node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -188,6 +243,22 @@ def check(file_path: str, config: dict | None = None) -> CheckResult:
             ),
             severity=Severity.WARNING if not has_help else Severity.INFO,
             fix_hint="Add: def get_help(command: str | None = None) -> str:" if not has_help else None,
+        )
+    )
+
+    # Check 5: get_introspective() function exists (optional but recommended)
+    has_introspective = "get_introspective" in functions
+    checks.append(
+        CheckItem(
+            name="get-introspective",
+            passed=has_introspective,
+            message=(
+                "get_introspective() function found — module supports introspection"
+                if has_introspective
+                else "Missing get_introspective() — introspection pattern recommended for drone modules"
+            ),
+            severity=Severity.WARNING if not has_introspective else Severity.INFO,
+            fix_hint="Add: def get_introspective() -> dict:" if not has_introspective else None,
         )
     )
 
