@@ -1,0 +1,44 @@
+{
+  "version": "3.0.0",
+  "last_updated": "2026-02-25",
+  "updated_by": "DEVPULSE",
+  "changes": [
+    "v3.0.0: Remove bulletin_board section, add commons_activity, per-section last_updated, template manager system"
+  ],
+  "templates": {
+    "DASHBOARD.template.json": {
+      "description": "Branch dashboard template - v3 schema with write-through sections"
+    }
+  },
+  "last_push": "2026-02-25 18:23:16",
+  "last_push_branches": [
+    ".VSCODE",
+    "AI_MAIL",
+    "API",
+    "ASSISTANT",
+    "BACKUP_SYSTEM",
+    "CLI",
+    "CORTEX",
+    "DEVPULSE",
+    "DEV_CENTRAL",
+    "DRONE",
+    "FLOW",
+    "GIT_MANAGER",
+    "GROWTH",
+    "MCP_SERVERS",
+    "MEMORY_BANK",
+    "NEXUS",
+    "PERMISSIONS",
+    "PRAX",
+    "PROJECTS",
+    "SEED",
+    "SPEAKEASY",
+    "TEAM_1",
+    "TEAM_2",
+    "TEAM_3",
+    "TEST",
+    "THE_COMMONS",
+    "TRIGGER",
+    "VERA"
+  ]
+}
