@@ -4,7 +4,7 @@ Permission Flags Standards Content
 Provides Rich-formatted reference text for the permission flags standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: permission_flags_content.py
 # Description: Permission Flags Standards Content
 # Version: 1.0.0

@@ -5,7 +5,7 @@ Provides formatted error handling standards content (3-tier architecture).
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: error_handling_content.py
 # Description: Error Handling Standards Content Handler
 # Version: 1.0.0

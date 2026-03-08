@@ -34,7 +34,7 @@ except ImportError:
     TELEGRAM_CHAT_AVAILABLE = False
     run_direct_chat = None
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 
 if not TELEGRAM_CHAT_AVAILABLE:
     print("[assistant_chat] telegram_chat module not available, exiting")

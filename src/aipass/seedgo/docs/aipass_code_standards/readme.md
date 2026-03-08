@@ -97,8 +97,8 @@ Auto-generation handles facts (file lists, timestamps). Humans handle meaning.
 
 | Tool | Purpose | Location |
 |------|---------|----------|
-| `readme_check.py` | 6 automated checks, score >= 75% to pass | `seedgo/apps/handlers/standards/` |
-| `readme_generator.py` | Auto-populates TREE, MODULES, COMMANDS, HEADER, LAST_UPDATED | `seedgo/apps/handlers/standards/` |
+| `readme_check.py` | 6 automated checks, score >= 75% to pass | `src/aipass/seedgo/apps/standards/aipass/handlers/standards/` |
+| `readme_generator.py` | Auto-populates TREE, MODULES, COMMANDS, HEADER, LAST_UPDATED | `src/aipass/seedgo/apps/standards/aipass/handlers/standards/` |
 | `seedgo readme update @branch` | On-demand regeneration (Phase 4, coming soon) | CLI |
 
 **Checks performed by `readme_check.py`:**

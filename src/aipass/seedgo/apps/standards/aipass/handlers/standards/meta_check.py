@@ -6,7 +6,7 @@ Library META is lighter than full META - focuses on identity
 and traceability without branch-specific fields.
 
 Required META format:
-    # =================== META ====================
+    # =================== AIPass ====================
     # Name: filename.py
     # Description: Brief description of the file
     # Version: X.Y.Z
@@ -15,7 +15,7 @@ Required META format:
     # =============================================
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: meta_check.py
 # Description: META Block Standards Checker Handler
 # Version: 1.0.0
@@ -29,7 +29,9 @@ from typing import Dict, List
 
 
 # Header/footer markers for library META
-META_HEADER = "# =================== META ===================="
+# Accept both AIPass (canonical) and META (legacy) header markers
+META_HEADER = "# =================== AIPass ===================="
+META_HEADER_LEGACY = "# =================== META ===================="
 META_FOOTER = "# ============================================="
 
 # Required fields with validation patterns
@@ -132,7 +134,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 def check_meta_presence(content: str) -> Dict:
     """Check that META block header and footer markers exist"""
-    has_header = META_HEADER in content
+    has_header = META_HEADER in content or META_HEADER_LEGACY in content
     has_footer = META_FOOTER in content
 
     if has_header and has_footer:

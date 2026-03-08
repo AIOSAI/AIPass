@@ -95,6 +95,8 @@ You are a **manager**, not a worker. Delegate code tasks to sub-agents — don't
 
 **Use background agents aggressively.** When multiple independent tasks exist, spawn background agents to handle them in parallel. Don't wait for one task to finish before starting the next. Keep the pipeline moving.
 
+- When waiting on background agents, stay engaged — don't idle. Start next tasks, check inbox, update memories.
+
 ## Critical Rules
 
 - Imports must use `from aipass.{module}...` — never bare module imports
@@ -102,3 +104,21 @@ You are a **manager**, not a worker. Delegate code tasks to sub-agents — don't
 - `drone` and `seedgo` are CLI entry points defined in pyproject.toml
 - No cross-branch file edits — email the branch if you find an issue
 - Dev-Pass is at `/home/patrick/Projects/Dev-Pass/` — reference only, not source
+
+## Current Context (Session 13)
+
+**Date:** 2026-03-08
+
+- 20-standard audit complete — all 20 NEEDS UPDATE, zero compliant
+- FPLAN-0010 created for standards fixes
+- 3 checker bugs fixed: encapsulation continue/break, error_handling import match, cli import prefix
+- AIPass header regex fixed (META→AIPass) across 42 checker files
+- Checker paths fixed in 10 docs
+- parents[4]→parents[3] fixed in 1 doc + 16 code files (backup/daemon/memory)
+- Prax import standard updated to accept both canonical and shorthand forms
+- Bypass.json mechanism exists but is unpopulated — needed for branch audits
+- Permission flags standard is future-proofing placeholder
+- Logs layout needs discussion with Patrick
+- 4 modules completely non-compliant with prax logging: backup (12 files), daemon (12), memory (16), drone (2)
+- drone.py uses 41 bare print() calls, needs CLI service migration
+- backup/daemon/memory bypass CLI service with local Console()

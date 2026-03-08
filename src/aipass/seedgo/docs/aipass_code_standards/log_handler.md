@@ -65,11 +65,11 @@ On 2026-02-26, the entire AIPass command infrastructure crashed because telegram
 - **Python recursion limit hit** at 1000 levels deep, cascading `RecursionError`
 - **Every `drone` command failed** — 30+ second hangs then crash
 
-All other branches using prax's `system_logger` rotated correctly (verified: `.log.1` backups exist). The telegram bots were the only code bypassing prax.
+All other branches using prax's `system_logger` rotated correctly (verified: `.log.1` backups exist). The telegram bots were the only code bypassing prax. (Telegram integration has since been removed from AIPass.)
 
 ## Checker
 
-**File:** `src/aipass/seedgo/apps/handlers/standards/log_handler_check.py`
+**File:** `src/aipass/seedgo/apps/standards/aipass/handlers/standards/log_handler_check.py`
 
 Checks:
 1. No raw `logging.FileHandler()` usage

@@ -36,7 +36,7 @@ apps/handlers/ (Implementation Layer)
 
 **Rule:** All branches must match the Spawn template structure.
 
-**Source of Truth:** `<project_root>/spawn/templates/agent.template/.template_registry.json`
+**Source of Truth:** `src/aipass/spawn/templates/builder/.template_registry.json`
 
 **What it checks:**
 - All required files from template exist in branch (with proper name transformations)
@@ -50,7 +50,7 @@ apps/handlers/ (Implementation Layer)
 - `OBSERVATIONS.json` → `{BRANCHNAME}.observations.json`
 - `AI_MAIL.json` → `{BRANCHNAME}.ai_mail.json`
 - `BRANCH.py` → `{branchname}.py` (e.g., `seedgo.py`)
-- `README.md` → `README.json` (template uses .md, branches use .json)
+- `README.md` → `README.md` (branches keep their README as markdown)
 
 **WHY:** Spawn creates branches from template. If branches drift from template structure (missing files/directories), updates break and branch becomes non-standard. Template is the contract - all branches must honor it.
 
@@ -166,7 +166,7 @@ apps/handlers/
   └── cli/        → Everything about user interaction
 ```
 
-**Verified from:** `<project_root>/spawn/apps/handlers/` - These are actual domains from Spawn.
+**Verified from:** `src/aipass/spawn/apps/handlers/` - These are actual domains from Spawn.
 
 **Note:** Actual domain names will vary by branch purpose. See naming.md for domain naming standards.
 
@@ -311,7 +311,7 @@ Run 'python3 create_plan.py --help' for usage
 - Remove module → automatically gone
 - Zero maintenance overhead
 
-**Implementation:** See `<project_root>/seedgo/apps/seedgo.py` and `<project_root>/seedgo/apps/modules/architecture_standard.py` for reference pattern.
+**Implementation:** See `src/aipass/seedgo/apps/seedgo.py` and `src/aipass/seedgo/apps/modules/architecture_standard.py` for reference pattern.
 
 ---
 

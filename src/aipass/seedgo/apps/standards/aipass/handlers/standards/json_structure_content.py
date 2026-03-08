@@ -5,7 +5,7 @@ Provides formatted JSON structure standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
 # Version: 1.0.0

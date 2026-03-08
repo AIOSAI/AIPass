@@ -1,10 +1,9 @@
 # Import Standards
-**Status:** Draft v1
-**Date:** 2025-11-12
+**Status:** Draft v2
+**Date:** 2026-03-08
 
 ---
-#@comments:patrick:whole file needs updating
-## Standard Import Order 
+## Standard Import Order
 
 **Every Python file follows this pattern:**
 
@@ -37,7 +36,7 @@ from aipass.seedgo.apps.handlers.domain1 import ops
 3. **Services** - CLI, other branch services (import before internal handlers)
 4. **Internal imports** - After all external dependencies resolved
 
-> **Note:** AIPass uses pip-installable namespace imports (`from aipass.{module}...`). No `sys.path` manipulation or `AIPASS_ROOT` path setup is needed.
+> **Note:** AIPass uses pip-installable namespace imports (`from aipass.{module}...`). No `sys.path` manipulation needed.
 
 ---
 
@@ -110,14 +109,17 @@ logger.warning("Memory file not found, using defaults")
 logger.error("Failed to backup branch", exc_info=True)
 ```
 
-**Consistency:** Same import pattern everywhere
+**Both forms are valid:**
 ```python
-# Always this
+# Canonical (full path)
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# Never variations like these
-from aipass.prax import logger  # ✗
+# Shorthand (via prax/__init__.py)
+from aipass.prax import logger
+
+# Never these
 import aipass.prax.system_logger  # ✗
+import logging; logging.getLogger()  # ✗ Use prax, not stdlib logging
 ```
 
 **Output location:** Prax manages log files, branches don't need to worry about where logs go
@@ -206,7 +208,7 @@ Some AIPass services need to know **which branch is calling them** to provide pr
 - **Prax** - Logging service
 - **CLI** - Console formatting and output
 - **API** - LLM calls and AI interactions
-- **Memory Bank** - Vector storage and search
+- **Memory** - Vector storage and search
 
 **Router Services (CLI Invocation Only):**
 - **Drone** - NOT a library service, it's a CLI router
@@ -258,7 +260,7 @@ from aipass.drone.apps.modules.router import route_command  # NO!
 ```
 
 **Why Drone is different:**
-- **Prax/CLI/API/Memory Bank**: Library services providing functionality via imports
+- **Prax/CLI/API/Memory**: Library services providing functionality via imports
 - **Drone**: CLI router that resolves targets and invokes other tools
 - Branches receive already-resolved paths/commands from Drone
 - Branches don't need @ handling code - Drone does that BEFORE calling them
@@ -495,7 +497,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 | Import Type | Pattern | Required? |
 |-------------|---------|-----------|
-| Prax logger | `from aipass.prax.apps.modules.logger import system_logger as logger` | **Nearly always** |
+| Prax logger | `from aipass.prax.apps.modules.logger import system_logger as logger` or `from aipass.prax import logger` | **Nearly always** |
 | CLI service | `from aipass.cli.apps.modules import console, header` | When needed |
 | API service | `from aipass.api.apps.modules import llm_call` | When needed |
 | **Drone** | `subprocess.run(["drone", "cmd", ...])` | **CLI only - NEVER import** |
@@ -511,13 +513,13 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 **Namespace pattern:** `from aipass.{module}...` - never bare imports or hardcoded paths
 
-**Prax logger:** Nearly always imported - system-wide logging service
+**Prax logger:** Nearly always imported - canonical or shorthand form both valid
 
-**Service imports:** CLI, API, Memory Bank imported as libraries; Drone invoked via CLI only
+**Service imports:** CLI, API, Memory imported as libraries; Drone invoked via CLI only
 
 **Drone is special:** NOT a library service - it's a CLI router. Never import from aipass.drone.apps.modules
 
-**Handler independence:** Same-branch handler→handler ✓, Handler→own-branch-module ✗, Cross-branch handler ✗
+**Handler independence:** Same-branch handler→handler ✓, Handler→service (Prax/CLI/API/Memory) ✓, Handler→own-branch-module ✗
 
 **Third-party libraries:** Pragmatic approach - install what you need as you build
 
@@ -534,3 +536,4 @@ from aipass.seedgo.apps.handlers.json import json_handler
 #@comments:2025-11-29:claude: Added explicit "Drone: CLI Router Pattern" section with FORBIDDEN import examples
 #@comments:2025-11-29:claude: Clarified that branches should NEVER import from aipass.drone.apps.modules - Drone resolves @ before calling them
 #@comments:2026-03-07:claude: Cleaned Dev-Pass references - updated to AIPass namespace imports, removed sys.path/AIPASS_ROOT patterns, fixed /home/aipass/ paths, seed->seedgo naming
+#@comments:2026-03-08:claude: Resolved patrick's "whole file needs updating" flag - fixed Memory Bank→Memory (3 occurrences), removed stale AIPASS_ROOT reference, corrected handler independence summary to reflect that handlers CAN import cross-branch services, bumped to Draft v2

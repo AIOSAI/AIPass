@@ -5,7 +5,7 @@ Provides formatted import standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: imports_content.py
 # Description: Import Standards Content Handler
 # Version: 1.0.0

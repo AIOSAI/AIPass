@@ -141,7 +141,7 @@ Handler → imports Module ✗ (creates cycle)
 **✅ ALLOWED - Same-branch handler imports (even across packages):**
 
 ```python
-# seedgo/apps/handlers/standards/imports_check.py
+# seedgo/apps/standards/aipass/handlers/standards/imports_check.py
 from aipass.seedgo.apps.handlers.json import json_handler  # ✅ OK - same branch
 
 # flow/apps/handlers/plan/create.py
@@ -163,7 +163,7 @@ from .logger import log_operation_start, log_operation_end
 **❌ FORBIDDEN - Handler imports own branch's modules:**
 
 ```python
-# seedgo/apps/handlers/json/json_handler.py
+# seedgo/apps/standards/aipass/handlers/json/json_handler.py
 from aipass.seedgo.apps.modules.create_thing import something  # ❌ NO - circular risk
 ```
 
@@ -655,7 +655,7 @@ handlers/
 **Current structure:**
 
 ```
-<project_root>/seedgo/apps/handlers/
+<project_root>/seedgo/apps/standards/aipass/handlers/
   ├── json/
   │   ├── json_handler.py          → JSON file operations (279 lines)
   │   └── test_auto_detection.py   → Tests

@@ -29,7 +29,7 @@ from typing import Dict, List, Any, Optional
 import inspect
 
 # Constants
-_DAEMON_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 JSON_TEMPLATES_DIR = _DAEMON_ROOT / "apps" / "json_templates"
 

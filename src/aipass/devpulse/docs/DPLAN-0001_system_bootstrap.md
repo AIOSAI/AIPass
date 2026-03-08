@@ -8,15 +8,15 @@ Tag: bootstrap
 Every module has citizenship (.trinity/), can receive email, and can be woken via dispatch. DevPulse has full visibility. The system runs as a coordinated multi-agent team.
 
 ## Current State
-- All 15 branches registered and discoverable via `drone systems`
-- All 5 new citizens granted birthright citizenship
-- Registry cleaned of stale test entries (manually — sync-registry can't detect /tmp dirs that still exist)
-- 13/15 branches respond to `drone @branch --help` (devpulse has no apps/ by design, commons needs DB init fix)
-- Backup, daemon import fixes complete (relative → absolute)
-- Skills import fixes complete + __main__ block added
+- All 15 branches registered, discoverable, and fully scaffolded
+- All citizens are builder class (except devpulse = manager)
+- 13/15 respond to `drone @branch --help` (devpulse has no apps/ by design, commons DB init fails)
+- Import fixes complete: backup (16 files), daemon (8 files), skills (5 files)
 - Commons entry point renamed (the_commons.py → commons.py)
-- Wake dispatch tested on @memory — agent spawned successfully
-- Tests need --isolate-registry flag or mock to stop polluting live registry
+- Wake + round-trip comms verified on @memory and @backup
+- Seedgo audit: all branches passing (77-98%)
+- gh CLI installed and authed for PR workflow
+- 3 PRs merged: #17 (bootstrap), #18 (builder scaffold), #19 (commons/skills scaffold)
 
 ## What Needs Building
 
@@ -63,6 +63,8 @@ Every module has citizenship (.trinity/), can receive email, and can be woken vi
 | commons/skills location | Move to src/aipass/ vs keep outside | Keep outside | They're not aipass system apps, they're external projects with their own namespace |
 | Citizenship for existing code | spawn create vs spawn passport | passport | Passport adds .trinity/ without touching apps/ |
 | Registry cleanup | Manual vs sync-registry --fix | sync-registry --fix | Let spawn's built-in tool handle it |
+| Citizen class for ported code | birthright vs builder | builder | All branches with apps/ should be builder — birthright is for identity-only |
+| External project scaffolding | spawn update vs manual | manual | spawn update can't reach outside src/aipass/, copy template files manually |
 
 ## Relationships
 - **Related DPLANs:** None yet
@@ -79,9 +81,11 @@ Every module has citizenship (.trinity/), can receive email, and can be woken vi
 ## Notes
 Session 11. First DPLAN in AIPass. Patrick confirmed: commons and skills are NOT aipass system apps — they live outside src/aipass/ intentionally. Use spawn passport for existing directories to avoid clobbering code.
 
-**Progress:** Phases 1-3 complete. All 15 branches discoverable, 13/15 responding to --help. Phase 4 in progress — wake tested on @memory, agent spawned. Phase 5 partial — devpulse prompt and passport updated, global prompt updated, 5 new citizens still need local prompts. 300 tests passing.
+**Progress:** Phases 1-4 substantially complete. All 15 branches scaffolded as builder class. Wake + round-trip comms verified on @memory and @backup. Phase 5 partial — prompts need building for new citizens.
 
-**Session 12 additions:** Fixed skills (added __main__ + absolute imports), fixed commons routing (renamed entry point), cleaned registry stale entries manually, tested wake dispatch on @memory. Tests pollute registry — needs isolation fix in spawn tests.
+**Session 12:** Fixed skills (added __main__ + absolute imports), fixed commons routing (renamed entry point), cleaned registry stale entries manually, tested wake dispatch on @memory and @backup — both replied autonomously. Discovered passport was setting birthright instead of builder — fixed all 5, ran spawn update on backup/daemon/memory, manually scaffolded commons/skills. Installed gh CLI. PRs #17, #18, #19 merged.
+
+**Remaining:** Commons DB init fix, ai_mail inbox display bug, branch prompts for new citizens, test registry isolation.
 
 ---
 *Created: 2026-03-07*

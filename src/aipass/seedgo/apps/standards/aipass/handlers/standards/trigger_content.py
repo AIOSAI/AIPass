@@ -5,7 +5,7 @@ Provides formatted Trigger event bus standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: trigger_content.py
 # Description: Trigger Standards Content Handler
 # Version: 1.0.0

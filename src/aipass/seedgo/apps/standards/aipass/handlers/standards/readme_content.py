@@ -4,7 +4,7 @@ README Standards Content
 Provides Rich-formatted reference text for the README standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: readme_content.py
 # Description: README Standards Content
 # Version: 1.0.0

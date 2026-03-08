@@ -67,12 +67,12 @@ Something breaks:
 
 ```python
 # ❌ WRONG - Points to seedgo
-SEEDGO_ROOT = Path(__file__).parents[4]  # Points to seedgo branch
+SEEDGO_ROOT = Path(__file__).parents[3]  # Points to seedgo branch
 SEEDGO_JSON_DIR = SEEDGO_ROOT / "seedgo_json"
 JSON_TEMPLATES_DIR = SEEDGO_ROOT / "apps" / "json_templates"
 
 # ✓ CORRECT - Points to YOUR branch
-API_ROOT = Path(__file__).parents[4]  # Points to api branch
+API_ROOT = Path(__file__).parents[3]  # Points to api branch
 API_JSON_DIR = API_ROOT / "api_json"
 JSON_TEMPLATES_DIR = API_ROOT / "apps" / "json_templates"
 ```
@@ -90,14 +90,14 @@ AIPass uses relative path resolution, not hardcoded paths.
 API_ROOT = Path("/home/user/workspace/AIPass/src/aipass/api")
 
 # ✓ CORRECT - Relative path resolution
-API_ROOT = Path(__file__).parents[4]  # Adjust N based on handler depth
+API_ROOT = Path(__file__).parents[3]  # Adjust N based on handler depth
 ```
 
 **Branch path patterns:**
 ```python
 # All branches live under src/aipass/{branch}/
 # Use Path(__file__).parents[N] to navigate up from handler location
-{BRANCH}_ROOT = Path(__file__).parents[4]  # from apps/handlers/json/json_handler.py
+{BRANCH}_ROOT = Path(__file__).parents[3]  # from apps/handlers/json/json_handler.py
 ```
 
 **2. Update JSON_DIR constant:**
@@ -122,7 +122,7 @@ mkdir -p src/aipass/{branch}/apps/json_templates/default
 
 **5. Copy templates from seedgo:**
 ```bash
-cp src/aipass/seedgo/apps/json_templates/default/*.json \
+cp src/aipass/seedgo/apps/standards/aipass/json_templates/default/*.json \
    src/aipass/{branch}/apps/json_templates/default/
 ```
 
@@ -145,7 +145,7 @@ drone @seedgo audit {branch}
 1. **Using hardcoded paths instead of `Path(__file__).parents[N]`** ← Most common error!
    - Always use relative path resolution from the handler file
    - `BRANCH_ROOT = Path("/absolute/path/to/branch")` → FAILS
-   - `BRANCH_ROOT = Path(__file__).parents[4]` → PASSES
+   - `BRANCH_ROOT = Path(__file__).parents[3]` → PASSES
 
 2. **Copying seedgo's handler without changing paths**
    - API and Drone both made this mistake
@@ -353,27 +353,26 @@ json_handler.log_operation("operation_name", {"key": "value"})
 {
   "metadata": {
     "version": "1.0.0",
-    "last_updated": "2025-11-13",
-    "total_branches": 17
+    "last_updated": "2026-03-08",
+    "total_branches": 15
   },
-  "branches": [
-    {
-      "name": "FLOW",
+  "branches": {
+    "flow": {
+      "name": "flow",
       "path": "src/aipass/flow",
       "email": "@flow",
-      "status": "active",
-      "created": "2025-10-30"
+      "status": "active"
     },
-    {
-      "name": "SEEDGO",
+    "seedgo": {
+      "name": "seedgo",
       "path": "src/aipass/seedgo",
       "email": "@seedgo",
-      "status": "active",
-      "created": "2025-10-30"
+      "status": "active"
     }
-  ]
+  }
 }
 ```
+**Note:** `total_branches` is auto-computed by `setup.sh` — do not hardcode it manually. The count shown above is representative; the actual value reflects whatever branches are registered at build time.
 
 **Registry characteristics:**
 - **Central source of truth** for collections
@@ -644,7 +643,7 @@ ls /branch/branch_json/
 
 ### Reference Implementation
 
-**Primary handler:** `src/aipass/seedgo/apps/handlers/json/json_handler.py`
+**Primary handler:** `src/aipass/seedgo/apps/standards/aipass/handlers/json/json_handler.py`
 
 **Branch implementations:**
 - `src/aipass/drone/apps/handlers/json/json_handler.py`

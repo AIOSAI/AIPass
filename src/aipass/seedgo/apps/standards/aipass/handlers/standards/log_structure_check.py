@@ -6,7 +6,7 @@ every module should have a logs/ directory for module-local logs.
 No hardcoded absolute log paths.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_structure_check.py
 # Description: Log Structure Standards Checker Handler
 # Version: 1.0.0

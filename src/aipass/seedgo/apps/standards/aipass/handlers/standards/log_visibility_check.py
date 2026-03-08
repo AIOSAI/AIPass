@@ -12,7 +12,7 @@ TWO CHECKS:
 Prax logging infrastructure and test files are exempt from both checks.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
 # Version: 1.0.0

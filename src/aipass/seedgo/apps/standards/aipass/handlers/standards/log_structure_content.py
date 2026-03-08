@@ -4,7 +4,7 @@ Log Structure Standards Content Handler
 Provides formatted display of log structure standards for terminal output.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_structure_content.py
 # Description: Log Structure Standards Content Handler
 # Version: 1.0.0

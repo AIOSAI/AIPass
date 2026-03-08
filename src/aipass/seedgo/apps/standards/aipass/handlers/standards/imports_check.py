@@ -6,7 +6,7 @@ Checks for clean pip-style imports: no AIPASS_ROOT, no sys.path hacking,
 proper aipass.* namespace usage, correct import order.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
 # Version: 2.0.0

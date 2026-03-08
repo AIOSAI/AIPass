@@ -117,7 +117,7 @@ def _load_config() -> Dict[str, Any]:
         Config dict, or empty dict on error
     """
     # Look for config relative to this handler's location
-    config_path = Path(__file__).resolve().parents[4] / "config" / "memory_bank.config.json"
+    config_path = Path(__file__).resolve().parents[3] / "config" / "memory_bank.config.json"
 
     if not config_path.exists():
         return {}

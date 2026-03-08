@@ -4,7 +4,7 @@ Log Visibility Standards Content
 Provides Rich-formatted reference text for the log visibility standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_visibility_content.py
 # Description: Log Visibility Standards Content
 # Version: 1.0.0

@@ -43,7 +43,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Paths
-_DAEMON_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 REGISTRY_FILE = _DAEMON_ROOT / "daemon_json" / "actions_registry.json"
 PLUGINS_DIR = _DAEMON_ROOT / "apps" / "plugins"
 

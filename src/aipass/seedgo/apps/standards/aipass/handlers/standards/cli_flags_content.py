@@ -4,7 +4,7 @@ CLI Flags Standards Content
 Provides Rich-formatted reference text for the CLI flags standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: cli_flags_content.py
 # Description: CLI Flags Standards Content
 # Version: 1.0.0

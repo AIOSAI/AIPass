@@ -13,7 +13,7 @@ THE STANDARD:
 - Documentation files that mention these flags for reference are exempt
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: permission_flags_check.py
 # Description: Permission Flags Standards Checker Handler
 # Version: 1.0.0

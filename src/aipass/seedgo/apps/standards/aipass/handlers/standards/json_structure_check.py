@@ -7,7 +7,7 @@ Validates JSON handling patterns for pip packages:
 - Branch detection via AIPASS_REGISTRY.json and BRANCH_REGISTRY.json
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
 # Version: 2.0.0

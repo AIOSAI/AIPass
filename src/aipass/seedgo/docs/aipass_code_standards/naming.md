@@ -1,274 +1,177 @@
 # Naming Conventions
-**Status:** Draft v2 (Truth-checked against codebase)
-**Date:** 2025-11-13
+**Status:** Active v3
+**Date:** 2026-03-08
 
 ---
 
 ## Core Principle: Path = Context, Name = Action
 
-**Bad:** `cortex/apps/handlers/branch/cortex_branch_file_ops.py`
-**Good:** `cortex/apps/handlers/branch/file_ops.py`
+The path tells you where you are. The filename tells you what the file does. Don't repeat the path in the name.
 
-**WHY:** The path already tells you it's Cortex → apps → handlers → branch operations. Adding "cortex_branch_" repeats information you already have.
+**Bad:** `spawn/apps/handlers/json/spawn_json_ops.py`
+**Good:** `spawn/apps/handlers/json/json_handler.py`
 
-**Result:** Clean, scannable names. No lies when code moves. Easier imports.
+The path already says it's Spawn's JSON handler directory. The filename says what it does.
 
-**REALITY CHECK:** This principle is aspirational. Current codebase has violations (e.g., `json_ops.py`, `json_handler.py` in json/ directory). New code should follow the principle; legacy code being migrated gradually.
+**Why this matters:**
+- Clean, scannable names
+- No lies when code moves between directories
+- Shorter imports: `from aipass.spawn.apps.handlers.json.json_handler import JsonHandler`
 
 ---
 
-## What Problems Does Consistent Naming Solve?
+## Entry Points
 
-### 1. The Navigation Problem
+Every branch has a single entry point at `apps/{branch_name}.py`. This is the only rigid naming rule for entry points.
 
-Without consistency, finding functionality becomes search:
-- "Where is JSON handler? Maybe `json_ops.py`? Or `cortex_json.py`? Or `json_operations.py`?"
-- Every branch uses different names
-- Agents and humans waste time exploring instead of executing
-
-**Solution:** Standardized locations = predictable navigation
-- Need JSON operations? Always `handlers/json/ops.py`
-- Need error decorators? Always `handlers/error/decorators.py`
-- No guessing. Direct access.
-
-### 2. The Comparison Problem
-
-**Without consistency:**
-```bash
-# Can't compare - different names, different locations
-cortex/cortex_json_handler.py
-flow/json_operations.py
-prax/handlers/json_ops.py
+```
+cli/apps/cli.py
+drone/apps/drone.py
+flow/apps/flow.py
+spawn/apps/spawn.py
+prax/apps/prax.py
+seedgo/apps/seedgo.py
+trigger/apps/trigger.py
+memory/apps/memory.py
+daemon/apps/daemon.py
+api/apps/api.py
+ai_mail/apps/ai_mail.py
+backup/apps/backup.py
 ```
 
-**With consistency:**
-```bash
-# Easy comparison - same name, same location
-cat cortex/apps/handlers/json/ops.py
-cat flow/apps/handlers/json/ops.py
-cat prax/apps/handlers/json/ops.py
+Never name an entry point `main.py`. The branch name is the entry point name.
+
+---
+
+## Module Files
+
+Module files live under `apps/modules/` and are named for what they do. There is no rigid naming convention beyond clarity. Names are decided during planning based on the module's purpose.
+
+**Real examples:**
+```
+spawn/apps/modules/core.py              # Core spawn logic
+spawn/apps/modules/passport.py          # Passport operations
+spawn/apps/modules/sync_templates.py    # Template syncing
+flow/apps/modules/create_plan.py        # Plan creation
+flow/apps/modules/close_plan.py         # Plan closing
+drone/apps/modules/router.py            # Command routing
+drone/apps/modules/registry.py          # Module registry
+memory/apps/modules/rollover.py         # Memory rollover
+trigger/apps/modules/medic.py           # Self-healing logic
+api/apps/modules/openrouter_client.py   # OpenRouter API client
 ```
 
-**WHY this matters:** Comparison reveals what's common vs branch-specific. You can't standardize what you can't compare.
+---
 
-### 3. The Marketplace Problem
+## Handler Files
 
-**Without consistency:**
+### The Standard: `handlers/<domain>/<action>.py`
+
+Handlers are the implementation layer. They live under domain-specific subdirectories.
+
+### `json_handler.py` -- The Canonical JSON Handler
+
+Every branch has `handlers/json/json_handler.py`. This is the standard name, not an exception. It exists in 11+ branches with a consistent API.
+
 ```
-Branch A needs: json operations
-Marketplace has: 7 different JSON handlers, different APIs
-Result: Integration nightmare, manual adaptation
+cli/apps/handlers/json/json_handler.py
+prax/apps/handlers/json/json_handler.py
+flow/apps/handlers/json/json_handler.py
+spawn/apps/handlers/json/json_handler.py
+trigger/apps/handlers/json/json_handler.py
+memory/apps/handlers/json/json_handler.py
+daemon/apps/handlers/json/json_handler.py
+backup/apps/handlers/json/json_handler.py
+api/apps/handlers/json/json_handler.py
+ai_mail/apps/handlers/json/json_handler.py
+seedgo/apps/standards/aipass/handlers/json/json_handler.py
 ```
 
-**With consistency:**
+When a branch needs JSON operations, create `handlers/json/json_handler.py`. Some branches also have supplementary files in the same directory (e.g., `load.py`, `save.py`, `initialize.py` in prax) for more granular operations.
+
+### Other Handler Examples
+
+**prax -- monitoring domain:**
 ```
-Branch A needs: handlers/json/ops.py
-Marketplace has: handlers/json/ops.py v1.2
-Result: Drop in, works immediately
+prax/apps/handlers/monitoring/
+    branch_detector.py
+    log_watcher.py
+    module_tracker.py
+    event_queue.py
+    unified_stream.py
+    telegram_relay.py
+```
+
+**prax -- registry domain:**
+```
+prax/apps/handlers/registry/
+    reader.py
+    load.py
+    save.py
+    statistics.py
+    meta_ops.py
+```
+
+**trigger -- events domain:**
+```
+trigger/apps/handlers/events/
+    error_logged.py
+    warning_logged.py
+    memory_threshold_exceeded.py
+    bulletin_created.py
+    startup.py
+```
+
+**memory -- specialized domains:**
+```
+memory/apps/handlers/vector/embedder.py
+memory/apps/handlers/rollover/extractor.py
+memory/apps/handlers/tracking/line_counter.py
+memory/apps/handlers/central_writer.py
 ```
 
 ---
 
 ## Why No Redundant Prefixes?
 
-### The Redundancy Cascade
+`spawn/apps/handlers/json/spawn_json_ops.py`
 
-`cortex/apps/handlers/json/cortex_json_ops.py`
+What breaks:
+1. **Import bloat:** `from aipass.spawn.apps.handlers.json.spawn_json_ops import SpawnJsonOps`
+2. **Name lies when code moves:** Rename the directory, the prefix is now wrong
+3. **Search noise:** Grep for "spawn" returns every file in the branch
+4. **Visual clutter:** Can't quickly scan a directory listing
 
-**What breaks:**
-1. **Length explosion:** 50+ character filenames
-2. **Import ugliness:** `from cortex.apps.handlers.json.cortex_json_ops import CortexJsonOps`
-3. **Refactoring nightmare:** Move to different directory? Prefix now lies
-4. **Search pollution:** Grep for "cortex" returns every file
-5. **Visual scanning:** Can't quickly scan directory listings
-
-**Principle:** Information should exist in exactly ONE place. Path tells you context, filename tells you action.
+Information should exist in one place. The path carries context; the filename carries action.
 
 ---
 
-## Standard Verbs: The Shared Language
+## Common Naming Patterns
 
-Same operation should have same name everywhere:
+These are patterns observed across the codebase. They are not prescriptive rules -- use whatever name best describes what the file does. But if your file does one of these things, these names are worth considering since other agents will recognize them:
 
-**Core operations (verified in codebase):**
-- `create` - Create new resource (e.g., `create_thing.py`)
-- `ops` - General operations (e.g., `ops.py` in domain handlers)
-- `load` - Load configuration/data (e.g., `load_config.py`)
-- `save` - Save data (e.g., `save.py` in json handlers)
-- `initialize` - Setup/initialization (e.g., `initialize.py`)
-
-**Transformation/Formatting:**
-- `formatters` - Transform/format data (e.g., `formatters.py` in error)
-- `decorators` - Function decorators (e.g., `decorators.py` in error)
-- `logger` - Logging operations (e.g., `logger.py`)
-
-**Handler patterns:**
-- `prompts` - User interaction handlers (e.g., `prompts.py` in cli)
-- `content` - Content providers (e.g., `cli_content.py`, `naming_content.py`)
-
-**WHY standardize verbs:**
-- Grep works: Search for "load" finds all loading operations
-- Mental model: See `load_config.py` → instantly know what it does
-- API consistency: All "load" operations follow similar patterns
-- Cross-branch comparison: Same name = same purpose across all branches
-
----
-
-## Examples: Good vs Bad
-
-**Good (from real codebase):**
-```
-cli/apps/handlers/error/decorators.py     # Path: error domain, name: what it does
-cli/apps/handlers/error/formatters.py     # Path: error domain, name: what it does
-prax/apps/handlers/config/load_config.py  # Path: config domain, name: action
-seedgo/apps/handlers/domain1/ops.py        # Path: domain1, name: operations
-```
-
-**Bad (real violations):**
-```
-prax/apps/handlers/json/json_ops.py       # Redundant "json_" prefix
-modules/plan_manager_module.py            # Redundant "module" suffix (hypothetical)
-```
-
-**Note:** `json_handler.py` is documented as a standardized exception (see Handler Naming Exceptions section below).
-
----
-
-## Handler Naming by Domain
-
-**Pattern:** `handlers/<domain>/<action>.py`
-
-**Real Examples from aipass_core/cli:**
-```
-cli/apps/handlers/
-└── error/
-    ├── decorators.py    # Error handling decorators
-    ├── formatters.py    # Error message formatting
-    ├── logger.py        # Error logging
-    └── result_types.py  # Result type definitions
-```
-
-**Real Examples from aipass_core/prax:**
-```
-prax/apps/handlers/
-├── config/
-│   ├── load_config.py           # Config loading
-│   └── load_ignore_patterns.py  # Ignore pattern loading
-├── json/
-│   ├── initialize.py   # JSON initialization
-│   ├── load.py         # JSON loading
-│   ├── save.py         # JSON saving
-│   └── log.py          # JSON logging
-└── cli/
-    └── prompts.py      # CLI prompt handlers
-```
-
-**Real Examples from seedgo:**
-```
-seedgo/apps/handlers/
-├── domain1/
-│   └── ops.py          # Domain operations (showroom)
-├── standards/
-│   ├── cli_content.py  # CLI standards content
-│   └── naming_content.py # Naming standards content
-└── json/
-    └── json_handler.py  # JSON operations (standardized exception)
-```
-
----
-
-## Handler Naming Exceptions
-
-### `json_handler.py` - Standardized Exception
-
-`json_handler.py` is a documented exception to the "no redundant prefixes" rule. This file exists across 8+ branches with an identical or near-identical API, making it a de facto standard in the ecosystem. Renaming it to `ops.py`, `handler.py`, or other variants would break established patterns and consumer code depending on this specific name. The redundant prefix is intentional here: it serves as a standardized identifier that marks this as THE canonical JSON handler implementation across the AIPass ecosystem. This exception demonstrates that standardization sometimes requires preserving a slightly non-ideal name rather than breaking existing integrations.
-
----
-
-## Why This Enables Speed at Scale
-
-### Zero-Cost Navigation
-**Agent workflow:**
-```
-Task: Update JSON operations in Flow
-Path: flow/apps/handlers/json/ops.py
-Status: FOUND (0 searches required)
-```
-
-**Without consistency:**
-```
-Task: Update JSON operations in Flow
-Attempt 1: Search for "json"... 47 results
-Attempt 2: Search in handlers/... 12 files
-Attempt 3: Read each to find right one
-Status: FOUND (3 searches, 5 file reads)
-```
-
-**Scale impact:** 20 branches × 50 operations = 1000 handlers
-- Consistent: Direct navigation to any handler
-- Inconsistent: Search required for every access
-
-### Pattern Emergence
-
-Standardization happens naturally when files align:
-
-1. Each branch implements `handlers/json/ops.py` for their needs
-2. Compare all `handlers/json/ops.py` files → common patterns visible
-3. Extract common patterns → create standard handler v1.0
-4. Freeze and reuse → no reinvention needed
-
-**Critical:** This ONLY works with consistent naming. Different names = patterns invisible.
-
-### Learning Transfer
-
-**With consistency:**
-```
-Day 1: Learn Cortex structure
-Day 2: Work on Flow (same structure, instant productivity)
-Day 3: Work on PRAX (same structure, instant productivity)
-```
-
-**Without consistency:**
-```
-Day 1: Learn Cortex structure
-Day 2: Learn Flow structure (different pattern, slower)
-Day 3: Learn PRAX structure (another pattern, still slower)
-```
-
----
-
-## What Breaks with Inconsistent Naming?
-
-1. **Agent assumptions fail** - AI builds mental model ("JSON is always in handlers/json/ops.py") → one branch violates → agent fails
-2. **Comparison tools break** - `diff cortex/.../ops.py flow/.../ops.py` only works if files align
-3. **Search becomes ambiguous** - Every search requires filtering, every filter requires domain knowledge
-4. **Refactoring becomes expensive** - Move file with prefixed name? Now name lies → rename → update imports → test everything
-5. **Marketplace fragments** - Every variant needs own entry, integration guides, version tracking
-
----
-
-## The Speed Equation
-
-**Without consistency:**
-- Navigation = Search (O(n) complexity)
-- Comparison = Manual mapping (human labor)
-- Learning = Per-branch overhead (20 branches = 20 learning curves)
-- Standardization = Nearly impossible (patterns hidden)
-
-**With consistency:**
-- Navigation = Direct access (O(1) complexity)
-- Comparison = Automated tools (machine labor)
-- Learning = One-time investment (20 branches = 1 curve)
-- Standardization = Natural emergence (patterns obvious)
+- `delivery` -- delivering messages or payloads
+- `detector` -- detecting conditions or changes
+- `embedder` -- creating vector embeddings
+- `extractor` -- extracting data from sources
+- `indexer` -- indexing or cataloging
+- `manager` -- managing lifecycle of a resource
+- `watcher` -- watching for file or event changes
+- `registry` -- maintaining a registry of items
+- `validator` -- validating data or state
+- `formatter` -- formatting output
+- `cleanup` -- cleanup and maintenance operations
+- `scanner` -- scanning directories or data
+- `dispatcher` -- routing or dispatching work
+- `collector` -- collecting data from multiple sources
+- `client` -- API or service client
 
 ---
 
 ## Summary
 
-1. **Path provides context** - Don't encode directory structure in filenames
-2. **Short names win** - Less typing, easier scanning, cleaner imports
-3. **Comparison enables standardization** - Can't standardize what you can't compare
-4. **Standard verbs = shared language** - Same operation, same name, everywhere
-5. **Consistency compounds** - Benefits multiply across branches and time
-
-**The meta-lesson:** Naming consistency isn't pedantry—it's the prerequisite for emergent standardization at scale.
+1. **Path = Context, Name = Action** -- don't encode directory info in filenames
+2. **Entry point is always `{branch_name}.py`** -- never `main.py`
+3. **`json_handler.py` is the standard** -- every branch uses it at `handlers/json/json_handler.py`
+4. **Module and handler names describe what they do** -- no rigid verb system, just clarity
+5. **Short names win** -- less typing, easier scanning, cleaner imports

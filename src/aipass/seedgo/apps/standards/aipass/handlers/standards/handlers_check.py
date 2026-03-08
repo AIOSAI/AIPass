@@ -5,7 +5,7 @@ Validates handler compliance with AIPass handler standards.
 Checks handler independence, auto-detection pattern, no orchestration.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
 # Version: 1.0.0

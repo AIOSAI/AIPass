@@ -27,7 +27,7 @@ Every branch follows the same structure:
 ```
 src/aipass/{name}/
 ├── .trinity/           # Identity & memory (passport.json, local.json, observations.json)
-├── .aipass/            # System prompt (branch_system_prompt.md)
+├── .aipass/            # System prompt (aipass_local_prompt.md)
 ├── .ai_mail.local/     # Mailbox (inbox.json, sent/)
 ├── apps/
 │   ├── {name}.py       # Entry point (e.g. spawn.py, prax.py, drone.py)
@@ -35,6 +35,8 @@ src/aipass/{name}/
 │   └── handlers/       # Implementation details
 ├── logs/               # Prax log output
 └── README.md
+
+~/.secrets/aipass/          # API keys, tokens, credentials (outside repo, cross-platform)
 ```
 
 **15 branches:** drone, seedgo, prax, cli, flow, ai_mail, api, trigger, spawn, devpulse, backup, daemon, memory, commons, skills
@@ -79,6 +81,7 @@ from aipass.prax import logger
 - **No hardcoded paths.** Use `Path(__file__).parents[N]` or drone for resolution.
 - **No deleting files.** Move to `.archive/` or rename with `(disabled)`.
 - **Verify after fixing.** Run a test or command to confirm. Don't say "fixed" until verified.
+- **Cross-platform.** AIPass is a public package — code must work on Linux, macOS, and Windows. Use `pathlib.Path` not string concatenation. Use `Path.home()` not `~` or `/home/`. Secrets live at `~/.secrets/aipass/` (`Path.home() / ".secrets" / "aipass"`).
 
 ## Memories
 

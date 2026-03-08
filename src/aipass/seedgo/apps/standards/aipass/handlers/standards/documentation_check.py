@@ -5,7 +5,7 @@ Validates documentation compliance: module docstrings and function docstrings.
 META block validation is handled separately by meta_check.py.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: documentation_check.py
 # Description: Documentation Standards Checker Handler
 # Version: 1.0.0

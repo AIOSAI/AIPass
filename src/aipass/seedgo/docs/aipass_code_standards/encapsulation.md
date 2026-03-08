@@ -101,7 +101,7 @@ Trigger is the ONE place where cross-branch handler imports are acceptable:
 
 ```python
 # In trigger/apps/handlers/events/startup.py
-from aipass.memory_bank.apps.handlers.mbank.rollover import check_and_rollover
+from aipass.memory.apps.handlers.rollover import check_and_rollover
 ```
 
 **WHY:** Trigger's entire purpose is centralizing cross-branch reaction logic. It's the exception that proves the rule - instead of scattered cross-branch calls, Trigger owns them all in one place.
@@ -154,6 +154,6 @@ For legitimate architectural exceptions, configure `.seedgo/bypass.json`:
 
 ## Reference
 
-- **Checker:** `src/aipass/seedgo/apps/handlers/standards/encapsulation_check.py`
+- **Checker:** `src/aipass/seedgo/apps/standards/aipass/handlers/standards/encapsulation_check.py`
 - **Handler Standard:** `src/aipass/seedgo/docs/aipass_code_standards/handlers.md`
 - **Architecture Standard:** `src/aipass/seedgo/docs/aipass_code_standards/architecture.md`

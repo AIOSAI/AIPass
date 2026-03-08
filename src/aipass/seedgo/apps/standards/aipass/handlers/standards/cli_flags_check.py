@@ -13,7 +13,7 @@ apps/handlers/ or apps/modules/). Non-entry-point files are skipped
 with a pass.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: cli_flags_check.py
 # Description: CLI Flags Standards Checker Handler
 # Version: 1.0.0

@@ -307,6 +307,8 @@ Current flag support across 10 branch entry points:
 
 **Summary:** --help is 10/10. Everything else is 0-2/10. Significant opportunity for standardization.
 
+**Note (2026-03-08):** This survey covers the original 10 branches. Five additional branches — BACKUP, DAEMON, MEMORY, COMMONS, and SKILLS — were added after this survey and are not reflected in the table above. They need the same flag standardization treatment and should be audited during Phase 1 rollout.
+
 ---
 
 ## Notes

@@ -7,7 +7,7 @@ pyproject.toml entry points or python3 -m.  Shebangs are unnecessary
 and should be removed.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: shebang_check.py
 # Description: Shebang Standards Checker Handler
 # Version: 1.0.0

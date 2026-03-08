@@ -5,7 +5,7 @@ Scans Spawn template directory and generates baseline structure.
 Respects .registry_ignore.json patterns.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: template_scanner.py
 # Description: Template Scanner - Automatically scan template to discover structure
 # Version: 1.0.0

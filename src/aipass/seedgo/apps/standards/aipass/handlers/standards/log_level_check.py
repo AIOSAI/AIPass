@@ -12,7 +12,7 @@ THE STANDARD:
 - INFO = Normal operations, successful completions, discoveries
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_level_check.py
 # Description: Log Level Hygiene Standards Checker Handler
 # Version: 1.0.0

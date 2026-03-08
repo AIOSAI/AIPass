@@ -40,12 +40,12 @@ The diagnostics checker runs pyright on Python files to detect:
 
 ### Single File
 ```bash
-python3 src/aipass/seedgo/apps/handlers/standards/diagnostics_check.py /path/to/file.py
+python3 src/aipass/seedgo/apps/standards/aipass/handlers/standards/diagnostics_check.py /path/to/file.py
 ```
 
 ### Entire Directory
 ```bash
-python3 src/aipass/seedgo/apps/handlers/standards/diagnostics_check.py src/aipass/seedgo/apps/
+python3 src/aipass/seedgo/apps/standards/aipass/handlers/standards/diagnostics_check.py src/aipass/seedgo/apps/
 ```
 
 ### Branch Check
@@ -183,6 +183,6 @@ drone @seedgo audit --diagnostics
 
 ## Reference
 
-- **Checker:** `src/aipass/seedgo/apps/handlers/standards/diagnostics_check.py`
+- **Checker:** `src/aipass/seedgo/apps/standards/aipass/handlers/standards/diagnostics_check.py`
 - **Pyright Docs:** https://microsoft.github.io/pyright/
 - **Python Typing:** https://docs.python.org/3/library/typing.html

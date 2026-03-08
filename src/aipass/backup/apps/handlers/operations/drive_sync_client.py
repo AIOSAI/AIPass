@@ -74,7 +74,7 @@ from aipass.backup.apps.handlers.json.drive_sync_json import (
 # CONSTANTS
 # =============================================
 
-_BACKUP_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/backup/
+_BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 JSON_DIR = _BACKUP_ROOT / "backup_json"
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']

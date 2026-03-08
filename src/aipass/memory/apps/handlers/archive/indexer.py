@@ -36,7 +36,7 @@ from typing import Dict, Any, List
 logger = logging.getLogger(__name__)
 
 # Paths resolved relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[4]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 CODE_ARCHIVE_PATH = _MEMORY_ROOT / "code_archive"
 INDEX_PATH = CODE_ARCHIVE_PATH / "index.json"
 

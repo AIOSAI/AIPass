@@ -33,7 +33,7 @@ import re
 # CONSTANTS
 # =============================================
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 SCHEDULE_JSON_PATH = _DAEMON_ROOT / "daemon_json" / "schedule.json"
 
 DEFAULT_SCHEDULE_DATA: Dict[str, Any] = {

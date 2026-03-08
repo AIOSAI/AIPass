@@ -54,7 +54,7 @@ from aipass.memory.apps.handlers.monitor.detector import check_single_file
 logger = logging.getLogger(__name__)
 
 # Memory root resolved relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[4]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 
 # Global observer instance
 _observer: Optional[Observer] = None

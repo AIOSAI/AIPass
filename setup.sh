@@ -68,6 +68,17 @@ else
     FAIL=1
 fi
 
+# --- Create secrets directory ---
+SECRETS_DIR="$HOME/.secrets/aipass"
+if [ ! -d "$SECRETS_DIR" ]; then
+    echo "Creating secrets directory at $SECRETS_DIR ..."
+    mkdir -p "$SECRETS_DIR"
+    chmod 700 "$HOME/.secrets"
+    echo "  ~/.secrets/aipass/ ... created"
+else
+    echo "Secrets directory already exists — skipping"
+fi
+
 # --- Generate branch registry ---
 if [ ! -f "AIPASS_REGISTRY.json" ]; then
     echo "Generating AIPASS_REGISTRY.json ..."

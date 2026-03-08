@@ -45,6 +45,7 @@ dev = [
     "pytest-cov",
     "ruff",
     "coverage",
+    "pyright",
 ]
 
 [project.scripts]

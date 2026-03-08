@@ -12,7 +12,7 @@ THE STANDARD:
 - Prax's own logging infrastructure is exempt (it IS the implementation)
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_handler_check.py
 # Description: Log Handler Standards Checker Handler
 # Version: 1.0.0

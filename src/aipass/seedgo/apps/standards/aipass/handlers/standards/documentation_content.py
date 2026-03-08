@@ -5,7 +5,7 @@ Condensed documentation standards verified against actual codebase.
 Truth-checked 2025-11-13 against spawn and seedgo production code.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: documentation_content.py
 # Description: Documentation Standards Content Handler
 # Version: 1.0.0
@@ -28,9 +28,9 @@ def get_documentation_standards() -> str:
         "",
         "─" * 70,
         "",
-        "[bold cyan]REQUIRED: META HEADER (Every Python file)[/bold cyan]",
+        "[bold cyan]REQUIRED: AIPass HEADER (Every Python file)[/bold cyan]",
         "",
-        "  [dim]# =================== META ====================[/dim]",
+        "  [dim]# =================== AIPass ====================[/dim]",
         "  [dim]# Name: filename.py[/dim]",
         "  [dim]# Description: Brief description of the file[/dim]",
         "  [dim]# Version: 1.0.0[/dim]",
@@ -39,7 +39,7 @@ def get_documentation_standards() -> str:
         "  [dim]# =============================================[/dim]",
         "",
         "[yellow]KEY RULES:[/yellow]",
-        "  1. META block = AI-scannable metadata",
+        "  1. AIPass block = AI-scannable metadata",
         "  2. Name must match the actual filename",
         "  3. Version uses semantic versioning (X.Y.Z)",
         "  4. Created/Modified use ISO date format (YYYY-MM-DD)",
@@ -58,7 +58,7 @@ def get_documentation_standards() -> str:
         "  \"\"\"[/dim]",
         "",
         "[yellow]RULES:[/yellow]",
-        "  • Goes right after META block",
+        "  • Goes right after AIPass block",
         "  • Tells WHAT the file does (not HOW)",
         "  • Keep brief - details go in function docstrings",
         "",

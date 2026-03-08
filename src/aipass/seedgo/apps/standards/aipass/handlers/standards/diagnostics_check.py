@@ -5,7 +5,7 @@ Uses pyright to detect type errors, undefined variables, and other
 static analysis issues that would show as Pylance errors in VS Code.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: diagnostics_check.py
 # Description: Type Error Diagnostics Checker
 # Version: 1.0.0

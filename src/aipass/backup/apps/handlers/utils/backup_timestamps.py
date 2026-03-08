@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-_BACKUP_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/backup/
+_BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 TIMESTAMPS_FILE = _BACKUP_ROOT / "backup_data" / "backup_timestamps.json"
 
 MODES = ["snapshot", "versioned", "drive_sync"]

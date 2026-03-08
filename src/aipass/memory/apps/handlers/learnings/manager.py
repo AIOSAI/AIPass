@@ -52,7 +52,7 @@ from aipass.memory.apps.handlers.json.json_handler import (
 )
 
 # ChromaDB subprocess for vectorization (resolved relative to handler location)
-_MEMORY_ROOT = Path(__file__).resolve().parents[4]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 CHROMA_SUBPROCESS_SCRIPT = _MEMORY_ROOT / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
 
 # Defaults

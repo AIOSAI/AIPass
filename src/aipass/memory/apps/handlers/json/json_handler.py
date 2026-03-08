@@ -45,7 +45,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # Resolve paths relative to handler location
-_MEMORY_ROOT = Path(__file__).resolve().parents[4]
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG_DIR = _MEMORY_ROOT / "config"
 _TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 

@@ -5,7 +5,7 @@ Validates module compliance with AIPass 3-tier logging standards.
 Checks Prax imports in modules/handlers, logger calls in handlers.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: error_handling_check.py
 # Description: Error Handling Standards Checker Handler
 # Version: 1.0.0
@@ -163,6 +163,7 @@ def check_module_has_prax(content: str, file_path: str, bypass_rules: list | Non
     has_prax_import = (
         'from aipass.prax import logger' in content
         or 'from aipass.prax import' in content and 'logger' in content
+        or 'from aipass.prax.apps.modules.logger import system_logger' in content
     )
 
     if has_prax_import:
@@ -238,7 +239,7 @@ def check_module_error_logging(content: str) -> Dict:
     """
     has_prax_import = 'from aipass.prax import logger' in content or (
         'from aipass.prax import' in content and 'logger' in content
-    )
+    ) or 'from aipass.prax.apps.modules.logger import system_logger' in content
 
     if has_prax_import:
         return {

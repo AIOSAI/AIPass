@@ -5,7 +5,7 @@ Validates module compliance with AIPass CLI standards.
 Checks console.print() usage, CLI service imports, handler separation.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
 # Version: 1.0.0
@@ -233,9 +233,10 @@ def check_handler_separation(content: str) -> Dict:
             console_print_lines.append(i)
 
         # Look for actual CLI service imports
-        if 'from cli.apps.modules import' in stripped:
+        if 'from aipass.cli.apps.modules import' in stripped or 'from aipass.cli import' in stripped:
             # Skip if in a string
-            if '"from cli.apps.modules import' in line or "'from cli.apps.modules import" in line:
+            if ('"from aipass.cli.apps.modules import' in line or "'from aipass.cli.apps.modules import" in line
+                    or '"from aipass.cli import' in line or "'from aipass.cli import" in line):
                 continue
             # This is likely an actual import
             cli_import_lines.append(i)
@@ -288,12 +289,12 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
             'message': 'CLI branch exempt (uses internal imports)'
         }
 
-    # Check for CLI imports
-    has_cli_imports = 'from cli.apps.modules import' in content
+    # Check for CLI imports (canonical or shortcut via cli/__init__.py)
+    has_cli_imports = 'from aipass.cli.apps.modules import' in content or 'from aipass.cli import' in content
 
     if has_cli_imports:
-        # Check what's imported
-        import_match = re.search(r'from cli\.apps\.modules import (.+)', content)
+        # Check what's imported (canonical full path or shortcut via __init__.py)
+        import_match = re.search(r'from aipass\.cli\.apps\.modules import (.+)', content) or re.search(r'from aipass\.cli import (.+)', content)
         if import_match:
             imports = import_match.group(1)
             return {

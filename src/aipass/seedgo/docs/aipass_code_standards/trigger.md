@@ -12,7 +12,7 @@ AIPass uses a centralized event system to replace scattered cross-branch functio
 Before (hardcoded):
     flow/close_plan.py → directly calls → dashboard/update_local()
     flow/close_plan.py → directly calls → mbank/process_closed_plans()
-    prax/logger.py → directly calls → memory_bank/check_and_rollover()
+    prax/logger.py → directly calls → memory/check_and_rollover()
 
 After (event-driven):
     flow/close_plan.py → trigger.fire('plan_closed') → handlers respond
@@ -103,7 +103,7 @@ def fire_event(name, **data):
 
 ## Handler Requirements
 
-Handlers live in `<project_root>/trigger/apps/handlers/events/`
+Handlers live in `src/aipass/trigger/apps/handlers/events/`
 
 ### Handler Interface
 ```python
@@ -151,7 +151,7 @@ def handle_{event_name}(**kwargs) -> None:
 
 ### Registering Handlers
 
-All handlers registered in `trigger/apps/handlers/events/registry.py`:
+All handlers registered in `src/aipass/trigger/apps/handlers/events/registry.py`:
 
 ```python
 from aipass.trigger.apps.modules.core import trigger
@@ -371,7 +371,7 @@ For Trigger branch itself:
 
 ## Reference
 
-- **Trigger Core:** `<project_root>/trigger/apps/modules/core.py`
-- **Handler Registry:** `<project_root>/trigger/apps/handlers/events/registry.py`
-- **Event Handlers:** `<project_root>/trigger/apps/handlers/events/*.py`
-- **Standard:** `<project_root>/src/aipass/seedgo/docs/aipass_code_standards/trigger.md`
+- **Trigger Core:** `src/aipass/trigger/apps/modules/core.py`
+- **Handler Registry:** `src/aipass/trigger/apps/handlers/events/registry.py`
+- **Event Handlers:** `src/aipass/trigger/apps/handlers/events/*.py`
+- **Standard:** `src/aipass/seedgo/docs/aipass_code_standards/trigger.md`

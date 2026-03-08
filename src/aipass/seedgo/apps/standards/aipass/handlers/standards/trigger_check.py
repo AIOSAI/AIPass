@@ -15,7 +15,7 @@ Valid bypass categories for .seedgo/bypass.json:
 - utility: Helper called by event-firing function
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: trigger_check.py
 # Description: Trigger Standards Checker Handler
 # Version: 1.0.0

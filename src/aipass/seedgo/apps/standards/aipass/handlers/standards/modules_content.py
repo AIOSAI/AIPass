@@ -5,7 +5,7 @@ Provides formatted module standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: modules_content.py
 # Description: Modules Standards Content Handler
 # Version: 1.0.0

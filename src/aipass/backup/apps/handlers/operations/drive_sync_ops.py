@@ -36,7 +36,7 @@ from aipass.backup.apps.handlers.json.drive_sync_json import (
 )
 
 # JSON file paths (resolved relative to backup root)
-_BACKUP_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/backup/
+_BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 _JSON_DIR = _BACKUP_ROOT / "backup_json"
 _MODULE_NAME = "google_drive_sync"
 _CONFIG_FILE = _JSON_DIR / f"{_MODULE_NAME}_config.json"

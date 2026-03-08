@@ -4,7 +4,7 @@ Log Handler Standards Content
 Provides Rich-formatted reference text for the log handler rotation standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_handler_content.py
 # Description: Log Handler Standards Content
 # Version: 1.0.0

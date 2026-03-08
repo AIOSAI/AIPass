@@ -10,7 +10,7 @@
 
 **Current approach:** Manual testing with JSON/log verification works effectively for rapid iteration phase.
 
-**Future:** pytest framework will be introduced once branches stabilize.
+**Future:** pytest framework expansion once branches stabilize (pytest is already configured and operational in some branches).
 
 ---
 
@@ -96,10 +96,9 @@ Process:
 ## Future: pytest Framework
 
 **Infrastructure in place:**
-- `pytest.ini` at root - Configuration for test discovery and markers
-- `<project_root>/tests/` - Root test directory with conftest.py
-- `<project_root>/tests/` - Core system tests
-- Branch-specific test directories (API, Prax, CLI, etc.)
+- `pytest.ini` at repo root - Configuration for test discovery and markers
+- `tests/` - Root test directory with conftest.py
+- Branch-specific test directories at `src/aipass/{branch}/tests/` (API, Prax, CLI, etc.)
 
 **Already operational in some branches:**
 - API branch: 4 test files (test_api_system.py, test_openrouter_key.py, etc.)
@@ -186,9 +185,9 @@ cat module_name_log.json
 ```bash
 # Prax provides file-based logging, not real-time watching
 # Check system logs directory for detailed output
-ls -la ~/system_logs/
-# Read specific module logs
-cat ~/system_logs/module_name.log
+ls -la system_logs/
+# Read specific module logs (Prax manages this directory location)
+cat system_logs/module_name.log
 ```
 
 **This infrastructure = verification layer without formal tests**
@@ -241,7 +240,7 @@ cat ~/system_logs/module_name.log
 - [ ] Check data.json - state tracking working?
 - [ ] Check log.json - operations recorded?
 - [ ] Test edge cases (invalid input, missing files, etc.)
-- [ ] Check Prax logs in ~/system_logs/ for detailed debugging info
+- [ ] Check Prax logs in system_logs/ for detailed debugging info
 - [ ] Manual feature tests at 90% stage
 
 ---
@@ -289,19 +288,18 @@ cat ~/system_logs/module_name.log
 
 **Current implementation:**
 ```
-<project_root>/
-  pytest.ini              # Test configuration
-  tests/                  # Root test directory
-    conftest.py           # Shared fixtures
-  src/aipass/
-    api/tests/            # API tests (4 files operational)
-      test_api_system.py
-      test_openrouter_key.py
-      test_free_models_quick.py
-      test_paid_model.py
-    prax/tests/           # Prax tests
-      test_log_rotation.py
-    cli/tests/            # CLI tests (infrastructure ready)
+pytest.ini                          # Test configuration (repo root)
+tests/                              # Root test directory
+  conftest.py                       # Shared fixtures
+src/aipass/
+  api/tests/                        # API tests (4 files operational)
+    test_api_system.py
+    test_openrouter_key.py
+    test_free_models_quick.py
+    test_paid_model.py
+  prax/tests/                       # Prax tests
+    test_log_rotation.py
+  cli/tests/                        # CLI tests (infrastructure ready)
   seedgo/
     tests/conftest.py
     apps/modules/test_cli_errors.py  # Demo module
@@ -313,7 +311,7 @@ cat ~/system_logs/module_name.log
 pytest
 
 # Run specific branch tests
-pytest aipass_core/api/tests/
+pytest src/aipass/api/tests/
 
 # Run with markers
 pytest -m unit
@@ -322,9 +320,9 @@ pytest -m slow
 ```
 
 **Test demonstration module:**
-- `<project_root>/src/aipass/seedgo/apps/modules/test_cli_errors.py` - Shows error handling patterns
+- `src/aipass/seedgo/apps/modules/test_cli_errors.py` - Shows error handling patterns
 - Not a pytest test, but demonstrates testing concepts
-- Run directly: `python3 <project_root>/src/aipass/seedgo/apps/modules/test_cli_errors.py`
+- Run directly: `python3 src/aipass/seedgo/apps/modules/test_cli_errors.py`
 
 ---
 
@@ -332,7 +330,7 @@ pytest -m slow
 
 #@comments:2025-11-13:claude: Pytest infrastructure exists and operational in API/Prax branches. Selective testing approach: automate stable components, manual testing for rapid development.
 
-#@comments:2025-11-13:claude: Prax doesn't have real-time "watcher" command for logs - uses file-based logging in ~/system_logs/. Updated documentation to reflect actual capabilities.
+#@comments:2025-11-13:claude: Prax doesn't have real-time "watcher" command for logs - uses file-based logging in system_logs/ (Prax manages the location). Updated documentation to reflect actual capabilities.
 
 #@comments:2025-11-13:claude: Error-first debugging approach is critical - maybe this should be emphasized in error_handling.md when we fill that section?
 

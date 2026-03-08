@@ -6,7 +6,7 @@ Checks for test functions, error handling patterns.
 Note: Manual testing is acceptable in current rapid iteration phase.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: testing_check.py
 # Description: Testing Standards Checker Handler
 # Version: 1.0.0

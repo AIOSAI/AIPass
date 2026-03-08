@@ -7,7 +7,7 @@ Validates that handlers are properly encapsulated:
 - Handlers should be accessed through module entry points, not directly
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
 # Version: 1.0.0
@@ -426,9 +426,14 @@ def check_cross_package_imports(lines: List[str], module_path: str,
             continue
 
         # Allow default handlers
+        is_allowed = False
         for allowed in allowed_handlers:
             if allowed in code_part:
-                continue
+                is_allowed = True
+                break
+
+        if is_allowed:
+            continue
 
         # This is a cross-package handler import
         violations.append({

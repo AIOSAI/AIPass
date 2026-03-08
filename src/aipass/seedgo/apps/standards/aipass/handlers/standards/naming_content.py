@@ -5,7 +5,7 @@ Provides formatted naming standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: naming_content.py
 # Description: Naming Standards Content Handler
 # Version: 1.0.0

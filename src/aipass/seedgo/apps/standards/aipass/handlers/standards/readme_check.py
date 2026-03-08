@@ -12,7 +12,7 @@ Checks:
 6. Command list presence (commands/usage section is not empty)
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
 # Version: 1.0.0

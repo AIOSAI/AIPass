@@ -6,7 +6,7 @@ Checks 3-layer pattern, handler independence, file size, domain organization.
 For entry points, also verifies entire branch structure against template baseline.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
 # Version: 1.0.0

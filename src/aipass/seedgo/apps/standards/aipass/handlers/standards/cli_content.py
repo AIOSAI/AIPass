@@ -5,7 +5,7 @@ Provides formatted CLI standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: cli_content.py
 # Description: CLI Standards Content Handler
 # Version: 1.0.0

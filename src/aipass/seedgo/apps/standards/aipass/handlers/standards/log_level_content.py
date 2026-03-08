@@ -4,7 +4,7 @@ Log Level Hygiene Standards Content
 Provides Rich-formatted reference text for the log level hygiene standard.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: log_level_content.py
 # Description: Log Level Hygiene Standards Content
 # Version: 1.0.0

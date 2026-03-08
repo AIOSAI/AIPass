@@ -5,7 +5,7 @@ Provides formatted Architecture standards content.
 Module orchestrates, handler implements.
 """
 
-# =================== META ====================
+# =================== AIPass ====================
 # Name: architecture_content.py
 # Description: Architecture Standards Content Handler
 # Version: 1.0.0

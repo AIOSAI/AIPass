@@ -3,7 +3,7 @@
 Branch Prompt Loader — AIPass Public Repo
 
 Injects branch-specific prompts based on CWD. When working in a branch
-directory, loads .aipass/branch_system_prompt.md and outputs it so the
+directory, loads .aipass/aipass_local_prompt.md and outputs it so the
 AI sees branch-specific context.
 
 Version: 1.0.0
@@ -41,7 +41,7 @@ def main():
     branch_root = find_branch_root()
 
     if branch_root:
-        prompt_file = branch_root / ".aipass" / "branch_system_prompt.md"
+        prompt_file = branch_root / ".aipass" / "aipass_local_prompt.md"
         if prompt_file.exists():
             content = prompt_file.read_text().strip()
             branch_name = branch_root.name.upper()

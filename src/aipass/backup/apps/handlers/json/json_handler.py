@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 # Constants
-_BACKUP_ROOT = Path(__file__).resolve().parents[4]  # src/aipass/backup/
+_BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 BACKUP_JSON_DIR = _BACKUP_ROOT / "backup_json"
 JSON_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "json_templates"
 
