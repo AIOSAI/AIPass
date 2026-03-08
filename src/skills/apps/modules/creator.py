@@ -104,4 +104,4 @@ def _is_valid_name(name):
     """
     if not name or not name[0].isalpha():
         return False
-    return all(c.isalnum() or c == "-" for c in name) and name == name.lower()
+    return all(c.isalnum() or c in "-_" for c in name) and name == name.lower()

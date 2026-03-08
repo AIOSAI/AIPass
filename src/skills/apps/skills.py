@@ -14,6 +14,18 @@
 #   - Formats and prints output
 # =============================================
 
+import sys
+from pathlib import Path
+# Ensure src/ is on sys.path so 'skills' package is resolvable.
+# Also remove the script's own directory (apps/) from sys.path to prevent
+# this file (skills.py) from shadowing the 'skills' package.
+_script_dir = str(Path(__file__).resolve().parent)
+if _script_dir in sys.path:
+    sys.path.remove(_script_dir)
+_src_dir = str(Path(__file__).resolve().parents[2])  # skills/apps/skills.py -> src/
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
 """Skills system entry point.
 
 Provides handle_command(command, args) for drone routing.
