@@ -79,6 +79,12 @@ else
     echo "Secrets directory already exists — skipping"
 fi
 
+# --- Seed .env template into secrets ---
+if [ ! -f "$SECRETS_DIR/.env" ] && [ -f ".env.example" ]; then
+    cp .env.example "$SECRETS_DIR/.env"
+    echo "  Copied .env.example → ~/.secrets/aipass/.env (add your API keys there)"
+fi
+
 # --- Generate branch registry ---
 if [ ! -f "AIPASS_REGISTRY.json" ]; then
     echo "Generating AIPASS_REGISTRY.json ..."
