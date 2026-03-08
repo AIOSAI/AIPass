@@ -37,7 +37,7 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Import from handlers
-from ..utils.system_utils import safe_print
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
 
 # =============================================
 # VERSION FILE DISCOVERY

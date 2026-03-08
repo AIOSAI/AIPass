@@ -21,7 +21,7 @@ Supports three tiers: markdown_only, with_handler, full.
 
 from pathlib import Path
 
-from ..handlers.template import copy_template, get_template
+from skills.apps.handlers.template import copy_template, get_template
 
 
 def create_skill(name, template_type="markdown_only", target_dir=None):

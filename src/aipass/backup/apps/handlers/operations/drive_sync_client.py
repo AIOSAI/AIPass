@@ -60,7 +60,7 @@ except ImportError:
     InstalledAppFlow = None
 
 # JSON handler for data persistence
-from ..json.drive_sync_json import (
+from aipass.backup.apps.handlers.json.drive_sync_json import (
     load_config as _load_config_fn,
     save_config as _save_config_fn,
     load_data as _load_data_fn,

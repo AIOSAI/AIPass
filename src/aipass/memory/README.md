@@ -1,7 +1,7 @@
-# SKILLS
+# MEMORY
 
-**Purpose:** Discoverable, validatable, executable skill units for AI agents
-**Module:** `aipass.skills`
+**Purpose:** Vector memory archive with ChromaDB semantic search
+**Module:** `aipass.memory`
 **Created:** 2026-03-07
 **Citizen Class:** birthright
 

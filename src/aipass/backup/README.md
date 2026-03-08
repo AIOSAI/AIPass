@@ -1,7 +1,7 @@
-# SKILLS
+# BACKUP
 
-**Purpose:** Discoverable, validatable, executable skill units for AI agents
-**Module:** `aipass.skills`
+**Purpose:** Multi-mode backup with Google Drive integration
+**Module:** `aipass.backup`
 **Created:** 2026-03-07
 **Citizen Class:** birthright
 

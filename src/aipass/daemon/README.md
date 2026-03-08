@@ -1,7 +1,7 @@
-# SKILLS
+# DAEMON
 
-**Purpose:** Discoverable, validatable, executable skill units for AI agents
-**Module:** `aipass.skills`
+**Purpose:** Cron-triggered task scheduler with plugin system
+**Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** birthright
 

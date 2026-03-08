@@ -19,7 +19,7 @@ Executes a skill: if it has a handler, calls handler.run();
 if no handler, prints the SKILL.md body for the LLM to read.
 """
 
-from .loader import load_skill
+from skills.apps.modules.loader import load_skill
 
 
 def run_skill(name, action=None, args=None, config=None):

@@ -44,7 +44,7 @@ def _header(text):
     console.print(f"[bold cyan]  {text}[/bold cyan]")
     console.print(f"[bold cyan]{'='*70}[/bold cyan]")
 
-from ..models.backup_models import BackupResult
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
 
 # =============================================
 # REPORT FORMATTING OPERATIONS

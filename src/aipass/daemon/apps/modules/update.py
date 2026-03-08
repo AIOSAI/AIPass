@@ -38,7 +38,7 @@ def _header(text):
     console.print(f"[bold cyan]{'='*70}[/bold cyan]")
 
 # Handler imports
-from ..handlers.update.data_loader import (
+from aipass.daemon.apps.handlers.update.data_loader import (
     load_inbox,
     load_local,
     categorize_messages,

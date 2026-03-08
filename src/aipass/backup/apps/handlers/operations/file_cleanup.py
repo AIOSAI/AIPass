@@ -42,8 +42,8 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-from ..utils.system_utils import temporarily_writable, safe_print
-from ..models.backup_models import BackupResult
+from aipass.backup.apps.handlers.utils.system_utils import temporarily_writable, safe_print
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
 
 # =============================================
 # FILE CLEANUP OPERATIONS

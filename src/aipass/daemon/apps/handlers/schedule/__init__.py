@@ -17,7 +17,7 @@
 Schedule handlers for ASSISTANT's scheduled follow-ups system.
 """
 
-from .task_registry import (
+from aipass.daemon.apps.handlers.schedule.task_registry import (
     load_tasks,
     save_tasks,
     create_task,

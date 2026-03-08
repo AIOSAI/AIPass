@@ -34,9 +34,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Import handlers
-from ..json.json_handler import load_json, save_json
-from ..models.backup_models import BackupResult
-from ..utils.system_utils import safe_print
+from aipass.backup.apps.handlers.json.json_handler import load_json, save_json
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
 
 # =============================================
 # STATISTICS OPERATIONS

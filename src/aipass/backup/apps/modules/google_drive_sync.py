@@ -64,10 +64,10 @@ LOG_FILE = JSON_DIR / f"{MODULE_NAME}_log.json"
 # =============================================
 
 try:
-    from ..handlers.operations.drive_sync_client import (
+    from aipass.backup.apps.handlers.operations.drive_sync_client import (
         GoogleDriveSync,
     )
-    from ..handlers.json.drive_sync_json import (
+    from aipass.backup.apps.handlers.json.drive_sync_json import (
         load_config as _load_config_fn,
         load_data as _load_data_fn,
     )
@@ -93,7 +93,7 @@ def _load_data():
 # =============================================
 
 try:
-    from ..handlers.operations.drive_sync_ops import (
+    from aipass.backup.apps.handlers.operations.drive_sync_ops import (
         clear_file_tracker as _clear_file_tracker_handler,
         get_file_tracker_stats,
         test_drive_connection as _test_drive_connection,
@@ -319,7 +319,7 @@ def handle_command(args) -> bool:
         limit = getattr(args, 'limit', 0) or 0
 
         # Show last backup timestamps for all modes
-        from ..handlers.utils.backup_timestamps import get_timestamps, format_age
+        from aipass.backup.apps.handlers.utils.backup_timestamps import get_timestamps, format_age
         ts = get_timestamps()
         console.print()
         console.print("[dim]Last backups:[/dim]")
@@ -394,7 +394,7 @@ def handle_command(args) -> bool:
         # Summary
         console.print()
         if result["success"]:
-            from ..handlers.utils.backup_timestamps import update_timestamp, get_timestamps, format_age
+            from aipass.backup.apps.handlers.utils.backup_timestamps import update_timestamp, get_timestamps, format_age
             update_timestamp("drive_sync")
             ts = get_timestamps()
             console.print(f"[green]Sync complete: {result['uploaded']} uploaded, {result['skipped']} unchanged[/green]")

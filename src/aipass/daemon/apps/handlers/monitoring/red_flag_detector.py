@@ -36,7 +36,7 @@ OK Conditions:
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
-from . import activity_collector
+from aipass.daemon.apps.handlers.monitoring import activity_collector
 
 
 # Status constants

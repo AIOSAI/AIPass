@@ -104,7 +104,7 @@ def discover_all():
         list[dict]: All discovered skills, deduplicated by name
             (first match wins).
     """
-    from ..handlers.registry import build_registry
+    from skills.apps.handlers.registry import build_registry
 
     search_paths = get_search_paths()
     return build_registry(search_paths, discover_skills_in_path)

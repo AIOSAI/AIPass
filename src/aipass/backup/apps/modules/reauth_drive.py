@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 # Handler imports
-from ..handlers.utils.reauth_handler import reauth as _run_reauth
+from aipass.backup.apps.handlers.utils.reauth_handler import reauth as _run_reauth
 
 CLIENT_SECRETS = Path(__file__).resolve().parents[1] / 'credentials.json'
 CREDS_PATH = Path.home() / '.aipass' / 'drive_creds.json'

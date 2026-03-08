@@ -46,7 +46,7 @@ def _error(text):
     console.print(f"[red]ERROR:[/red] {text}")
 
 # Handler imports
-from ..handlers.schedule.task_registry import (
+from aipass.daemon.apps.handlers.schedule.task_registry import (
     load_tasks, create_task, delete_task, get_due_tasks, mark_completed, parse_due_date,
     mark_dispatching, mark_pending, recover_stale_dispatches
 )

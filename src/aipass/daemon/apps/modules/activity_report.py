@@ -34,10 +34,10 @@ from typing import Dict, Any, List, Optional
 import logging
 logger = logging.getLogger(__name__)
 
-# Import monitoring handlers using relative imports
-from ..handlers.monitoring import activity_collector
-from ..handlers.monitoring import memory_health
-from ..handlers.monitoring import red_flag_detector
+# Import monitoring handlers using absolute imports
+from aipass.daemon.apps.handlers.monitoring import activity_collector
+from aipass.daemon.apps.handlers.monitoring import memory_health
+from aipass.daemon.apps.handlers.monitoring import red_flag_detector
 
 
 # =============================================

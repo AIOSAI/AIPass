@@ -65,23 +65,23 @@ def _header(text):
 
 
 # Import handlers (core dependencies) - relative imports
-from ..handlers.config.config_handler import (
+from aipass.backup.apps.handlers.config.config_handler import (
     BACKUP_MODES,
     GLOBAL_IGNORE_PATTERNS,
     IGNORE_EXCEPTIONS,
     filter_tracked_items,
     should_ignore
 )
-from ..handlers.models.backup_models import BackupResult
-from ..handlers.operations.file_operations import copy_file_with_structure, copy_versioned_file
-from ..handlers.utils.system_utils import safe_print
-from ..handlers.json.json_handler import log_operation, ensure_module_jsons
-from ..handlers.json.changelog_handler import (
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
+from aipass.backup.apps.handlers.operations.file_operations import copy_file_with_structure, copy_versioned_file
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
+from aipass.backup.apps.handlers.json.json_handler import log_operation, ensure_module_jsons
+from aipass.backup.apps.handlers.json.changelog_handler import (
     load_changelog as load_changelog_file,
     save_changelog_entry as save_changelog_entry_file,
     display_previous_comments as display_previous_comments_file
 )
-from ..handlers.json.backup_info_handler import (
+from aipass.backup.apps.handlers.json.backup_info_handler import (
     load_backup_info as load_backup_info_file,
     save_backup_info as save_backup_info_file
 )
@@ -302,7 +302,7 @@ class BackupEngine:
 
     def ensure_backup_directory(self, result: BackupResult) -> bool:
         """Create backup directory if needed (delegates to handler)."""
-        from ..handlers.utils.system_utils import ensure_backup_directory as ensure_dir
+        from aipass.backup.apps.handlers.utils.system_utils import ensure_backup_directory as ensure_dir
         success, error_msg = ensure_dir(self.backup_dest, self.backup_path, self.mode_config['behavior'] == 'dynamic')
         if not success:
             error_text = error_msg if error_msg is not None else "Unknown error creating backup directory"
@@ -313,12 +313,12 @@ class BackupEngine:
 
     def file_needs_backup(self, source_file: Path, backup_file: Path, last_timestamps: dict) -> bool:
         """Check if file needs backup (delegates to handler)."""
-        from ..handlers.operations.file_operations import file_needs_backup as check_file
+        from aipass.backup.apps.handlers.operations.file_operations import file_needs_backup as check_file
         return check_file(source_file, backup_file, last_timestamps, self.source_dir)
 
     def remove_empty_dirs(self, path: Path):
         """Remove empty directories (delegates to handler)."""
-        from ..handlers.utils.system_utils import remove_empty_dirs as clean_dirs
+        from aipass.backup.apps.handlers.utils.system_utils import remove_empty_dirs as clean_dirs
         clean_dirs(path)
 
     # Changelog and backup info operations (thin delegators to handlers)
@@ -360,7 +360,7 @@ class BackupEngine:
         logger.info(f"[backup_core] Starting {self.mode} backup: {backup_note}")
 
         # Show last backup timestamps for all modes
-        from ..handlers.utils.backup_timestamps import get_timestamps, format_age
+        from aipass.backup.apps.handlers.utils.backup_timestamps import get_timestamps, format_age
         ts = get_timestamps()
         console.print()
         console.print("[dim]Last backups:[/dim]")
@@ -395,11 +395,11 @@ class BackupEngine:
             last_timestamps = {}
 
         # HANDLER: Scan files
-        from ..handlers.operations.file_scanner import scan_files
+        from aipass.backup.apps.handlers.operations.file_scanner import scan_files
         files_to_backup, skipped_items = scan_files(self.source_dir, self.should_ignore)
 
         # HANDLER: Process files
-        from ..handlers.operations.path_builder import build_backup_path
+        from aipass.backup.apps.handlers.operations.path_builder import build_backup_path
         current_timestamps = {}
         total_files = len(files_to_backup)
 
@@ -475,14 +475,14 @@ class BackupEngine:
         # RE-ENABLED 2025-11-23: Fixed to respect IGNORE_EXCEPTIONS in third pass
         # Now runs in dry-run mode to show what WOULD be deleted
         if self.backup_path.exists() and self.mode_config['behavior'] == 'dynamic':
-            from ..handlers.operations.file_cleanup import cleanup_deleted_files
+            from aipass.backup.apps.handlers.operations.file_cleanup import cleanup_deleted_files
             cleanup_deleted_files(self.backup_path, self.source_dir, self.should_ignore, result, self.dry_run)
 
         # HANDLER: Remove empty directories (handled by cleanup_deleted_files now)
         # self.remove_empty_dirs(self.backup_path)
 
         # HANDLER: Create and save backup metadata
-        from ..handlers.json.backup_metadata_builder import create_backup_metadata
+        from aipass.backup.apps.handlers.json.backup_metadata_builder import create_backup_metadata
         backup_info = create_backup_metadata(
             self.mode, self.mode_config['behavior'], backup_note, self.backup_folder_name,
             self.backup_path, self.source_dir, result, current_timestamps, backup_info
@@ -490,7 +490,7 @@ class BackupEngine:
         self.save_backup_info(backup_info)
 
         # HANDLER: Display backup results
-        from ..handlers.reporting.report_formatter import display_backup_results
+        from aipass.backup.apps.handlers.reporting.report_formatter import display_backup_results
         display_backup_results(result, self.mode_config, self.backup_path, skipped_items, filter_tracked_items, self.dry_run)
 
         # Update JSON system
@@ -509,7 +509,7 @@ class BackupEngine:
             logger.info(f"[backup_core] {self.mode} backup completed successfully - {result.files_copied} files copied in {execution_time}ms")
 
             # Update backup timestamp and show confirmation
-            from ..handlers.utils.backup_timestamps import update_timestamp, get_timestamps, format_age
+            from aipass.backup.apps.handlers.utils.backup_timestamps import update_timestamp, get_timestamps, format_age
             update_timestamp(self.mode)
             ts = get_timestamps()
             console.print()
@@ -535,7 +535,7 @@ class BackupEngine:
             )
             logger.error(f"[backup_core] {self.mode} backup completed with {result.errors} errors in {execution_time}ms")
 
-        from ..handlers.json.statistics_handler import update_data_file
+        from aipass.backup.apps.handlers.json.statistics_handler import update_data_file
         update_data_file(result)
 
         return result

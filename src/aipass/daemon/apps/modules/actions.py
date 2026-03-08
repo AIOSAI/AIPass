@@ -46,7 +46,7 @@ def _success(text):
 def _error(text):
     console.print(f"[red]ERROR:[/red] {text}")
 
-from ..handlers.actions.actions_registry import (
+from aipass.daemon.apps.handlers.actions.actions_registry import (
     list_actions,
     get_action,
     toggle_action,

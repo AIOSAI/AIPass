@@ -97,7 +97,7 @@ def _print_help():
 
 def _cmd_list():
     """List all discovered skills."""
-    from .modules.discovery import discover_all
+    from skills.apps.modules.discovery import discover_all
 
     skills = discover_all()
 
@@ -135,7 +135,7 @@ def _cmd_list():
 
 def _cmd_info(name):
     """Display full SKILL.md contents for a skill."""
-    from .modules.loader import load_skill
+    from skills.apps.modules.loader import load_skill
 
     loaded = load_skill(name)
     if not loaded["success"]:
@@ -179,7 +179,7 @@ def _cmd_info(name):
 
 def _cmd_run(name, action, extra_args):
     """Execute a skill."""
-    from .modules.runner import run_skill
+    from skills.apps.modules.runner import run_skill
 
     result = run_skill(name, action=action, args=extra_args)
 
@@ -196,7 +196,7 @@ def _cmd_run(name, action, extra_args):
 
 def _cmd_create(args):
     """Create a new skill from a template."""
-    from .modules.creator import create_skill
+    from skills.apps.modules.creator import create_skill
 
     name = args[0]
 
@@ -218,8 +218,8 @@ def _cmd_create(args):
 
 def _cmd_validate(name):
     """Validate a skill's requirements."""
-    from .modules.loader import load_skill
-    from .handlers.validator import validate_skill
+    from skills.apps.modules.loader import load_skill
+    from skills.apps.handlers.validator import validate_skill
 
     loaded = load_skill(name)
     if not loaded["success"]:
@@ -265,3 +265,14 @@ def _parse_extra_args(arg_list):
             positional_idx += 1
 
     return result
+
+
+if __name__ == "__main__":
+    import sys
+    args = sys.argv[1:]
+    if not args:
+        handle_command("--help")
+    else:
+        command = args[0]
+        remaining = args[1:] if len(args) > 1 else []
+        handle_command(command, remaining)

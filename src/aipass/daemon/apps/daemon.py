@@ -42,7 +42,7 @@ def _header(text):
 # MODULE DISCOVERY
 # =============================================================================
 
-from .modules import update, schedule, activity_report, actions
+from aipass.daemon.apps.modules import update, schedule, activity_report, actions
 
 def get_modules() -> List[Any]:
     """

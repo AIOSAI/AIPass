@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 # Explicit module imports (replaces dynamic discover_modules)
-from .modules import backup_core, google_drive_sync, integrations, reauth_drive
+from aipass.backup.apps.modules import backup_core, google_drive_sync, integrations, reauth_drive
 
 
 def get_modules():

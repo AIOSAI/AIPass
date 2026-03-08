@@ -28,7 +28,7 @@ google_drive_sync module. Called by the module orchestrator.
 from pathlib import Path
 from typing import Any, Dict
 
-from ..json.drive_sync_json import (
+from aipass.backup.apps.handlers.json.drive_sync_json import (
     load_config,
     load_data,
     save_data,

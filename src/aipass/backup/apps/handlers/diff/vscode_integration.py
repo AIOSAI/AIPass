@@ -39,8 +39,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Import from handlers
-from ..utils.system_utils import safe_print
-from ..diff.version_manager import get_versioned_files
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
+from aipass.backup.apps.handlers.diff.version_manager import get_versioned_files
 
 # =============================================
 # VS CODE INTEGRATION

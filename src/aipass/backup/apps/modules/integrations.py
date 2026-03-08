@@ -61,15 +61,15 @@ def _header(text):
 
 
 # Handler imports - relative imports
-from ..handlers.utils.system_utils import safe_print
-from ..handlers.operations.integration_ops import (
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
+from aipass.backup.apps.handlers.operations.integration_ops import (
     sync_to_drive as _sync_to_drive_handler,
     set_backup_readonly as _set_backup_readonly_handler,
 )
 
 # Google Drive sync integration (optional - graceful degradation if not available)
 try:
-    from .google_drive_sync import GoogleDriveSync
+    from aipass.backup.apps.modules.google_drive_sync import GoogleDriveSync
     DRIVE_SYNC_AVAILABLE = True
 except ImportError:
     GoogleDriveSync = None  # type: ignore

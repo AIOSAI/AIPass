@@ -30,7 +30,7 @@ Creates mode-specific backup information structures.
 import datetime
 from pathlib import Path
 
-from ..models.backup_models import BackupResult
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
 
 # =============================================
 # METADATA CONSTRUCTION OPERATIONS

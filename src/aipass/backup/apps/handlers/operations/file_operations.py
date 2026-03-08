@@ -60,9 +60,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # Import from handlers modules
-from ..utils.system_utils import temporarily_writable, safe_print
-from ..diff.diff_generator import should_create_diff, generate_diff_content
-from ..models.backup_models import BackupResult
+from aipass.backup.apps.handlers.utils.system_utils import temporarily_writable, safe_print
+from aipass.backup.apps.handlers.diff.diff_generator import should_create_diff, generate_diff_content
+from aipass.backup.apps.handlers.models.backup_models import BackupResult
 
 # =============================================
 # SNAPSHOT MODE OPERATIONS

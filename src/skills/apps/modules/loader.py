@@ -23,7 +23,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from .discovery import discover_all, parse_frontmatter
+from skills.apps.modules.discovery import discover_all, parse_frontmatter
 
 
 def load_skill(name):

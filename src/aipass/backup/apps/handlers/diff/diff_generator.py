@@ -35,8 +35,8 @@ import difflib
 from pathlib import Path
 
 # Import from handlers
-from ..utils.system_utils import safe_print
-from ..config.config_handler import DIFF_IGNORE_PATTERNS, DIFF_INCLUDE_PATTERNS
+from aipass.backup.apps.handlers.utils.system_utils import safe_print
+from aipass.backup.apps.handlers.config.config_handler import DIFF_IGNORE_PATTERNS, DIFF_INCLUDE_PATTERNS
 
 # =============================================
 # DIFF GENERATION
