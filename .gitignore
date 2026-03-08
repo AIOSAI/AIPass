@@ -9,6 +9,10 @@ __pycache__/
 # Secrets
 .env
 
+# Plans (managed by flow, local to each installation)
+FPLAN-*.md
+DPLAN-*.md
+
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json
 .trinity/
