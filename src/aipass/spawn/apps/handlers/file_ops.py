@@ -13,6 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
+from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 
 # Patterns to skip during template copy
@@ -58,6 +59,10 @@ def copy_template(template_dir, target_dir, replacements):
             copied.append(f"{dest_rel}/ (dir)")
         elif item.is_file():
             dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                logger.info(f"[spawn] Skipping existing file: {dest_rel}")
+                skipped.append(f"{dest_rel} (exists)")
+                continue
             try:
                 content = item.read_text(encoding="utf-8")
                 content = replace_placeholders(content, replacements)

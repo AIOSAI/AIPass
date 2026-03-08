@@ -22,6 +22,7 @@ from aipass.spawn.apps.handlers.registry import (
     find_registry,
     load_registry,
     save_registry,
+    _branches_as_list,
 )
 
 # Repo root — resolved from spawn package location
@@ -80,7 +81,7 @@ def delete_branch(
     branch_entry = None
     branch_dir = None
 
-    for entry in registry.get("branches", []):
+    for entry in _branches_as_list(registry.get("branches", [])):
         if entry.get("name", "").lower() == branch_name.lower():
             branch_entry = entry
             rel_path = entry.get("path", "")
@@ -157,11 +158,19 @@ def delete_branch(
         }
 
     # 6. Remove from registry
-    registry["branches"] = [
-        b for b in registry.get("branches", [])
-        if b.get("name", "").lower() != branch_name.lower()
-    ]
-    registry["metadata"]["total_branches"] = len(registry["branches"])
+    branches = registry.get("branches", [])
+    if isinstance(branches, dict):
+        # Dict format: remove by key (try both cases)
+        for key in list(branches.keys()):
+            if key.lower() == branch_name.lower() or branches[key].get("name", "").lower() == branch_name.lower():
+                del branches[key]
+        registry["branches"] = branches
+    else:
+        registry["branches"] = [
+            b for b in branches
+            if b.get("name", "").lower() != branch_name.lower()
+        ]
+    registry["metadata"]["total_branches"] = len(_branches_as_list(registry["branches"]))
     registry_updated = save_registry(registry_path, registry)
 
     if registry_updated:

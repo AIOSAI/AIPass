@@ -4,14 +4,6 @@
 # Date: 2026-03-07
 # Version: 1.0.0
 # Category: skills/catalog/system_status
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Initial implementation
-#
-# CODE STANDARDS:
-#   - Handler layer: returns dicts, NEVER prints
-#   - stdlib only (no external deps)
-#   - Graceful error handling on all actions
 # =============================================
 
 """

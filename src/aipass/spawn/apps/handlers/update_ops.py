@@ -33,7 +33,7 @@ from aipass.spawn.apps.handlers.reconcile import reconcile_branch_state
 from aipass.spawn.apps.handlers.change_detection import detect_changes
 from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
-from aipass.spawn.apps.handlers.registry import find_registry, load_registry
+from aipass.spawn.apps.handlers.registry import find_registry, load_registry, _branches_as_list
 
 # Repo root — resolved from spawn package location
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
@@ -254,7 +254,7 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
     """
     registry_path = find_registry()
     registry = load_registry(registry_path)
-    branches = registry.get("branches", [])
+    branches = _branches_as_list(registry.get("branches", []))
 
     if not branches:
         return []
@@ -333,7 +333,7 @@ def _resolve_branch_path(branch_name: str) -> Path | None:
     registry_path = find_registry()
     registry = load_registry(registry_path)
 
-    for branch in registry.get("branches", []):
+    for branch in _branches_as_list(registry.get("branches", [])):
         reg_name = branch.get("name", "")
         if reg_name.lower() == branch_name.lower():
             rel_path = branch.get("path", "")

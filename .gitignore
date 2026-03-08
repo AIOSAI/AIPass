@@ -6,6 +6,9 @@ __pycache__/
 *.pyc
 *.egg-info/
 
+# Secrets
+.env
+
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json
 .trinity/

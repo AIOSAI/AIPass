@@ -14,6 +14,23 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _branches_as_list(branches):
+    """Normalize branches to a list regardless of storage format.
+
+    The registry may store branches as:
+    - A list of dicts (legacy format)
+    - A dict keyed by name (dict format from setup.sh)
+
+    Returns:
+        list of branch entry dicts
+    """
+    if isinstance(branches, dict):
+        return list(branches.values())
+    if isinstance(branches, list):
+        return branches
+    return []
+
+
 def find_registry(start_path=None):
     """
     Find AIPASS_REGISTRY.json — consistent with drone's resolution.
@@ -112,8 +129,13 @@ def save_registry(registry_path, data):
     data["metadata"]["last_updated"] = datetime.now().strftime("%Y-%m-%d")
 
     if "branches" in data:
+        branches = data["branches"]
+        if isinstance(branches, dict):
+            branch_list = list(branches.values())
+        else:
+            branch_list = branches
         data["branches"] = sorted(
-            data["branches"], key=lambda b: b.get("name", "")
+            branch_list, key=lambda b: b.get("name", "")
         )
 
     try:
@@ -137,7 +159,8 @@ def get_next_citizen_number(registry_path):
         int: Next citizen number
     """
     data = load_registry(registry_path)
-    return len(data.get("branches", [])) + 1
+    branches = data.get("branches", [])
+    return len(_branches_as_list(branches)) + 1
 
 
 def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose=""):
@@ -156,11 +179,16 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         True if added, False if already exists or error
     """
     registry = load_registry(registry_path)
+    branches = registry.get("branches", [])
 
-    # Check for duplicates
-    for branch in registry.get("branches", []):
-        if branch.get("name") == branch_name:
+    # Check for duplicates — handle both dict and list formats
+    if isinstance(branches, dict):
+        if branch_name in branches:
             return False
+    else:
+        for branch in branches:
+            if branch.get("name") == branch_name:
+                return False
 
     today = datetime.now().strftime("%Y-%m-%d")
     entry = {
@@ -174,7 +202,12 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         "last_active": today,
     }
 
-    registry["branches"].append(entry)
-    registry["metadata"]["total_branches"] = len(registry["branches"])
+    # Add entry — handle both dict and list formats
+    if isinstance(branches, dict):
+        branches[branch_name] = entry
+    else:
+        branches.append(entry)
+    registry["branches"] = branches
+    registry["metadata"]["total_branches"] = len(_branches_as_list(branches))
 
     return save_registry(registry_path, registry)

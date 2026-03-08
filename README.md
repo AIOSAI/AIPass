@@ -9,6 +9,8 @@ Orchestration framework for autonomous AI agent ecosystems. Command routing, sym
 
 ## Quick Start
 
+### 1. Install
+
 ```bash
 git clone https://github.com/AIOSAI/AIPass.git
 cd AIPass
@@ -16,12 +18,49 @@ cd AIPass
 source .venv/bin/activate
 ```
 
+`setup.sh` handles everything: creates the venv, installs the package, generates the branch registry (15 branches), bootstraps identity files (`.trinity/`, `.seedgo/`, `.ai_mail.local/`) for every branch, and installs Claude Code hooks. Idempotent — safe to re-run.
+
 Verify:
 
 ```bash
-drone --help        # Command router
-drone systems       # List registered modules and branches
+drone systems       # Should show 15 branches
+drone @seedgo verify # Should show 5/5 checks passed
 ```
+
+### 2. Start a Session
+
+AIPass is designed to be operated by AI agents via [Claude Code](https://docs.anthropic.com/en/docs/claude-code). The orchestration hub is **devpulse** — start there.
+
+```bash
+cd src/aipass/devpulse
+claude --permission-mode bypassPermissions
+```
+
+Say `hi` to trigger the [startup protocol](#4-startup-protocol). The agent reads its identity and memory files, checks git status, verifies system health, and picks up where it left off. In a returning session, use `/resume` instead.
+
+### 3. What You Get
+
+After setup, every branch has:
+
+```
+.trinity/passport.json       # Identity (name, role, citizen class)
+.trinity/local.json          # Session history (empty, ready to populate)
+.trinity/observations.json   # Collaboration patterns (empty)
+.seedgo/bypass.json          # Standards bypass config
+.ai_mail.local/inbox.json    # Mailbox
+```
+
+The agent fills in its own memories as it works — session logs, learnings, observations. These grow over time and persist across sessions.
+
+### 4. Startup Protocol
+
+These greetings trigger the full startup sequence: `hi`, `hello`, `yo`, `hey`, `sup`, `good morning`, `good evening`, `what's up`. Everything else is treated as a direct task.
+
+On startup the agent:
+1. Reads `.trinity/passport.json` (identity), `local.json` (session history), `observations.json` (patterns)
+2. Runs `git status`, `drone systems`, `drone @seedgo verify`
+3. Checks active tasks and recent session context
+4. Picks up work or waits for instructions
 
 ## Core Concepts
 

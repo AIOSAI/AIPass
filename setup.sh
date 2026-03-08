@@ -92,6 +92,7 @@ src_dir = Path(repo_root) / "src" / "aipass"
 today = date.today().isoformat()
 
 branches = {}
+# Discover modules under src/aipass/
 for d in sorted(src_dir.iterdir()):
     if d.is_dir() and not d.name.startswith(("_", ".")):
         branches[d.name] = {
@@ -100,6 +101,21 @@ for d in sorted(src_dir.iterdir()):
             "profile": "library",
             "description": "",
             "email": f"@{d.name}",
+            "status": "active",
+            "created": today,
+            "last_active": today,
+        }
+
+# Add external branches: commons and skills
+for ext_name in ["commons", "skills"]:
+    ext_path = Path(repo_root) / "src" / ext_name
+    if ext_path.is_dir():
+        branches[ext_name] = {
+            "name": ext_name,
+            "path": str(ext_path),
+            "profile": "library",
+            "description": "",
+            "email": f"@{ext_name}",
             "status": "active",
             "created": today,
             "last_active": today,
@@ -121,6 +137,147 @@ PYEOF
 else
     echo "AIPASS_REGISTRY.json already exists — skipping"
 fi
+
+# --- Bootstrap branch identity and memory files ---
+echo ""
+echo "Bootstrapping branch identity files ..."
+
+DATE_TODAY=$(date +%Y-%m-%d)
+
+bootstrap_branch() {
+    local name="$1"
+    local path="$2"
+    local citizen_class="$3"
+    local role="$4"
+    local created=0
+
+    # .trinity/passport.json
+    mkdir -p "$path/.trinity"
+    if [ ! -f "$path/.trinity/passport.json" ]; then
+        cat > "$path/.trinity/passport.json" << JSONEOF
+{
+  "document_metadata": {
+    "document_type": "identity",
+    "document_name": "${name}.PASSPORT",
+    "version": "1.0.0",
+    "schema_version": "1.0.0",
+    "created": "${DATE_TODAY}",
+    "last_updated": "${DATE_TODAY}",
+    "managed_by": "${name}"
+  },
+  "identity": {
+    "name": "${name}",
+    "citizen_class": "${citizen_class}",
+    "role": "${role}",
+    "status": "active"
+  }
+}
+JSONEOF
+        created=1
+    fi
+
+    # .trinity/local.json
+    if [ ! -f "$path/.trinity/local.json" ]; then
+        cat > "$path/.trinity/local.json" << JSONEOF
+{
+  "document_metadata": {
+    "document_type": "session_history",
+    "document_name": "${name}.LOCAL",
+    "version": "1.0.0",
+    "schema_version": "1.0.0",
+    "created": "${DATE_TODAY}",
+    "last_updated": "${DATE_TODAY}",
+    "managed_by": "${name}",
+    "tags": ["session_tracking", "work_log", "${name}"],
+    "limits": {"max_lines": 600, "note": "Auto-rollover when max_lines exceeded"},
+    "status": {"health": "healthy", "current_lines": 0, "last_health_check": "${DATE_TODAY}"}
+  },
+  "active_tasks": {
+    "today_focus": "First session — explore codebase and capabilities",
+    "recently_completed": []
+  },
+  "key_learnings": {},
+  "sessions": []
+}
+JSONEOF
+        created=1
+    fi
+
+    # .trinity/observations.json
+    if [ ! -f "$path/.trinity/observations.json" ]; then
+        cat > "$path/.trinity/observations.json" << JSONEOF
+{
+  "document_metadata": {
+    "document_type": "collaboration_patterns",
+    "document_name": "${name}.OBSERVATIONS",
+    "version": "1.0.0",
+    "schema_version": "1.0.0",
+    "created": "${DATE_TODAY}",
+    "last_updated": "${DATE_TODAY}",
+    "managed_by": "${name}",
+    "tags": ["collaboration", "patterns", "${name}"],
+    "limits": {"max_lines": 600, "note": "Auto-rollover when max_lines exceeded"},
+    "status": {"health": "healthy", "current_lines": 0, "last_health_check": "${DATE_TODAY}"}
+  },
+  "guidelines": {
+    "purpose": "Capture collaboration patterns and experiential insights over time",
+    "chronological_order": "Newest entries at TOP, oldest at BOTTOM - NEVER reorder"
+  },
+  "observations": [
+    {
+      "date": "${DATE_TODAY}",
+      "session": 1,
+      "entries": [
+        {"title": "First Contact", "detail": "Branch initialized. Ready to begin capturing collaboration patterns."}
+      ]
+    }
+  ]
+}
+JSONEOF
+        created=1
+    fi
+
+    # .seedgo/bypass.json
+    mkdir -p "$path/.seedgo"
+    if [ ! -f "$path/.seedgo/bypass.json" ]; then
+        echo '{}' > "$path/.seedgo/bypass.json"
+        created=1
+    fi
+
+    # .ai_mail.local/inbox.json
+    mkdir -p "$path/.ai_mail.local"
+    if [ ! -f "$path/.ai_mail.local/inbox.json" ]; then
+        echo '{"inbox": []}' > "$path/.ai_mail.local/inbox.json"
+        created=1
+    fi
+
+    if [ "$created" -eq 1 ]; then
+        echo "  @${name} ... bootstrapped"
+    else
+        echo "  @${name} ... exists (skipped)"
+    fi
+}
+
+# Branches inside src/aipass/
+bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone"    "builder" "Command routing and module discovery"
+bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo"   "builder" "Standards enforcement and code auditing"
+bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax"     "builder" "Logging and monitoring system"
+bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli"      "builder" "Display formatting service"
+bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow"     "builder" "Workflow and plan management"
+bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail"  "builder" "Inter-agent messaging and dispatch"
+bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api"      "builder" "LLM access and model routing"
+bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger"  "builder" "Event-driven automation"
+bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn"    "builder" "Branch lifecycle management"
+bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
+bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup"   "builder" "Multi-mode backup system"
+bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon"   "builder" "Background scheduler"
+bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory"   "builder" "Vector memory bank"
+
+# External branches
+bootstrap_branch "commons"  "$SCRIPT_DIR/src/commons"         "builder" "Social network for branches"
+bootstrap_branch "skills"   "$SCRIPT_DIR/src/skills"          "builder" "Capability framework"
+
+echo "  15 branches bootstrapped"
 
 # --- Install Claude Code hooks ---
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"

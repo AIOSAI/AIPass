@@ -23,6 +23,7 @@ from aipass.spawn.apps.handlers.registry import (
     find_registry,
     load_registry,
     save_registry,
+    _branches_as_list,
 )
 
 # Repo root — resolved from spawn package location
@@ -54,7 +55,7 @@ def sync_registry(fix: bool = False) -> dict:
     # 1. Load registry
     registry_path = find_registry()
     registry = load_registry(registry_path)
-    branches = registry.get("branches", [])
+    branches = _branches_as_list(registry.get("branches", []))
 
     # Build lookup of registered branch names (lowercase) -> entry
     registered: dict[str, dict] = {}
@@ -108,11 +109,19 @@ def sync_registry(fix: bool = False) -> dict:
     fixed = False
     if fix and (stale or unregistered_list):
         # Remove stale entries
+        raw_branches = registry.get("branches", [])
         if stale:
-            registry["branches"] = [
-                b for b in registry["branches"]
-                if b.get("name", "").lower() not in stale
-            ]
+            if isinstance(raw_branches, dict):
+                for key in list(raw_branches.keys()):
+                    entry_name = raw_branches[key].get("name", "").lower() if isinstance(raw_branches[key], dict) else key.lower()
+                    if entry_name in stale or key.lower() in stale:
+                        del raw_branches[key]
+            else:
+                raw_branches = [
+                    b for b in raw_branches
+                    if b.get("name", "").lower() not in stale
+                ]
+            registry["branches"] = raw_branches
             for s in stale:
                 logger.info(f"[sync-registry] Removed stale entry: {s}")
 
@@ -132,11 +141,15 @@ def sync_registry(fix: bool = False) -> dict:
                 "created": today,
                 "last_active": today,
             }
-            registry["branches"].append(entry)
+            raw_branches = registry["branches"]
+            if isinstance(raw_branches, dict):
+                raw_branches[name.upper()] = entry
+            else:
+                raw_branches.append(entry)
             logger.info(f"[sync-registry] Added unregistered branch: {name}")
 
         # Update total and save
-        registry["metadata"]["total_branches"] = len(registry["branches"])
+        registry["metadata"]["total_branches"] = len(_branches_as_list(registry["branches"]))
         save_result = save_registry(registry_path, registry)
         fixed = save_result
 
