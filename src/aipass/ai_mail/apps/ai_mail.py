@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 # Handle broken pipe gracefully (e.g. output piped to head)
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# SIGPIPE does not exist on Windows
+if hasattr(signal, 'SIGPIPE'):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Dashboard integration (optional, requires dev_central package)
 _UPDATE_SECTION = None  # type: ignore

@@ -70,16 +70,16 @@ def batch_close_post_ops(
     if push_dashboard_fn:
         try:
             push_dashboard_fn(branch_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[close] push_dashboard_fn failed for %s: %s", branch_path, e)
     if update_central_fn:
         try:
             update_central_fn()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[close] update_central_fn failed: %s", e)
     if purge_deleted_fn:
         try:
             mailbox_path = branch_path / ".ai_mail.local"
             purge_deleted_fn(mailbox_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[close] purge_deleted_fn failed for %s: %s", branch_path, e)

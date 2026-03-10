@@ -19,9 +19,15 @@ Usage:
         json.dump(data, open(inbox_file, 'w', encoding='utf-8'))
 """
 
-import fcntl
+import sys
 from pathlib import Path
 from contextlib import contextmanager
+
+# fcntl is POSIX-only (Linux/macOS). On Windows, use msvcrt for locking.
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 
 
@@ -51,14 +57,20 @@ def inbox_lock(inbox_file: Path):
         lock_fd = open(lock_file, 'w', encoding='utf-8')
 
         # Acquire exclusive lock (blocking - waits for other processes)
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+        if sys.platform == "win32":
+            msvcrt.locking(lock_fd.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
         yield
 
     finally:
         if lock_fd is not None:
             try:
                 # Release lock
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                if sys.platform == "win32":
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
                 lock_fd.close()
             except Exception:
                 try:

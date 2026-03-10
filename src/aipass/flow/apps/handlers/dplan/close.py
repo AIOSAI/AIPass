@@ -13,15 +13,9 @@ Validates, marks as closed, and archives DPLAN files.
 Adapted from Flow's close system for single-user DPLANs.
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
-import sys
 import re
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -31,8 +25,10 @@ from .status import extract_status
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
-PROCESSED_PLANS_DIR = Path.home() / "aipass_core" / "backup_system" / "processed_plans"
+# close.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
+PROCESSED_PLANS_DIR = FLOW_ROOT / "processed_plans"
 
 
 # =============================================================================

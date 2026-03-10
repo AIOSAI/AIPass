@@ -15,7 +15,9 @@ so we use the dbus module directly with unique app names per
 notification source to ensure they stack in the notification center.
 """
 
+import shutil
 import subprocess
+import sys
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -47,8 +49,10 @@ def _send_via_dbus(title: str, body: str, source: str,
     """Send notification via D-Bus using system python."""
     try:
         # Use system python which has dbus module (venv python may not)
+        # Find python3 cross-platform (not hardcoded /usr/bin/python3)
+        system_python = shutil.which("python3") or shutil.which("python") or sys.executable
         result = subprocess.run(
-            ["/usr/bin/python3", "-c", _DBUS_SCRIPT,
+            [system_python, "-c", _DBUS_SCRIPT,
              source, icon, title, body],
             capture_output=True, text=True, timeout=5
         )

@@ -445,25 +445,32 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command handled, False otherwise
     """
-    if command == "status":
+    if command != "dashboard":
+        return False
+
+    subcmd = args[0] if args else ""
+
+    if subcmd == "status":
         print_status()
         return True
-    elif command == "template":
+    elif subcmd == "template":
         print_template()
         return True
-    elif command == "refresh":
-        _handle_refresh(args)
+    elif subcmd == "refresh":
+        _handle_refresh(args[1:])
         return True
-    elif command == "push-template":
-        _handle_push_template(args)
+    elif subcmd == "push-template":
+        _handle_push_template(args[1:])
         return True
-    elif command == "diff-template":
-        _handle_diff_template(args)
+    elif subcmd == "diff-template":
+        _handle_diff_template(args[1:])
         return True
-    elif command == "template-status":
+    elif subcmd == "template-status":
         _handle_template_status()
         return True
-    return False
+    else:
+        print_help()
+        return True
 
 
 def main():

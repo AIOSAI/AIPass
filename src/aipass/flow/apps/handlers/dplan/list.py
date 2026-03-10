@@ -12,15 +12,9 @@ List Handler - Plan Listing
 Collects and returns plan data for display. Supports multiple plan types.
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
-import sys
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -30,7 +24,9 @@ from .status import extract_status, extract_tag, extract_description
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
+# list.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
 
 # Regex matches any plan type: DPLAN-001_topic_2026-02-19.md, BPLAN-001_topic_2026-02-19.md
 PLAN_FILENAME_PATTERN = re.compile(r"([A-Z]+PLAN)-(\d+)_(.+)_(\d{4}-\d{2}-\d{2})\.md")

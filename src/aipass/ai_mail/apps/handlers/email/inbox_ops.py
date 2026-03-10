@@ -17,6 +17,8 @@ import json
 from pathlib import Path
 from typing import Dict
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 
 
 def load_inbox(inbox_file: Path) -> Dict:
@@ -75,7 +77,7 @@ def load_inbox(inbox_file: Path) -> Dict:
                 with open(inbox_file, 'w', encoding='utf-8') as f:
                     json.dump(inbox_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
-                pass  # Silent fail - migration persist is best-effort
+                logger.warning("[inbox] Migration persist failed for %s: %s", inbox_file, e)
 
         return inbox_data
 

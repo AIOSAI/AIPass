@@ -27,7 +27,9 @@ from typing import Dict, Any
 # CONFIGURATION
 # =============================================================================
 
-CLOSED_PLANS_PATH = Path.home() / "aipass_os" / "dev_central" / "CLOSED_PLANS.local.json"
+# closed_plans_registry.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+CLOSED_PLANS_PATH = FLOW_ROOT / "CLOSED_PLANS.local.json"
 
 
 # =============================================================================

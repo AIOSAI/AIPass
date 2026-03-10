@@ -45,6 +45,26 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
     no_memory_save = '--no-memory-save' in working_args
     working_args = [a for a in working_args if a != '--no-memory-save']
 
+    # Extract --from (explicit sender identity override)
+    from_branch = None
+    if '--from' in working_args:
+        idx = working_args.index('--from')
+        if idx + 1 < len(working_args):
+            from_branch = working_args[idx + 1]
+            working_args = working_args[:idx] + working_args[idx + 2:]
+        else:
+            return {
+                "auto_execute": auto_execute,
+                "no_memory_save": no_memory_save,
+                "reply_to": None,
+                "from_branch": None,
+                "recipients": [],
+                "subject": None,
+                "message": None,
+                "mode": "error",
+                "error": "--from requires a branch address (e.g., --from @spawn)",
+            }
+
     # Extract --reply-to
     reply_to = None
     if '--reply-to' in working_args:
@@ -57,6 +77,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
                 "auto_execute": auto_execute,
                 "no_memory_save": no_memory_save,
                 "reply_to": None,
+                "from_branch": from_branch,
                 "recipients": [],
                 "subject": None,
                 "message": None,
@@ -93,6 +114,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
         "auto_execute": auto_execute,
         "no_memory_save": no_memory_save,
         "reply_to": reply_to,
+        "from_branch": from_branch,
         "recipients": recipients,
         "subject": subject,
         "message": message,

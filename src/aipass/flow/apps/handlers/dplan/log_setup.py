@@ -26,7 +26,9 @@ import io
 # CONFIGURATION
 # =============================================================================
 
-DEFAULT_LOG_DIR = Path.home() / "aipass_os" / "logs"
+# log_setup.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_LOG_DIR = FLOW_ROOT / "logs"
 
 
 # =============================================================================
@@ -40,7 +42,7 @@ def prepare_log_file(filename: str = "post_close_runner.log",
 
     Args:
         filename: Log file name (default: post_close_runner.log)
-        log_dir: Override log directory (default: ~/aipass_os/logs/)
+        log_dir: Override log directory (default: flow/logs/)
 
     Returns:
         Dict with keys:

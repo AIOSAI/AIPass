@@ -106,8 +106,8 @@ def _trigger_sent_purge(mailbox_path: Path) -> None:
     try:
         from aipass.ai_mail.apps.handlers.email.purge import purge_sent_folder
         purge_sent_folder(mailbox_path)
-    except Exception:
-        pass  # Silent fail - purge is best-effort
+    except Exception as e:
+        logger.warning("[create] _trigger_sent_purge() failed: %s", e)
 
 
 def load_email_file(email_file: Path) -> Dict | None:
@@ -126,7 +126,8 @@ def load_email_file(email_file: Path) -> Dict | None:
     try:
         with open(email_file, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.warning("[create] load_email_file(%s) failed: %s", email_file, e)
         return None
 
 

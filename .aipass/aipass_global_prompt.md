@@ -85,6 +85,7 @@ from aipass.prax import logger
 - **No deleting files.** Move to `.archive/` or rename with `(disabled)`.
 - **Verify after fixing.** Run a test or command to confirm. Don't say "fixed" until verified.
 - **Cross-platform.** AIPass is a public package — code must work on Linux, macOS, and Windows. Use `pathlib.Path` not string concatenation. Use `Path.home()` not `~` or `/home/`. Secrets live at `~/.secrets/aipass/` (`Path.home() / ".secrets" / "aipass"`).
+- **Public repo — no local paths in code.** Never hardcode `/home/username/...` or any machine-specific path. All file paths must derive from `Path(__file__)`, `Path.home()`, or registry lookups. This repo is public — your local directory structure doesn't exist for anyone else. Tests included.
 - **Fail to errors, never fall back silently.** When a command, handler, or module receives input it can't handle, return an explicit error — not a silent fallback to default output. No dimming, no swallowing, no showing the same screen regardless of input. The user must see that their input was received and rejected. Show what's missing (no help available, no introspection, no subcommands) and where to look (file path). Dead ends must announce themselves.
 
 ## Memories
@@ -93,3 +94,25 @@ Your `.trinity/` files are your persistence. Without them you're just an instanc
 - `passport.json` — who you are (role, purpose, principles)
 - `local.json` — session history, active tasks, learnings
 - `observations.json` — collaboration patterns over time
+- `dev.local.md` — shared scratchpad for issues, todos, working notes (human + AI both contribute)
+
+Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. If compaction hits before you save, it's gone. `dev.local.md` is for friction notes, ideas, and quick tracking — not formal docs. Details in your branch prompt.
+
+## Breadcrumbs
+
+Small knowledge traces that trigger awareness. Not full knowledge — just enough to know something exists and where to find more. A breadcrumb isn't the answer, it's the trigger that leads to the answer.
+
+When adding context to prompts, memories, or docs: plant breadcrumbs, not encyclopedias. Two lines that say "this exists, look here" beat twenty lines explaining how it works. If one source is lost, others reinforce. The system teaches through convention, not search.
+
+**Prompts are signposts, not journals.** Branch prompts (`aipass_local_prompt.md`) are injected every turn — keep them minimal. Never track state, sessions, or current context in prompts. State goes in `.trinity/` and `dev.local.md`. Prompts guide; memories record.
+
+## Claude Code Docs (Local)
+
+Offline mirror of Anthropic's Claude Code docs — no web searches needed. Auto-updates from GitHub.
+- `/docs` — list all topics
+- `/docs <topic>` — read a doc (e.g. `/docs hooks`, `/docs statusline`, `/docs sub-agents`)
+- `/docs whats new` — recent changes
+
+## Docker
+
+Container available: `aipass-fresh-test`. Inside: `/home/coder/workspace/AIPass/`. Shared folder: `/home/coder/share` (rw). Screenshots: `/home/coder/screenshots` (ro).

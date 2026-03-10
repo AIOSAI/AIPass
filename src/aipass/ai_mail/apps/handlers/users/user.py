@@ -21,6 +21,8 @@ PHILOSOPHY: Fail hard if detection fails. Fallbacks hide bugs.
 from pathlib import Path
 from typing import Dict
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 # Import branch detection functions
 from .branch_detection import detect_branch_from_pwd
 
@@ -123,7 +125,8 @@ def get_user_by_email(email: str) -> Dict | None:
                     "timestamp_format": "%Y-%m-%d %H:%M:%S"
                 }
         return None
-    except Exception:
+    except Exception as e:
+        logger.warning("[identity] get_user_by_email(%s) failed: %s", email, e)
         return None
 
 
@@ -156,5 +159,6 @@ def get_all_users() -> Dict[str, Dict]:
                     "timestamp_format": "%Y-%m-%d %H:%M:%S"
                 }
         return users
-    except Exception:
+    except Exception as e:
+        logger.warning("[identity] get_all_users() failed: %s", e)
         return {}

@@ -121,8 +121,8 @@ def send_to_broadcast(
     try:
         if update_central_fn:
             update_central_fn()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[send] update_central_fn failed after broadcast: %s", e)
 
     return success_count > 0, success_count, len(branches), results
 
@@ -178,8 +178,8 @@ def send_to_single(
         try:
             if update_central_fn:
                 update_central_fn()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("[send] update_central_fn failed after send to %s: %s", to_branch, e)
 
         return True, None
     else:

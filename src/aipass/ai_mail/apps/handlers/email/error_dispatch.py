@@ -107,10 +107,10 @@ def on_email_delivered(
     if push_dashboard_fn:
         try:
             push_dashboard_fn(branch_path)
-        except Exception:
-            pass  # Dashboard update is best-effort
+        except Exception as e:
+            logger.warning("[error_dispatch] dashboard update failed for %s: %s", branch_path, e)
     if update_central_fn:
         try:
             update_central_fn()
-        except Exception:
-            pass  # Central update is best-effort
+        except Exception as e:
+            logger.warning("[error_dispatch] central update failed: %s", e)

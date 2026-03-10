@@ -13,16 +13,10 @@ Creates new plan files (DPLAN, BPLAN) with proper naming and content.
 Supports @ branch resolution via target_path parameter.
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
-import sys
 import re
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Dict, Any
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -33,7 +27,9 @@ from .template import render_template
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
+# create.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
 
 
 # =============================================================================

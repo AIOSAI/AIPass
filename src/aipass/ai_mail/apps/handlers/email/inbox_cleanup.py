@@ -20,6 +20,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Tuple, Optional, Any
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 
 # Lazy import for inbox file lock
 _inbox_lock = None
@@ -126,7 +128,8 @@ def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
 
         return len(messages)
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[cleanup] _migrate_deleted_json() failed: %s", e)
         return 0
 
 
@@ -276,14 +279,14 @@ def _update_dashboard(branch_path: Path, new: int, opened: int, total: int) -> N
     """Update dashboard ai_mail section with enriched data via write-through API."""
     try:
         _get_push_dashboard_update()(branch_path)
-    except Exception:
-        pass  # Silent fail - dashboard update is best-effort
+    except Exception as e:
+        logger.warning("[cleanup] dashboard update failed for %s: %s", branch_path, e)
 
     # Update central after any inbox changes
     try:
         _get_update_central()()
-    except Exception:
-        pass  # Silent fail - central update is best-effort
+    except Exception as e:
+        logger.warning("[cleanup] central update failed: %s", e)
 
 
 def _trigger_deleted_purge(branch_path: Path) -> None:
@@ -296,8 +299,8 @@ def _trigger_deleted_purge(branch_path: Path) -> None:
         from aipass.ai_mail.apps.handlers.email.purge import purge_deleted_folder
         mailbox_path = branch_path / ".ai_mail.local"
         purge_deleted_folder(mailbox_path)
-    except Exception:
-        pass  # Silent fail - purge is best-effort
+    except Exception as e:
+        logger.warning("[cleanup] _trigger_deleted_purge() failed: %s", e)
 
 
 # =============================================================================

@@ -14,15 +14,10 @@ plan metadata, status, tags, and AI-generated summaries.
 """
 
 import json
-import sys
 import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -32,10 +27,11 @@ from .status import extract_status, extract_tag, extract_description
 # CONFIGURATION
 # =============================================================================
 
-DEVPULSE_ROOT = Path.home() / "aipass_os" / "dev_central" / "devpulse"
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
-REGISTRY_FILE = DEVPULSE_ROOT / "devpulse_json" / "dplan_registry.json"
-SUMMARIES_FILE = DEVPULSE_ROOT / "devpulse_json" / "dplan_summaries.json"
+# registry.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
+REGISTRY_FILE = FLOW_ROOT / "flow_json" / "dplan_registry.json"
+SUMMARIES_FILE = FLOW_ROOT / "flow_json" / "dplan_summaries.json"
 
 
 # =============================================================================

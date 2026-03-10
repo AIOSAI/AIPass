@@ -1,0 +1,25 @@
+{
+  "closed_plans": [
+    {
+      "plan_id": "DPLAN-001",
+      "type": "DPLAN",
+      "subject": "test dispatch fix",
+      "date_closed": "2026-03-10",
+      "location": "dev_central"
+    },
+    {
+      "plan_id": "FPLAN-0024",
+      "type": "FPLAN",
+      "subject": "Test close with real content",
+      "date_closed": "2026-03-10",
+      "location": "flow"
+    },
+    {
+      "plan_id": "FPLAN-0025",
+      "type": "FPLAN",
+      "subject": "Build STATUS board — per-branch STATUS.local.md with Prax-managed central aggregation",
+      "date_closed": "2026-03-10",
+      "location": "flow"
+    }
+  ]
+}

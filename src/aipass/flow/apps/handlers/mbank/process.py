@@ -272,10 +272,11 @@ def get_closed_plans() -> List[Dict[str, Any]]:
 # =============================================
 
 def is_template_content(content: str) -> bool:
-    """Check if plan content is still unedited template (v3.0)
+    """Check if plan content is still unedited template (v4.0)
 
-    Checks against markers from all template types (default, master, proposal).
-    Template detected if 3+ markers from ANY single template type are found.
+    Uses bracket placeholders only (not section headers) to detect untouched
+    templates. Also checks for user-added content in key sections — if any
+    real work was added, the plan is NOT a template even if placeholders remain.
 
     Args:
         content: Plan file content
@@ -283,28 +284,52 @@ def is_template_content(content: str) -> bool:
     Returns:
         True if plan is essentially an untouched template
     """
-    # Default template markers (updated Dec 2025 rewrite)
+    # User content indicators — if ANY of these are found, plan has real work
+    user_content_signals = [
+        "- [x] Agent deployed",       # Checked execution log item
+        "- [x] Agent completed",       # Checked execution log item
+        "- [x] Seedgo checklist",      # Checked completion item
+        "- [x] All goals achieved",    # Checked completion item
+    ]
+    for signal in user_content_signals:
+        if signal in content:
+            return False
+
+    # Check Notes section for user content (not just the placeholder)
+    import re
+    notes_match = re.search(r'## Notes\s*\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
+    if notes_match:
+        notes_content = notes_match.group(1).strip()
+        # If notes has content beyond the template placeholder, it's real work
+        if notes_content and notes_content != "[Working notes, issues encountered, decisions made]":
+            return False
+
+    # Check Execution Log for user-added entries beyond template
+    exec_match = re.search(r'## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
+    if exec_match:
+        exec_content = exec_match.group(1).strip()
+        lines = [l.strip() for l in exec_content.split('\n') if l.strip()]
+        # Template has ~6 lines (date header + checkbox items). More = user added content.
+        if len(lines) > 8:
+            return False
+
+    # Bracket placeholders only (no section headers — those persist in real plans)
     default_markers = [
         "[What do you want to achieve? Specific end state.]",
         "[How will agents tackle this? What instructions will they need?]",
         "[List any planning docs, specs, or examples to reference]",
         "[Working notes, issues encountered, decisions made]",
         "[What specifically defines complete for this plan?]",
-        "## What Are Flow Plans?",
-        "## Critical: Branch Manager Role",
     ]
 
-    # Master template markers
     master_markers = [
         "[What this phase accomplishes]",
         "[What the agent will build]",
         "[Files/outputs expected]",
         "[What specifically defines the project complete?]",
         "[Patterns discovered that span multiple phases]",
-        "## Master Plan Overview",
     ]
 
-    # Proposal template markers
     proposal_markers = [
         "[Clear description of the idea, feature, improvement, or fix]",
         "[Why is this valuable? What problem does it solve? What does it enable?]",
@@ -312,7 +337,7 @@ def is_template_content(content: str) -> bool:
         "[Any other branches, services, or approvals needed?]",
     ]
 
-    # Check each template type - 3+ markers from any type = template
+    # 3+ bracket placeholders from any type = template
     for markers in [default_markers, master_markers, proposal_markers]:
         found = sum(1 for m in markers if m in content)
         if found >= 3:

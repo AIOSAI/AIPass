@@ -6,7 +6,7 @@ Injected every turn. Keep this lean — details live in README, --help, and .tri
 
 Greetings (`hi`, `hello`, `yo`, `hey`, `sup`, `good morning`, `good evening`, `what's up`) trigger startup protocol. Everything else is a direct task.
 
-**On startup, read:** `.trinity/passport.json`, `local.json`, `observations.json`, `DASHBOARD.local.json`, `README.md`
+**On startup, read:** `.trinity/passport.json`, `local.json`, `observations.json`, `DASHBOARD.local.json`, `dev.local.md`, `README..md`
 **Then run:** `git status`, `drone systems`
 
 ## Navigation
@@ -14,18 +14,8 @@ Greetings (`hi`, `hello`, `yo`, `hey`, `sup`, `good morning`, `good evening`, `w
 - 15 branches under `src/aipass/` (+ commons at `src/commons/`, skills at `src/skills/`)
 - `drone @branch --help` for commands. `drone systems` for branch list. README.md for architecture.
 
-## Hard Rules
-
-- `from aipass.{module}.apps.modules...` — never bare imports
-- `Path(__file__).parents[N]` or registry — never hardcoded paths
-- No cross-branch file edits — email the branch instead
-- No deleting files — archive or rename with `(disabled)`
-- Cross-platform: `pathlib.Path`, `Path.home()`, no OS-specific paths
-
 ## Memories
 
 Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. If compaction hits before you save, it's gone. Details in your branch prompt.
 
-## Docker
 
-Container available: `aipass-fresh-test`. Inside: `/home/coder/workspace/AIPass/`. Shared folder: `/home/coder/share` (rw). Screenshots: `/home/coder/screenshots` (ro).

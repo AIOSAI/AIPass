@@ -141,19 +141,19 @@ def main():
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Check if user wants module-specific help
-    if remaining_args and remaining_args[0] in ['--help', '-h']:
-        print_module_help(command, modules)
+    # Route to modules (modules handle their own --help internally)
+    if route_command(command, remaining_args, modules):
         return 0
 
-    # Route to modules
-    if route_command(command, remaining_args, modules):
+    # Fallback: try module-specific help if command wasn't handled
+    if remaining_args and remaining_args[0] in ['--help', '-h']:
+        print_module_help(command, modules)
         return 0
     else:
         console.print()
         console.print(f"[red]Unknown command: {command}[/red]")
         console.print()
-        console.print("Run [dim]python3 flow.py --help[/dim] for available commands")
+        console.print("Run [dim]drone @flow --help[/dim] for available commands")
         console.print()
         return 1
 
@@ -181,7 +181,7 @@ def print_introspection(modules: List[Any]):
         console.print("  [dim]No modules discovered[/dim]")
 
     console.print()
-    console.print("[dim]Run 'python3 flow.py --help' for usage information[/dim]")
+    console.print("[dim]Run 'drone @flow --help' for usage information[/dim]")
     console.print()
 
 
@@ -198,8 +198,8 @@ def print_help(modules: List[Any]):
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]python3 flow.py <command> [args...][/dim]")
-    console.print("  [dim]python3 flow.py --help[/dim]")
+    console.print("  [dim]drone @flow <command> [args...][/dim]")
+    console.print("  [dim]drone @flow --help[/dim]")
     console.print()
     console.print("─" * 70)
     console.print()
@@ -232,30 +232,45 @@ def print_help(modules: List[Any]):
     console.print("─" * 70)
     console.print()
 
-    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print("[bold cyan]FPLAN EXAMPLES:[/bold cyan]")
     console.print()
-    console.print("  [yellow]Create new PLAN:[/yellow]")
-    console.print("    [dim]python3 flow.py create . \"Implementation task\"[/dim]")
-    console.print("    [dim]python3 flow.py create /path/to/location \"Implementation task\"[/dim]")
+    console.print("  [yellow]Create new FPLAN:[/yellow]")
+    console.print("    [dim]drone @flow create . \"Implementation task\"[/dim]")
+    console.print("    [dim]drone @flow create . \"subject\" master[/dim]")
     console.print()
-    console.print("  [yellow]Close PLAN:[/yellow]")
-    console.print("    [dim]python3 flow.py close 42 --yes[/dim]")
+    console.print("  [yellow]Close FPLAN:[/yellow]")
+    console.print("    [dim]drone @flow close FPLAN-0042[/dim]")
     console.print()
-    console.print("  [yellow]Close all open plans:[/yellow]")
-    console.print("    [dim]python3 flow.py close --all[/dim]")
+    console.print("  [yellow]List FPLANs:[/yellow]")
+    console.print("    [dim]drone @flow list[/dim]")
     console.print()
-    console.print("  [yellow]List plans:[/yellow]")
-    console.print("    [dim]python3 flow.py list[/dim]")
+    console.print("─" * 70)
     console.print()
+
+    console.print("[bold cyan]DPLAN EXAMPLES:[/bold cyan]")
     console.print()
-    console.print("[bold]NOTE:[/bold] @ syntax (e.g., @flow, @seedgo) only works through drone:")
-    console.print("  [dim]drone flow create @flow \"Implementation task\"[/dim]")
+    console.print("  [yellow]Create DPLAN:[/yellow]")
+    console.print("    [dim]drone @flow plan create \"Topic\"[/dim]")
+    console.print()
+    console.print("  [yellow]List DPLANs:[/yellow]")
+    console.print("    [dim]drone @flow plan list[/dim]")
+    console.print("    [dim]drone @flow plan list --tag idea[/dim]")
+    console.print()
+    console.print("  [yellow]Close DPLAN:[/yellow]")
+    console.print("    [dim]drone @flow plan close 42[/dim]")
+    console.print("    [dim]drone @flow plan close --all[/dim]")
+    console.print()
+    console.print("  [yellow]DPLAN status:[/yellow]")
+    console.print("    [dim]drone @flow plan status[/dim]")
+    console.print()
+    console.print("  [yellow]Sync registry:[/yellow]")
+    console.print("    [dim]drone @flow plan sync[/dim]")
     console.print()
     console.print("─" * 70)
     console.print()
 
     console.print("[bold]TIP:[/bold] For module-specific help:")
-    console.print("  [dim]python3 flow.py <command> --help[/dim]")
+    console.print("  [dim]drone @flow <command> --help[/dim]")
     console.print()
 
 
@@ -274,7 +289,7 @@ def print_module_help(command: str, modules: List[Any]):
         console.print()
         console.print(f"[red]Unknown command: {command}[/red]")
         console.print()
-        console.print("Run [dim]python3 flow.py --help[/dim] for available commands")
+        console.print("Run [dim]drone @flow --help[/dim] for available commands")
         console.print()
         return
 

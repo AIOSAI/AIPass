@@ -18,19 +18,15 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
-
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-DEVPULSE_ROOT = Path.home() / "aipass_os" / "dev_central" / "devpulse"
-TEMPLATE_DIR = DEVPULSE_ROOT / "templates"
-TEMPLATE_FILE = TEMPLATE_DIR / "dplan_default.md"
+# template.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+TEMPLATE_DIR = FLOW_ROOT / "templates"
 
 DPLAN_DEFAULT_TEMPLATE = """# DPLAN-{{NUMBER}}: {{TOPIC}}
 

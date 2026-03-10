@@ -82,7 +82,7 @@ ai_mail send @branch "Question: [topic]" "I'm working on X and need guidance on 
 - Building something with email? Ask @ai_mail how delivery works
 - Need routing or @ resolution? Ask @drone
 - Unsure about standards? Ask @seedgo for reference code
-- Need persistent storage or search? Ask @memory_bank
+- Need persistent storage or search? Ask @memory
 - Event-driven behavior? Ask @trigger about their event system
 - Dashboard integration? Ask @devpulse about update_section()
 

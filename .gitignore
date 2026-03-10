@@ -19,7 +19,9 @@ AIPASS_REGISTRY.json
 .ai_mail.local/
 ai_mail.local/
 DASHBOARD.local.json
-flow.local.md
+dev.local.md
+STATUS.local.md
+CLOSED_PLANS.local.json
 .ai_central/
 system_logs/
 
@@ -50,3 +52,4 @@ tools/
 # Test artifacts
 test/
 src/aipass/seedgo/apps/standards/aipass/pack.json
+backup_data/

@@ -129,17 +129,20 @@ def handle_send(args: List[str]) -> bool:
 
     # Direct send
     recipients = parsed["recipients"]
+    from_branch = parsed.get("from_branch")
     if len(recipients) == 1:
         target = resolve_dispatch_target(recipients[0], parsed["auto_execute"], _get_branch_info_fn())
         return _send_direct(recipients[0], parsed["subject"], parsed["message"],
-                            parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"])
+                            parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"],
+                            from_branch=from_branch)
 
     console.print(f"\n[bold]Group send to {len(recipients)} recipients...[/bold]")
     ok = 0
     for r in recipients:
         target = resolve_dispatch_target(r, parsed["auto_execute"], _get_branch_info_fn())
         if _send_direct(r, parsed["subject"], parsed["message"],
-                        parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"]):
+                        parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"],
+                        from_branch=from_branch):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
     return ok > 0

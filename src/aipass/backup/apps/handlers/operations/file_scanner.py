@@ -80,7 +80,11 @@ def scan_files(source_dir: Path, should_ignore: Callable, show_progress: bool = 
                             progress.update(task, description=f"Found {len(files_to_backup)} files...")
     else:
         # Walk directory tree without progress display
-        for dirpath, dirnames, filenames in os.walk(source_dir):
+        def _walk_error(err):
+            """Handle os.walk errors (broken symlinks, permission denied)."""
+            pass  # Skip inaccessible paths silently
+
+        for dirpath, dirnames, filenames in os.walk(source_dir, onerror=_walk_error):
             # Filter directories (modify in-place to prune walk)
             original_dirs = dirnames.copy()
             dirnames[:] = [d for d in dirnames if not should_ignore(Path(dirpath) / d)]
@@ -98,7 +102,7 @@ def scan_files(source_dir: Path, should_ignore: Callable, show_progress: bool = 
                 if should_ignore(file_path):
                     rel_file = str(file_path.relative_to(source_dir))
                     skipped_items["files"].add(rel_file)
-                else:
+                elif file_path.exists():
                     files_to_backup.append(file_path)
 
     return files_to_backup, skipped_items

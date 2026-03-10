@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Callable
 
+from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json_utils.json_handler import load_json, save_json
 
 
@@ -122,7 +123,8 @@ def get_all_branches() -> List[Dict]:
 
         return branches
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[delivery] get_all_branches() failed to read registry: %s", e)
         return []
 
 
@@ -181,7 +183,8 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
         try:
             with open(inbox_file, 'w', encoding='utf-8') as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
-        except Exception:
+        except Exception as e:
+            logger.warning("[delivery] _migrate_inbox_format() failed to persist migration for %s: %s", inbox_file, e)
             return inbox_data
 
     return inbox_data
@@ -208,8 +211,8 @@ def _is_private_branch_email(email: str) -> bool:
         for branch in registry.get("branches", []):
             if branch.get("email", "") == email:
                 return True
-    except (json.JSONDecodeError, IOError):
-        pass
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning("[delivery] _is_private_branch_email(%s) failed: %s", email, e)
     return False
 
 
@@ -357,7 +360,8 @@ def deliver_email_to_branch(
     if on_delivered:
         try:
             on_delivered(branch_path, new_count, opened_count, inbox_data["total_messages"])
-        except Exception:
+        except Exception as e:
+            logger.warning("[delivery] on_delivered callback failed for %s: %s", to_branch, e)
             return True, ""
 
     return True, ""
@@ -431,7 +435,8 @@ def _update_summary_file(summary_file: Path, message: Dict, total: int, unread: 
         with open(summary_file, 'w', encoding='utf-8') as f:
             json.dump(summary_data, f, indent=2, ensure_ascii=False)
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[delivery] _update_summary_file(%s) failed: %s", summary_file, e)
         return
 
 
@@ -484,7 +489,8 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
         from aipass.ai_mail.apps.handlers.notify import send_notification
         send_notification(title, body, source=sender_name)
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
-    except Exception:
+    except Exception as e:
+        logger.warning("[delivery] _send_desktop_notification() failed for %s: %s", recipient, e)
         return
 
 

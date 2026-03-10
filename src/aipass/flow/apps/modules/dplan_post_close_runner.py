@@ -21,10 +21,8 @@ import sys
 from pathlib import Path
 
 # INFRASTRUCTURE IMPORT PATTERN
-AIPASS_ROOT = Path.home() / "aipass_core"
-DEVPULSE_ROOT = Path.home() / "aipass_os" / "dev_central" / "devpulse"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
+# dplan_post_close_runner.py → modules/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[2]
 
 # External: CLI console (Rich display) and Prax logger
 from aipass.cli.apps.modules import console
@@ -32,9 +30,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 MODULE_NAME = "dplan_post_close_runner"
 
-LOCK_FILE = DEVPULSE_ROOT / ".post_close_runner.lock"
+LOCK_FILE = FLOW_ROOT / ".post_close_runner.lock"
 
-from aipass_os.dev_central.devpulse.apps.handlers.mbank.process import process_closed_plans
+from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -105,7 +103,7 @@ def print_introspection():
     console.print("Background post-close processing for DPLANs — runs Memory Bank archival")
     console.print()
     console.print("Connected Handlers:")
-    console.print("  handlers/mbank/  (via aipass_os.dev_central.devpulse)")
+    console.print("  handlers/mbank/  (local)")
     console.print("    - process.py (process_closed_plans — scan and archive closed plans)")
     console.print()
 

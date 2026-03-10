@@ -16,24 +16,19 @@ Provides help text and introspection information.
 import sys
 from pathlib import Path
 
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
-
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
-DEVPULSE_ROOT = Path.home() / "aipass_os" / "dev_central" / "devpulse"
-COUNTER_FILE = DEV_PLANNING_ROOT / "counter.json"
-TEMPLATE_FILE = DEVPULSE_ROOT / "templates" / "dplan_default.md"
+# display.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+TEMPLATE_FILE = FLOW_ROOT / "templates" / "dplan_default.md"
 
 HELP_TEXT = """
 [bold]USAGE:[/bold]
-  drone @devpulse plan <subcommand> [options]
+  drone @flow plan <subcommand> [options]
 
 [bold]SUBCOMMANDS:[/bold]
   create "topic" [options]                 - Create new plan document
@@ -48,18 +43,18 @@ HELP_TEXT = """
   bplan  - Business plans
 
 [bold]EXAMPLES:[/bold]
-  drone @devpulse plan create "new feature design"
-  drone @devpulse plan create "API upgrade" --tag upgrade
-  drone @devpulse plan create "revenue model" --type bplan
-  drone @devpulse plan create "vera improvements" --type dplan @vera
-  drone @devpulse plan list
-  drone @devpulse plan list --type bplan
-  drone @devpulse plan list --tag idea
-  drone @devpulse plan list --status planning
-  drone @devpulse plan status
-  drone @devpulse plan status --type dplan
-  drone @devpulse plan close 3
-  drone @devpulse plan close --all
+  drone @flow plan create "new feature design"
+  drone @flow plan create "API upgrade" --tag upgrade
+  drone @flow plan create "revenue model" --type bplan
+  drone @flow plan create "vera improvements" --type dplan @vera
+  drone @flow plan list
+  drone @flow plan list --type bplan
+  drone @flow plan list --tag idea
+  drone @flow plan list --status planning
+  drone @flow plan status
+  drone @flow plan status --type dplan
+  drone @flow plan close 3
+  drone @flow plan close --all
 
 [bold]@ RESOLUTION:[/bold]
   Append @branch to create plans in another branch's dev_planning/:
@@ -120,8 +115,6 @@ def get_introspection_data() -> dict:
     return {
         "name": "D-PLAN Management Module",
         "description": "Manages numbered planning documents in dev_planning/",
-        "planning_dir": str(DEV_PLANNING_ROOT),
-        "counter_file": str(COUNTER_FILE),
         "template_file": str(TEMPLATE_FILE)
     }
 
@@ -142,11 +135,9 @@ def print_introspection() -> str:
         f"[dim]{data['description']}[/dim]",
         "",
         "[yellow]Configuration:[/yellow]",
-        f"  [dim]Planning dir:[/dim] {data['planning_dir']}",
-        f"  [dim]Counter file:[/dim] {data['counter_file']}",
         f"  [dim]Template:[/dim] {data['template_file']}",
         "",
-        "[dim]Run 'python3 dev_flow.py --help' for usage[/dim]",
+        "[dim]Run 'drone @flow plan --help' for usage[/dim]",
         ""
     ]
 

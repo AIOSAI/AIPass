@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional
 from datetime import datetime
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 # Services imported in __main__ only (handlers should not display)
 
 
@@ -44,7 +46,8 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
                 return msg
         return None
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[reply] get_email_by_id(%s, %s) failed: %s", inbox_file, message_id, e)
         return None
 
 

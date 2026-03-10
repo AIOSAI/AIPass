@@ -15,14 +15,9 @@ independence pattern). Central push is handled directly here.
 """
 
 import json
-import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -32,8 +27,11 @@ from .registry import load_registry
 # CONFIGURATION
 # =============================================================================
 
-DEVPULSE_ROOT = Path.home() / "aipass_os" / "dev_central" / "devpulse"
-CENTRAL_FILE = Path.home() / "aipass_os" / "AI_CENTRAL" / "DEVPULSE.central.json"
+# dashboard.py → dplan/ → handlers/ → apps/ → flow/ → aipass/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+AIPASS_ROOT = Path(__file__).resolve().parents[4]
+DEVPULSE_ROOT = AIPASS_ROOT / "devpulse"
+CENTRAL_FILE = DEVPULSE_ROOT / "DEVPULSE.central.json"
 
 
 # =============================================================================

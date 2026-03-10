@@ -21,6 +21,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 # Lazy-loaded write_section reference
 _write_section = None
 
@@ -181,6 +183,6 @@ def push_dashboard_update(branch_path: Path) -> bool:
         write_section = _get_write_section()
         return write_section(branch_path, "ai_mail", section_data)
 
-    except Exception:
-        # Dashboard write failure - silent, never raise
+    except Exception as e:
+        logger.warning("[dashboard] push_dashboard_update failed for %s: %s", branch_path, e)
         return False

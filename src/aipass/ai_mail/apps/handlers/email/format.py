@@ -48,7 +48,8 @@ def lookup_branch_alias(branch_name: str) -> Optional[str]:
                 alias = branch.get("alias", "")
                 return alias if alias else None
         return None
-    except Exception:
+    except Exception as e:
+        logger.warning("[format] lookup_branch_alias(%s) failed: %s", branch_name, e)
         return None
 
 

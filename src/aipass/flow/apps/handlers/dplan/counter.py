@@ -14,25 +14,20 @@ Supports multiple plan types (DPLAN, BPLAN) with separate sequences.
 Counter file is a cache, not source of truth.
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
-import sys
 import json
 import re
 from pathlib import Path
 from typing import Tuple
 
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
-
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
-# Modules do the logging, handlers return errors
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
+# counter.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
 COUNTER_FILE = DEV_PLANNING_ROOT / "counter.json"
 
 VALID_PLAN_TYPES = {"dplan": "DPLAN", "bplan": "BPLAN"}

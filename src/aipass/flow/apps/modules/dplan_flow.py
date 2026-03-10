@@ -22,21 +22,21 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, success, error
 
-# Handler imports
-from aipass_os.dev_central.devpulse.apps.handlers.plan.create import create_plan
-from aipass_os.dev_central.devpulse.apps.handlers.plan.list import list_plans
-from aipass_os.dev_central.devpulse.apps.handlers.plan.status import get_status_summary, get_status_icon, VALID_TAGS
-from aipass_os.dev_central.devpulse.apps.handlers.plan.display import show_help, print_introspection
-from aipass_os.dev_central.devpulse.apps.handlers.plan.close import (
+# Handler imports (local handlers in handlers/dplan/)
+from aipass.flow.apps.handlers.dplan.create import create_plan
+from aipass.flow.apps.handlers.dplan.list import list_plans
+from aipass.flow.apps.handlers.dplan.status import get_status_summary, get_status_icon, VALID_TAGS
+from aipass.flow.apps.handlers.dplan.display import show_help, print_introspection
+from aipass.flow.apps.handlers.dplan.close import (
     normalize_plan_number, close_plan, get_open_plans
 )
-from aipass_os.dev_central.devpulse.apps.handlers.plan.counter import VALID_PLAN_TYPES
-from aipass_os.dev_central.devpulse.apps.handlers.plan.registry import (
+from aipass.flow.apps.handlers.dplan.counter import VALID_PLAN_TYPES
+from aipass.flow.apps.handlers.dplan.registry import (
     register_plan, update_plan_status, populate_from_filesystem,
     get_summary, save_plan_summary, generate_description_summary
 )
-from aipass_os.dev_central.devpulse.apps.handlers.plan.dashboard import push_all as _push_dashboard_raw
-from aipass_os.dev_central.devpulse.apps.handlers.dashboard.operations import write_section
+from aipass.flow.apps.handlers.dplan.dashboard import push_all as _push_dashboard_raw
+from aipass.prax.apps.handlers.dashboard.operations import write_section
 
 # Local handlers (file I/O extracted from this module)
 from aipass.flow.apps.handlers.dplan.branch_resolve import resolve_branch_target as _resolve_branch
@@ -74,7 +74,7 @@ def print_introspection():
     console.print("Plan management orchestrator — routes plan commands to handlers")
     console.print()
     console.print("Connected Handlers:")
-    console.print("  handlers/plan/  (via aipass_os.dev_central.devpulse)")
+    console.print("  handlers/dplan/")
     console.print("    - create.py (create_plan — create new plans)")
     console.print("    - list.py (list_plans — list plans with filters)")
     console.print("    - status.py (get_status_summary — plan status aggregation)")
@@ -83,15 +83,13 @@ def print_introspection():
     console.print("    - counter.py (VALID_PLAN_TYPES — plan type definitions)")
     console.print("    - registry.py (register_plan, update_plan_status — registry ops)")
     console.print("    - dashboard.py (push_all — dashboard updates)")
-    console.print()
-    console.print("  handlers/dashboard/  (via aipass_os.dev_central.devpulse)")
-    console.print("    - operations.py (write_section — dashboard section writer)")
-    console.print()
-    console.print("  handlers/dplan/")
     console.print("    - branch_resolve.py (resolve_branch_target — @ branch resolution)")
     console.print("    - closed_plans_registry.py (append_closed_dplan — closed plan tracking)")
     console.print("    - log_setup.py (prepare_log_file — log file preparation)")
     console.print("    - background_spawn.py (spawn_post_close — background archival)")
+    console.print()
+    console.print("  External:")
+    console.print("    - aipass.prax (write_section — dashboard section writer)")
     console.print()
 
 

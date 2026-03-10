@@ -26,7 +26,8 @@ Captured ideas, brainstorms, future possibilities. Add freely.
 ## Relationships
 - **Related DPLANs:** None yet
 - **Related FPLANs:** None yet
-- **Owner branches:** Who builds this
+- **Owner branch:** Who builds this
+- **Seedgo standards:** `drone @seedgo audit aipass @branch` | `drone @seedgo standards_query aipass_standards`
 
 ## Status
 - [x] Planning

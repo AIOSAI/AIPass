@@ -112,6 +112,7 @@ GLOBAL_IGNORE_PATTERNS = [
     ".backup",  # Old backup directories
     ".antigravity",  # AI assistant cache/data
     ".gemini",  # AI assistant cache
+    "snap",  # Snap package directories (broken symlinks, system-managed)
 
     # Version control (huge number of files!)
     ".git",  # Git repositories are version controlled elsewhere

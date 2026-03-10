@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 from typing import Dict
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 # =============================================
 # CONSTANTS
 # =============================================
@@ -95,7 +97,8 @@ def detect_branch_from_pwd() -> Dict | None:
 
         return branch_info
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[identity] detect_branch_from_pwd() failed: %s", e)
         return None
 
 
@@ -127,7 +130,8 @@ def _lookup_branch_by_name(branch_name: str) -> Dict | None:
 
         return None
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[identity] _lookup_branch_by_name(%s) failed: %s", branch_name, e)
         return None
 
 
@@ -194,7 +198,8 @@ def get_branch_info_from_registry(branch_path: Path) -> Dict | None:
 
         return None
 
-    except Exception:
+    except Exception as e:
+        logger.warning("[identity] get_branch_info_from_registry(%s) failed: %s", branch_path, e)
         return None
 
 

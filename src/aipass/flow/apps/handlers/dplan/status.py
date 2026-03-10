@@ -12,15 +12,9 @@ Status Handler - D-PLAN Status Operations
 Extracts status from plan files and provides status summary.
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
-import sys
 import re
 from pathlib import Path
 from typing import Dict, Tuple
-
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
-sys.path.insert(0, str(Path.home()))
 
 # NOTE: Handlers do NOT import Prax logger (per 3-tier standard)
 
@@ -28,7 +22,9 @@ sys.path.insert(0, str(Path.home()))
 # CONFIGURATION
 # =============================================================================
 
-DEV_PLANNING_ROOT = Path.home() / "aipass_os" / "dev_central" / "dev_planning"
+# status.py → dplan/ → handlers/ → apps/ → flow/
+FLOW_ROOT = Path(__file__).resolve().parents[3]
+DEV_PLANNING_ROOT = FLOW_ROOT / "dev_planning"
 
 VALID_TAGS = ["idea", "upgrade", "proposal", "bug", "research", "seed", "infrastructure"]
 

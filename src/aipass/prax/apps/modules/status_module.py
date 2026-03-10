@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status_module.py
 # Description: PRAX Status Command
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-15
-# Modified: 2026-03-09
+# Modified: 2026-03-10
 # =============================================
 
 """
@@ -17,22 +17,17 @@ from pathlib import Path
 from typing import List
 
 from aipass.prax.apps.modules.logger import get_system_status, system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error
+from aipass.prax.apps.handlers.status.sync import sync_status
+from aipass.cli.apps.modules import console, header, success, error, warning
 
 
 def print_help():
     """Display module help and connected handlers"""
     console.print()
-    console.print("[bold cyan]PRAX Status Module[/bold cyan]")
-    console.print()
-    console.print("[yellow]Connected Handlers:[/yellow]")
-    console.print()
-
-    console.print("  [cyan]prax/modules/[/cyan]")
-    console.print("    [dim]- logger.py[/dim] (get_system_status, system_logger)")
-    console.print()
-
-    console.print("[dim]Run 'python3 status_module.py --help' for usage[/dim]")
+    console.print("[bold cyan]PRAX Status Commands:[/bold cyan]")
+    console.print("  [white]status[/white]              Show PRAX system status")
+    console.print("  [white]status sync[/white]         Scan all branches, build STATUS.md at repo root")
+    console.print("  [white]status help[/white]         Show this help")
     console.print()
 
 
@@ -50,6 +45,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != 'status':
         return False
 
+    # --- sub-command routing ------------------------------------------------
+    if args and args[0] in ("--help", "help"):
+        print_help()
+        return True
+
+    if args and args[0] == "sync":
+        return _handle_sync()
+
+    # --- default: show PRAX system status -----------------------------------
     status = get_system_status()
 
     console.print("\n📊 PRAX System Status")
@@ -62,6 +66,38 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"File Watcher: {'🟢 Active' if status['file_watcher_active'] else '🔴 Inactive'}")
     console.print(f"Logger Override: {'🟢 Active' if status['logger_override_active'] else '🔴 Inactive'}")
     console.print("=" * 60 + "\n")
+    return True
+
+
+def _handle_sync() -> bool:
+    """Run the status sync handler and display results."""
+    console.print()
+    console.print("[bold cyan]Syncing branch status...[/bold cyan]")
+
+    try:
+        result = sync_status()
+    except Exception as exc:
+        error(f"Status sync failed: {exc}")
+        logger.error("Status sync failed: %s", exc)
+        return True
+
+    if result["status"] == "error":
+        error("Status sync encountered an error — check logs for details.")
+        return True
+
+    synced = result["branches_synced"]
+    missing = result["branches_missing"]
+
+    success(f"STATUS.md written — {len(synced)} branches synced")
+
+    if missing:
+        warning(
+            f"{len(missing)} branches missing STATUS.local.md",
+            details=", ".join(missing),
+        )
+
+    console.print(f"  [dim]Timestamp: {result['timestamp']}[/dim]")
+    console.print()
     return True
 
 

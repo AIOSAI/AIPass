@@ -32,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aipass.prax.apps.modules.logger import system_logger as logger
+
 
 def _build_notification_message(
     error_hash: str,
@@ -166,5 +168,5 @@ def handle_error_detected(
         # Deliver via inbox.json
         deliver_email_to_branch(branch_email, email_data)
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[error_handler] Failed to deliver error notification to %s: %s", branch_email, e)
