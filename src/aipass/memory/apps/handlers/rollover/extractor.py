@@ -142,6 +142,31 @@ def _count_file_lines(file_path: Path) -> int:
 
 
 # =============================================================================
+# PATH HELPERS
+# =============================================================================
+
+def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
+    """
+    Derive branch name and memory type from file path.
+
+    Handles both naming conventions:
+    - .trinity/local.json → branch from parent.parent.name, type from stem
+    - BRANCH.type.json (legacy) → parsed from stem
+
+    Returns:
+        Tuple of (branch_name, memory_type) e.g. ("DEVPULSE", "local")
+    """
+    if file_path.parent.name == '.trinity':
+        branch_name = file_path.parent.parent.name.upper()
+        memory_type = file_path.stem  # "local" or "observations"
+    else:
+        parts = file_path.stem.split('.')
+        branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
+        memory_type = parts[1] if len(parts) > 1 else "unknown"
+    return branch_name, memory_type
+
+
+# =============================================================================
 # STRUCTURE DETECTION
 # =============================================================================
 
@@ -307,10 +332,9 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             'error': f"Failed to write file: {e}"
         }
 
-    # Parse branch and type from filename
-    parts = file_path.stem.split('.')
-    branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
-    memory_type = parts[1] if len(parts) > 1 else "unknown"
+    # Derive branch and type from path
+    # .trinity/local.json → branch = parent.parent.name, type = stem
+    branch_name, memory_type = _derive_branch_and_type(file_path)
 
     return {
         'success': True,
@@ -420,10 +444,8 @@ def extract_items(
             'error': f"Failed to write file: {e}"
         }
 
-    # Parse branch and type from filename
-    parts = file_path.stem.split('.')
-    branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
-    memory_type = parts[1] if len(parts) > 1 else "unknown"
+    # Derive branch and type from path
+    branch_name, memory_type = _derive_branch_and_type(file_path)
 
     return {
         'success': True,

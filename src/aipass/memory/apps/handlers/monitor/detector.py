@@ -34,6 +34,18 @@ logger = get_system_logger()
 # No module imports (handler independence)
 
 
+def _find_repo_root() -> Path:
+    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
+_REPO_ROOT = _find_repo_root()
+
+
 # =============================================================================
 # DATA STRUCTURES
 # =============================================================================
@@ -61,12 +73,14 @@ class RolloverTrigger:
 
 def _read_registry() -> List[Dict[str, Any]]:
     """
-    Read AIPASS_REGISTRY.json
+    Read AIPASS_REGISTRY.json from repo root.
+
+    Registry paths are relative — resolved against repo root.
 
     Returns:
-        List of branch dictionaries
+        List of branch dictionaries with absolute paths
     """
-    registry_path = Path.home() / "AIPASS_REGISTRY.json"
+    registry_path = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
     if not registry_path.exists():
         return []
@@ -74,18 +88,30 @@ def _read_registry() -> List[Dict[str, Any]]:
     try:
         with open(registry_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            return data.get('branches', [])
-    except Exception as e:
-        # No logging in handlers - let caller handle errors
+            branches = data.get('branches', [])
+
+            # Resolve relative paths against repo root
+            for branch in branches:
+                raw_path = branch.get('path', '')
+                resolved = Path(raw_path)
+                if not resolved.is_absolute():
+                    resolved = _REPO_ROOT / raw_path
+                branch['path'] = str(resolved)
+
+            return branches
+    except Exception:
         return []
 
 
 def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
     """
-    Get path to memory file for branch
+    Get path to memory file for branch.
+
+    Memory files live in .trinity/ subdirectory as {memory_type}.json
+    (e.g., .trinity/local.json, .trinity/observations.json).
 
     Args:
-        branch: Branch dict from registry
+        branch: Branch dict from registry (path already resolved to absolute)
         memory_type: 'observations' or 'local'
 
     Returns:
@@ -95,9 +121,8 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
     if not branch_path.exists():
         return None
 
-    branch_name = branch.get('name', '').upper()
-    file_name = f"{branch_name}.{memory_type}.json"
-    file_path = branch_path / file_name
+    # Memory files are in .trinity/ subdirectory
+    file_path = branch_path / '.trinity' / f'{memory_type}.json'
 
     return file_path if file_path.exists() else None
 

@@ -32,15 +32,27 @@ from aipass.prax import logger
 # Handler imports (relative within the memory package)
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import extractor
-from aipass.memory.apps.handlers.vector import embedder
 from aipass.memory.apps.handlers.tracking import line_counter
 
-# ChromaDB storage via subprocess
+# Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = Path(__file__).resolve().parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
+EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
-# Use system python by default; can be overridden via environment variable
-MEMORY_PYTHON = os.environ.get("AIPASS_MEMORY_PYTHON", sys.executable)
+# Memory venv python — auto-detect from memory/.venv/ or use env var override
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
+
+def _get_memory_python() -> str:
+    """Get the Python executable for memory ML operations."""
+    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
+    if env_override:
+        return env_override
+    if _MEMORY_VENV_PYTHON.exists():
+        return str(_MEMORY_VENV_PYTHON)
+    return sys.executable
+
+MEMORY_PYTHON = _get_memory_python()
 
 
 # =============================================================================
@@ -114,6 +126,43 @@ def store_vectors_subprocess(branch: str, memory_type: str, embeddings: list,
         return {'success': False, 'error': 'Storage operation timed out'}
     except json.JSONDecodeError as e:
         return {'success': False, 'error': f'Invalid JSON response: {e}'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+# =============================================================================
+# EMBEDDING VIA SUBPROCESS
+# =============================================================================
+
+def encode_batch_subprocess(texts: list) -> dict:
+    """
+    Encode texts via subprocess using memory venv's sentence-transformers.
+
+    Args:
+        texts: List of text strings to encode
+
+    Returns:
+        Dict with success, embeddings, count, dimension
+    """
+    input_data = json.dumps({'texts': texts})
+
+    try:
+        result = subprocess.run(
+            [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+
+        if result.returncode != 0:
+            return {'success': False, 'error': result.stderr or 'Embedding subprocess failed'}
+
+        return json.loads(result.stdout)
+    except subprocess.TimeoutExpired:
+        return {'success': False, 'error': 'Embedding timed out'}
+    except json.JSONDecodeError as e:
+        return {'success': False, 'error': f'Invalid JSON from embedder: {e}'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -280,8 +329,8 @@ def execute_rollover() -> Dict[str, Any]:
             continue
 
         memories = extract_result.get('entries', [])
-        branch = extract_result.get('branch', '')
-        memory_type = extract_result.get('type', 'unknown')
+        branch = extract_result.get('branch', '') or trigger.branch
+        memory_type = extract_result.get('type', 'unknown') or trigger.memory_type
         old_lines = extract_result.get('old_lines', 0)
         new_lines = extract_result.get('new_lines', 0)
 
@@ -295,8 +344,8 @@ def execute_rollover() -> Dict[str, Any]:
         # Convert memory items to text for vectorization
         texts = extract_text_from_memories(memories)
 
-        # Step 3: Generate embeddings
-        embed_result = embedder.encode_batch(texts)
+        # Step 3: Generate embeddings (via subprocess in memory venv)
+        embed_result = encode_batch_subprocess(texts)
 
         if not embed_result['success']:
             error_msg = embed_result.get('error', 'Unknown error')

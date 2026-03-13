@@ -38,9 +38,20 @@ _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 # =============================================================================
 
 CENTRAL_FILE = _MEMORY_ROOT / "central" / "memory_bank.central.json"
-AIPASS_REGISTRY = Path.home() / "AIPASS_REGISTRY.json"
 CONFIG_PATH = _MEMORY_ROOT / "config" / "memory_bank.config.json"
 TEMPLATE_VERSION_FILE = _MEMORY_ROOT / "templates" / ".template_version.json"
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
+AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 # Near-rollover threshold: branches with fewer than this many lines remaining
 NEAR_ROLLOVER_THRESHOLD = 100
@@ -154,18 +165,22 @@ def _find_branches_near_rollover() -> List[Dict[str, Any]]:
         branches = registry.get("branches", [])
         rollover_config = _get_rollover_config()
 
+        repo_root = _find_repo_root()
         for branch in branches:
             branch_name = branch.get("name", "")
-            branch_path = Path(branch.get("path", ""))
+            raw_path = branch.get("path", "")
+            branch_path = Path(raw_path)
+            if not branch_path.is_absolute():
+                branch_path = repo_root / raw_path
 
             if not branch_path.exists():
                 continue
 
             max_lines = _get_max_lines_for_branch(branch_name, rollover_config)
 
-            # Check both .local.json and .observations.json
+            # Memory files live in .trinity/ subdirectory
             for suffix in ["local", "observations"]:
-                memory_file = branch_path / f"{branch_name}.{suffix}.json"
+                memory_file = branch_path / ".trinity" / f"{suffix}.json"
                 if not memory_file.exists():
                     continue
 
@@ -283,9 +298,13 @@ def _get_all_branch_paths() -> List[Path]:
             return []
 
         registry = json_loads(AIPASS_REGISTRY.read_text(encoding="utf-8"))
+        repo_root = _find_repo_root()
         paths = []
         for branch in registry.get("branches", []):
-            branch_path = Path(branch.get("path", ""))
+            raw_path = branch.get("path", "")
+            branch_path = Path(raw_path)
+            if not branch_path.is_absolute():
+                branch_path = repo_root / raw_path
             if branch_path.exists():
                 paths.append(branch_path)
         return paths

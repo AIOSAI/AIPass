@@ -160,11 +160,12 @@ def check_and_rollover() -> Dict[str, Any]:
         # Extract branch name from path (last component, uppercase)
         branch_name = branch.name.upper()
 
-        # Find memory files in this branch (skip DASHBOARD files - no rollover metadata)
-        for pattern in ['*.local.json', '*.observations.json']:
-            for memory_file in branch.glob(pattern):
-                if memory_file.name.startswith('DASHBOARD'):
-                    continue
+        # Find memory files in .trinity/ subdirectory
+        trinity_dir = branch / '.trinity'
+        if not trinity_dir.exists():
+            continue
+        for pattern in ['local.json', 'observations.json']:
+            for memory_file in trinity_dir.glob(pattern):
 
                 results['files_checked'] += 1
 
@@ -360,16 +361,28 @@ def _check_code_archive() -> Dict[str, Any]:
 # UTILITY FUNCTIONS
 # =============================================================================
 
+def _find_repo_root() -> Path:
+    """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
 def _get_branch_paths() -> list[Path]:
     """
-    Get all branch paths from AIPASS_REGISTRY.json (silent - no logging)
+    Get all branch paths from AIPASS_REGISTRY.json (silent - no logging).
+
+    Registry paths are relative — resolved against repo root.
 
     Returns:
         List of Path objects for each branch
     """
     import json
 
-    registry_path = Path.home() / "AIPASS_REGISTRY.json"
+    repo_root = _find_repo_root()
+    registry_path = repo_root / "AIPASS_REGISTRY.json"
 
     if not registry_path.exists():
         return []
@@ -381,7 +394,10 @@ def _get_branch_paths() -> list[Path]:
 
             paths = []
             for branch in branches:
-                branch_path = Path(branch.get('path', ''))
+                raw_path = branch.get('path', '')
+                branch_path = Path(raw_path)
+                if not branch_path.is_absolute():
+                    branch_path = repo_root / raw_path
                 if branch_path.exists():
                     paths.append(branch_path)
 
@@ -392,7 +408,7 @@ def _get_branch_paths() -> list[Path]:
 
 def _is_memory_file(file_path: Path) -> bool:
     """
-    Check if file is a memory file (*.local.json or *.observations.json)
+    Check if file is a memory file in .trinity/ (local.json or observations.json)
 
     Args:
         file_path: Path to check
@@ -401,7 +417,8 @@ def _is_memory_file(file_path: Path) -> bool:
         True if memory file, False otherwise
     """
     name = file_path.name
-    return (name.endswith('.local.json') or name.endswith('.observations.json'))
+    parent = file_path.parent.name
+    return parent == '.trinity' and name in ('local.json', 'observations.json')
 
 
 # =============================================================================

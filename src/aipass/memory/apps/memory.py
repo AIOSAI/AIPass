@@ -89,8 +89,7 @@ def print_help():
     what_content = (
         "Memory is the [bold]central memory archive[/bold] that:\n\n"
         "  [green]>[/green] Provides semantic search across all branch memories\n"
-        "  [green]>[/green] Archives memories when branches hit rollover limits\n"
-        "  [green]>[/green] Extracts symbolic dimensions from conversations"
+        "  [green]>[/green] Archives memories when branches hit rollover limits"
     )
     console.print(Panel(
         what_content,
@@ -108,19 +107,13 @@ def print_help():
     table.add_column("Command", style="green")
     table.add_column("Description", style="dim")
 
-    # Core commands
+    # Core commands (only implemented ones)
     table.add_row("search <query>", "Semantic search across all branch memories")
-    table.add_row("rollover", "Execute memory rollover for files over 600 lines")
+    table.add_row("rollover", "Execute memory rollover for files exceeding limits")
     table.add_row("status", "Show rollover statistics for all branches")
     table.add_row("check", "Check which files need rollover (dry run)")
     table.add_row("watch", "Start memory watcher (auto-rollover on changes)")
     table.add_row("sync-lines", "Update line count metadata for all branches")
-    table.add_row("push-templates", "Push template updates to all branches")
-    table.add_row("push-templates --dry-run", "Preview template changes without writing")
-    table.add_row("diff-templates", "Show template differences per branch")
-    table.add_row("template-status", "Show template version and push status")
-    table.add_row("symbolic demo", "Run fragmented memory demonstration")
-    table.add_row("symbolic fragments <q>", "Search symbolic fragments")
 
     console.print(table)
 
@@ -133,7 +126,7 @@ def print_help():
     console.print("  [yellow]Via Drone (recommended):[/yellow]")
     console.print("    [dim]drone @memory search \"error handling\"[/dim]")
     console.print("    [dim]drone @memory status[/dim]")
-    console.print("    [dim]drone @memory symbolic demo[/dim]")
+    console.print("    [dim]drone @memory rollover[/dim]")
     console.print()
     console.print("  [yellow]Direct execution:[/yellow]")
     console.print("    [dim]python3 -m aipass.memory.apps.memory search \"query\"[/dim]")
@@ -165,7 +158,7 @@ def print_help():
     console.print("-" * 70)
     console.print()
 
-    console.print("Commands: search, rollover, status, check, watch, sync-lines, push-templates, diff-templates, template-status, symbolic")
+    console.print("Commands: search, rollover, status, check, watch, sync-lines")
     console.print()
 
 
@@ -286,7 +279,7 @@ def start_watch() -> None:
         return
 
     console.print(f"[green]>[/green] Watching {result.get('count', 0)} branch directories")
-    console.print("[dim]Auto-rollover enabled when files exceed 600 lines[/dim]")
+    console.print("[dim]Auto-rollover enabled when files exceed limits[/dim]")
     console.print("[dim]Press Ctrl+C to stop[/dim]")
     console.print()
 

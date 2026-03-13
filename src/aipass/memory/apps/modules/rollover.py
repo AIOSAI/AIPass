@@ -265,7 +265,7 @@ def show_status() -> None:
 
                 status_marker = "[red]![/red]" if ready else "[green]OK[/green]"
 
-                if schema_ver.startswith('2') and v2_reason:
+                if schema_ver.startswith('2'):
                     status_text = f"READY ({v2_reason})" if ready else "OK (v2)"
                     console.print(f"    {status_marker} {memory_type}: {status_text}")
                 else:

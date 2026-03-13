@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: query_executor.py
 # Description: Search Query Execution Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-03-12
 # =============================================
 
 """
 Search Query Execution Handler
 
 Contains the core search execution logic: subprocess-based vector search,
-query encoding via embedder, similarity calculation, and result filtering.
+query encoding via subprocess embedder, similarity calculation, and result filtering.
 Called by the search module which handles display/CLI concerns.
 
 Purpose:
@@ -27,18 +27,79 @@ from typing import Dict, Any
 
 from aipass.prax import logger
 
-# Handler imports
-from aipass.memory.apps.handlers.vector import embedder
-
-# ChromaDB search via subprocess
+# Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = Path(__file__).resolve().parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
+EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
-# Use system python by default; can be overridden via environment variable
-MEMORY_PYTHON = os.environ.get("AIPASS_MEMORY_PYTHON", sys.executable)
+# Memory venv python — auto-detect from memory/.venv/ or use env var override
+_MEMORY_ROOT = Path(__file__).resolve().parents[3]
+_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
+
+
+def _get_memory_python() -> str:
+    """Get the Python executable for memory ML operations."""
+    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
+    if env_override:
+        return env_override
+    if _MEMORY_VENV_PYTHON.exists():
+        return str(_MEMORY_VENV_PYTHON)
+    return sys.executable
+
+
+MEMORY_PYTHON = _get_memory_python()
 
 # Minimum similarity threshold - filter out irrelevant results
 MIN_SIMILARITY_THRESHOLD = 0.40  # 40% minimum relevance
+
+
+# =============================================================================
+# SUBPROCESS EMBEDDING
+# =============================================================================
+
+def encode_query_subprocess(query: str) -> dict:
+    """
+    Encode query text via subprocess using memory venv's sentence-transformers.
+
+    Args:
+        query: Search query text
+
+    Returns:
+        Dict with success, embedding (list of floats), dimension
+    """
+    input_data = json.dumps({'texts': [query]})
+
+    try:
+        result = subprocess.run(
+            [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
+            input=input_data,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+
+        if result.returncode != 0:
+            return {'success': False, 'error': result.stderr or 'Embedding subprocess failed'}
+
+        data = json.loads(result.stdout)
+        if not data.get('success'):
+            return data
+
+        embeddings = data.get('embeddings', [])
+        if not embeddings:
+            return {'success': False, 'error': 'No embedding generated'}
+
+        return {
+            'success': True,
+            'embedding': embeddings[0],
+            'dimension': data.get('dimension', 384)
+        }
+    except subprocess.TimeoutExpired:
+        return {'success': False, 'error': 'Embedding timed out'}
+    except json.JSONDecodeError as e:
+        return {'success': False, 'error': f'Invalid JSON from embedder: {e}'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 
 # =============================================================================
@@ -54,8 +115,6 @@ def search_vectors_subprocess(
 ) -> dict:
     """
     Search vectors via subprocess.
-
-    This ensures ChromaDB compatibility regardless of calling Python version.
 
     Args:
         query_embedding: Query embedding vector (list of floats)
@@ -103,12 +162,12 @@ def search_vectors_subprocess(
 
 def _calculate_similarity(distance: float) -> float:
     """
-    Calculate similarity from ChromaDB L2 distance.
+    Calculate similarity from ChromaDB cosine distance.
 
-    ChromaDB L2 distance: 0=identical, ~2=very different.
+    ChromaDB cosine distance: 0=identical, 2=opposite.
 
     Args:
-        distance: L2 distance from ChromaDB
+        distance: Cosine distance from ChromaDB
 
     Returns:
         Similarity score between 0 and 1
@@ -119,8 +178,6 @@ def _calculate_similarity(distance: float) -> float:
 def _filter_results(results: list, n_results: int) -> list:
     """
     Filter search results by similarity threshold and quality.
-
-    Removes empty documents and results below the minimum similarity threshold.
 
     Args:
         results: Raw search results from subprocess
@@ -136,7 +193,6 @@ def _filter_results(results: list, n_results: int) -> list:
 
         similarity = _calculate_similarity(distance)
 
-        # Skip empty documents and low-relevance results
         if not document or not document.strip():
             continue
         if similarity < MIN_SIMILARITY_THRESHOLD:
@@ -162,7 +218,7 @@ def execute_search(
     Execute semantic search: encode query, search vectors, filter results.
 
     Workflow:
-    1. Encode query to embedding vector via embedder handler
+    1. Encode query to embedding vector via subprocess (memory venv)
     2. Search ChromaDB via subprocess
     3. Filter and score results by similarity
 
@@ -173,18 +229,10 @@ def execute_search(
         n_results: Number of results to return
 
     Returns:
-        Dict with:
-            - success: bool
-            - query: original query text
-            - branch: branch filter (if any)
-            - memory_type: memory type filter (if any)
-            - results: list of filtered result dicts with similarity scores
-            - collections_searched: number of collections searched
-            - total_results: total raw results before filtering
-            - error: error message (on failure)
+        Dict with success, results, collections_searched, total_results
     """
-    # Step 1: Encode query
-    embed_result = embedder.encode_batch([query])
+    # Step 1: Encode query via subprocess
+    embed_result = encode_query_subprocess(query)
 
     if not embed_result['success']:
         error_msg = embed_result.get('error', 'Unknown error')
@@ -195,19 +243,7 @@ def execute_search(
             'query': query,
         }
 
-    embeddings = embed_result.get('embeddings', [])
-    if not embeddings:
-        return {
-            'success': False,
-            'error': 'No embedding generated',
-            'query': query,
-        }
-
-    query_embedding = embeddings[0]
-    # Convert numpy array to list for JSON serialization
-    if hasattr(query_embedding, 'tolist'):
-        query_embedding = query_embedding.tolist()
-
+    query_embedding = embed_result['embedding']
     logger.info(f"[search] Encoded query to {len(query_embedding)}-dim vector")
 
     # Step 2: Search via subprocess
