@@ -1,3 +1,5 @@
+/home/patrick/Projects/AIPass/CLAUDE.md
+
 # AIPass — System Prompt
 
 Injected every turn. Keep this lean — details live in README, --help, and .trinity/ memories.
