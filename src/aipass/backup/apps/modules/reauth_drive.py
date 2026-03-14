@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules.display import error
 from aipass.prax import logger
 
 # Handler imports
@@ -70,12 +71,12 @@ def _execute_reauth() -> bool:
         from google.auth.transport.requests import Request  # noqa: F811
         from googleapiclient.discovery import build
     except ImportError as e:
-        console.print(f"[red]Missing package: {e}[/red]")
+        error(f"Missing package: {e}")
         console.print(f"Install: {sys.executable} -m pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
         return False
 
     if not CLIENT_SECRETS.exists():
-        console.print(f"[red]ERROR: Client secrets not found at: {CLIENT_SECRETS}[/red]")
+        error(f"Client secrets not found at: {CLIENT_SECRETS}")
         logger.warning(f"OAuth client secrets not found at: {CLIENT_SECRETS}")
         return False
 
@@ -119,7 +120,7 @@ def _execute_reauth() -> bool:
         except Exception:
             pass
     else:
-        console.print("[red]Re-authentication FAILED[/red]")
+        error("Re-authentication FAILED")
         logger.error("Drive re-authentication failed")
 
     return success

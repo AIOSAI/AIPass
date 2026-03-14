@@ -31,6 +31,7 @@ from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
+from aipass.cli.apps.modules import warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -137,7 +138,7 @@ def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
     console.print()
 
     if not standards:
-        console.print("[yellow]No content handlers found.[/yellow]")
+        warning("No content handlers found.")
         console.print(f"[dim]Add *_content.py files to handlers/{pack_name}/[/dim]")
         console.print()
         return
@@ -207,7 +208,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if standard_name not in standards:
         console.print(f"[red]Unknown standard:[/red] '{standard_name}'")
         console.print()
-        console.print(f"[yellow]Available standards in {pack_name}:[/yellow]")
+        warning(f"Available standards in {pack_name}:")
         for name in standards:
             console.print(f"  [cyan]{name}[/cyan]")
         console.print()

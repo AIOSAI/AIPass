@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Dict
 
 from aipass.cli.apps.modules import console, header, success, error
+from aipass.cli.apps.modules.display import warning
 from aipass.prax import logger
 
 
@@ -180,7 +181,7 @@ def handle_command(args) -> bool:
         if result.critical_errors:
             error(f"{mode.title()} backup FAILED")
         elif result.errors > 0:
-            console.print(f"[yellow]{mode.title()} completed with {result.errors} errors[/yellow]")
+            warning(f"{mode.title()} completed with {result.errors} errors")
             console.print(f"  [dim]Files: {result.files_copied} copied, {result.files_skipped} skipped[/dim]")
         else:
             if dry_run:
@@ -458,7 +459,7 @@ class BackupEngine:
                 except Exception as e:
                     result.add_error(f"Error processing {file_path}: {e}", is_critical=True)
                     # Use console.print directly for critical errors so they appear above progress bar
-                    console.print(f"[red]CRITICAL: Error processing {file_path}: {e}[/red]")
+                    error(f"CRITICAL: Error processing {file_path}: {e}")
 
                 # Update progress
                 progress.advance(task)

@@ -87,7 +87,7 @@ def _show_audit_introspection() -> None:
     console.print()
 
     if not packs:
-        console.print("[yellow]No checker packs found.[/yellow]")
+        warning("No checker packs found.")
         console.print("[dim]Add *_check.py files to handlers/*_standards/ directories.[/dim]")
         console.print()
         return

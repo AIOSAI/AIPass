@@ -34,6 +34,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
+from aipass.cli.apps.modules import error as display_error, warning
 
 # Handler (implementation) — readme operations
 from aipass.seedgo.apps.handlers.readme.readme_ops import (
@@ -150,7 +151,7 @@ def _handle_update(args: List[str]) -> None:
 
         readme_path = Path(branch_path) / 'README.md'
         if not readme_path.exists():
-            console.print(f"  [yellow]No README.md found at {branch_path}[/yellow]")
+            warning(f"No README.md found at {branch_path}")
             continue
 
         try:
@@ -159,7 +160,7 @@ def _handle_update(args: List[str]) -> None:
             if result.get('updated'):
                 total_updated += 1
         except Exception as e:
-            console.print(f"  [red]Error: {e}[/red]")
+            display_error(f"Error: {e}")
             logger.error(f"README update failed for {branch_name}: {e}")
 
     if len(branches) > 1:
@@ -197,14 +198,14 @@ def _handle_check(args: List[str]) -> None:
 
         readme_path = Path(branch_path) / 'README.md'
         if not readme_path.exists():
-            console.print(f"  [yellow]No README.md found at {branch_path}[/yellow]")
+            warning(f"No README.md found at {branch_path}")
             continue
 
         try:
             result = generator.update_readme_auto_sections(branch_path, dry_run=True)
             _print_result(result, is_check=True)
         except Exception as e:
-            console.print(f"  [red]Error: {e}[/red]")
+            display_error(f"Error: {e}")
             logger.error(f"README check failed for {branch_name}: {e}")
 
 
@@ -212,16 +213,16 @@ def _handle_check(args: List[str]) -> None:
 # DISPLAY HELPERS
 # =============================================================================
 
-def _print_target_error(error: str) -> None:
+def _print_target_error(err_code: str) -> None:
     """Display target resolution errors"""
-    if error == "no_args":
-        console.print("[yellow]Usage: drone @seedgo readme update @branch[/yellow]")
+    if err_code == "no_args":
+        warning("Usage: drone @seedgo readme update @branch")
         console.print("[dim]Use @all to update all branches[/dim]")
-    elif error == "no_branches":
-        console.print("[red]No branches found in registry[/red]")
-    elif error.startswith("not_found:"):
-        target = error.split(":", 1)[1]
-        console.print(f"[red]Branch '{target}' not found in registry[/red]")
+    elif err_code == "no_branches":
+        display_error("No branches found in registry")
+    elif err_code.startswith("not_found:"):
+        target = err_code.split(":", 1)[1]
+        display_error(f"Branch '{target}' not found in registry")
 
 
 def _print_result(result: dict, is_check: bool = False) -> None:

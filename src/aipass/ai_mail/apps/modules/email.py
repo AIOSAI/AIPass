@@ -280,13 +280,13 @@ def handle_view(args: List[str]) -> bool:
     """View email content and mark as opened."""
     log_operation("view_email_initiated", {"args": args})
     if not args:
-        console.print("[red]Usage: drone @ai_mail view <message_id>[/red]")
+        error("Usage: drone @ai_mail view <message_id>")
         return False
     try:
         branch_path = Path(get_current_user()["mailbox_path"]).parent
         success, message, email_data = mark_as_opened(branch_path, args[0])
         if not success:
-            console.print(f"[red]{message}[/red]")
+            error(message)
             return False
         console.print(f"\n{'='*60}")
         console.print(f"From: {email_data.get('from', 'unknown')} ({email_data.get('from_name', '')})")
@@ -302,7 +302,7 @@ def handle_view(args: List[str]) -> bool:
         return True
     except Exception as e:
         logger.error(f"[email] View failed: {e}")
-        console.print(f"[red]Error: {e}[/red]")
+        error(f"Error: {e}")
         return False
 
 
@@ -310,20 +310,26 @@ def handle_close(args: List[str]) -> bool:
     """Close email(s) and archive to deleted."""
     log_operation("close_email_initiated", {"args": args})
     if not args:
-        console.print("[red]Usage: drone @ai_mail close <id> [id2 ...] | close all[/red]")
+        error("Usage: drone @ai_mail close <id> [id2 ...] | close all")
         return False
     try:
         branch_path = Path(get_current_user()["mailbox_path"]).parent
         if args[0].lower() == "all":
             success, message, count = mark_all_read_and_archive(branch_path)
-            console.print(f"{'[green]' if success else '[red]'}{message}{'[/green]' if success else '[/red]'}")
+            if success:
+                console.print(f"[green]{message}[/green]")
+            else:
+                error(message)
             if success:
                 log_operation("email_closed_all", {"count": count})
             return success
 
         results, closed, failed = batch_close(branch_path, args, mark_as_closed_and_archive)
         for msg_id, success, message in results:
-            console.print(f"{'[green]' if success else '[red]'}{message}{'[/green]' if success else '[/red]'}")
+            if success:
+                console.print(f"[green]{message}[/green]")
+            else:
+                error(message)
             if success:
                 log_operation("email_closed", {"message_id": msg_id})
 
@@ -338,7 +344,7 @@ def handle_close(args: List[str]) -> bool:
         return failed == 0
     except Exception as e:
         logger.error(f"[email] Close failed: {e}")
-        console.print(f"[red]Error: {e}[/red]")
+        error(f"Error: {e}")
         return False
 
 
@@ -346,23 +352,26 @@ def handle_reply(args: List[str]) -> bool:
     """Reply to an email."""
     log_operation("reply_email_initiated", {"args": args})
     if len(args) < 2:
-        console.print("[red]Usage: drone @ai_mail reply <message_id> \"your message\"[/red]")
+        error("Usage: drone @ai_mail reply <message_id> \"your message\"")
         return False
     try:
         branch_path = Path(get_current_user()["mailbox_path"]).parent
         inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
         original = get_email_by_id(inbox_file, args[0])
         if not original:
-            console.print(f"[red]Message not found: {args[0]}[/red]")
+            error(f"Message not found: {args[0]}")
             return False
         success, message, reply_id = send_reply(branch_path, original, args[1])
-        console.print(f"{'[green]' if success else '[red]'}{message}{'[/green]' if success else '[/red]'}")
+        if success:
+            console.print(f"[green]{message}[/green]")
+        else:
+            error(message)
         if success:
             log_operation("email_replied", {"message_id": args[0], "reply_id": reply_id})
         return success
     except Exception as e:
         logger.error(f"[email] Reply failed: {e}")
-        console.print(f"[red]Error: {e}[/red]")
+        error(f"Error: {e}")
         return False
 
 
@@ -387,7 +396,7 @@ def handle_sent(args: List[str]) -> bool:
         return True
     except Exception as e:
         logger.error(f"[email] Sent view failed: {e}")
-        console.print(f"[red]Error: {e}[/red]")
+        error(f"Error: {e}")
         return False
 
 
@@ -397,7 +406,7 @@ def handle_contacts(args: List[str]) -> bool:
     try:
         branches = get_all_branches()
         if not branches:
-            console.print("[red]No contacts found[/red]")
+            error("No contacts found")
             return False
         console.print(f"\nTotal: {len(branches)} branches\n")
         console.print(f"{'EMAIL':<20} {'BRANCH NAME':<25} {'PATH':<35}")
@@ -407,7 +416,7 @@ def handle_contacts(args: List[str]) -> bool:
         return True
     except Exception as e:
         logger.error(f"[email] Contacts view failed: {e}")
-        console.print(f"[red]Error: {e}[/red]")
+        error(f"Error: {e}")
         return False
 
 
@@ -463,6 +472,6 @@ if __name__ == "__main__":
     command = sys.argv[1]
     remaining = sys.argv[2:] if len(sys.argv) > 2 else []
     if not handle_command(command, remaining):
-        console.print(f"\n[red]Unknown command: {command}[/red]")
+        error(f"Unknown command: {command}")
         console.print("[dim]Run 'python3 email.py --help' for available commands[/dim]\n")
         sys.exit(1)

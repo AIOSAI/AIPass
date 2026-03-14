@@ -20,10 +20,12 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 try:
-    from aipass.cli.apps.modules import console
+    from aipass.cli.apps.modules import console, error
 except ImportError:
     from rich.console import Console
     console = Console()
+    def error(msg: str) -> None:
+        console.print(f"[red]{msg}[/red]")
 
 from rich.panel import Panel
 
@@ -236,7 +238,7 @@ def _cmd_look(args: List[str]) -> bool:
 def _cmd_decorate(args: List[str]) -> bool:
     """Place a decoration in a room."""
     if len(args) < 3:
-        console.print('[red]Usage: commons decorate <room> "item_name" "description"[/red]')
+        error('Usage: commons decorate <room> "item_name" "description"')
         return True
 
     room_name = args[0].lower()
@@ -245,14 +247,14 @@ def _cmd_decorate(args: List[str]) -> bool:
 
     caller = get_caller_branch()
     if not caller:
-        console.print("[red]Could not detect calling branch. Run from a branch directory.[/red]")
+        error("Could not detect calling branch. Run from a branch directory.")
         return True
 
     branch_name = caller["name"]
     result = place_decoration(room_name, item_name, description, branch_name)
 
     if result.get("error"):
-        console.print(f"[red]{result['error']}[/red]")
+        error(result['error'])
         return True
 
     if result["success"]:

@@ -29,6 +29,7 @@ from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
+from aipass.cli.apps.modules import error, warning
 
 
 # =============================================================================
@@ -110,7 +111,7 @@ def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | N
             # Count failures for architecture
             if standard_name == 'architecture' and has_failures:
                 failed_checks = [c for c in result.get('checks', []) if not c.get('passed', False)]
-                console.print(f"    [yellow]└─ Architecture violations ({len(failed_checks)} missing):[/yellow]")
+                warning(f"  └─ Architecture violations ({len(failed_checks)} missing):")
 
                 # Group by type for clarity (match both "Dir:" and "Directory:" prefixes)
                 missing_dirs = [c for c in failed_checks if 'Dir:' in c.get('name', '') or 'Directory:' in c.get('name', '')]
@@ -398,7 +399,7 @@ def print_bypass_audit(bypass_results: List[Dict]):
 
             if status == 'file_missing':
                 console.print(f"  [red]✗[/red] {file_name} [{standard}]")
-                console.print(f"    [red]FILE MISSING - bypass can be removed[/red]")
+                error("FILE MISSING - bypass can be removed")
                 removable_count += 1
             elif status == 'checked':
                 score = r['current_score']

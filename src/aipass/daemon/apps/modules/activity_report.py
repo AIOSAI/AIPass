@@ -23,7 +23,7 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 # logger imported from aipass.prax
 
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 
 # Import report generation handler (implementation lives in handler layer)
 from aipass.daemon.apps.handlers.monitoring.report_generator import (
@@ -229,7 +229,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 1
 
         if not branch_name:
-            console.print("ERROR: branch-health requires a branch name")
+            error("branch-health requires a branch name")
             console.print()
             console.print("Usage: branch-health <branch_name> [--hours N]")
             console.print("Example: branch-health DRONE")

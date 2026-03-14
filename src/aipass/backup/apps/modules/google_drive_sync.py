@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules.display import error, warning
 from aipass.prax import logger
 
 _BACKUP_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/backup/
@@ -154,7 +155,7 @@ def _run_sync_test() -> bool:
     # Create test files via handler
     setup = create_sync_test_files(_BACKUP_ROOT)
     if not setup["success"]:
-        console.print(f"[red]Failed to create test files: {setup['error']}[/red]")
+        error(f"Failed to create test files: {setup['error']}")
         return False
 
     test_dir = setup["test_dir"]
@@ -163,7 +164,7 @@ def _run_sync_test() -> bool:
     # Run sync
     sync = GoogleDriveSync()
     if not sync.authenticate():
-        console.print("[red]Auth failed[/red]")
+        error("Auth failed")
         cleanup_sync_test_dir(test_dir)
         return False
 
@@ -178,7 +179,7 @@ def _run_sync_test() -> bool:
     folder_id = sync.get_or_create_project_folder("AIPass_Test")
     if not folder_id:
         error_msg = sync.last_error or "Unknown error"
-        console.print(f"[red]FAILED: {error_msg}[/red]")
+        error(f"FAILED: {error_msg}")
         cleanup_sync_test_dir(test_dir)
         return False
     console.print(f"  Drive folder ready: AIPass_Test")
@@ -198,7 +199,7 @@ def _run_sync_test() -> bool:
     )
 
     if result.get("error"):
-        console.print(f"\n[red]FAILED: {result['error']}[/red]")
+        error(f"FAILED: {result['error']}")
         cleanup_sync_test_dir(test_dir)
         return False
 
@@ -206,7 +207,7 @@ def _run_sync_test() -> bool:
     if result["success"]:
         console.print(f"[green]Test passed: {result['uploaded']}/{result['total']} files synced[/green]")
     else:
-        console.print(f"[red]Test failed: {result['uploaded']} OK, {result['failed']} failed[/red]")
+        error(f"Test failed: {result['uploaded']} OK, {result['failed']} failed")
 
     # Run it again to verify no duplicates
     console.print(f"\nRe-running sync (should show 0 to upload)...")
@@ -215,7 +216,7 @@ def _run_sync_test() -> bool:
     if len(files_to_upload2) == 0:
         console.print(f"[green]Dedup check passed: 0 files need re-upload[/green]")
     else:
-        console.print(f"[red]Dedup check failed: {len(files_to_upload2)} files flagged for re-upload[/red]")
+        error(f"Dedup check failed: {len(files_to_upload2)} files flagged for re-upload")
 
     # Cleanup local test dir via handler
     cleanup_sync_test_dir(test_dir)

@@ -25,6 +25,7 @@ from aipass.prax import logger
 # CLI service
 from aipass.cli import console
 from aipass.cli import header
+from aipass.cli.apps.modules import error, warning
 
 # JSON handler for logging
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -139,8 +140,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Unknown argument — fail to error, not fallback
-    console.print(f"\n[red]Unknown argument:[/red] '{args[0]}'")
-    console.print("[yellow]This module has no subcommands.[/yellow]")
+    error(f"Unknown argument: '{args[0]}'")
+    warning("This module has no subcommands.")
     console.print("Diagnostics runs through the audit pipeline:")
     console.print("  [green]drone @seedgo audit aipass[/green]")
     console.print()
