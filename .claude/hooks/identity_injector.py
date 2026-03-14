@@ -30,11 +30,10 @@ def find_branch_root() -> Path | None:
 
     search_path = cwd
     while search_path >= repo_root:
-        has_apps = (search_path / "apps").is_dir()
         has_trinity = (search_path / ".trinity").is_dir()
         has_id = list(search_path.glob("*.id.json"))
 
-        if has_apps and (has_trinity or has_id):
+        if has_trinity or has_id:
             return search_path
 
         if search_path == repo_root:
@@ -70,8 +69,12 @@ def format_identity(data: dict) -> str:
     identity = data.get("identity", {})
     if identity.get("role"):
         lines.append(f"Role: {identity['role']}")
-    if identity.get("traits"):
-        lines.append(f"Traits: {identity['traits']}")
+    traits = identity.get("traits") or data.get("traits")
+    if traits:
+        if isinstance(traits, list):
+            lines.append("Traits: " + " | ".join(traits))
+        else:
+            lines.append(f"Traits: {traits}")
     if identity.get("purpose"):
         lines.append(f"Purpose: {identity['purpose']}")
 

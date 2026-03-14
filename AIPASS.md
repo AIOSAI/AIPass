@@ -1,15 +1,14 @@
-/home/patrick/Projects/AIPass/CLAUDE.md
+# AIPass — Project Prompt
 
-# AIPass — System Prompt
-
-Injected every turn. Keep this lean — details live in README, --help, and .trinity/ memories.
+Project-level instructions loaded by Claude Code. Persists in context for the entire conversation.
+Details live in README, --help, .trinity/ memories, and the Global Prompt (.aipass/aipass_global_prompt.md).
 
 ## Startup
 
-Greetings (`hi`, `hello`, `yo`, `hey`, `sup`, `good morning`, `good evening`, `what's up`) trigger startup protocol. Everything else is a direct task.
+On any greeting, silently read these files from CWD and run the commands — no narration, no announcing steps. Just do it and respond with the status.
 
-**On startup, read:** `.trinity/passport.json`, `local.json`, `observations.json`, `DASHBOARD.local.json`, `dev.local.md`, `README..md`
-**Then run:** `git status`, `drone systems`
+**Read:** `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `STATUS.local.md`, `README.md`
+**Run:** `git status`, `drone systems`
 
 ## Navigation
 

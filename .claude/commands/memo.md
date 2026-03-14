@@ -4,9 +4,10 @@ Purpose: Update branch memory files after completing work this session.
 
 ## Execution
 
-1. Review what was done this session (context, recent changes, key decisions)
-2. Update each file below as needed
-3. Confirm completion — list files updated
+1. Read `.trinity/passport.json` first — re-absorb your identity, role, and principles before writing memories
+2. Review what was done this session (context, recent changes, key decisions)
+3. Update each file below as needed
+4. Confirm completion — list files updated
 
 ## What to Update
 
