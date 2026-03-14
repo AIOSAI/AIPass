@@ -195,7 +195,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Renumbered: {len(result['renumbered'])}")
 
         if result['healing_performed']:
-            console.print(f"\n[yellow]Registry healed - {len(result['added']) + len(result['updated']) + len(result['removed'])} changes[/yellow]")
+            warning(f"Registry healed - {len(result['added']) + len(result['updated']) + len(result['removed'])} changes")
         else:
             console.print(f"\n[dim]No changes needed - registry is healthy[/dim]")
 
@@ -215,7 +215,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         success = start_monitoring()
         if success:
             console.print()
-            console.print("[bold yellow]Monitor is running. Press Ctrl+C to stop.[/bold yellow]")
+            warning("Monitor is running. Press Ctrl+C to stop.")
             console.print()
 
             # Keep script alive

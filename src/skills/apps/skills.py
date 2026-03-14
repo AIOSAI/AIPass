@@ -7,7 +7,7 @@
 # =============================================
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 
 """Skills system entry point.
 
@@ -61,13 +61,13 @@ def handle_command(command, args=None):
 
     if command == "info":
         if not args:
-            console.print("  Error: skill name required. Usage: skills info <name>")
+            error("Error: skill name required. Usage: skills info <name>")
             return False
         return _cmd_info(args[0])
 
     if command == "run":
         if not args:
-            console.print("  Error: skill name required. Usage: skills run <name> [action] [args...]")
+            error("Error: skill name required. Usage: skills run <name> [action] [args...]")
             return False
         name = args[0]
         action = args[1] if len(args) > 1 else None
@@ -76,13 +76,13 @@ def handle_command(command, args=None):
 
     if command == "create":
         if not args:
-            console.print("  Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
+            error("Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
             return False
         return _cmd_create(args)
 
     if command == "validate":
         if not args:
-            console.print("  Error: skill name required. Usage: skills validate <name>")
+            error("Error: skill name required. Usage: skills validate <name>")
             return False
         return _cmd_validate(args[0])
 
@@ -159,7 +159,7 @@ def _cmd_info(name):
 
     loaded = load_skill(name)
     if not loaded["success"]:
-        console.print(f"  Error: {loaded['error']}")
+        error(f"Error: {loaded['error']}")
         return False
 
     metadata = loaded["metadata"]
@@ -209,7 +209,7 @@ def _cmd_run(name, action, extra_args):
                 console.print(f"  {line}")
     else:
         err = result.get("error", "Unknown error")
-        console.print(f"  Error: {err}")
+        error(f"Error: {err}")
 
     return result["success"]
 
@@ -230,7 +230,7 @@ def _cmd_create(args):
     result = create_skill(name, template_type=template_type)
 
     if not result["success"]:
-        console.print(f"  Error: {result['error']}")
+        error(f"Error: {result['error']}")
         return False
 
     return True
@@ -243,7 +243,7 @@ def _cmd_validate(name):
 
     loaded = load_skill(name)
     if not loaded["success"]:
-        console.print(f"  Error: {loaded['error']}")
+        error(f"Error: {loaded['error']}")
         return False
 
     result = validate_skill(loaded["metadata"])

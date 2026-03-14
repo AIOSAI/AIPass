@@ -114,7 +114,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(format_plan_deletion_success(msg["plan_key"]))
 
         elif msg_type == "plan_list":
-            console.print(f"\n[bold yellow]Found {msg['count']} open plan(s) to close:[/bold yellow]")
+            warning(f"Found {msg['count']} open plan(s) to close:")
             for plan in msg.get("plans", []):
                 console.print(f"  * FPLAN-{plan['plan_num']}: {plan['subject']}")
 

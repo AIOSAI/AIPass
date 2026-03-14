@@ -479,7 +479,7 @@ def _handle_close_all() -> bool:
         warning("No open plans to close")
         return True
 
-    console.print(f"\n[bold yellow]Found {len(open_plans)} open plan(s) to close:[/bold yellow]")
+    warning(f"Found {len(open_plans)} open plan(s) to close:")
     for p in open_plans:
         console.print(f"  - DPLAN-{p['number']:03d}: {p['topic']}")
 

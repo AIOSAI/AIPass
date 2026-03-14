@@ -36,7 +36,7 @@ signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Cross-branch imports
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header
+from aipass.cli.apps.modules import console, header, error
 
 
 # =============================================================================
@@ -302,7 +302,7 @@ def main() -> int:
 
     # Ensure database is ready
     if not ensure_database():
-        console.print("[red]Failed to initialize The Commons database[/red]")
+        error("Failed to initialize The Commons database")
         return 1
 
     # Discover available modules
@@ -327,7 +327,7 @@ def main() -> int:
         return 0
 
     if not modules:
-        console.print("[red]No modules available[/red]")
+        error("No modules available")
         return 1
 
     # Extract command and remaining args
@@ -352,11 +352,7 @@ def main() -> int:
     if route_command(command, remaining_args, modules):
         return 0
 
-    console.print()
-    console.print(f"[red]Unknown command: {command}[/red]")
-    console.print()
-    console.print("[dim]Run 'python3 the_commons.py --help' for available commands[/dim]")
-    console.print()
+    error(f"Unknown command: {command}", suggestion="Run 'drone @commons --help' for available commands")
     return 1
 
 

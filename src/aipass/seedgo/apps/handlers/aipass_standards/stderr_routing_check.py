@@ -159,6 +159,42 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
+def _is_markup_label(line: str, color: str, max_short_words: int = 2) -> bool:
+    """Check if colored markup in a console.print() is a label/highlight, not a warning/error.
+
+    Detects section headers, term highlights, and short formatting labels that use
+    colored markup for emphasis — not for signaling warnings or errors.
+
+    Label patterns:
+    - Short highlight/term (<=max_short_words): 'off', 'Muted', 'Missing branch name'
+    - Colon-terminated: 'COMMANDS:', 'Options:', 'Discovered Modules:'
+    - ALL CAPS headers: 'ACTIONABLE ITEMS', 'ESCALATIONS NEEDED'
+
+    max_short_words controls the threshold for short-phrase detection:
+    - Yellow (warnings): 2 — real warnings like 'Template version mismatch' are 3+ words
+    - Red (errors): 5 — red is commonly used for CLI feedback phrases
+    """
+    pattern = re.compile(
+        r'\[(?:bold\s+)?' + re.escape(color) + r'(?:\s+bold)?\](.*?)\[/',
+        re.IGNORECASE
+    )
+    match = pattern.search(line)
+    if match:
+        text = match.group(1).strip()
+        words = text.split()
+        word_count = len(words)
+        # Short highlight/term — too brief to be a real error/warning sentence
+        if word_count <= max_short_words:
+            return True
+        # Label ending with colon (e.g., 'COMMANDS:', 'Discovered Modules:')
+        if text.endswith(':') and word_count <= 3:
+            return True
+        # ALL CAPS section header (e.g., 'ACTIONABLE ITEMS')
+        if text.isupper() and word_count <= 3:
+            return True
+    return False
+
+
 def _has_any_output(content: str) -> bool:
     """Check if file has any console output at all."""
     return 'console.print(' in content or 'err_console.print(' in content
@@ -183,8 +219,10 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
 
     # Patterns: [red], [bold red], [red bold] in console.print()
     red_pattern = re.compile(r'console\.print\(.*\[(?:bold\s+)?red(?:\s+bold)?\]', re.IGNORECASE)
-    # Also catch: console.print(f"❌ ..." or console.print("Error: ...")
-    error_msg_pattern = re.compile(r'console\.print\([f"\']*[^)]*(?:error|failed|fatal|cannot|unable|invalid|❌)', re.IGNORECASE)
+    # Also catch: console.print("Error: ...") or console.print("Failed to ...")
+    # Only match when keyword appears at the START of the string content (not buried in help text)
+    # "error" requires a colon (to distinguish "Error: ..." from "Error Registry ...")
+    error_msg_pattern = re.compile(r'''console\.print\(\s*f?["']\s*(?:error\s*:|(?:failed|fatal|cannot|unable|invalid)\b)''', re.IGNORECASE)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -219,12 +257,11 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
         if is_bypassed(module_path, 'stderr_routing', line=i, bypass_rules=bypass_rules):
             continue
 
-        # Match red markup patterns
+        # Match red markup patterns (skip CLI feedback — short red phrases are UI styling)
         if red_pattern.search(stripped):
-            violations.append(i)
+            if not _is_markup_label(stripped, 'red', max_short_words=5):
+                violations.append(i)
         elif error_msg_pattern.search(stripped):
-            # Only flag if it looks like an error message, not just mentioning the word
-            # Must be the console.print argument, not a variable name
             violations.append(i)
 
     return violations
@@ -239,7 +276,8 @@ def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list 
 
     # Patterns: [yellow] in console.print() that look like warnings
     yellow_pattern = re.compile(r'console\.print\(.*\[(?:bold\s+)?yellow(?:\s+bold)?\]', re.IGNORECASE)
-    warning_msg_pattern = re.compile(r'console\.print\([f"\']*[^)]*(?:warning|⚠)', re.IGNORECASE)
+    # Only match when keyword appears at the START of the string content (not buried in help text)
+    warning_msg_pattern = re.compile(r'''console\.print\(\s*f?["']\s*(?:⚠\s*)?warning\b''', re.IGNORECASE)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
@@ -270,7 +308,8 @@ def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list 
             continue
 
         if yellow_pattern.search(stripped):
-            violations.append(i)
+            if not _is_markup_label(stripped, 'yellow'):
+                violations.append(i)
         elif warning_msg_pattern.search(stripped):
             violations.append(i)
 

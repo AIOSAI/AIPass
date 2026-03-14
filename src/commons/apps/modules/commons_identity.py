@@ -23,10 +23,12 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 try:
-    from aipass.cli.apps.modules import console
+    from aipass.cli.apps.modules import console, error, warning
 except ImportError:
     from rich.console import Console
     console = Console()
+    error = lambda msg, **kw: console.print(f"[red]{msg}[/red]")
+    warning = lambda msg, **kw: console.print(f"[yellow]{msg}[/yellow]")
 
 # Re-export all public functions for backward compatibility
 from commons.apps.handlers.identity.identity_ops import (
@@ -93,8 +95,7 @@ def _handle_whoami(args: List[str]) -> bool:
         branch_info = get_caller_branch()
 
         if not branch_info:
-            console.print("[yellow]Could not detect your branch identity.[/yellow]")
-            console.print("[dim]Run from a branch directory containing a *.id.json file.[/dim]")
+            warning("Could not detect your branch identity. Run from a branch directory.")
             return True
 
         name = branch_info.get("name", "unknown")

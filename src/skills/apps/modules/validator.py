@@ -13,7 +13,7 @@ checking skill requirements (pip packages, CLI bins, config/env vars).
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 from skills.apps.handlers.validator import validate_skill as _handler_validate
 
 
@@ -29,7 +29,7 @@ def handle_command(command: str, args: list) -> bool:
     """
     if command == "validate":
         if not args:
-            console.print("  Error: skill name required. Usage: skills validate <name>")
+            error("Error: skill name required. Usage: skills validate <name>")
             return False
 
         from skills.apps.modules.loader import load_skill
@@ -37,7 +37,7 @@ def handle_command(command: str, args: list) -> bool:
         name = args[0]
         loaded = load_skill(name)
         if not loaded["success"]:
-            console.print(f"  Error: {loaded['error']}")
+            error(f"Error: {loaded['error']}")
             return False
 
         result = validate_skill(loaded["metadata"])

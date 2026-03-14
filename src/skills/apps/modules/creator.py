@@ -15,7 +15,7 @@ Thin orchestration layer - delegates to creator_handler for logic.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 from skills.apps.handlers.creator_handler import create_skill as _handler_create_skill
 
 try:
@@ -36,7 +36,7 @@ def handle_command(command: str, args: list) -> bool:
     """
     if command == "create":
         if not args:
-            console.print("  Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
+            error("Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
             return False
 
         name = args[0]

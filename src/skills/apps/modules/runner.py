@@ -13,7 +13,7 @@ skill handlers and assembling markdown output.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 from skills.apps.modules.loader import load_skill
 from skills.apps.handlers.runner_handler import run_handler, run_markdown
 
@@ -30,7 +30,7 @@ def handle_command(command: str, args: list) -> bool:
     """
     if command == "run":
         if not args:
-            console.print("  Error: skill name required. Usage: skills run <name> [action] [args...]")
+            error("Error: skill name required. Usage: skills run <name> [action] [args...]")
             return False
 
         name = args[0]
@@ -45,7 +45,7 @@ def handle_command(command: str, args: list) -> bool:
                     console.print(f"  {line}")
         else:
             err = result.get("error", "Unknown error")
-            console.print(f"  Error: {err}")
+            error(f"Error: {err}")
 
         return result["success"]
 

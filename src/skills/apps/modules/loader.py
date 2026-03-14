@@ -12,7 +12,7 @@ Thin orchestration layer - delegates to loader_handler for parsing
 SKILL.md files and dynamically importing handler modules.
 """
 
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, warning
 from aipass.prax import logger
 from skills.apps.modules.discovery import discover_all
 from skills.apps.handlers.loader_handler import load_skill as _handler_load_skill
@@ -59,7 +59,7 @@ def load_skill(name):
         logger.warning(f"Failed to load skill: {result['error']}")
 
     if result["success"] and result["handler"] is None and result["metadata"].get("has_handler", False):
-        console.print(f"  Warning: has_handler is true but handler.py not found at {result['path']}")
+        warning(f"Warning: has_handler is true but handler.py not found at {result['path']}")
 
     return result
 

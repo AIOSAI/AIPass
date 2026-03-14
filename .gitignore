@@ -60,3 +60,4 @@ backup_data/
 
 backups
 backup_system
+src/aipass/flow/CLOSED_PLANS.local.json
