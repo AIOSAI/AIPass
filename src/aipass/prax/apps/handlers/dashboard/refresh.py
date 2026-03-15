@@ -78,8 +78,8 @@ def _extract_flow_section(centrals: Dict, branch_name: str) -> Dict:
 
     active_plans = plans_data.get("active_plans", [])
 
-    # Count plans for this branch
-    branch_plans = [p for p in active_plans if p.get("branch") == branch_name]
+    # Count plans for this branch (case-insensitive — centrals use lowercase, refresh uses uppercase)
+    branch_plans = [p for p in active_plans if p.get("branch", "").upper() == branch_name]
 
     # Get recently_closed from top-level (already limited to 5 by push_central)
     recently_closed_raw = plans_data.get("recently_closed", [])
@@ -93,7 +93,7 @@ def _extract_flow_section(centrals: Dict, branch_name: str) -> Dict:
         "managed_by": "flow",
         "active_plans": len(branch_plans),
         "recently_closed": recently_closed,
-        "last_updated": plans_data.get("last_updated", datetime.now().isoformat())
+        "last_updated": plans_data.get("generated_at", plans_data.get("last_updated", datetime.now().isoformat()))
     }
 
 
@@ -109,7 +109,8 @@ def _extract_ai_mail_section(centrals: Dict, branch_name: str) -> Dict:
     return {
         "managed_by": "ai_mail",
         "unread": stats.get("unread", 0),
-        "total": stats.get("total", 0)
+        "total": stats.get("total", 0),
+        "last_updated": mail_data.get("last_updated", datetime.now().isoformat())
     }
 
 

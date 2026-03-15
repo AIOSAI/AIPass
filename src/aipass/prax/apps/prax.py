@@ -166,7 +166,7 @@ Examples:
     parser.add_argument('--version', '-V', action='version', version='PRAX v2.0.0')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
 
-    parsed_args = parser.parse_args()
+    parsed_args, remaining = parser.parse_known_args()
 
     # If no command provided, show introspection display
     if not parsed_args.command:
@@ -180,8 +180,12 @@ Examples:
         error("No command modules discovered")
         return 1
 
+    # Merge positional args with any flags argparse didn't consume
+    # so subcommand handlers like dashboard can receive --all, --branch, etc.
+    all_args = parsed_args.args + remaining
+
     # Route command to appropriate handler
-    if route_command(parsed_args.command, parsed_args.args, handlers):
+    if route_command(parsed_args.command, all_args, handlers):
         return 0
     else:
         error(f"Unknown command: {parsed_args.command}")
