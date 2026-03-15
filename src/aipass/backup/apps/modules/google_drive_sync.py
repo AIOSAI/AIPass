@@ -105,7 +105,7 @@ def _show_file_tracker_stats() -> bool:
                 console.print(f"    ... and {remaining} more files")
         return True
     except Exception as e:
-        console.print(f"Error showing tracker stats: {e}")
+        error(f"Error showing tracker stats: {e}")
         logger.error(f"Error showing tracker stats: {e}")
         return False
 
@@ -123,7 +123,7 @@ def _clear_file_tracker() -> bool:
             console.print("File tracker already empty or clear failed")
         return success
     except Exception as e:
-        console.print(f"Error clearing file tracker: {e}")
+        error(f"Error clearing file tracker: {e}")
         logger.error(f"Error clearing file tracker: {e}")
         return False
 
@@ -140,10 +140,10 @@ def _test_drive_sync() -> bool:
             folder_id = sync.get_or_create_backup_folder()
             console.print(f"Backup folder ready: {folder_id}")
         else:
-            console.print("Failed to create backup folder")
+            error("Failed to create backup folder")
         return result
     except Exception as e:
-        console.print(f"Test failed: {e}")
+        error(f"Test failed: {e}")
         logger.error(f"Test failed: {e}")
         return False
 
@@ -279,7 +279,7 @@ def handle_command(args) -> bool:
             # Default to snapshot backup directory
             backup_path = _BACKUP_ROOT / "backups" / "system_snapshot"
         if not backup_path.exists():
-            console.print(f"Error: Backup directory not found: {backup_path}")
+            error(f"Backup directory not found: {backup_path}")
             return False
 
         project = getattr(args, 'project', 'AIPass') or 'AIPass'
@@ -288,7 +288,7 @@ def handle_command(args) -> bool:
 
         sync = GoogleDriveSync()
         if not sync.authenticate():
-            console.print("[red]FAILED: Could not authenticate with Google Drive[/red]")
+            error("FAILED: Could not authenticate with Google Drive")
             return False
 
         limit = getattr(args, 'limit', 0) or 0
@@ -308,13 +308,13 @@ def handle_command(args) -> bool:
         folder_id = sync.get_or_create_project_folder(project)
         if not folder_id:
             error_msg = sync.last_error or "Unknown error"
-            console.print(f"[red]FAILED: {error_msg}[/red]")
-            console.print("[red]Sync aborted - no files uploaded[/red]")
+            error(f"FAILED: {error_msg}")
+            error("Sync aborted - no files uploaded")
             return False
         console.print(f"  Drive folder ready: {project}")
 
         if sync.tracker_was_reset:
-            console.print(f"[yellow]  Drive folder is new - tracker reset, full re-sync needed[/yellow]")
+            warning("Drive folder is new - tracker reset, full re-sync needed")
 
         # Phase 1: Scan (local only, fast) - runs AFTER folder check so tracker is accurate
         console.print(f"\nScanning {backup_path}...")
@@ -362,8 +362,8 @@ def handle_command(args) -> bool:
 
         # Check for errors
         if result.get("error"):
-            console.print(f"\n[red]FAILED: {result['error']}[/red]")
-            console.print("[red]Sync aborted - no files uploaded[/red]")
+            error(f"FAILED: {result['error']}")
+            error("Sync aborted - no files uploaded")
             return False
 
         # Summary
@@ -379,7 +379,7 @@ def handle_command(args) -> bool:
             console.print(f"  [dim]Versioned:  {format_age(ts.get('versioned'))}[/dim]")
             console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
         else:
-            console.print(f"[red]Sync failed: {result['uploaded']} uploaded, {result['failed']} failed, {result['skipped']} unchanged[/red]")
+            error(f"Sync failed: {result['uploaded']} uploaded, {result['failed']} failed, {result['skipped']} unchanged")
 
         return result["success"]
 
@@ -464,7 +464,7 @@ EXAMPLES:
     # Check if module is enabled
     config = _load_config()
     if not config.get("config", {}).get("enabled", True):
-        console.print("Warning: Google Drive sync is disabled")
+        warning("Google Drive sync is disabled")
         sys.exit(0)
 
     if args.command == 'clear-tracker':
@@ -472,7 +472,7 @@ EXAMPLES:
             console.print("File tracker cleared successfully")
             sys.exit(0)
         else:
-            console.print("Failed to clear file tracker")
+            error("Failed to clear file tracker")
             sys.exit(1)
 
     elif args.command == 'show-stats':
@@ -483,19 +483,19 @@ EXAMPLES:
 
     elif args.command == 'sync':
         if not args.path:
-            console.print("Error: sync command requires a path argument")
+            error("sync command requires a path argument")
             console.print("Usage: python3 google_drive_sync.py sync /path/to/backups")
             sys.exit(1)
 
         backup_path = Path(args.path)
 
         if not backup_path.exists():
-            console.print(f"Error: Backup directory not found: {backup_path}")
+            error(f"Backup directory not found: {backup_path}")
             sys.exit(1)
 
         sync = GoogleDriveSync()
         if not sync.authenticate():
-            console.print("[red]Failed to authenticate with Google Drive[/red]")
+            error("Failed to authenticate with Google Drive")
             sys.exit(1)
 
         # Phase 1: Scan
@@ -531,7 +531,7 @@ EXAMPLES:
             console.print(f"[green]Sync complete: {result['uploaded']} uploaded, {result['skipped']} unchanged[/green]")
             sys.exit(0)
         else:
-            console.print(f"[yellow]Sync finished: {result['uploaded']} uploaded, {result['failed']} failed, {result['skipped']} unchanged[/yellow]")
+            warning(f"Sync finished: {result['uploaded']} uploaded, {result['failed']} failed, {result['skipped']} unchanged")
             sys.exit(1)
 
     elif args.command == 'sync-test':

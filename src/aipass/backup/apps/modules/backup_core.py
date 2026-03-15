@@ -371,16 +371,13 @@ class BackupEngine:
         # Display dry-run warning if in test mode
         if self.dry_run:
             console.print()
-            console.print("╭" + "─" * 68 + "╮", style="yellow")
-            console.print("│" + " " * 18 + "[bold yellow]🔍 DRY-RUN MODE ACTIVE[/bold yellow]" + " " * 18 + "│", style="yellow")
-            console.print("│" + " " * 10 + "[yellow]Files will be scanned but NOT copied or deleted[/yellow]" + " " * 10 + "│", style="yellow")
-            console.print("╰" + "─" * 68 + "╯", style="yellow")
+            warning("DRY-RUN MODE ACTIVE — Files will be scanned but NOT copied or deleted")
             console.print()
 
         header(f"AIPass {self.mode_config['name']} - {self.mode_config['description']}")
         # Ensure backup directory exists
         if not self.ensure_backup_directory(result):
-            console.print(f"\nBACKUP FAILED: Could not create backup directory")
+            error("BACKUP FAILED: Could not create backup directory")
             return result
 
         # Load previous backup info
@@ -449,7 +446,10 @@ class BackupEngine:
                             else:
                                 result.files_skipped += 1  # Only skip if unchanged
                     elif self.mode_config['behavior'] == 'versioned':
-                        if copy_versioned_file(file_path, backup_file, self.backup_path, result):
+                        # Skip unchanged files (mtime pre-check avoids expensive copy_versioned_file overhead)
+                        if backup_file.exists() and backup_file.stat().st_mtime == file_path.stat().st_mtime:
+                            result.files_skipped += 1
+                        elif copy_versioned_file(file_path, backup_file, self.backup_path, result):
                             result.files_copied += 1
                     elif self.file_needs_backup(file_path, backup_file, last_timestamps):
                         if copy_file_with_structure(file_path, backup_file, self.backup_path, result):

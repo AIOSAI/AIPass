@@ -1,0 +1,282 @@
+{
+    "global_ignore_patterns": {
+        "comments": "Global ignore patterns — what NOT to backup across all systems. Each category documents WHY patterns exist.",
+        "patterns": [
+            "__pycache__",
+            "*.pyc",
+            "*.pyo",
+
+            ".venv",
+            "venv",
+
+            "node_modules",
+            "npm-debug.log",
+            "yarn-error.log",
+
+            ".DS_Store",
+            "Thumbs.db",
+            "desktop.ini",
+            "nul",
+
+            ".temp",
+            "tmp",
+            ".tmp",
+            "*.tmp",
+            "*.temp",
+
+            "build",
+            "dist",
+            "install",
+            "lib",
+            "bin",
+
+            "*.swp",
+            "*.swo",
+            "*~",
+
+            "backups",
+            "backup_system/backups",
+            "*/backups",
+            "system_snapshot",
+            "versioned_backup",
+            "deleted_branches",
+
+            "TimeShift*",
+            "timeshift*",
+            ".local/share/Trash",
+            "Trash",
+
+            ".local",
+            ".cache",
+            ".config",
+            ".mozilla",
+            ".gnupg",
+            ".ssh",
+            ".vscode/cli",
+            ".vscode/extensions",
+            ".vscode-server",
+            ".npm-global",
+            ".pki",
+            ".dotnet",
+            ".var",
+            ".backup",
+            ".antigravity",
+            ".gemini",
+            "snap",
+
+            ".trinity",
+            ".ai_mail.local",
+            ".archive",
+            "backup_data",
+            "backup_json",
+            "DASHBOARD.local.json",
+            "CLOSED_PLANS.local.json",
+            "STATUS.local.md",
+
+            ".git",
+
+            ".idea",
+            ".eclipse",
+
+            ".claude/todos",
+            ".claude/shell-snapshots",
+            ".claude/ide",
+            ".claude/statsig",
+            ".claude/.credentials.json",
+            ".claude/debug",
+            ".claude/file-history",
+            ".claude/history.jsonl",
+            ".claude/.update.lock",
+            ".claude/.projects",
+            ".serena/logs",
+            ".code",
+
+            ".npm",
+            ".cargo",
+            ".rustup",
+            ".gem",
+            ".gradle",
+            ".m2",
+
+            ".thunderbird",
+            ".wine",
+            ".steam",
+            ".zoom",
+
+            "Downloads",
+            "Videos",
+            "Pictures",
+            "Dropbox",
+            "system_logs",
+            "external_repos",
+            "mcp_servers/context7",
+            "mcp_servers/playwright-mcp",
+            "mcp_servers/serena",
+            "mcp_servers/servers",
+            "mcp_servers/dropbox",
+
+            "*.zip",
+            "*.tar",
+            "*.gz",
+            "*.bz2",
+            "*.rar",
+            "*.7z",
+            "*.whl",
+
+            "*.img",
+            "*.iso",
+            "*.vmdk",
+            "*.vdi",
+            "*.qcow2",
+
+            "*.png",
+            "*.jpg",
+            "*.jpeg",
+            "*.gif",
+            "*.svg",
+            "*.webp",
+            "*.ico",
+            "*.bmp",
+            "*.tiff",
+            "*.tif",
+
+            "*.log",
+            "logs",
+
+            "*_data.json",
+            "*_log.json",
+            "*_registry.json",
+            "snapshot_backup.json",
+            "snapshot_backup_changelog.json",
+
+            "*.db",
+            "*.bashrc",
+            "*.bash_history",
+            "*.bash_logout",
+            "*.lesshst",
+            "*.npmrc",
+            "*.sudo_as_admin_successful"
+        ],
+        "category_comments": {
+            "python_cache": "Python cache and temp files: __pycache__, *.pyc, *.pyo",
+            "virtual_environments": "Virtual environments: .venv, venv",
+            "nodejs": "Node.js: node_modules, npm-debug.log, yarn-error.log",
+            "os_files": "Operating system files: .DS_Store, Thumbs.db, desktop.ini, nul (Windows reserved filename issue)",
+            "temp_files": "Temporary files: .temp, tmp, .tmp, *.tmp, *.temp",
+            "build_dirs": "Build and distribution directories: build, dist, install, lib, bin",
+            "editor_files": "IDE and editor files: *.swp, *.swo, *~",
+            "backup_dirs": "Backup directories (prevent recursive backups) — CRITICAL! backups matches any directory named 'backups'. Also system_snapshot, versioned_backup folder names, deleted_branches (trash folder)",
+            "system_backups": "System backups and trash: TimeShift*, timeshift*, .local/share/Trash, Trash",
+            "linux_system": "Linux system directories (don't backup user settings/cache): .local, .cache, .config, .mozilla, .gnupg, .ssh, .vscode/cli (large, regenerates), .vscode/extensions (large, regenerates), .vscode-server, .npm-global, .pki, .dotnet, .var (Flatpak etc), .backup, .antigravity (AI assistant cache/data), .gemini (AI assistant cache), snap (broken symlinks, system-managed)",
+            "aipass_internal": "AIPass internal state (runtime, not user data): .trinity (passport, local, observations), .ai_mail.local (mailbox dirs), .archive, backup_data (runtime state), backup_json (metadata tracking), DASHBOARD.local.json, CLOSED_PLANS.local.json, STATUS.local.md",
+            "version_control": "Version control (huge number of files!): .git repos are version controlled elsewhere",
+            "ide_dirs": "IDE and editor directories: .idea (IntelliJ), .eclipse",
+            "claude_session": "Claude Code session files (change every session) — synced from .gitignore: .claude/todos, .claude/shell-snapshots, .claude/ide, .claude/statsig, .claude/.credentials.json, .claude/debug, .claude/file-history, .claude/history.jsonl, .claude/.update.lock, .claude/.projects, .serena/logs, .code",
+            "dev_cache": "Development cache/build directories: .npm, .cargo, .rustup, .gem, .gradle, .m2",
+            "app_data": "Application data we don't need in backups: .thunderbird, .wine, .steam, .zoom",
+            "user_dirs": "User directories that shouldn't be backed up: Downloads, Videos, Pictures, Dropbox, system_logs, external_repos (version controlled elsewhere), mcp_servers/* (external MCP server repos)",
+            "archives": "Archive and compressed files: *.zip, *.tar, *.gz, *.bz2, *.rar, *.7z, *.whl (Python wheel files — long filenames)",
+            "large_binaries": "Large binary/image files (VMs, disk images): *.img (can be 50GB+), *.iso, *.vmdk, *.vdi, *.qcow2",
+            "media_files": "Image/media files (screenshots, icons, etc.): *.png, *.jpg, *.jpeg, *.gif, *.svg, *.webp, *.ico, *.bmp, *.tiff, *.tif",
+            "log_files": "Log files: *.log, logs",
+            "json_files": "Most JSON files (frequent changes, not human-readable diffs): *_data.json, *_log.json, *_registry.json, snapshot_backup.json, snapshot_backup_changelog.json",
+            "misc": "Miscellaneous: *.db, *.bashrc, *.bash_history, *.bash_logout, *.lesshst, *.npmrc, *.sudo_as_admin_successful"
+        }
+    },
+    "ignore_exceptions": {
+        "comments": "Files that should be backed up despite matching ignore patterns. Synced from .gitignore exceptions (! prefix patterns).",
+        "patterns": [
+            ".gitignore",
+            "*.local.md",
+            ".vscode/settings.json",
+            "*/.claude/settings.local.json",
+            "tools/cleanup_configs/*.json",
+            "*_config.json",
+            "drone/commands/global/*.json",
+            ".claude.json",
+            ".mcp.json",
+            ".config/nerd-dictation/*",
+            ".commands.json",
+            "BRANCH_REGISTRY.json",
+
+            "templates/**",
+            "*/templates/**",
+            "templates/*/**",
+            "*/templates/*/**",
+
+            "templates/ai_branch_setup_template/ai_mail.local/**",
+            "templates/ai_branch_setup_template/logs/**",
+            "templates/ai_branch_setup_template/standards.local/**",
+            "templates/ai_branch_setup_template/.claude/**",
+            "templates/ai_branch_setup_template/.archive/**",
+
+            ".gitkeep",
+            ".gitattributes"
+        ],
+        "category_comments": {
+            "root_files": ".gitignore — Root .gitignore file should be backed up",
+            "aipass_session": "*.local.md — AIPass session tracking files (caught by .local pattern but should be backed up)",
+            "vscode": ".vscode/settings.json — VS Code settings",
+            "claude_settings": "*/.claude/settings.local.json — Claude local settings in any directory",
+            "config_json": "*_config.json, tools/cleanup_configs/*.json, drone/commands/global/*.json, .claude.json, .mcp.json, .commands.json — Various config JSON files",
+            "nerd_dictation": ".config/nerd-dictation/* — Nerd dictation config",
+            "branch_registry": "BRANCH_REGISTRY.json — Core ecosystem registry — vital file",
+            "templates_full_exception": "FULL EXCEPTION: Include EVERY file in templates directory — templates/**, */templates/**, templates/*/** , */templates/*/**",
+            "template_subdirs_explicit": "Explicit template subdirectories: ai_branch_setup_template/ai_mail.local, logs, standards.local, .claude, .archive",
+            "markers": ".gitkeep — Include all .gitkeep marker files (especially in templates). .gitattributes — Git attributes files"
+        }
+    },
+    "cli_tracking_patterns": {
+        "comments": "Notable patterns to highlight when skipped. Currently empty — reserved for future use.",
+        "patterns": []
+    },
+    "diff_ignore_patterns": {
+        "comments": "Files that should be backed up but NOT generate diff files.",
+        "patterns": [
+            "*.log",
+            "*.logs",
+            "system_logs/*.log",
+
+            "*.pyc",
+            "*.pyo",
+            "*.pyd",
+            "__pycache__/*",
+
+            "*.db",
+            "*.sqlite",
+            "*.sqlite3",
+
+            "*.exe",
+            "*.dll",
+            "*.so",
+            "*.dylib",
+
+            "*.pkl",
+            "*.pickle",
+
+            "*.tmp",
+            "*.temp",
+            "*.bak",
+            "~*"
+        ],
+        "category_comments": {
+            "log_files": "Log files (append-only, huge diffs): *.log, *.logs, system_logs/*.log",
+            "python_cache": "Python cache/compiled: *.pyc, *.pyo, *.pyd, __pycache__/*",
+            "database_files": "Database files: *.db, *.sqlite, *.sqlite3",
+            "binary_files": "Binary/media files: *.exe, *.dll, *.so, *.dylib",
+            "pickle_cache": "Pickle/cache files: *.pkl, *.pickle",
+            "temp_files": "Temporary files: *.tmp, *.temp, *.bak, ~*"
+        }
+    },
+    "diff_include_patterns": {
+        "comments": "Files that SHOULD have diffs created (exceptions to ignore patterns).",
+        "patterns": [
+            "profile.json",
+            "pyrightconfig.json",
+            "package.json",
+            ".mcp.json",
+            "settings.json",
+            "settings.local.json"
+        ]
+    }
+}

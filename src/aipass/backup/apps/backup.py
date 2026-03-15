@@ -62,7 +62,11 @@ def route_command(args: argparse.Namespace, modules: List[Any]) -> bool:
             if module.handle_command(args):
                 return True
         except Exception as e:
-            logger.error(f"Module error: {e}")
+            # Show the actual error — don't mask it behind "Unknown command"
+            module_name = getattr(module, '__name__', str(module)).split('.')[-1]
+            logger.error(f"Module error in {module_name}: {e}")
+            error(f"{module_name} failed: {e}")
+            return True  # Command was handled (by crashing) — don't show "Unknown command"
 
     return False
 
