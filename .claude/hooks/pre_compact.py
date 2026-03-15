@@ -149,8 +149,8 @@ Context just compacted. Below is your live state. Use it to continue seamlessly.
         # Recovery instructions (lean)
         sections.append("""## Recovery Protocol
 - Continue where the summary left off — don't restart or ask generic questions
-- STATUS.local.md Notepad has your scratch context
-- .trinity/local.json has full session history and key_learnings if you need more
+- .trinity/local.json has full session history and key_learnings — read it if you need more context
+- STATUS.local.md has current work, known issues, and todos
 - Save memories proactively — compaction just proved you need to
 - Match the conversation tone from before compaction""")
 
