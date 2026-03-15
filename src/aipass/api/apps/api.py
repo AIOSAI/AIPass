@@ -153,6 +153,8 @@ def print_help():
 
     table.add_row("get-key", "Retrieve API key for provider")
     table.add_row("validate", "Validate API credentials and connection")
+    table.add_row("validate google", "Validate Google OAuth2 credentials")
+    table.add_row("reauth google", "Re-authenticate Google OAuth2")
     table.add_row("test", "Test OpenRouter connection status")
     table.add_row("models", "List available models from provider")
     table.add_row("track", "Track API usage metrics")
