@@ -55,9 +55,14 @@ drone @seedgo audit aipass        # Run standards audit on all branches
 drone @seedgo standards_query aipass_standards  # List all standards (then query by name)
 drone @prax monitor               # Real-time monitoring (interactive)
 drone @flow create . "Subject"        # Create FPLAN (execution plan)
+drone @flow create . "Subject" master # Create FPLAN master (multi-phase execution)
 drone @flow create . "Subject" dplan  # Create DPLAN (design/planning doc)
 drone @flow list                      # List active plans
 ```
+
+**DPLAN** = Design Plan. Thinking, brainstorming, capturing ideas and decisions. Created early — even before you know if you'll build anything. The template explains more when you open it.
+
+**FPLAN** = Flow Plan. Building and executing. Default is for single focused tasks. Master is for multi-phase projects that spawn sub-FPLANs per phase. DPLANs come first, FPLANs come when you're ready to build.
 
 ## Dispatch — Wake a Branch
 
