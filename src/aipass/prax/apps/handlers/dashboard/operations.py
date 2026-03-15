@@ -14,13 +14,12 @@ All business logic for dashboard file operations.
 """
 
 import json
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-AIPASS_ROOT = Path.home() / "aipass_core"
-sys.path.insert(0, str(AIPASS_ROOT))
+# Resolve prax root from this file's location
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
 
 def get_dashboard_path(branch_path: Path) -> Path:
@@ -112,7 +111,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
         Fresh dashboard dict with warning and all sections
     """
     # Try loading from template file
-    template_file = Path.home() / "aipass_os" / "dev_central" / "devpulse" / "templates" / "DASHBOARD.template.json"
+    template_file = _PRAX_ROOT / "templates" / "DASHBOARD.template.json"
     if template_file.exists():
         try:
             template = json.loads(template_file.read_text())
@@ -137,7 +136,6 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
             "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
             "memory_bank": {"managed_by": "memory_bank", "vectors_stored": 0, "notes": {}, "last_updated": ""},
-            "devpulse": {"managed_by": "devpulse", "summary": {}, "last_updated": ""},
             "commons_activity": {"managed_by": "the_commons", "mentions": 0, "new_posts_since_last_visit": 0, "new_comments_since_last_visit": 0, "last_updated": ""}
         }
     }
@@ -172,7 +170,6 @@ def ensure_dashboard_structure(branch_path: Path) -> Dict:
             "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
             "memory_bank": {"managed_by": "memory_bank", "vectors_stored": 0, "notes": {}, "last_updated": ""},
-            "devpulse": {"managed_by": "devpulse", "summary": {}, "last_updated": ""},
             "commons_activity": {"managed_by": "the_commons", "mentions": 0, "new_posts_since_last_visit": 0, "new_comments_since_last_visit": 0, "last_updated": ""}
         }
     }
@@ -300,7 +297,7 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         - Saves back to disk
 
     Args:
-        branch_path: Path to branch root directory (e.g. Path("/home/aipass/aipass_os/dev_central/devpulse"))
+        branch_path: Path to branch root directory
         section_name: Section key (e.g. "ai_mail", "flow", "commons_activity")
         section_data: Dict of data for this section. Will be written as-is
             with an auto-added "last_updated" timestamp.
@@ -309,8 +306,8 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         True if saved successfully, False on any error
 
     Example:
-        >>> from aipass_os.dev_central.devpulse.apps.modules.dashboard import write_section
-        >>> write_section(Path("/home/aipass/aipass_os/flow"), "flow", {"active_plans": 2})
+        >>> from aipass.prax.apps.modules.dashboard import write_section
+        >>> write_section(branch_path, "flow", {"active_plans": 2})
         True
     """
     try:

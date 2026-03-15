@@ -25,27 +25,37 @@ Independence:
 
 import json
 import copy
-import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
-# Infrastructure setup
-AIPASS_ROOT = Path.home()
-sys.path.insert(0, str(AIPASS_ROOT))
+# =============================================================================
+# PATH RESOLUTION
+# =============================================================================
+
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-DEVPULSE_ROOT = AIPASS_ROOT / "aipass_os" / "dev_central" / "devpulse"
-TEMPLATE_DIR = DEVPULSE_ROOT / "templates"
+TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
 VERSION_FILE = TEMPLATE_DIR / ".dashboard_version.json"
-BRANCH_REGISTRY = AIPASS_ROOT / "BRANCH_REGISTRY.json"
+BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 # Deprecated sections to REMOVE during push
-DEPRECATED_SECTIONS = ["bulletin_board"]
+DEPRECATED_SECTIONS = ["bulletin_board", "devpulse"]
 
 # Deprecated quick_status keys to REMOVE during push
 DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
@@ -69,11 +79,6 @@ REQUIRED_SECTIONS = {
         "managed_by": "memory_bank",
         "vectors_stored": 0,
         "notes": {},
-        "last_updated": ""
-    },
-    "devpulse": {
-        "managed_by": "devpulse",
-        "summary": {},
         "last_updated": ""
     },
     "commons_activity": {
@@ -229,9 +234,12 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     branches = [b for b in registry.get("branches", []) if b.get("status") == "active"]
     branches_updated_list: List[str] = []
 
+    repo_root = _find_repo_root()
+
     for branch in branches:
         branch_name = branch.get("name", "UNKNOWN").upper()
-        branch_path = Path(branch.get("path", ""))
+        raw_path = Path(branch.get("path", ""))
+        branch_path = raw_path if raw_path.is_absolute() else repo_root / raw_path
         result["branches_scanned"] += 1
 
         if not branch_path.exists():

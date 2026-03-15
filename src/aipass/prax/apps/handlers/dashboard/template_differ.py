@@ -23,32 +23,42 @@ Independence:
 """
 
 import json
-import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
-# Infrastructure setup
-AIPASS_ROOT = Path.home()
-sys.path.insert(0, str(AIPASS_ROOT))
+# =============================================================================
+# PATH RESOLUTION
+# =============================================================================
+
+_PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-DEVPULSE_ROOT = AIPASS_ROOT / "aipass_os" / "dev_central" / "devpulse"
-TEMPLATE_DIR = DEVPULSE_ROOT / "templates"
+TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
-BRANCH_REGISTRY = AIPASS_ROOT / "BRANCH_REGISTRY.json"
+BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 # Deprecated sections that should be flagged for removal
-DEPRECATED_SECTIONS = ["bulletin_board"]
+DEPRECATED_SECTIONS = ["bulletin_board", "devpulse"]
 
 # Deprecated quick_status keys that should be flagged
 DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
 # Required sections (from template)
 REQUIRED_SECTIONS = [
-    "ai_mail", "flow", "memory_bank", "devpulse", "commons_activity"
+    "ai_mail", "flow", "memory_bank", "commons_activity"
 ]
 
 
@@ -107,7 +117,6 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
         return result
 
     # Check for missing required sections
-    template_sections = template.get("sections", {})
     for section_name in REQUIRED_SECTIONS:
         if section_name not in sections:
             result["additions"].append(f"{section_name} section")
@@ -202,9 +211,12 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
                 "summary": {}
             }
 
+    repo_root = _find_repo_root()
+
     for branch in branches:
         bname = branch.get("name", "UNKNOWN").upper()
-        bpath = Path(branch.get("path", ""))
+        raw_path = Path(branch.get("path", ""))
+        bpath = raw_path if raw_path.is_absolute() else repo_root / raw_path
 
         if not bpath.exists():
             branch_diff = {

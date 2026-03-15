@@ -9,7 +9,7 @@
 """
 Agent Status Dashboard Write-Through Handler
 
-Pushes the 'agent_status' section to branch dashboards via DevPulse write_section().
+Pushes the 'agent_status' section to branch dashboards via prax write_section().
 Scans dispatch lock files and /proc to detect active and stale agents, then pushes
 to ALL branch dashboards (agent status is system-wide info).
 
@@ -244,7 +244,7 @@ def _write_section_to_all_branches(section_name: str, section_data: Dict,
         script = (
             "import sys, json\n"
             "from pathlib import Path\n"
-            "from aipass.devpulse.apps.modules.dashboard import write_section\n"
+            "from aipass.prax.apps.modules.dashboard import write_section\n"
             "data = json.loads(sys.stdin.read())\n"
             "section_name = data['section_name']\n"
             "section_data = data['section_data']\n"

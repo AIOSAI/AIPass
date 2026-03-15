@@ -79,11 +79,6 @@ DASHBOARD_TEMPLATE = {
             "notes": {},
             "last_updated": ""
         },
-        "devpulse": {
-            "managed_by": "devpulse",
-            "summary": {},
-            "last_updated": ""
-        },
         "commons_activity": {
             "managed_by": "the_commons",
             "mentions": 0,
@@ -115,7 +110,7 @@ def update_section(
     Update a specific section in branch dashboard (legacy wrapper).
 
     For new integrations, prefer write_section() from
-    aipass_os.dev_central.devpulse.apps.handlers.dashboard.operations
+    aipass.prax.apps.handlers.dashboard.operations
     which is self-contained and dependency-free.
 
     Args:
@@ -170,19 +165,19 @@ def print_help():
     console.print("  template-status  - Show template version and push info")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  drone @devpulse dashboard status")
-    console.print("  drone @devpulse dashboard template")
-    console.print("  drone @devpulse dashboard refresh          # refresh current branch")
-    console.print("  drone @devpulse dashboard refresh @flow    # refresh specific branch")
-    console.print("  drone @devpulse dashboard refresh --all    # refresh all branches")
-    console.print("  drone @devpulse dashboard push-template             # push to all branches")
-    console.print("  drone @devpulse dashboard push-template --dry-run   # preview changes")
-    console.print("  drone @devpulse dashboard diff-template             # diff all branches")
-    console.print("  drone @devpulse dashboard diff-template --branch FLOW  # diff single branch")
-    console.print("  drone @devpulse dashboard template-status           # version info")
+    console.print("  drone @prax dashboard status")
+    console.print("  drone @prax dashboard template")
+    console.print("  drone @prax dashboard refresh          # refresh current branch")
+    console.print("  drone @prax dashboard refresh @flow    # refresh specific branch")
+    console.print("  drone @prax dashboard refresh --all    # refresh all branches")
+    console.print("  drone @prax dashboard push-template             # push to all branches")
+    console.print("  drone @prax dashboard push-template --dry-run   # preview changes")
+    console.print("  drone @prax dashboard diff-template             # diff all branches")
+    console.print("  drone @prax dashboard diff-template --branch FLOW  # diff single branch")
+    console.print("  drone @prax dashboard template-status           # version info")
     console.print()
     console.print("[yellow]PROGRAMMATIC (write-through API):[/yellow]")
-    console.print("  from aipass_os.dev_central.devpulse.apps.modules.dashboard import write_section")
+    console.print("  from aipass.prax.apps.modules.dashboard import write_section")
     console.print("  write_section(branch_path, 'ai_mail', {'new': 3, 'total': 5})")
     console.print()
 

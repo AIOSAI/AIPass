@@ -25,11 +25,20 @@ from .operations import create_fresh_dashboard, save_dashboard
 from ..central.reader import read_all_centrals
 
 # Sections managed by the refresh path — everything else is write-through only
-REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory_bank", "devpulse", "commons_activity"}
+REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory_bank", "commons_activity"}
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
 
 # Infrastructure
-AIPASS_ROOT = Path.home()
-BRANCH_REGISTRY = AIPASS_ROOT / "BRANCH_REGISTRY.json"
+BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def _load_branch_paths() -> List[Path]:
@@ -45,6 +54,7 @@ def _load_branch_paths() -> List[Path]:
     if not BRANCH_REGISTRY.exists():
         raise FileNotFoundError(f"Branch registry not found: {BRANCH_REGISTRY}")
 
+    repo_root = _find_repo_root()
     data = json.loads(BRANCH_REGISTRY.read_text())
     branches = data.get("branches", [])
 
@@ -52,7 +62,8 @@ def _load_branch_paths() -> List[Path]:
     for branch in branches:
         path_str = branch.get("path")
         if path_str:
-            path = Path(path_str)
+            raw = Path(path_str)
+            path = raw if raw.is_absolute() else repo_root / raw
             if path.exists():
                 paths.append(path)
 
@@ -136,29 +147,6 @@ def _extract_memory_bank_section(centrals: Dict, branch_path: Path) -> Dict:
         "vectors_stored": local_vectors,
         "notes": {},
         "last_updated": mb_last_updated
-    }
-
-
-def _extract_devpulse_section(centrals: Dict, branch_name: str) -> Dict:
-    """Extract devpulse section from DEVPULSE.central.json, including dplan_counts."""
-    dp_data = centrals.get("devpulse")
-    if not dp_data:
-        return {"managed_by": "devpulse", "summary": {}, "dplan_counts": {}, "recent_activity": ""}
-
-    summaries = dp_data.get("branch_summaries", {})
-    branch_summary = summaries.get(branch_name, {})
-
-    # Include dplan_counts from central dplan_summary (Phase 4 enrichment)
-    dplan_summary = dp_data.get("dplan_summary", {})
-    dplan_counts = dplan_summary.get("dplan_counts", {})
-    recent_activity = dplan_summary.get("recent_activity", "")
-
-    return {
-        "managed_by": "devpulse",
-        "summary": branch_summary,
-        "dplan_counts": dplan_counts,
-        "recent_activity": recent_activity,
-        "last_updated": dp_data.get("last_updated", datetime.now().isoformat())
     }
 
 
@@ -277,7 +265,6 @@ def refresh_all_dashboards() -> Dict:
             dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
             dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
             dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
-            dashboard["sections"]["devpulse"] = _extract_devpulse_section(centrals, branch_name)
 
             # Commons: preserve existing write-through data if no central file
             commons_section = _extract_commons_section(centrals, branch_name)
@@ -351,7 +338,6 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
         dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
         dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
         dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
-        dashboard["sections"]["devpulse"] = _extract_devpulse_section(centrals, branch_name)
 
         # Commons: preserve existing write-through data if no central file
         commons_section = _extract_commons_section(centrals, branch_name)

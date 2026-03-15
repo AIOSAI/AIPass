@@ -17,8 +17,17 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
-AIPASS_ROOT = Path.home()
-BRANCH_REGISTRY = AIPASS_ROOT / "BRANCH_REGISTRY.json"
+
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
+    current = Path(__file__).resolve().parent
+    for parent in [current] + list(current.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
+BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def calculate_quick_status(sections: Dict) -> Dict:
@@ -81,13 +90,18 @@ def get_branch_paths() -> List[Path]:
     if not BRANCH_REGISTRY.exists():
         raise FileNotFoundError(f"Branch registry not found: {BRANCH_REGISTRY}")
 
+    repo_root = _find_repo_root()
     data = json.loads(BRANCH_REGISTRY.read_text())
-    return [Path(b.get("path", "")) for b in data.get("branches", [])]
+    paths = []
+    for b in data.get("branches", []):
+        raw = Path(b.get("path", ""))
+        paths.append(raw if raw.is_absolute() else repo_root / raw)
+    return paths
 
 
 def resolve_branch_path(branch_ref: str) -> Path:
     """
-    Resolve @branch reference to filesystem path via BRANCH_REGISTRY.json.
+    Resolve @branch reference to filesystem path via AIPASS_REGISTRY.json.
 
     Handler-layer function: performs file I/O to read registry and
     resolve branch name to its directory path.
@@ -104,12 +118,14 @@ def resolve_branch_path(branch_ref: str) -> Path:
     name = branch_ref.lstrip("@").upper()
 
     if not BRANCH_REGISTRY.exists():
-        raise FileNotFoundError("BRANCH_REGISTRY.json not found")
+        raise FileNotFoundError("AIPASS_REGISTRY.json not found")
 
+    repo_root = _find_repo_root()
     data = json.loads(BRANCH_REGISTRY.read_text())
     for branch in data.get("branches", []):
         if branch.get("name", "").upper() == name:
-            path = Path(branch["path"])
+            raw = Path(branch["path"])
+            path = raw if raw.is_absolute() else repo_root / raw
             if path.exists():
                 return path
             raise FileNotFoundError(f"Branch path does not exist: {path}")
