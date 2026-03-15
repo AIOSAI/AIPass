@@ -332,6 +332,23 @@ def show_version():
     CONSOLE.print("CLI v0.2.0")
 
 
+def _handle_aipass(args):
+    """Route aipass subcommands."""
+    if not args:
+        error("Missing subcommand", suggestion="Try: drone @cli aipass init")
+        sys.exit(1)
+
+    subcmd = args[0]
+    sub_args = args[1:]
+
+    from aipass.cli.apps.modules.init_project import handle_command
+    if handle_command(subcmd, sub_args):
+        return
+
+    error(f"Unknown aipass subcommand: {subcmd}", suggestion="Try: drone @cli aipass init")
+    sys.exit(1)
+
+
 def main():
     """CLI branch entry point - shows available services"""
 
@@ -350,8 +367,17 @@ def main():
         print_help()
         return
 
-    # Default behavior for other commands
-    print_help()
+    # Route subcommands
+    command = sys.argv[1]
+    cmd_args = sys.argv[2:] if len(sys.argv) > 2 else []
+
+    if command == "aipass":
+        _handle_aipass(cmd_args)
+        return
+
+    # Unknown command
+    error(f"Unknown command: {command}", suggestion="Run 'drone @cli --help' for usage")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
