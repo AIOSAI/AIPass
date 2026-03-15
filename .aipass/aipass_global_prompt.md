@@ -80,12 +80,39 @@ drone @ai_mail dispatch wake --fresh @target   # Fresh session
 - `--dispatch` = recipient must ACT (tasks, bugs, investigations)
 - No flag = just informing (FYI, status updates)
 
+## How to Work
+
+**Always plan before executing.** Create an FPLAN before building anything non-trivial. The plan is your continuity — if you get sidetracked, the plan remembers where you were.
+
+**Use agents for all building work.** You are the orchestrator, not the builder. Deploy sub-agents to write code, read files, and run tests. You manage the plan, check the output, and keep moving. Your context is precious — agents are disposable.
+
+**Check seedgo standards.** Before building: `drone @seedgo standards_query aipass_standards` to know what applies. During: check your work against standards as you go. After: `drone @seedgo audit aipass @{branch}` as a final gate before committing.
+
 ## Logging
 
 Prax is the ONLY logging system. Every branch uses:
 ```python
 from aipass.prax import logger
 ```
+
+## Git Workflow
+
+Only commit files inside your own branch directory (`src/aipass/{your_branch}/`). When your task is complete and you're satisfied with the work, commit, push, and open a PR. Not per-file — per task.
+
+```
+git checkout -b feat/{branch}-short-description   # create git branch
+git add src/aipass/{branch}/...                    # stage your files only
+git commit -m "feat(branch): description"         # commit (see signature below)
+git push -u origin feat/{branch}-short-description
+gh pr create --title "feat(branch): ..." --body "..."
+```
+
+**Sign your work.** End every commit message with:
+```
+Co-Authored-By: @{branch} <{branch}@aipass>
+```
+
+**Never merge.** Only devpulse or Patrick merge PRs. If your PR gets feedback, fix the issues, commit, and push to the same git branch — the PR updates automatically.
 
 ## Context Guardrail
 
