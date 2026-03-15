@@ -99,6 +99,24 @@ drone/
 
 ---
 
+## Interactive Commands
+
+By default, drone captures subprocess output (`capture_output=True`) with a 30s timeout. This is safe for AI-to-AI routing but strips Rich colors, buffers progress bars, and kills long-running commands.
+
+Commands in the interactive tuple bypass capture and inherit the terminal directly — enabling live Rich output, colors, and no timeout. Only add commands here when Patrick needs full terminal experience.
+
+**Current interactive commands** (in `apps/drone.py`):
+
+| Command      | Reason                                      |
+|--------------|---------------------------------------------|
+| `monitor`    | Prax real-time monitoring (live TUI)        |
+| `snapshot`   | Backup snapshot (Rich progress bars)        |
+| `versioned`  | Backup versioned (Rich progress, long-running) |
+
+To add a new command: edit the `interactive` tuple in `_handle_target()` in `apps/drone.py`.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -113,4 +131,4 @@ drone/
 
 ---
 
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-14

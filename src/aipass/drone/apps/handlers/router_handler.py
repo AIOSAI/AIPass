@@ -116,5 +116,5 @@ def execute_branch_command(
         stderr=result.stderr,
         exit_code=result.exit_code,
         branch=branch_name,
-        command=command,
+        command=command or "",
     )

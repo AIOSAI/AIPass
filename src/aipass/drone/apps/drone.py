@@ -210,7 +210,7 @@ def _handle_target(args: List[str]) -> int:
     cmd_args = rest[1:]
 
     # Long-running interactive commands bypass capture + timeout
-    interactive = command in ("monitor",)
+    interactive = command in ("monitor", "snapshot", "versioned")
 
     try:
         result = route_command(
