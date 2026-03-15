@@ -22,12 +22,21 @@ An operating system for AI agents. Not a chatbot wrapper. Not a prompt chain. A 
 
 ## Current State: Beta
 
-**It works.** The pieces are all in place and the system runs well in a single project. We're past prototyping — 15 branches are operational, tested, and communicating.
+**It works.** 15 branches are operational, tested, and communicating. We're past prototyping and into hardening — building the infrastructure that makes the system reliable at scale.
+
+**Recently completed:**
+
+- **Credential model** — UUID-based registry matching is live. Every project gets a unique registry ID, every citizen's passport carries it. `aipass init` creates a new project in any directory with its own credentials. Agents always know which project they belong to, even with multiple AIPass projects on the same machine.
+- **Stderr routing** — system-wide migration across 10 branches (48 files). CLI owns the display layer (`error()`, `warning()`, `fatal()` all route to stderr). Seedgo enforces it with an automated checker.
+- **Dashboard pipeline** — Prax now owns the dashboard end-to-end. Per-branch `STATUS.local.md` files sync to a central `STATUS.md` via `drone @prax status sync`. DevPulse section removed — it's a coordinator, not a service.
+- **CLI init** — `aipass init` migrated from prototype to CLI branch. Creates registry, passport, `.trinity/`, hooks — everything needed to bootstrap a new project. 99% seedgo compliance.
+- **Drone test suite** — 188 tests across 5 files. Interactive mode for human-facing commands (backup snapshot, versioned). Credential verification with dedicated error hierarchy.
+- **System governance** — git workflow, commit signing (`Co-Authored-By: @branch`), DPLAN/FPLAN documentation, and "How to Work" guidelines all codified in the global prompt.
 
 **What we're solving now:**
 
-- **Multi-project isolation** — `aipass init` should work in any directory, creating its own registry and credentials. Right now the system assumes one project. We're adding a credential model (UUID-based registry matching) so agents always know which project they belong to, even if multiple AIPass projects exist on the same machine.
-- **System-wide compliance** — as we make large-scale changes (stderr routing, import patterns, error handling), seedgo audits ensure nothing drifts. We're refining the checkers to eliminate false positives and catch real issues.
+- **Lint cleanup** — 474 ruff violations remain (mostly unused imports from unwired modules). Blocked until seedgo audit coverage is higher — we can't confidently remove imports until we know what's actually used.
+- **Dashboard CLI routing** — the Python API works but `drone @prax dashboard refresh --all` fails because argparse eats the flags before the module sees them. Known bug, fix pending.
 - **Cross-platform reliability** — Linux and Windows tested. macOS is structurally supported but needs a dedicated testing pass. All paths use `pathlib`, no hardcoded paths, secrets stored at `~/.secrets/aipass/`.
 - **Agent agnosticism** — currently focused on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (hooks for auto-diagnostics, prompt injection, session recovery). But AIPass is designed to not depend on any single provider. `agents.md` and `gemini.md` can bootstrap the system for Codex and Gemini — you lose hooks but keep the core. The plan is truly agnostic: any agent, anywhere, persistent memory, no vendor lock-in.
 
@@ -66,6 +75,8 @@ Then just talk to it. Ask what the system is, what's been built, what branches e
 **The pattern:** You work with devpulse. Devpulse dispatches to specialists. Specialists do the work and report back. You never need to context-switch between 15 agents — devpulse is your single point of contact.
 
 Once devpulse confirms the core systems are working (email, drone routing, flow plans), you can start exploring individual branches directly with `cd src/aipass/{branch} && claude`.
+
+> **Want a fast overview?** Every branch has its own `README.md` with architecture details, commands, integration points, and known issues. Have your agent read all 15 READMEs (`src/aipass/*/README.md`) and you'll have a solid understanding of the whole system in minutes. You can also run `drone @branch --help` on any branch to see its available commands and usage.
 
 ### What Each Branch Does
 
