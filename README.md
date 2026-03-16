@@ -71,14 +71,16 @@ Devpulse is the orchestration hub — your first relationship in the system. Sta
 
 ```bash
 cd src/aipass/devpulse
-claude
+claude --permission-mode bypassPermissions
 ```
 
 Then just talk to it. Ask what the system is, what's been built, what branches exist, how drone works, what it knows, what it doesn't. Devpulse will investigate, dispatch other branches, and bring information back to you.
 
 **The pattern:** You work with devpulse. Devpulse dispatches to specialists. Specialists do the work and report back. You never need to context-switch between 15 agents — devpulse is your single point of contact.
 
-Once devpulse confirms the core systems are working (email, drone routing, flow plans), you can start exploring individual branches directly with `cd src/aipass/{branch} && claude`.
+Once devpulse confirms the core systems are working (email, drone routing, flow plans), you can start exploring individual branches directly with `cd src/aipass/{branch} && claude --permission-mode bypassPermissions`.
+
+> **Why bypassPermissions?** AIPass agents dispatch work, wake other branches, run drone commands, read and write files — all autonomously. Standard permission mode would prompt you on every action. The system is designed for autonomous operation with governance built into the architecture (standards enforcement, ownership boundaries, dispatch locks), not into permission dialogs.
 
 > **Want a fast overview?** Every branch has its own `README.md` with architecture details, commands, integration points, and known issues. Have your agent read all 15 READMEs (`src/aipass/*/README.md`) and you'll have a solid understanding of the whole system in minutes. You can also run `drone @branch --help` on any branch to see its available commands and usage.
 
@@ -89,7 +91,7 @@ Every branch is a citizen — an expert in its domain with its own memories and 
 | Branch | Role |
 |--------|------|
 | `devpulse` | **Start here.** Orchestration hub — coordinates everything |
-| `drone` | Command routing — `drone @branch command` resolves and routes |
+| `drone` | AI-friendly CLI — every command is a single-line, non-interactive call |
 | `seedgo` | Standards enforcement — 24-standard audit pack, system compliance |
 | `prax` | Logging and monitoring (the only logger in the system) |
 | `cli` | Terminal display, stderr routing, project commands |
@@ -151,6 +153,20 @@ src/aipass/<branch>/
 ```
 
 All branches follow this structure. Drone resolves `@name` to paths via `AIPASS_REGISTRY.json` — no hardcoded paths between modules.
+
+### Drone — A CLI Built for AI
+
+Drone's argument structure is designed so AI agents can operate the entire system through single-line, non-interactive commands. No interactive menus, no prompts, no multi-step wizards. Everything — sending emails, running audits, creating plans, managing backups — is a one-liner:
+
+```bash
+drone @ai_mail send @memory "Bug Report" "Search fails without torch" --dispatch
+drone @seedgo audit aipass @memory
+drone @flow create . "Fix search module" dplan
+```
+
+Once you learn the pattern (`drone @branch command [args]`), you know how to use every branch. The commands are self-explanatory — guess `drone @memory search "credential model"` and you'd be right. `drone @branch --help` fills in the rest.
+
+Humans use it too. Interactive modes exist where they make sense (backup prompts, monitoring dashboards), but the core design is: AI agents shouldn't need interactive CLIs to be productive. Drop a command, get a result.
 
 ## Requirements
 

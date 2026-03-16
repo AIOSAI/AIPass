@@ -144,9 +144,12 @@ Your `.trinity/` files are your persistence. Without them you're just an instanc
 - `passport.json` — who you are (role, purpose, principles)
 - `local.json` — session history, active tasks, learnings
 - `observations.json` — collaboration patterns over time
-- `dev.local.md` — shared scratchpad for issues, todos, working notes (human + AI both contribute)
 
-Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. If compaction hits before you save, it's gone. `dev.local.md` is for friction notes, ideas, and quick tracking — not formal docs. Details in your branch prompt.
+Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. If compaction hits before you save, it's gone. Details in your branch prompt.
+
+### STATUS.local.md — Equal Priority
+
+STATUS.local.md is part of your persistence layer, same as local.json and observations.json. It's what the pre-compact hook surfaces for recovery and what every fresh session reads on startup. Don't treat it as a scratchpad you update last — update it alongside your other files whenever you do meaningful work.
 
 ### Save Triggers — Do This Without Being Asked
 
@@ -161,7 +164,7 @@ Save memories **proactively**. Don't wait for `/memo` or end of session. These a
 What to save where:
 - `local.json` → session entry (what happened), key_learnings (facts you'd need next time)
 - `observations.json` → collaboration patterns (how Patrick works, what works well, what to avoid)
-- `STATUS.local.md` → notepad for quick friction notes, completed items, issue tracking
+- `STATUS.local.md` → current work, known issues, todos, recently completed. Surfaces in pre-compact recovery and startup reads.
 
 **The cost of saving too often is zero. The cost of losing context to compaction is everything.**
 
