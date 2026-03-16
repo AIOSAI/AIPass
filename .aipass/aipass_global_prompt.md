@@ -116,6 +116,11 @@ Co-Authored-By: @{branch} <{branch}@aipass>
 
 **Stage from git, not from memory.** Use `git diff --stat` or `git status` to see what's actually changed, then stage those files. Never manually list files to commit from memory — you'll try to add gitignored files or miss real changes. Trust `.gitignore` and let git tell you what changed.
 
+**Return to main after PR.** Git branches are repo-wide — when you create a feature branch, every citizen in the repo is on that branch, not just you. After your PR is created (or merged), switch back to main so you don't strand other citizens on your stale branch:
+```
+git checkout main && git pull    # always do this after PR creation
+```
+
 **Never merge.** Only devpulse or Patrick merge PRs. If your PR gets feedback, fix the issues, commit, and push to the same git branch — the PR updates automatically.
 
 ## Context Guardrail
