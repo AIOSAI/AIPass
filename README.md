@@ -19,22 +19,26 @@ An operating system for AI agents. Not a chatbot wrapper. Not a prompt chain. A 
 - **Standards enforcement** keeps the system consistent as it grows (seedgo runs 24+ automated checks)
 - **Inter-agent messaging** lets citizens email each other, dispatch tasks, and wake each other up
 - **Everything is tracked** — design plans (DPLANs), execution plans (FPLANs), and seedgo audits make changes traceable even when 500+ files change in a single session
+- **Init anywhere** — `aipass init` turns any directory into a self-contained AI workspace with its own registry, identity, and memories. No repo required. A business project, a research folder, a side project — each gets its own isolated environment that works immediately
 
 ## Current State: Beta
 
-**It works.** 15 branches are operational, tested, and communicating. We're past prototyping and into hardening — building the infrastructure that makes the system reliable at scale.
+**It works.** 14 of 15 branches are operational, tested, and communicating. 53 PRs merged. 30+ orchestration sessions. We're past prototyping and into hardening — building the infrastructure that makes the system reliable at scale.
 
 **Recently completed:**
 
-- **Credential model** — UUID-based registry matching is live. Every project gets a unique registry ID, every citizen's passport carries it. `aipass init` creates a new project in any directory with its own credentials. Agents always know which project they belong to, even with multiple AIPass projects on the same machine.
+- **CLI front door + init anywhere** — full discovery chain rebuilt so users can find and use `aipass init` through natural exploration. CLI rewritten to seedgo's auto-discovery pattern. Registered as a drone internal module — `drone @cli aipass init` works from any directory on any system, before any project exists. Creates a registry (UUID), passport, `.trinity/` memories, prompt files, and hooks. Every project is fully self-contained — no shared state, no cross-contamination between workspaces.
+- **Memory introspection overhaul** — memory branch rewired to seedgo-compliant CLI discovery. Rollover and search introspection rebuilt. 18+ files ported back from archives (symbolic reasoning, templates, pool processor). Templates modernization in progress (FPLAN-0052).
+- **Seedgo standards enforcement** — checklist command fixed, checker false positives addressed, handler guards added. PR #52 open.
+- **Credential model** — UUID-based registry matching is live. Every project gets a unique registry ID, every citizen's passport carries it. `aipass init` creates a new project in any directory with its own credentials.
 - **Stderr routing** — system-wide migration across 10 branches (48 files). CLI owns the display layer (`error()`, `warning()`, `fatal()` all route to stderr). Seedgo enforces it with an automated checker.
-- **Dashboard pipeline** — Prax now owns the dashboard end-to-end. Per-branch `STATUS.local.md` files sync to a central `STATUS.md` via `drone @prax status sync`. DevPulse section removed — it's a coordinator, not a service.
-- **CLI init** — `aipass init` migrated from prototype to CLI branch. Creates registry, passport, `.trinity/`, hooks — everything needed to bootstrap a new project. 99% seedgo compliance.
-- **Drone test suite** — 188 tests across 5 files. Interactive mode for human-facing commands (backup snapshot, versioned). Credential verification with dedicated error hierarchy.
+- **Dashboard pipeline** — Prax owns the dashboard end-to-end. Per-branch `STATUS.local.md` files sync to a central `STATUS.md` via `drone @prax status sync`.
+- **Drone test suite** — 188 tests across 5 files. Interactive mode for human-facing commands. Credential verification with dedicated error hierarchy.
 - **System governance** — git workflow, commit signing (`Co-Authored-By: @branch`), DPLAN/FPLAN documentation, and "How to Work" guidelines all codified in the global prompt.
 
 **What we're solving now:**
 
+- **Memory subsystem wiring** — symbolic reasoning, templates, and pool processor modules ported back but need full integration and testing. Templates modernization (spawn handler, v2 schema) in progress.
 - **Lint cleanup** — 474 ruff violations remain (mostly unused imports from unwired modules). Blocked until seedgo audit coverage is higher — we can't confidently remove imports until we know what's actually used.
 - **Dashboard CLI routing** — the Python API works but `drone @prax dashboard refresh --all` fails because argparse eats the flags before the module sees them. Known bug, fix pending.
 - **Cross-platform reliability** — Linux and Windows tested. macOS is structurally supported but needs a dedicated testing pass. All paths use `pathlib`, no hardcoded paths, secrets stored at `~/.secrets/aipass/`.
