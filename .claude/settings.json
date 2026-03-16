@@ -10,5 +10,18 @@
     ],
     "defaultMode": "acceptEdits"
   },
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/patrick/.claude/hooks/auto_fix_diagnostics.py"
+          }
+        ]
+      }
+    ]
+  }
 }

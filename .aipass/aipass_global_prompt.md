@@ -114,6 +114,8 @@ gh pr create --title "feat(branch): ..." --body "..."
 Co-Authored-By: @{branch} <{branch}@aipass>
 ```
 
+**Stage from git, not from memory.** Use `git diff --stat` or `git status` to see what's actually changed, then stage those files. Never manually list files to commit from memory — you'll try to add gitignored files or miss real changes. Trust `.gitignore` and let git tell you what changed.
+
 **Never merge.** Only devpulse or Patrick merge PRs. If your PR gets feedback, fix the issues, commit, and push to the same git branch — the PR updates automatically.
 
 ## Context Guardrail

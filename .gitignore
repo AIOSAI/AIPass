@@ -63,3 +63,5 @@ backup_data/
 backups
 backup_system
 src/aipass/flow/CLOSED_PLANS.local.json
+src/aipass/memory/config/fragmented_memory_config.json
+src/aipass/memory/config/fragmented_memory_state.json
