@@ -1,4 +1,7 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "permissions": {
     "allow": [],
     "deny": [
@@ -19,6 +22,17 @@
           {
             "type": "command",
             "command": "python3 /home/patrick/.claude/hooks/auto_fix_diagnostics.py"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/patrick/.claude/hooks/subagent_stop_gate.py",
+            "timeout": 30
           }
         ]
       }

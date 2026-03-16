@@ -7,11 +7,13 @@ This directory configures Claude Code for the AIPass project.
 | File | Name | What it does |
 |------|------|-------------|
 | `~/.claude/settings.json` | **Anthropic settings** | All hooks, sounds, statusline, plugins. Fires everywhere. |
-| `.claude/settings.json` (this dir) | **Project settings** | Permissions only. No hooks. |
+| `.claude/settings.json` (this dir) | **Project settings** | Permissions, env vars, project-scoped hooks. |
 
-**Why this split:** Claude Code project settings only fire when launched from the repo root. We launch from branch subdirectories (`src/aipass/{name}/`), so hooks must live in Anthropic settings with absolute paths.
+**Why this split:** Claude Code project settings only fire when launched from the repo root. We launch from branch subdirectories (`src/aipass/{name}/`), so most hooks live in Anthropic settings with absolute paths. Project settings handles permissions, environment configuration, and hooks that need project-level scoping (like SubagentStop).
 
-Project settings = permissions. That's it.
+## Environment
+
+Project settings sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` — this makes PostToolUse hooks (like auto-fix) fire inside subagents, not just the parent conversation. Without this, subagents bypass all hook enforcement.
 
 ## Hooks — Two Locations, No Duplication
 
@@ -22,7 +24,8 @@ General-purpose scripts that work on any project.
 | Script | Event | What it does |
 |--------|-------|-------------|
 | `tool_use_sound.py` | PreToolUse | Plays keypress sound on tool calls |
-| `auto_fix_diagnostics.py` | PostToolUse | Syntax check after file edits |
+| `auto_fix_diagnostics.py` | PostToolUse | Syntax check + seedgo standards checklist after file edits. Fires in subagents too (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). |
+| `subagent_stop_gate.py` | SubagentStop | Secondary gate — checks modified .py files against seedgo standards before allowing subagent completion. |
 | `stop_sound.py` | Stop | Sound on stop |
 | `notification_sound.py` | Notification | Sound on notification |
 
@@ -48,9 +51,18 @@ The global prompt (`aipass_global_prompt.md`) is injected via a `cat` command in
 
 ## Directory Structure
 
+### Project hooks (`.claude/settings.json`)
+
+Hooks defined in project settings — fire for project-scoped events.
+
+| Hook | Event | What it does |
+|------|-------|-------------|
+| `auto_fix_diagnostics.py` | PostToolUse | Same Anthropic hook, also wired at project level for subagent coverage |
+| `subagent_stop_gate.py` | SubagentStop | Blocks subagent completion if modified files have seedgo violations |
+
 ```
 .claude/
-├── settings.json              # Permissions only (no hooks)
+├── settings.json              # Permissions, env, project hooks
 ├── hooks/                     # AIPass-specific hook scripts
 │   ├── branch_prompt_loader.py
 │   ├── identity_injector.py
@@ -73,3 +85,13 @@ The global prompt (`aipass_global_prompt.md`) is injected via a `cat` command in
 Defined in `settings.json`:
 - **Denied**: `git reset`, `git rebase`, `git config`, `git push --force`, `EnterPlanMode`
 - **Default mode**: `acceptEdits`
+
+## Subagent Hook Enforcement
+
+Subagents (spawned via the Agent tool) run in isolation by default — parent hooks don't fire inside them. Two mechanisms enforce standards on subagents:
+
+1. **`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`** — env var that makes PostToolUse hooks fire inside all built-in subagent types (builder, Explore, Plan, general-purpose). This means `auto_fix_diagnostics.py` runs after every file edit, even inside subagents.
+
+2. **`SubagentStop` hook** — secondary gate. When a subagent finishes, `subagent_stop_gate.py` checks all modified .py files against seedgo standards. If violations exist, it blocks completion and tells the subagent to fix them.
+
+No custom agents (`.claude/agents/`) are used — this works with all built-in subagent types.
