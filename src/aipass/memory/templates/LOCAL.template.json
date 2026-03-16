@@ -1,0 +1,37 @@
+{
+  "document_metadata": {
+    "document_type": "session_history",
+    "document_name": "{{BRANCHNAME}}.LOCAL",
+    "version": "2.0.0",
+    "schema_version": "2.0.0",
+    "created": "{{DATE}}",
+    "last_updated": "{{DATE}}",
+    "managed_by": "{{BRANCHNAME}}",
+    "tags": [
+      "session_tracking",
+      "work_log",
+      "{{BRANCHNAME}}"
+    ],
+    "limits": {
+      "max_sessions": 20,
+      "max_key_learnings": 25,
+      "session_summary_max_chars": 150,
+      "learning_value_max_chars": 200,
+      "note": "Auto-rollover to @memory when limits exceeded. Oldest entries trimmed first."
+    },
+    "status": {
+      "health": "healthy",
+      "last_health_check": "{{DATE}}",
+      "current_lines": 0
+    }
+  },
+  "key_learnings": {},
+  "sessions": [
+    {
+      "session_number": 1,
+      "date": "{{DATE}}",
+      "summary": "Branch initialized - {{BRANCHNAME}} created by aipass init.",
+      "status": "completed"
+    }
+  ]
+}
