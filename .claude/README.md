@@ -2,96 +2,146 @@
 
 This directory configures Claude Code for the AIPass project.
 
-## Settings — Two Files, Clear Separation
+**Related:** DPLAN-0053 (Hook Migration) documents the research and decisions behind this architecture.
 
-| File | Name | What it does |
-|------|------|-------------|
-| `~/.claude/settings.json` | **Anthropic settings** | All hooks, sounds, statusline, plugins. Fires everywhere. |
-| `.claude/settings.json` (this dir) | **Project settings** | Permissions, env vars, project-scoped hooks. |
+## Quick Setup
 
-**Why this split:** Claude Code project settings only fire when launched from the repo root. We launch from branch subdirectories (`src/aipass/{name}/`), so most hooks live in Anthropic settings with absolute paths. Project settings handles permissions, environment configuration, and hooks that need project-level scoping (like SubagentStop).
+AIPass hooks live in two places. The project hooks (`hooks/`) travel with the repo. The global hooks (`global_hooks/`) need to be copied to your `~/.claude/` directory.
 
-## Environment
+### Step 1: Copy global hooks
 
-Project settings sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` — this makes PostToolUse hooks (like auto-fix) fire inside subagents, not just the parent conversation. Without this, subagents bypass all hook enforcement.
+```bash
+# Copy hook scripts to your Anthropic hooks directory
+mkdir -p ~/.claude/hooks
+cp .claude/global_hooks/*.py ~/.claude/hooks/
+cp .claude/global_hooks/*.sh ~/.claude/
 
-## Hooks — Two Locations, No Duplication
+# Optional: copy sounds (if you want audio feedback)
+mkdir -p ~/.claude/sounds
+cp .claude/sounds/* ~/.claude/sounds/ 2>/dev/null || true
+```
 
-### Anthropic hooks (`~/.claude/hooks/`)
+### Step 2: Configure global settings
 
-General-purpose scripts that work on any project.
+Add these entries to your `~/.claude/settings.json`. These use `git rev-parse` to find the repo — no hardcoded paths needed.
 
-| Script | Event | What it does |
-|--------|-------|-------------|
-| `tool_use_sound.py` | PreToolUse | Plays keypress sound on tool calls |
-| `auto_fix_diagnostics.py` | PostToolUse | Syntax check + seedgo standards checklist after file edits. Fires in subagents too (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). |
-| `subagent_stop_gate.py` | SubagentStop | Secondary gate — checks modified .py files against seedgo standards before allowing subagent completion. |
-| `stop_sound.py` | Stop | Sound on stop |
-| `notification_sound.py` | Notification | Sound on notification |
+**UserPromptSubmit hooks** (inject prompts every turn):
+```json
+"UserPromptSubmit": [
+  {
+    "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.aipass/aipass_global_prompt.md\" ] && cat \"$REPO/.aipass/aipass_global_prompt.md\" || true" }]
+  },
+  {
+    "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/branch_prompt_loader.py\" ] && python3 \"$REPO/.claude/hooks/branch_prompt_loader.py\" || true" }]
+  },
+  {
+    "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/identity_injector.py\" ] && python3 \"$REPO/.claude/hooks/identity_injector.py\" || true" }]
+  },
+  {
+    "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/email_notification.py\" ] && python3 \"$REPO/.claude/hooks/email_notification.py\" || true" }]
+  }
+]
+```
 
-### Project hooks (`AIPass/.claude/hooks/`)
+**PreCompact hooks** (save context before compaction):
+```json
+"PreCompact": [
+  { "matcher": "manual", "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/pre_compact.py\" ] && python3 \"$REPO/.claude/hooks/pre_compact.py\" || true", "timeout": 60 }] },
+  { "matcher": "auto", "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/pre_compact.py\" ] && python3 \"$REPO/.claude/hooks/pre_compact.py\" || true", "timeout": 60 }] }
+]
+```
 
-AIPass-specific scripts. Referenced from Anthropic settings with absolute paths.
+**Optional hooks** (sounds, auto-fix — from global_hooks/):
+```json
+"PreToolUse": [
+  { "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task",
+    "hooks": [{ "type": "command", "command": "python3 ~/.claude/hooks/tool_use_sound.py" }] }
+],
+"PostToolUse": [
+  { "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+    "hooks": [{ "type": "command", "command": "python3 ~/.claude/hooks/auto_fix_diagnostics.py" }] }
+],
+"Stop": [
+  { "hooks": [{ "type": "command", "command": "python3 ~/.claude/hooks/stop_sound.py" }] }
+],
+"Notification": [
+  { "hooks": [{ "type": "command", "command": "python3 ~/.claude/hooks/notification_sound.py" }] }
+]
+```
 
-| Script | Event | What it does |
-|--------|-------|-------------|
-| `branch_prompt_loader.py` | UserPromptSubmit | Finds `.aipass/aipass_local_prompt.md` from CWD, injects branch context |
-| `identity_injector.py` | UserPromptSubmit | Reads `.trinity/passport.json`, injects role/traits/purpose |
-| `email_notification.py` | UserPromptSubmit | Checks `.ai_mail.local/inbox.json` for unread messages |
-| `pre_compact.py` | PreCompact | Saves session context before compaction |
+### Step 3: Done
 
-The global prompt (`aipass_global_prompt.md`) is injected via a `cat` command in Anthropic settings — no script needed.
+Launch Claude from any branch subdirectory:
+```bash
+cd src/aipass/devpulse
+claude --permission-mode bypassPermissions
+```
 
-## What Gets Injected Every Turn
+The hooks will auto-discover the repo root and inject the right prompts.
 
-1. **Global Prompt** — `cat .aipass/aipass_global_prompt.md` (system context, terminology, rules)
-2. **Branch Prompt** — `branch_prompt_loader.py` (branch-specific instructions from CWD)
-3. **Identity** — `identity_injector.py` (compact passport summary: role, traits, purpose)
-4. **Email** — `email_notification.py` (notification only if unread mail exists)
+## Why This Architecture
 
-## Directory Structure
+Claude Code project settings (`.claude/settings.json`) don't fire `UserPromptSubmit` hooks from subdirectories — only from the repo root. Since AIPass citizens launch from `src/aipass/{name}/`, we can't use project settings for prompt injection.
 
-### Project hooks (`.claude/settings.json`)
+The solution: hooks live in **global settings** (`~/.claude/settings.json`) but use `git rev-parse --show-toplevel` to find the repo dynamically. No hardcoded paths. Works for any clone location, any user. Outside a git repo, hooks silently do nothing.
 
-Hooks defined in project settings — fire for project-scoped events.
+See DPLAN-0053 for the full investigation and test results.
 
-| Hook | Event | What it does |
-|------|-------|-------------|
-| `auto_fix_diagnostics.py` | PostToolUse | Same Anthropic hook, also wired at project level for subagent coverage |
-| `subagent_stop_gate.py` | SubagentStop | Blocks subagent completion if modified files have seedgo violations |
+## What's In This Directory
 
 ```
 .claude/
-├── settings.json              # Permissions, env, project hooks
-├── hooks/                     # AIPass-specific hook scripts
-│   ├── branch_prompt_loader.py
-│   ├── identity_injector.py
-│   ├── email_notification.py
-│   └── pre_compact.py
-├── commands/
-│   └── memo.md                # /memo — memory update workflow
-├── sounds/                    # Audio files (symlinked from ~/.claude/sounds)
-└── README.md
+├── settings.json              # Project settings (permissions, env vars, PostToolUse, SubagentStop)
+├── hooks/                     # AIPass-specific hook scripts (travel with repo)
+│   ├── branch_prompt_loader.py    # Injects branch-specific prompt based on CWD
+│   ├── identity_injector.py       # Injects passport identity (role, traits, purpose)
+│   ├── email_notification.py      # Notifies if unread mail exists
+│   ├── pre_compact.py             # Saves session context before compaction
+│   ├── prompt_inject.sh           # Combined inject (reference, not used in production)
+│   └── .archive/                  # Archived/disabled hooks
+├── global_hooks/              # Scripts to copy to ~/.claude/hooks/ (user setup)
+│   ├── auto_fix_diagnostics.py    # Syntax check + seedgo checklist after edits
+│   ├── subagent_stop_gate.py      # Blocks subagent if modified files have violations
+│   ├── tool_use_sound.py          # Keypress sound on tool calls
+│   ├── stop_sound.py              # Sound on stop
+│   ├── notification_sound.py      # Sound on notification
+│   ├── hook_logger.sh             # Optional hook activity logger
+│   └── statusline.sh              # Statusline display (branch, model, context, cost)
+├── agents/                    # Agent definitions
+│   └── builder.md
+├── commands/                  # Slash commands
+│   └── memo.md                    # /memo — memory update workflow
+├── sounds/                    # Audio files for sound hooks
+└── README.md                  # This file
 ```
+
+## What Gets Injected Every Turn
+
+1. **Global Prompt** — system context, terminology, commands, rules (`.aipass/aipass_global_prompt.md`)
+2. **Branch Prompt** — branch-specific instructions based on CWD (`.aipass/aipass_local_prompt.md`)
+3. **Identity** — passport summary: role, traits, purpose (`.trinity/passport.json`)
+4. **Email** — notification only if unread mail exists (`.ai_mail.local/inbox.json`)
+
+## Project Settings
+
+Defined in `settings.json` (this directory). These DO fire from subdirectories.
+
+**Environment:**
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` — makes PostToolUse hooks fire inside subagents
+
+**Permissions:**
+- Denied: `git reset`, `git rebase`, `git config`, `git push --force`, `EnterPlanMode`
+- Default mode: `acceptEdits`
+
+**Project hooks:**
+- `PostToolUse` — auto-fix diagnostics after file edits (fires in subagents via env var)
+- `SubagentStop` — secondary gate checking modified files against seedgo standards
 
 ## Adding a New Hook
 
 1. Create the script in `.claude/hooks/`
-2. Add one entry to `~/.claude/settings.json` (Anthropic settings) with the absolute path
-3. Done — no changes to project settings
-
-## Permissions
-
-Defined in `settings.json`:
-- **Denied**: `git reset`, `git rebase`, `git config`, `git push --force`, `EnterPlanMode`
-- **Default mode**: `acceptEdits`
-
-## Subagent Hook Enforcement
-
-Subagents (spawned via the Agent tool) run in isolation by default — parent hooks don't fire inside them. Two mechanisms enforce standards on subagents:
-
-1. **`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`** — env var that makes PostToolUse hooks fire inside all built-in subagent types (builder, Explore, Plan, general-purpose). This means `auto_fix_diagnostics.py` runs after every file edit, even inside subagents.
-
-2. **`SubagentStop` hook** — secondary gate. When a subagent finishes, `subagent_stop_gate.py` checks all modified .py files against seedgo standards. If violations exist, it blocks completion and tells the subagent to fix them.
-
-No custom agents (`.claude/agents/`) are used — this works with all built-in subagent types.
+2. Add one entry to `~/.claude/settings.json` using the `git rev-parse` pattern:
+   ```
+   REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$REPO/.claude/hooks/your_script.py" ] && python3 "$REPO/.claude/hooks/your_script.py" || true
+   ```
+3. Done — no hardcoded paths, works for any clone location
