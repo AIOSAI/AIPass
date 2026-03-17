@@ -17,6 +17,8 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+from aipass.prax.apps.handlers.json import json_handler
+
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
@@ -66,7 +68,7 @@ def calculate_quick_status(sections: Dict) -> Dict:
     if mentions:
         summary_parts.append(f"{mentions} mentions")
 
-    return {
+    result = {
         "new_mail": new_mail,
         "opened_mail": opened_mail,
         "active_plans": active_plans,
@@ -74,6 +76,14 @@ def calculate_quick_status(sections: Dict) -> Dict:
         "action_required": action_required,
         "summary": ", ".join(summary_parts) if summary_parts else "All clear"
     }
+
+    json_handler.log_operation("status_calculated", {
+        "action_required": action_required,
+        "new_mail": new_mail,
+        "active_plans": active_plans,
+    })
+
+    return result
 
 
 def get_branch_paths() -> List[Path]:

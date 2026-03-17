@@ -66,6 +66,8 @@ except ImportError as e:
     MonitoringEvent = None  # type: ignore[assignment, misc]
     global_queue = None  # type: ignore[assignment]
 
+from aipass.prax.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # BRANCH REGISTRY LOADER
@@ -247,6 +249,7 @@ class FileWatcherManager:
 
         if self.observer:
             self.running = True
+            json_handler.log_operation("file_watcher_started", {"branches": len(self.branch_paths)})
             logger.info("File watcher started successfully")
             return True
         else:

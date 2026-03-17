@@ -18,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Resolve prax root from this file's location
 _PRAX_ROOT = Path(__file__).resolve().parents[3]  # .../prax/
 
@@ -341,7 +343,14 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         dashboard["quick_status"] = _calculate_quick_status_standalone(dashboard["sections"])
 
         # Save
-        return save_dashboard(branch_path, dashboard)
+        saved = save_dashboard(branch_path, dashboard)
+
+        json_handler.log_operation("section_updated", {
+            "section": section_name,
+            "branch": branch_path.name,
+        })
+
+        return saved
 
     except Exception:
         return False

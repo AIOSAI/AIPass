@@ -59,6 +59,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 # CLI services (display/output formatting)
 from aipass.cli.apps.modules import console, header, error
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Monitoring handlers (connected subsystems)
 from aipass.prax.apps.handlers.monitoring import (
     print_event,              # unified_stream.py
@@ -207,6 +209,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     global _monitoring_active, _event_queue, _module_tracker
     global _display_thread, _file_watcher_thread, _log_watcher_thread
 
+    json_handler.log_operation("monitor_started", {"args": args})
     logger.info(f"Starting unified monitoring (args: {args})")
 
     # Initialize monitoring subsystems

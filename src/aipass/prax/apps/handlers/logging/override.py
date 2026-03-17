@@ -31,6 +31,8 @@ from aipass.prax.apps.handlers.logging.setup import setup_individual_logger
 # Import introspection
 from aipass.prax.apps.handlers.logging.introspection import get_calling_module
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Store original logging functions for restoration
 _original_getLogger = logging.getLogger
 _original_basicConfig = logging.basicConfig
@@ -94,6 +96,7 @@ def install_logger_override():
     logging.getLogger = enhanced_getLogger
     # sys.stderr used intentionally: logging system is being replaced, cannot use prax logger here
     sys.stderr.write("[prax] Global logger override installed\n")
+    json_handler.log_operation("logger_override_applied", {"action": "install"})
 
 def restore_original_logger():
     """Restore original getLogger function

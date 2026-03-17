@@ -17,6 +17,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import enable_terminal_output, disable_terminal_output, system_logger as logger
 from aipass.cli.apps.modules import console, error
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -92,6 +93,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         if args[0] not in ['enable', 'disable']:
             print_help()
             return True  # Command was handled, even if validation failed
+
+        json_handler.log_operation("terminal_command", {"action": args[0]})
 
         if args[0] == 'enable':
             enable_terminal_output()

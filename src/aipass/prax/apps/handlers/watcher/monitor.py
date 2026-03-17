@@ -17,6 +17,8 @@ complete visibility into branch modifications.
 from pathlib import Path
 from typing import List, Callable, Optional, TYPE_CHECKING, Any
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # =============================================================================
 # WATCHDOG IMPORT (external dependency)
 # =============================================================================
@@ -160,6 +162,8 @@ def start_monitoring(branch_paths: List[tuple], callback: Callable) -> Any:
         observer.schedule(event_handler, str(path), recursive=True)
 
     observer.start()
+
+    json_handler.log_operation("watcher_monitor_event", {"branches_monitored": len(branch_paths)})
 
     return observer
 

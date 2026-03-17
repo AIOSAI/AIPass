@@ -32,6 +32,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # =============================================
 # CONFIGURATION
 # =============================================
@@ -174,12 +176,14 @@ def load_log_config() -> Dict[str, Any]:
                 system_logs = config.get('config', {}).get('system_logs', DEFAULT_SYSTEM_LOGS)
                 local_logs = config.get('config', {}).get('local_logs', DEFAULT_LOCAL_LOGS)
 
-                return {
+                result = {
                     'system_logs': system_logs,
                     'local_logs': local_logs,
                     'log_format': config.get('config', {}).get('log_format', LOG_FORMAT),
                     'date_format': config.get('config', {}).get('date_format', DATE_FORMAT)
                 }
+                json_handler.log_operation("config_loaded", {"source": str(PRAX_LOGGER_CONFIG_FILE)})
+                return result
     except (json.JSONDecodeError, OSError) as e:
         logging.debug(f"Log config load error (using defaults): {e}")
 

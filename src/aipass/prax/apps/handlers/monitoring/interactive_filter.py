@@ -10,6 +10,8 @@
 
 from typing import List, Tuple, Optional
 
+from aipass.prax.apps.handlers.json import json_handler
+
 
 def parse_command(cmd: str) -> Tuple[Optional[str], List[str]]:
     """Parse user command into action and arguments.
@@ -29,6 +31,8 @@ def parse_command(cmd: str) -> Tuple[Optional[str], List[str]]:
 
     command = parts[0].lower()
     args = parts[1:] if len(parts) > 1 else []
+
+    json_handler.log_operation("filter_applied", {"command": command, "args": args})
 
     # Normalize aliases
     if command in ['exit', 'q']:

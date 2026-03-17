@@ -17,6 +17,7 @@ from typing import List
 
 from aipass.cli.apps.modules import console
 from aipass.prax.apps.handlers.discovery.scanner import discover_python_modules
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_help():
@@ -57,6 +58,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    json_handler.log_operation("discover_command_executed", {"command": command})
     console.print("🔍 Discovering Python modules...")
     modules = discover_python_modules()
     console.print(f"✅ Discovered {len(modules)} modules")

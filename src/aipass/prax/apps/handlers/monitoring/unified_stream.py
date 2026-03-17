@@ -28,6 +28,8 @@ except ImportError:
     from rich.console import Console
     console = Console()
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Thread safety
 _print_lock = Lock()
 
@@ -113,6 +115,8 @@ def print_event(event_type: str, branch: str, message: str, level: str = 'info',
         level: Event level (info, warning, error, critical)
         pid: Optional process ID for the active agent
     """
+    json_handler.log_operation("stream_output", {"event_type": event_type, "branch": branch, "level": level})
+
     with _print_lock:
         # Timestamp
         timestamp = datetime.now().strftime("%H:%M:%S")

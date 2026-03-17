@@ -17,6 +17,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import initialize_logging_system, system_logger as logger
 from aipass.cli.apps.modules import console, error
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -74,6 +75,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     try:
+        json_handler.log_operation("init_command_executed", {"command": command})
         console.print("🚀 Initializing PRAX logging system...")
         initialize_logging_system()
         console.print("✅ PRAX logging system initialized")

@@ -46,6 +46,8 @@ except ImportError:
     trigger = None  # type: ignore[assignment]
     HAS_TRIGGER = False
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Logger
 # logger imported from aipass.prax
 
@@ -521,6 +523,7 @@ def start_log_watcher(event_queue: MonitoringQueue) -> Any:
 
     _log_observer = observer
 
+    json_handler.log_operation("log_watcher_started", {"log_dir": str(get_system_logs_dir())})
     logger.info(f"Log watcher started, monitoring: {get_system_logs_dir()}")
 
     return observer

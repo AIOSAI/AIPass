@@ -20,6 +20,8 @@ from typing import Set, Optional
 # Import from prax config
 from aipass.prax.apps.handlers.config.load import PRAX_JSON_DIR
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Module constants
 MODULE_NAME = "prax_terminal"
 CONFIG_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_config.json"
@@ -64,4 +66,6 @@ def should_display_terminal(module_name: str, filtered_modules: Optional[Set[str
     if filtered_modules is None:
         filtered_modules = load_filtered_modules()
 
-    return module_name not in filtered_modules
+    result = module_name not in filtered_modules
+    json_handler.log_operation("terminal_filter_applied", {"module": module_name, "displayed": result})
+    return result

@@ -21,6 +21,8 @@ Based on backup_system/config_handler.py's excellent pattern organization.
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Any
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # =============================================
 # MONITORING PATTERNS
 # =============================================
@@ -303,6 +305,7 @@ def should_monitor(path: Path) -> bool:
         should_monitor(Path("/home/user/.cache/data"))  # False
         should_monitor(Path("/home/user/FLOW.id.json"))  # True (ALWAYS)
     """
+    json_handler.log_operation("monitoring_started", {"path": str(path)})
     import os
 
     path_str = str(path)

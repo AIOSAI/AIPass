@@ -21,6 +21,7 @@ from typing import Dict, Optional
 # Import from prax config
 from aipass.prax.apps.handlers.config.load import PRAX_JSON_DIR
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger
+from aipass.prax.apps.handlers.json import json_handler
 
 _logger = get_direct_logger()
 
@@ -62,6 +63,7 @@ def log_operation(message: str, data: Optional[Dict] = None):
     # Save log
     with open(LOG_FILE, 'w', encoding='utf-8') as f:
         json.dump(log_entries, f, indent=2, ensure_ascii=False)
+    json_handler.log_operation("log_operation_performed", {"message": message})
 
 def create_config_file():
     """Create default config file if it doesn't exist"""

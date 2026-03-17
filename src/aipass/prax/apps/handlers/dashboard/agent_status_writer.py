@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+from aipass.prax.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # CONSTANTS
@@ -303,6 +305,13 @@ def push_agent_status_dashboard() -> bool:
         success_count = _write_section_to_all_branches(
             "agent_status", section_data, branch_paths
         )
+
+        json_handler.log_operation("agent_status_written", {
+            "branches_targeted": len(branch_paths),
+            "branches_updated": success_count,
+            "active_agents": section_data.get("agent_count", 0),
+            "stale_agents": len(section_data.get("stale_agents", [])),
+        })
 
         return success_count > 0
 

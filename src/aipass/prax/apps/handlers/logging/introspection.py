@@ -16,6 +16,8 @@ Used by logger_setup.py to route logs to correct files.
 from pathlib import Path
 from typing import Optional
 
+from aipass.prax.apps.handlers.json import json_handler
+
 def get_calling_module() -> str:
     """Detect calling module from stack trace
 
@@ -99,7 +101,9 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         relative = path.relative_to(_AIPASS_PKG_ROOT)
         # relative is like: flow/apps/module.py → parts[0] = "flow"
         if len(relative.parts) >= 2:
-            return relative.parts[0]
+            branch = relative.parts[0]
+            json_handler.log_operation("introspection_resolved", {"module_path": module_path, "branch": branch})
+            return branch
     except ValueError:
         pass
 

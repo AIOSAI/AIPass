@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Optional
 import threading
 
+from aipass.prax.apps.handlers.json import json_handler
+
 @dataclass(order=True)
 class MonitoringEvent:
     """Unified event structure for all monitoring sources"""
@@ -53,6 +55,8 @@ class MonitoringQueue:
         """Add event to queue (thread-safe)"""
         if not self.running:
             return False
+
+        json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
 
         # Simple deduplication
         if not self._is_duplicate(event):

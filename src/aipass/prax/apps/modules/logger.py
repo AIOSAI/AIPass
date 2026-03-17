@@ -67,6 +67,7 @@ from aipass.prax.apps.handlers.logging.direct import (
     direct_log,
     DirectLogger
 )
+from aipass.prax.apps.handlers.json import json_handler
 
 # Module constants
 MODULE_NAME = "prax_logger"
@@ -288,6 +289,7 @@ def handle_command(_command: str, args: list) -> bool:
     Logger is a service module with no user-facing commands.
     All interaction happens through the system_logger API.
     """
+    json_handler.log_operation("logger_handle_command", {"args": args})
     if not args:
         print_introspection()
         return True

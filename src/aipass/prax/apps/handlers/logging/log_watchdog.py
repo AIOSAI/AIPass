@@ -26,6 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from aipass.prax.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # CONSTANTS
@@ -125,6 +127,7 @@ def scan_log_files() -> List[Dict[str, Any]]:
 
     # Sort by line count descending (biggest problems first)
     results.sort(key=lambda x: x["lines"], reverse=True)
+    json_handler.log_operation("log_watchdog_check", {"files_scanned": len(results)})
     return results
 
 

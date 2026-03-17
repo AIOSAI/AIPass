@@ -18,6 +18,7 @@ import sys
 import time
 from typing import Dict, Any, Callable
 
+from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.logging.setup import (
     setup_system_logger,
 )
@@ -94,6 +95,8 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
         "modules_discovered": len(modules),
         "consolidated_logger": True
     })
+
+    json_handler.log_operation("lifecycle_event", {"event": "initialized", "modules_count": len(modules)})
 
     return {
         "modules_count": len(modules),

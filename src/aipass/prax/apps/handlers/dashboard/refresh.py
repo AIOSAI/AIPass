@@ -24,6 +24,8 @@ from .operations import create_fresh_dashboard, save_dashboard
 # Cross-handler imports for central reader
 from ..central.reader import read_all_centrals
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Sections managed by the refresh path — everything else is write-through only
 REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory_bank", "commons_activity"}
 
@@ -311,6 +313,12 @@ def refresh_all_dashboards() -> Dict:
         status = "partial"
     else:
         status = "error"
+
+    json_handler.log_operation("dashboard_refreshed", {
+        "status": status,
+        "branches_updated": branches_updated,
+        "branches_failed": branches_failed,
+    })
 
     return {
         "status": status,

@@ -66,6 +66,7 @@ from aipass.prax.apps.handlers.dashboard.template_pusher import (
 from aipass.prax.apps.handlers.dashboard.template_differ import (
     diff_dashboard_template
 )
+from aipass.prax.apps.handlers.json import json_handler
 
 
 # ============================================
@@ -391,8 +392,6 @@ def _handle_diff_template(args: List[str]) -> None:
     invalid_json_count = summary.get('invalid_json', 0)
     if invalid_json_count:
         error(f"Invalid JSON: {invalid_json_count}")
-    else:
-        console.print(f"  Invalid JSON: {invalid_json_count}")
 
     for branch_diff in result.get("branches", []):
         status = branch_diff["status"]
@@ -467,6 +466,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     subcmd = args[0]
+    json_handler.log_operation("dashboard_command", {"subcommand": subcmd})
 
     if subcmd == "status":
         print_status()

@@ -17,6 +17,7 @@ import sys
 from typing import List
 
 from aipass.cli.apps.modules import console, error
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -80,6 +81,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         build_agent_status_section,
         push_agent_status_dashboard,
     )
+
+    json_handler.log_operation("agent_status_push_executed", {"args": args})
 
     if '--help' in args:
         print_help()

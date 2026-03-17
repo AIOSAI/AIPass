@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT, ECOSYSTEM_ROOT
+from aipass.prax.apps.handlers.json import json_handler
 
 # =============================================
 # CONFIGURATION
@@ -91,6 +92,8 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
         # Save to file
         with open(REGISTRY_FILE, 'w', encoding='utf-8') as f:
             json.dump(registry_structure, f, indent=2, ensure_ascii=False)
+
+        json_handler.log_operation("registry_saved", {"total_modules": len(modules)})
 
         return True
 

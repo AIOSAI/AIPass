@@ -17,6 +17,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import start_continuous_logging
 from aipass.cli.apps.modules import console
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_help():
@@ -53,6 +54,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    json_handler.log_operation("run_command_executed", {"command": command})
     console.print("🚀 Starting PRAX continuous logging mode...")
     start_continuous_logging()
     return True

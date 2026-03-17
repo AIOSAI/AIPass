@@ -24,6 +24,7 @@ import logging
 from functools import lru_cache
 
 from aipass.prax import logger
+from aipass.prax.apps.handlers.json import json_handler
 
 # logger imported from aipass.prax
 
@@ -47,6 +48,7 @@ class BranchDetector:
         self.known_branches: Set[str] = set()
         self._repo_root: Optional[Path] = None
         self._load_registry()
+        json_handler.log_operation("branch_detected", {"known_branches": len(self.known_branches)})
 
     def _find_repo_root(self) -> Path:
         """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""

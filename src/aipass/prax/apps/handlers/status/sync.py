@@ -26,6 +26,7 @@ from typing import Dict
 
 from aipass.prax.apps.handlers.config.load import _find_repo_root
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax.apps.handlers.json import json_handler
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,8 @@ def sync_status() -> Dict:
     logger.info(
         "STATUS.md synced: %d branches, %d missing", len(synced), len(missing)
     )
+
+    json_handler.log_operation("status_synced", {"branches_synced": len(synced), "branches_missing": len(missing)})
 
     return {
         "status": "ok",

@@ -17,6 +17,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import shutdown_logging_system
 from aipass.cli.apps.modules import console
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_help():
@@ -53,6 +54,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    json_handler.log_operation("shutdown_command_executed", {"command": command})
     console.print("🛑 Shutting down PRAX logging system...")
     shutdown_logging_system()
     console.print("✅ PRAX logging system shutdown complete")

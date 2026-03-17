@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT
+from aipass.prax.apps.handlers.json import json_handler
 
 # =============================================
 # CONFIGURATION
@@ -76,6 +77,7 @@ def load_module_registry() -> Dict[str, Dict[str, Any]]:
         with open(REGISTRY_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
             modules = data.get('modules', {})
+            json_handler.log_operation("registry_loaded", {"module_count": len(modules)})
             return modules
     except Exception:
         # Silently return empty dict - logging not available at this level

@@ -19,6 +19,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -112,6 +113,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         enforce_log_limits,
         log_health_summary,
     )
+
+    json_handler.log_operation("log_audit_executed", {"mode": args[0] if args else "audit"})
 
     if args and args[0] == 'enforce':
         console.print("\n[bold cyan]Enforcing log limits...[/bold cyan]")

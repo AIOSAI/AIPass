@@ -33,6 +33,8 @@ from aipass.prax.apps.handlers.logging.introspection import (
     detect_branch_from_path
 )
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # Global state for logging system
 _system_logger: Optional[logging.Logger] = None
 _captured_loggers: Dict[str, logging.Logger] = {}
@@ -187,6 +189,8 @@ def setup_system_logger() -> logging.Logger:
     # Log system logger creation
     _system_logger.info("Prax system logger initialized successfully")
     _system_logger.info(f"System logger writing to: {system_log_file} + {local_log_file}")
+
+    json_handler.log_operation("logger_setup_complete", {"system_log": str(system_log_file), "local_log": str(local_log_file)})
 
     return _system_logger
 

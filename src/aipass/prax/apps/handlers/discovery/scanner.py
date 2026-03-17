@@ -26,6 +26,7 @@ from aipass.prax.apps.handlers.config.load import (
 
 # Import filtering
 from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
+from aipass.prax.apps.handlers.json import json_handler
 
 def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
     """Safely scan directory with depth limit
@@ -81,5 +82,7 @@ def discover_python_modules() -> Dict[str, Dict[str, Any]]:
 
     # Scan entire ecosystem recursively
     scan_directory_safely(ECOSYSTEM_ROOT, modules)
+
+    json_handler.log_operation("modules_scanned", {"modules_found": len(modules)})
 
     return modules

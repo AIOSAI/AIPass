@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def run_monitoring_loop(
@@ -41,6 +42,7 @@ def run_monitoring_loop(
         KeyboardInterrupt: When user presses Ctrl+C (caught and handled gracefully)
     """
     module_name = "prax_logger"
+    json_handler.log_operation("monitoring_configured", {"interval": interval, "status_interval": status_interval})
 
     try:
         logger.info(f"[{module_name}] Logger capture active - monitoring all modules")

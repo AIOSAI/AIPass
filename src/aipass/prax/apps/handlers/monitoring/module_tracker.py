@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import re
 
+from aipass.prax.apps.handlers.json import json_handler
+
 class ModuleTracker:
     """Track active modules and their execution"""
 
@@ -22,6 +24,7 @@ class ModuleTracker:
 
     def track_start(self, module_name: str, command: str, pid: Optional[int] = None):
         """Track module start"""
+        json_handler.log_operation("module_tracked", {"module": module_name, "command": command})
         self.active_modules[module_name] = {
             'command': command,
             'pid': pid,

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Set
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT
+from aipass.prax.apps.handlers.json import json_handler
 
 # =============================================
 # CONFIGURATION
@@ -73,6 +74,7 @@ def load_ignore_patterns_from_config() -> Set[str]:
                 config = json.load(f)
                 patterns = config.get('config', {}).get('ignore_patterns', [])
                 if patterns:
+                    json_handler.log_operation("ignore_patterns_loaded", {"pattern_count": len(patterns)})
                     return set(patterns)
     except Exception:
         # Silently fall back to defaults - logging not available at this level

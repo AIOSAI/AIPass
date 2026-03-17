@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict
 
 from aipass.prax.apps.handlers.config.load import _find_repo_root
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def read_all_centrals() -> Dict:
@@ -46,5 +47,7 @@ def read_all_centrals() -> Dict:
             centrals[service_name] = data
         except (json.JSONDecodeError, OSError):
             continue
+
+    json_handler.log_operation("central_data_read", {"services_found": len(centrals)})
 
     return centrals

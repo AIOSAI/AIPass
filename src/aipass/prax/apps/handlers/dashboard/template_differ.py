@@ -26,6 +26,8 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # =============================================================================
 # PATH RESOLUTION
 # =============================================================================
@@ -234,6 +236,13 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         status = branch_diff["status"]
         if status in result["summary"]:
             result["summary"][status] += 1
+
+    json_handler.log_operation("template_diffed", {
+        "branch_filter": branch_name,
+        "branches_scanned": len(result["branches"]),
+        "needs_update": result["summary"].get("needs_update", 0),
+        "up_to_date": result["summary"].get("up_to_date", 0),
+    })
 
     return result
 

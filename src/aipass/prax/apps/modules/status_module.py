@@ -18,6 +18,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import get_system_status, system_logger as logger
 from aipass.prax.apps.handlers.status.sync import sync_status
 from aipass.cli.apps.modules import console, success, error, warning
+from aipass.prax.apps.handlers.json import json_handler
 
 
 def print_help():
@@ -47,6 +48,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not args:
         print_introspection()
         return True
+
+    json_handler.log_operation("status_checked", {"subcommand": args[0] if args else "default"})
 
     # --- sub-command routing ------------------------------------------------
     if args and args[0] in ("--help", "help"):

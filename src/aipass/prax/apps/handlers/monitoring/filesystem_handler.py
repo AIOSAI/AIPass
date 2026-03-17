@@ -38,6 +38,7 @@ except ImportError:
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_path
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor, get_priority
+from aipass.prax.apps.handlers.json import json_handler
 
 
 class MonitoringFileHandler(FileSystemEventHandler):
@@ -59,6 +60,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
         super().__init__()
         self._event_queue = event_queue
         self._command_indicator_files = command_indicator_files or {}
+        json_handler.log_operation("file_change_handled", {"has_queue": event_queue is not None})
         # Track last command emitted per file to avoid duplicate separators
         self._last_file_command: Dict[str, str] = {}
         # Track JSONL file positions for incremental reading

@@ -36,6 +36,7 @@ from aipass.prax.apps.handlers.registry.save import save_module_registry
 
 # Import filtering
 from aipass.prax.apps.handlers.discovery.filtering import should_ignore_path
+from aipass.prax.apps.handlers.json import json_handler
 
 # Trigger integration - graceful fallback if trigger not available
 try:
@@ -120,6 +121,7 @@ def start_file_watcher():
 
     new_observer.start()
     _observer = new_observer
+    json_handler.log_operation("discovery_watcher_event", {"action": "started", "watch_root": str(ECOSYSTEM_ROOT)})
 
 
 def stop_file_watcher():

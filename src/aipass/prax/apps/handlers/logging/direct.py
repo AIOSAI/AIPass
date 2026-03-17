@@ -43,6 +43,7 @@ from aipass.prax.apps.handlers.config.load import (
     lines_to_bytes
 )
 from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
+from aipass.prax.apps.handlers.json import json_handler
 
 # Use original stdlib getLogger (not the prax-overridden version).
 # This is intentional: direct.py creates raw stdlib loggers for
@@ -228,6 +229,7 @@ def get_direct_logger() -> DirectLogger:
         DirectLogger instance bound to the caller's module/branch.
     """
     module_name, branch_path = _get_direct_caller_info()
+    json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
     return DirectLogger(module_name, branch_path)
 
 

@@ -24,6 +24,8 @@ from aipass.prax.apps.handlers.config.load import DEFAULT_LOG_LEVEL
 # Import filtering
 from aipass.prax.apps.handlers.logging.terminal.filtering import should_display_terminal
 
+from aipass.prax.apps.handlers.json import json_handler
+
 def detect_branch_from_logger_name(logger_name: str) -> Optional[str]:
     """Detect branch from logger name
 
@@ -111,5 +113,7 @@ def create_terminal_handler() -> logging.StreamHandler:
     # Use custom formatter
     formatter = TerminalFormatter()
     handler.setFormatter(formatter)
+
+    json_handler.log_operation("terminal_formatted", {"level": str(DEFAULT_LOG_LEVEL)})
 
     return handler

@@ -29,6 +29,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
+from aipass.prax.apps.handlers.json import json_handler
+
 # =============================================================================
 # PATH RESOLUTION
 # =============================================================================
@@ -384,6 +386,13 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     # Update version file if any branches were modified
     if not dry_run and branches_updated_list:
         _update_version_file(branches_updated_list)
+
+    json_handler.log_operation("template_pushed", {
+        "dry_run": dry_run,
+        "branches_scanned": result["branches_scanned"],
+        "branches_updated": result["branches_updated"],
+        "branches_created": result["branches_created"],
+    })
 
     return result
 
