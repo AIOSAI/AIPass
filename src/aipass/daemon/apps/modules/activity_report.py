@@ -24,6 +24,7 @@ from aipass.prax import logger
 # logger imported from aipass.prax
 
 from aipass.cli.apps.modules import console, error
+from aipass.daemon.apps.handlers.json import json_handler
 
 # Import report generation handler (implementation lives in handler layer)
 from aipass.daemon.apps.handlers.monitoring.report_generator import (
@@ -173,28 +174,34 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     # Handle 'activity_report' as alias — help shows module name, users expect it to work
     if command == "activity_report":
+        if args and args[0] in ('--help', '-h', 'help'):
+            print_introspection()
+            return True
+        json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
         return True
 
-    # Handle 'activity' command - quick summary
+    # Handle 'activity' command - quick summary (runs with no args, defaults to 24h)
     if command == "activity":
         if args and args[0] in ('--help', '-h', 'help'):
             _print_activity_help()
             return True
 
+        json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
         report = generate_activity_report(since_hours=hours, verbosity="normal")
         console.print(report)
         return True
 
-    # Handle 'activity-report' command - detailed report
+    # Handle 'activity-report' command - detailed report (runs with no args, defaults to 24h)
     if command == "activity-report":
         if args and args[0] in ('--help', '-h', 'help'):
             _print_activity_report_help()
             return True
 
+        json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
 
         # Check for --json flag
@@ -207,9 +214,12 @@ def handle_command(command: str, args: List[str]) -> bool:
             console.print(report)
         return True
 
-    # Handle 'branch-health' command - single branch report
+    # Handle 'branch-health' command - requires branch name arg
     if command == "branch-health":
-        if args and args[0] in ('--help', '-h', 'help'):
+        if not args:
+            print_introspection()
+            return True
+        if args[0] in ('--help', '-h', 'help'):
             _print_branch_health_help()
             return True
 

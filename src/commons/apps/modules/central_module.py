@@ -27,6 +27,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.central.central_writer import update_central
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -59,10 +60,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "push-central":
         return False
 
+    if not args:
+        print_introspection()
+        return True
+
     try:
         stats = update_central()
         branch_count = len(stats.get("branch_stats", {}))
         console.print(f"[green]Central file updated:[/green] {branch_count} branches")
+        json_handler.log_operation("push-central_executed", {"command": "push-central", "success": True})
         return True
     except Exception as e:
         logger.error(f"[commons] push-central failed: {e}")

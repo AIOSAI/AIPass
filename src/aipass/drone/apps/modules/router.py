@@ -18,13 +18,14 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
 from aipass.drone.apps.handlers.executor import CommandResult
+from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import execute_branch_command
 from .resolver import list_branches, resolve_branch
 
 logger = system_logger
 
 
-def handle_command(command: str, args: List[str]) -> bool:
+def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
     """Route router commands to handler functions.
 
     Args:
@@ -34,6 +35,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    if not args:
+        if command is None:
+            print_introspection()
+            return True
+        args = []
+    json_handler.log_operation("handle_command", {"module": "router", "command": command})
     if command == "route":
         if len(args) < 2:
             logger.warning("router route requires <target> <command> [args...]")
@@ -85,6 +92,7 @@ def route_command(
     branch_path = resolve_branch(target)
     branch_name = target.lstrip("@").lower()
 
+    logger.info("Routing @%s → %s %s", branch_name, command or "(introspection)", args or [])
     return execute_branch_command(
         branch_path=branch_path,
         branch_name=branch_name,

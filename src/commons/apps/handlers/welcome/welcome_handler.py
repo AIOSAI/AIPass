@@ -17,6 +17,7 @@ import sqlite3
 from typing import Optional, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from commons.apps.handlers.json import json_handler
 
 
 def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[int]:
@@ -57,6 +58,7 @@ def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[
         )
 
         conn.commit()
+        json_handler.log_operation("create_welcome_post", {"branch": branch_name, "post_id": post_id})
         return post_id
 
     except Exception as e:

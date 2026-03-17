@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import List
 
 from .exceptions import CommandExecutionError
+from aipass.drone.apps.handlers.json import json_handler
 
 
 @dataclass
@@ -106,6 +107,8 @@ def execute_command(
 
     stdout = result.stdout.decode("utf-8", errors="replace")
     stderr = result.stderr.decode("utf-8", errors="replace")
+
+    json_handler.log_operation("execute_command", {"command": str(full_cmd), "exit_code": result.returncode})
 
     return CommandResult(
         stdout=stdout,

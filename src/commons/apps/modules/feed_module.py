@@ -29,6 +29,7 @@ from rich.table import Table
 
 from commons.apps.handlers.feed.feed_ops import display_feed, format_time_ago
 from commons.apps.handlers.identity.identity_ops import resolve_display_name
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -155,4 +156,5 @@ def _handle_feed(args: List[str]) -> bool:
     )
     console.print()
 
+    json_handler.log_operation("feed_executed", {"command": "feed", "success": True})
     return True

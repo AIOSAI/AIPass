@@ -20,9 +20,6 @@ Design philosophy (Session 134 research):
 - Fresh sessions: no accumulated idle context from prior wakes
 """
 
-from aipass.prax import logger
-# logger imported from aipass.prax
-
 PLUGIN_CONFIG = {
     "name": "heartbeat",
     "schedule": "interval",

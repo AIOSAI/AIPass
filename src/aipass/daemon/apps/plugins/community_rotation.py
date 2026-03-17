@@ -49,7 +49,7 @@ INACTIVITY_THRESHOLD = 10
 EXCLUDED_BRANCHES = {
     "VERA",            # Already checks Commons via her own heartbeat plugin
     "DEV_CENTRAL",     # Human workspace -- can't be auto-woken (needs Patrick)
-    "PARTICK_PRIVATE", # Patrick's private branch
+    # "PATRICK_PRIVATE",  # Commented out — CLI registry handles branch locking now. May return.
 }
 
 # Engagement prompt -- what each branch does when woken

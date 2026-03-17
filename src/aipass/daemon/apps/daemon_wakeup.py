@@ -28,15 +28,14 @@ import fcntl
 from pathlib import Path
 from datetime import datetime
 
-from aipass.prax import logger
-
 from aipass.cli.apps.modules import console
+from aipass.daemon.apps.handlers.json import json_handler
 
 # =============================================
 # CONSTANTS
 # =============================================
 
-_DAEMON_ROOT = Path(__file__).resolve().parents[2]  # src/aipass/daemon/
+_DAEMON_ROOT = Path(__file__).resolve().parents[1]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 
 LOCK_FILE = JSON_DIR / "wakeup.lock"
@@ -54,7 +53,7 @@ def print_introspection():
     console.print()
     console.print("Connected Handlers:")
     console.print("  modules/")
-    console.print("    - wakeup_ops.py (notification stubs — Telegram stripped)")
+    console.print("    - wakeup_ops.py (notifications archived — Telegram removed)")
     console.print()
 
 
@@ -189,6 +188,7 @@ def main() -> int:
         print_help()
         sys.exit(0)
 
+    json_handler.log_operation("wakeup_triggered")
     log("=" * 60)
     log("Daemon wake-up triggered")
 

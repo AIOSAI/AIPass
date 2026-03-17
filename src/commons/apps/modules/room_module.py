@@ -28,6 +28,7 @@ except ImportError:
 from rich.table import Table
 
 from commons.apps.handlers.rooms.room_ops import create_room, list_rooms, join_room
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -63,21 +64,26 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if not args:
-        return _handle_list_rooms([])
+        print_introspection()
+        return True
 
     subcommand = args[0].lower()
     sub_args = args[1:]
 
     if subcommand == "create":
-        return _handle_create_room(sub_args)
+        result = _handle_create_room(sub_args)
     elif subcommand == "list":
-        return _handle_list_rooms(sub_args)
+        result = _handle_list_rooms(sub_args)
     elif subcommand == "join":
-        return _handle_join_room(sub_args)
+        result = _handle_join_room(sub_args)
     else:
         console.print(f"[red]Unknown room subcommand: {subcommand}[/red]")
         console.print("[dim]Available: create, list, join[/dim]")
         return True
+
+    if result:
+        json_handler.log_operation(f"room_{subcommand}_executed", {"command": "room", "success": True})
+    return result
 
 
 # =============================================================================

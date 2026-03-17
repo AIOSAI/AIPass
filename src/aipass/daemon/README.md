@@ -4,7 +4,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** builder
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-03-17
 
 ---
 
@@ -50,20 +50,18 @@ daemon/
 │   │   │   └── red_flag_detector.py   # Detects anomalies / red flags
 │   │   ├── schedule/
 │   │   │   ├── task_registry.py       # Task registry for scheduled items
-│   │   │   ├── assistant_notifier.py  # Assistant notification dispatch
-│   │   │   └── telegram_notifier.py   # Telegram notification dispatch
-│   │   ├── telegram/
-│   │   │   └── assistant_chat.py      # Telegram assistant chat handler
+│   │   │   └── .archive/             # assistant_notifier, telegram_notifier (archived)
+│   │   ├── telegram/                  # ARCHIVED — moving to skills system
+│   │   │   └── .archive/             # assistant_chat (archived)
 │   │   └── update/
 │   │       └── data_loader.py         # Data loading for status digests
 │   ├── extensions/             # Extension point for additional capabilities
 │   ├── json_templates/         # JSON template definitions
 │   └── plugins/
-│       ├── botfather_reminder.py      # BotFather reminder plugin
 │       ├── community_rotation.py      # Community rotation plugin
 │       ├── daily_audit.py             # Daily audit plugin
-│       ├── dev_central_monitor.py     # Dev-Central monitor plugin
-│       └── heartbeat.py               # Heartbeat / liveness plugin
+│       ├── heartbeat.py               # Heartbeat / liveness plugin
+│       └── .archive/                  # botfather_reminder, dev_central_monitor (archived)
 ├── daemon_json/                # JSON tracking data
 ├── docs/                       # Documentation
 ├── dropbox/                    # Incoming file drops
@@ -115,7 +113,8 @@ drone @daemon <command> --help
 
 ### Provides To
 - All modules -- background task scheduling, activity monitoring, action tracking
-- Plugins -- extensible plugin system for recurring tasks (heartbeat, daily audit, community rotation, etc.)
+- Plugins -- extensible plugin system for recurring tasks (heartbeat, daily audit, community rotation)
+- Note: Telegram handlers archived -- moving to skills system. See `apps/handlers/telegram/.archive/`
 
 ---
 
@@ -128,4 +127,4 @@ drone @daemon <command> --help
 
 ---
 
-*Last Updated: 2026-03-10*
+*Last Updated: 2026-03-17*

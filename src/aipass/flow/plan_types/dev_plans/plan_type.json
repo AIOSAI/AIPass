@@ -1,0 +1,11 @@
+{
+  "name": "dev_plans",
+  "display_name": "Dev Plans",
+  "prefix": "DPLAN",
+  "digits": 4,
+  "description": "Design Plans for thinking and planning",
+  "default_template": "default",
+  "available_templates": ["default"],
+  "registry_file": "dplan_registry.json",
+  "slug_max_length": 45
+}

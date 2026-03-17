@@ -1,0 +1,11 @@
+{
+  "name": "flow_plans",
+  "display_name": "Flow Plans",
+  "prefix": "FPLAN",
+  "digits": 4,
+  "description": "Flow Plans for building and execution",
+  "default_template": "default",
+  "available_templates": ["default", "master"],
+  "registry_file": "fplan_registry.json",
+  "slug_max_length": 45
+}

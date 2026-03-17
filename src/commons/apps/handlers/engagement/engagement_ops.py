@@ -23,6 +23,7 @@ from datetime import datetime
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -105,6 +106,7 @@ def generate_prompt(args: List[str]) -> dict:
         post_id = cursor.lastrowid
         conn.commit()
         close_db(conn)
+        json_handler.log_operation("generate_prompt", {"post_id": post_id, "theme": theme})
 
         return {
             "success": True,

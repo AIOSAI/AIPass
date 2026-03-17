@@ -36,6 +36,7 @@ import fcntl
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console
+from aipass.daemon.apps.handlers.json import json_handler
 
 # =============================================
 # OPTIONAL IMPORTS (via module layer)
@@ -131,7 +132,7 @@ def print_introspection():
     console.print()
     console.print("Connected Handlers:")
     console.print("  modules/")
-    console.print("    - scheduler_ops.py (task registry ops + action registry ops)")
+    console.print("    - scheduler_ops.py (task registry ops + action registry ops, notifications archived)")
     console.print()
     console.print("  plugins/")
     console.print("    - discover_plugins (plugin discovery and scheduled execution)")
@@ -184,7 +185,7 @@ def process_due_tasks() -> dict:
 
     # Recover any stale dispatches (stuck > 5 minutes)
     try:
-        recovered = recover_stale_dispatches(max_age_minutes=STALE_DISPATCH_MAX_AGE)
+        recovered = recover_stale_dispatches(max_age_minutes=STALE_DISPATCH_MAX_AGE)  # type: ignore[misc]
         results["recovered"] = recovered
         if recovered:
             log(f"Recovered {recovered} stale dispatch(es)")
@@ -194,7 +195,7 @@ def process_due_tasks() -> dict:
 
     # Get due tasks
     try:
-        due_tasks = get_due_tasks()
+        due_tasks = get_due_tasks()  # type: ignore[misc]
     except Exception as e:
         log(f"ERROR: Failed to load due tasks: {e}")
         results["errors"].append(f"Load tasks: {e}")
@@ -219,7 +220,7 @@ def process_due_tasks() -> dict:
 
         # Mark as dispatching (prevents re-dispatch)
         try:
-            mark_dispatching(task_id)
+            mark_dispatching(task_id)  # type: ignore[misc]
         except Exception as e:
             log(f"WARNING: Failed to mark dispatching {task_id[:8]}: {e}")
             results["errors"].append(f"Mark dispatching {task_id[:8]}: {e}")
@@ -234,7 +235,7 @@ def process_due_tasks() -> dict:
         # Send the email
         if not AI_MAIL_AVAILABLE:
             log(f"SKIP: ai_mail not available, cannot send to {recipient}")
-            mark_pending(task_id)
+            mark_pending(task_id)  # type: ignore[misc]
             results["failed"] += 1
             results["errors"].append(f"ai_mail unavailable for {task_id[:8]}")
             continue
@@ -250,11 +251,11 @@ def process_due_tasks() -> dict:
             )
 
             if email_sent:
-                mark_completed(task_id)
+                mark_completed(task_id)  # type: ignore[misc]
                 log(f"OK: Sent to {recipient}: {task_desc[:40]}")
                 results["success"] += 1
             else:
-                mark_pending(task_id)
+                mark_pending(task_id)  # type: ignore[misc]
                 log(f"FAIL: Email returned False for {recipient}: {task_desc[:40]}")
                 results["failed"] += 1
                 results["errors"].append(f"Email failed: {task_id[:8]} -> {recipient}")
@@ -262,7 +263,7 @@ def process_due_tasks() -> dict:
         except Exception as e:
             # Reset to pending for retry on next run
             try:
-                mark_pending(task_id)
+                mark_pending(task_id)  # type: ignore[misc]
             except Exception:
                 pass  # Best effort reset
             log(f"ERROR: Exception sending to {recipient}: {e}")
@@ -312,10 +313,14 @@ def _is_plugin_due(config: dict, last_run_map: dict) -> bool:
     name = config["name"]
 
     if schedule == "daily":
-        # Compare HH:MM against current time
+        # Compare HH:MM against current time (fuzzy 15-minute window)
         target_time = config.get("time", "00:00")
         target_h, target_m = map(int, target_time.split(":"))
-        if now.hour != target_h or now.minute != target_m:
+        current_minutes = now.hour * 60 + now.minute
+        target_minutes = target_h * 60 + target_m
+        minutes_diff = abs(current_minutes - target_minutes)
+        minutes_diff = min(minutes_diff, 1440 - minutes_diff)  # handle midnight wrap
+        if minutes_diff > 15:
             return False
         # Check we haven't already run today
         last_iso = last_run_map.get(name)
@@ -326,9 +331,11 @@ def _is_plugin_due(config: dict, last_run_map: dict) -> bool:
         return True
 
     elif schedule == "hourly":
-        # Compare MM against current minute
+        # Compare MM against current minute (fuzzy 15-minute window)
         target_m = int(config.get("time", "0"))
-        if now.minute != target_m:
+        minutes_diff = abs(now.minute - target_m)
+        minutes_diff = min(minutes_diff, 60 - minutes_diff)  # handle hour wrap
+        if minutes_diff > 15:
             return False
         # Check we haven't already run this hour
         last_iso = last_run_map.get(name)
@@ -416,7 +423,7 @@ def process_plugins() -> dict:
 
     # Discover plugins
     try:
-        plugins = discover_plugins()
+        plugins = discover_plugins()  # type: ignore[misc]
     except Exception as e:
         log(f"PLUGIN: Discovery failed: {e}")
         results["errors"].append(f"Plugin discovery: {e}")
@@ -544,10 +551,10 @@ def _ensure_registry() -> None:
     """Auto-migrate plugins to registry on first run if registry is empty."""
     if not ACTION_REGISTRY_AVAILABLE:
         return
-    registry = load_registry()
+    registry = load_registry()  # type: ignore[misc]
     if not registry.get("actions"):
         log("ACTION: Registry empty, auto-migrating plugins...")
-        count = migrate_plugins()
+        count = migrate_plugins()  # type: ignore[misc]
         log(f"ACTION: Migrated {count} plugin(s) into registry")
 
 
@@ -625,7 +632,7 @@ def _dispatch_action(action: dict) -> dict:
                 reply_to='@dev_central',
             )
             if email_sent:
-                mark_reminder_completed(action["id"])
+                mark_reminder_completed(action["id"])  # type: ignore[misc]
                 log(f"ACTION: {name} - reminder sent and completed")
                 return {"status": "ok", "branch": target}
             else:
@@ -707,7 +714,7 @@ def process_actions() -> dict:
 
     # Load registry
     try:
-        registry = load_registry()
+        registry = load_registry()  # type: ignore[misc]
     except Exception as e:
         log(f"ACTION: Failed to load registry: {e}")
         results["errors"].append(f"Load registry: {e}")
@@ -733,8 +740,8 @@ def process_actions() -> dict:
         action_id = action.get("id", "????")
         name = action.get("name", "?")
 
-        if not is_action_due(action):
-            due_str = next_due_str(action)
+        if not is_action_due(action):  # type: ignore[misc]
+            due_str = next_due_str(action)  # type: ignore[misc]
             results["skipped_actions"].append({
                 "id": action_id,
                 "name": name,
@@ -755,7 +762,7 @@ def process_actions() -> dict:
                 "branch": dispatch_result.get("branch", "?"),
             })
             # Update last_run in registry
-            update_last_run(action_id)
+            update_last_run(action_id)  # type: ignore[misc]
         else:
             results["failed"] += 1
             error_msg = dispatch_result.get("error", "unknown")
@@ -788,6 +795,7 @@ def main() -> int:
         print_help()
         sys.exit(0)
 
+    json_handler.log_operation("cron_run")
     log("=" * 60)
     log("Scheduler cron triggered")
 

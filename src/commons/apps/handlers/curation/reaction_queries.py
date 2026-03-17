@@ -17,6 +17,8 @@ Pure sqlite3 - no external dependencies.
 import sqlite3
 from typing import Optional, Dict, List
 
+from commons.apps.handlers.json import json_handler
+
 
 # Emoji display map
 REACTION_EMOJI = {
@@ -74,6 +76,7 @@ def add_reaction(
         (agent_name, post_id, comment_id, reaction),
     )
     conn.commit()
+    json_handler.log_operation("reaction_added", {"agent": agent_name, "reaction": reaction})
     return True
 
 

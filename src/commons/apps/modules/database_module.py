@@ -27,6 +27,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.database import init_db, close_db, get_db
+from commons.apps.handlers.json import json_handler
 
 __all__ = ["init_db", "close_db", "get_db", "handle_command"]
 
@@ -63,4 +64,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         Always False — this module is infrastructure only.
     """
+    if command == "database":
+        if not args:
+            print_introspection()
+            json_handler.log_operation("database_executed", {"command": "database", "success": True})
+            return True
     return False

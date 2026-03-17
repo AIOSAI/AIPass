@@ -23,7 +23,9 @@ def display_plan_created(
     plan_num: int,
     relative_location: str,
     subject: str,
-    template_type: str
+    template_type: str,
+    prefix: str = "FPLAN",
+    digits: int = 4,
 ) -> str:
     """
     Format plan creation success messages
@@ -33,12 +35,15 @@ def display_plan_created(
         relative_location: Relative path to plan
         subject: Plan subject
         template_type: Template used
+        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
+        digits: Number of zero-padded digits in the plan number
 
     Returns:
         Multi-line formatted string for display
     """
+    plan_id = f"{prefix}-{plan_num:0{digits}d}"
     lines = [
-        f"[FLOW] Created FPLAN-{plan_num:04d} in {relative_location}",
+        f"[FLOW] Created {plan_id} in {relative_location}",
         f"[FLOW] Template: {template_type}",
         f"[FLOW] Subject: {subject}"
     ]
@@ -50,7 +55,9 @@ def display_plan_result(
     plan_num: int,
     location: str,
     template_type: str,
-    error: str
+    error: str,
+    prefix: str = "FPLAN",
+    digits: int = 4,
 ) -> str:
     """
     Display plan creation result with rich formatting
@@ -61,14 +68,17 @@ def display_plan_result(
         location: Relative location (ignored if not success)
         template_type: Template type (ignored if not success)
         error: Error message (ignored if success)
+        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
+        digits: Number of zero-padded digits in the plan number
 
     Returns:
         Formatted result string with emoji and color markup
     """
     if success:
-        return f"\n[green]✅ Created FPLAN-{plan_num:04d} in {location}/ using {template_type} template[/green]\n"
+        plan_id = f"{prefix}-{plan_num:0{digits}d}"
+        return f"\n[green]Created {plan_id} in {location}/ using {template_type} template[/green]\n"
     else:
-        return f"\n[red]❌ ERROR: {error}[/red]\n"
+        return f"\n[red]ERROR: {error}[/red]\n"
 
 
 # DELETE PLAN DISPLAY FUNCTIONS

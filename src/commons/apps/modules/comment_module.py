@@ -27,6 +27,7 @@ except ImportError:
 
 from commons.apps.handlers.comments.comment_ops import add_comment, vote_on_content
 from commons.apps.handlers.identity.identity_ops import resolve_display_name
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -60,11 +61,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise.
     """
     if command == "comment":
-        return _handle_comment(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_comment(args)
     elif command == "vote":
-        return _handle_vote(args)
+        result = _handle_vote(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

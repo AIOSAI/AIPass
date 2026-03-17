@@ -25,6 +25,7 @@ from .exceptions import (
     RegistryNotFoundError,
     RegistryPermissionError,
 )
+from aipass.drone.apps.handlers.json import json_handler
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +220,9 @@ def load_registry() -> Dict[str, Any]:
         raise RegistryCorruptError("Registry 'branches' must be a list or dict")
 
     _verify_registry_credential(registry_path, data)
+
+    branch_count = len(data.get("branches", {}))
+    json_handler.log_operation("load_registry", {"path": str(registry_path), "branch_count": branch_count})
 
     return data
 

@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
+from aipass.drone.apps.handlers.json import json_handler
 
 logger = system_logger
 
@@ -108,11 +109,14 @@ def discover_modules(branch_path: str, branch_name: str) -> List[str]:
 
             commands = parse_help_for_commands(help_text)
             if commands:
+                json_handler.log_operation("discover_modules", {"branch": branch_name, "count": len(commands)})
                 return commands
         except (subprocess.TimeoutExpired, OSError):
             pass
 
-    return scan_modules_directory(branch_path)
+    modules = scan_modules_directory(branch_path)
+    json_handler.log_operation("discover_modules", {"branch": branch_name, "count": len(modules), "source": "scan"})
+    return modules
 
 
 def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) -> HelpResult:

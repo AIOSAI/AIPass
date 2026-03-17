@@ -29,6 +29,7 @@ except ImportError:
 from rich.panel import Panel
 
 from commons.apps.handlers.profiles.profile_ops import show_profile, list_members
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -60,10 +61,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     if command == "profile":
-        return _handle_profile(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_profile(args)
     elif command == "who":
-        return _handle_who(args)
-    return False
+        result = _handle_who(args)
+    else:
+        return False
+
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

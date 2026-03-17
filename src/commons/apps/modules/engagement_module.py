@@ -27,6 +27,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.engagement.engagement_ops import generate_prompt, create_event
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -64,11 +65,15 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "prompt":
-        return _handle_prompt(args)
+        result = _handle_prompt(args)
     elif command == "event":
-        return _handle_event(args)
+        result = _handle_event(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

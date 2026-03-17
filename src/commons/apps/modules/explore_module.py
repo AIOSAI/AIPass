@@ -29,6 +29,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from commons.apps.handlers.rooms.explore_ops import explore_rooms, list_secrets
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -54,11 +55,15 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "explore":
-        return _handle_explore(args)
+        result = _handle_explore(args)
     elif command == "secrets":
-        return _handle_secrets(args)
+        result = _handle_secrets(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

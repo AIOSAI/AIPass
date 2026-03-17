@@ -31,6 +31,7 @@ from commons.apps.handlers.artifacts.trade_ops import (
     gift_artifact, trade_artifact, drop_item, find_item, mint_event_artifact,
     RARITY_COLORS,
 )
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -63,17 +64,24 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "gift":
-        return _handle_gift(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_gift(args)
     elif command == "trade":
-        return _handle_trade(args)
+        result = _handle_trade(args)
     elif command == "drop":
-        return _handle_drop(args)
+        result = _handle_drop(args)
     elif command == "find":
-        return _handle_find(args)
+        result = _handle_find(args)
     elif command == "mint":
-        return _handle_mint(args)
+        result = _handle_mint(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

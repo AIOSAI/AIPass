@@ -24,6 +24,7 @@ from commons.apps.handlers.search.search_queries import (
     search_all,
 )
 from commons.apps.handlers.search.log_export import export_room_log
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -118,6 +119,7 @@ def run_search(args: List[str]) -> dict:
         logger.error(f"Search failed: {e}")
         return {"success": False, "error": str(e)}
 
+    json_handler.log_operation("search_query", {"query": query, "post_results": len(posts), "comment_results": len(comments_list)})
     return {
         "success": True,
         "query": query,

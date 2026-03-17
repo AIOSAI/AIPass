@@ -26,6 +26,7 @@ OK Conditions:
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
+from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.monitoring import activity_collector
 
 
@@ -239,6 +240,8 @@ def detect_red_flags(
     # Default time window: last 24 hours
     if since_timestamp is None:
         since_timestamp = datetime.now() - timedelta(hours=24)
+
+    json_handler.log_operation("red_flag_scan")
 
     # Get all branch paths
     branches = activity_collector.get_branch_paths()

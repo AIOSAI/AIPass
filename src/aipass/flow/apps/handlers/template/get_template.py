@@ -27,7 +27,6 @@ Usage:
 
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 # INFRASTRUCTURE IMPORT PATTERN
 _PKG_ROOT = Path(__file__).resolve().parents[4]
@@ -87,18 +86,32 @@ def _find_template_file(template_name: str) -> Path:
 # HANDLER FUNCTION
 # =============================================
 
-def get_template(template_name: str = "default",
-                 number: int = 0,
-                 location: str = "",
-                 subject: str = "") -> str:
+def get_template(
+    template_name: str = "default",
+    number: int = 0,
+    location: str = "",
+    subject: str = "",
+    template_path: Path | None = None,
+    prefix: str = "FPLAN",
+    digits: int = 4,
+) -> str:
     """
-    Load and format a PLAN template from the configured template directories.
+    Load and format a PLAN template.
+
+    When *template_path* is provided the file is loaded directly from
+    that path (used by the plan_types plugin system).  Otherwise the
+    legacy ``templates/`` directory lookup is used as a fallback.
 
     Args:
         template_name: Name of template file (without .md extension)
         number: PLAN number for formatting
         location: Plan location (relative path)
         subject: Plan subject/title
+        template_path: Absolute path to a template file.  Bypasses
+            the old ``templates/`` directory lookup when set.
+        prefix: Plan prefix (e.g. "FPLAN", "DPLAN") used for
+            ``{prefix}`` and ``{plan_number}`` placeholders.
+        digits: Number of zero-padded digits in the plan number.
 
     Returns:
         Formatted template content with placeholders replaced
@@ -109,14 +122,21 @@ def get_template(template_name: str = "default",
 
     Examples:
         >>> get_template("default", 101, "flow", "My Task")
-        # Returns default.md with {number}→101, {subject}→"My Task", etc.
+        # Returns default.md with {number}->101, {subject}->"My Task", etc.
 
         >>> get_template("master", 102, "flow/DOCUMENTS", "Big Project")
         # Returns master.md with placeholders filled
+
+        >>> get_template(template_path=Path(".../dev_plans/templates/default.md"),
+        ...              number=4, subject="Design", prefix="DPLAN")
+        # Returns DPLAN template with {plan_number}->"DPLAN-0004"
     """
     try:
-        # Resolve template file (with fallback handling across directories)
-        template_file = _find_template_file(template_name)
+        # Resolve template file
+        if template_path is not None:
+            template_file = template_path
+        else:
+            template_file = _find_template_file(template_name)
 
         # Read template file
         with open(template_file, 'r', encoding='utf-8') as f:
@@ -125,12 +145,19 @@ def get_template(template_name: str = "default",
         # Get current date for {today} placeholder
         today = datetime.now().strftime('%Y-%m-%d')
 
+        # Build formatted number string (zero-padded)
+        formatted_number = f"{number:0{digits}d}"
+        plan_number = f"{prefix}-{formatted_number}"
+
         # Format template with placeholders
         formatted_content = template_content.format(
-            number=f"{number:04d}",  # Format as 4-digit number (0001, 0042, 0101)
+            number=formatted_number,
             subject=subject,
             location=location,
-            today=today
+            today=today,
+            prefix=prefix,
+            plan_number=plan_number,
+            tag="",
         )
 
         return formatted_content

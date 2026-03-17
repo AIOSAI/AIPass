@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional, TypeVar, Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from commons.apps.handlers.json import json_handler
 
 # =============================================================================
 # DATABASE PATHS
@@ -176,6 +177,7 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     _register_branches(conn)
 
     logger.info("[commons.db] Database initialized successfully")
+    json_handler.log_operation("db_init", {"db_path": str(db_path or DB_PATH), "success": True})
     return conn
 
 

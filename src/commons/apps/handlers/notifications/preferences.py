@@ -22,6 +22,7 @@ import sqlite3
 from typing import Optional, List, Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from commons.apps.handlers.json import json_handler
 
 
 def get_preference(
@@ -75,6 +76,7 @@ def set_preference(
             (agent_name, target_type, target_id, level),
         )
         conn.commit()
+        json_handler.log_operation("set_preference", {"agent": agent_name, "target_type": target_type, "level": level})
         return True
     except Exception as e:
         logger.error(f"Failed to set preference: {e}")

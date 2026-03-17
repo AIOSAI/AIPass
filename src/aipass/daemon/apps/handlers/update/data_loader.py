@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List
 
+from aipass.daemon.apps.handlers.json import json_handler
+
 # =============================================
 # CONSTANTS
 # =============================================
@@ -28,6 +30,7 @@ LOCAL_PATH = _DAEMON_ROOT / "DAEMON.local.json"
 
 def load_inbox() -> Dict[str, Any]:
     """Load inbox.json and return parsed data."""
+    json_handler.log_operation("data_loaded")
     if not INBOX_PATH.exists():
         return {"messages": [], "total_messages": 0, "unread_count": 0}
 

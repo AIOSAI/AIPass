@@ -17,6 +17,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
+from commons.apps.handlers.json import json_handler
+
 
 def get_profile(conn: sqlite3.Connection, branch_name: str) -> Optional[Dict[str, Any]]:
     """
@@ -59,6 +61,7 @@ def update_bio(conn: sqlite3.Connection, branch_name: str, bio: str) -> bool:
         (bio, branch_name)
     )
     conn.commit()
+    json_handler.log_operation("update_profile", {"branch": branch_name, "field": "bio"})
     return cursor.rowcount > 0
 
 

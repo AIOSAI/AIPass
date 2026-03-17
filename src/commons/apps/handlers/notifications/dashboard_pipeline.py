@@ -39,6 +39,7 @@ from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.handlers.notifications.preferences import get_preference
 from commons.apps.handlers.dashboard.dashboard_writer import update_commons_dashboard
 from commons.apps.handlers.central.central_writer import update_central
+from commons.apps.handlers.json import json_handler
 
 
 def _get_all_agents(conn: sqlite3.Connection) -> List[str]:
@@ -184,6 +185,8 @@ def update_dashboards_for_event(
             update_central()
         except (OSError, sqlite3.OperationalError):
             pass
+
+        json_handler.log_operation("dashboard_pipeline", {"event_type": event_type, "dashboards_updated": count})
 
     except Exception as e:
         logger.error(f"[commons] Dashboard pipeline failed: {e}")

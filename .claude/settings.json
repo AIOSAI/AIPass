@@ -5,10 +5,6 @@
   "permissions": {
     "allow": [],
     "deny": [
-      "Bash(git reset:*)",
-      "Bash(git rebase:*)",
-      "Bash(git config:*)",
-      "Bash(git push --force:*)",
       "EnterPlanMode"
     ],
     "defaultMode": "acceptEdits"

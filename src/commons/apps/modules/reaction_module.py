@@ -39,6 +39,7 @@ from commons.apps.handlers.curation.reaction_queries import (
     REACTION_EMOJI,
     VALID_REACTIONS,
 )
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -82,22 +83,36 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in HANDLED_COMMANDS:
         return False
 
-    if command == "react":
-        return _handle_react(args)
-    elif command == "unreact":
-        return _handle_unreact(args)
-    elif command == "reactions":
-        return _handle_reactions(args)
-    elif command == "pin":
-        return _handle_pin(args)
-    elif command == "unpin":
-        return _handle_unpin(args)
-    elif command == "pinned":
-        return _handle_pinned(args)
-    elif command == "trending":
-        return _handle_trending(args)
+    # Action commands that work without args — route before introspection gate
+    if command in ("reactions", "pinned", "trending"):
+        if command == "reactions":
+            result = _handle_reactions(args)
+        elif command == "pinned":
+            result = _handle_pinned(args)
+        else:
+            result = _handle_trending(args)
+        if result:
+            json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+        return result
 
-    return False
+    if not args:
+        print_introspection()
+        return True
+
+    if command == "react":
+        result = _handle_react(args)
+    elif command == "unreact":
+        result = _handle_unreact(args)
+    elif command == "pin":
+        result = _handle_pin(args)
+    elif command == "unpin":
+        result = _handle_unpin(args)
+    else:
+        return False
+
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

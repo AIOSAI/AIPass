@@ -23,6 +23,7 @@ from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
 from .executor import CommandResult, execute_command
+from aipass.drone.apps.handlers.json import json_handler
 
 logger = system_logger
 
@@ -110,6 +111,9 @@ def execute_branch_command(
         env=caller_env,
         interactive=interactive,
     )
+
+    logger.info("Executed @%s %s → exit %d", branch_name, command or "(introspection)", result.exit_code)
+    json_handler.log_operation("execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code})
 
     return CommandResult(
         stdout=result.stdout,

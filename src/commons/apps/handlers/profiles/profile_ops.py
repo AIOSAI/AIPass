@@ -27,6 +27,7 @@ from commons.apps.handlers.profiles.profile_queries import (
     format_time_ago,
 )
 from commons.apps.modules.commons_identity import get_caller_branch
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -75,6 +76,7 @@ def show_profile(args: List[str]) -> dict:
         profile["last_active_display"] = format_time_ago(profile.get("last_active", "")) if profile.get("last_active") else "never"
         profile["joined_display"] = profile["joined_at"][:10] if profile.get("joined_at") else "unknown"
 
+        json_handler.log_operation("view_profile", {"branch": target_branch})
         return {"success": True, "action": "view", "profile": profile}
 
     except Exception as e:

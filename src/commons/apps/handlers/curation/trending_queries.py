@@ -17,6 +17,8 @@ Pure sqlite3 - no external dependencies.
 import sqlite3
 from typing import List, Dict, Any
 
+from commons.apps.handlers.json import json_handler
+
 
 def get_trending_posts(
     conn: sqlite3.Connection,
@@ -76,4 +78,5 @@ def get_trending_posts(
         query, (hours_offset, hours_offset, hours_offset, min_engagement, limit)
     ).fetchall()
 
+    json_handler.log_operation("trending_query", {"hours": hours, "results": len(rows)})
     return [dict(row) for row in rows]

@@ -16,6 +16,7 @@ to the handler layer.
 from __future__ import annotations
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_registry_handler import (
     ModuleInfo,
     list_modules,
@@ -64,7 +65,7 @@ def print_introspection():
     console.print()
 
 
-def handle_command(command: str, args: list[str]) -> bool:
+def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
     """Route module registry commands to handler functions.
 
     Args:
@@ -74,6 +75,12 @@ def handle_command(command: str, args: list[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    if not args:
+        if command is None:
+            print_introspection()
+            return True
+        args = []
+    json_handler.log_operation("handle_command", {"module": "module_registry", "command": command})
     if command == "list":
         modules = list_modules()
         for name in modules:

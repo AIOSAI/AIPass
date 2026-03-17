@@ -31,6 +31,7 @@ from typing import Dict, Any, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 # =============================================================================
 # CONSTANTS
@@ -299,4 +300,5 @@ def update_central() -> Dict[str, Any]:
     write_central_file(central_data)
 
     logger.info(f"[commons] Central file updated: {len(branch_stats)} branches")
+    json_handler.log_operation("update_central", {"branches_count": len(branch_stats), "success": True})
     return central_data

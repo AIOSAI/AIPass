@@ -23,6 +23,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Console
 from aipass.cli.apps.modules import console, error
+from aipass.daemon.apps.handlers.json import json_handler
 
 def _header(text):
     console.print(f"\n[bold cyan]{'='*70}[/bold cyan]")
@@ -180,6 +181,8 @@ def main():
     # Extract command and remaining args
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
+
+    json_handler.log_operation("daemon_command", {"command": command})
 
     # Route to modules
     if route_command(command, remaining_args, modules):

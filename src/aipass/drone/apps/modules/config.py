@@ -12,10 +12,10 @@ Registry configuration management.
 Thin orchestrator that delegates to registry_handler for path resolution.
 """
 
-from pathlib import Path
 from typing import List, Optional
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
     get_registry_path,
     set_registry_path,
@@ -45,7 +45,7 @@ def print_introspection():
     console.print()
 
 
-def handle_command(command: str, args: List[str]) -> bool:
+def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
     """Route config commands to handler functions.
 
     Args:
@@ -55,6 +55,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    if not args:
+        if command is None:
+            print_introspection()
+            return True
+        args = []
+    json_handler.log_operation("handle_command", {"module": "config", "command": command})
     if command == "path":
         logger.info("Registry path: %s", get_registry_path())
         return True

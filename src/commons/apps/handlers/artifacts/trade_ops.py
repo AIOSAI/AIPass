@@ -22,6 +22,7 @@ from typing import List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 # Constants
 BRANCH_REGISTRY_PATH = os.path.join(os.path.expanduser("~"), "BRANCH_REGISTRY.json")
@@ -163,6 +164,7 @@ def gift_artifact(args: List[str]) -> dict:
         conn.commit()
         close_db(conn)
 
+        json_handler.log_operation("gift_artifact", {"artifact_id": artifact_id, "sender": sender, "recipient": recipient})
         return {
             "success": True,
             "artifact_id": artifact_id,

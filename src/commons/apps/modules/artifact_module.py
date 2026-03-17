@@ -32,6 +32,7 @@ from commons.apps.handlers.artifacts.artifact_ops import (
     craft_artifact, list_artifacts, inspect_artifact, collab_artifact, sign_artifact,
     RARITY_COLORS,
 )
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -61,17 +62,24 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "craft":
-        return _handle_craft(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_craft(args)
     elif command == "artifacts":
-        return _handle_list(args)
+        result = _handle_list(args)
     elif command == "inspect":
-        return _handle_inspect(args)
+        result = _handle_inspect(args)
     elif command == "collab":
-        return _handle_collab(args)
+        result = _handle_collab(args)
     elif command == "sign":
-        return _handle_sign(args)
+        result = _handle_sign(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

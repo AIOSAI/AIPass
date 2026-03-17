@@ -19,6 +19,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -175,6 +176,7 @@ def display_feed(args: List[str]) -> dict:
         }
 
         close_db(conn)
+        json_handler.log_operation("feed_query", {"total": total, "sort": sort, "room": room_name})
         return result
 
     except Exception as e:

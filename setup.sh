@@ -342,14 +342,31 @@ else
     echo "Skipping hooks (no .claude/hooks/ directory found)"
 fi
 
+# --- Create global symlinks for CLI tools ---
+echo ""
+echo "Creating global symlinks ..."
+
+VENV_BIN="$SCRIPT_DIR/.venv/bin"
+LOCAL_BIN="/usr/local/bin"
+
+for cmd in drone seedgo; do
+    if [ -f "$VENV_BIN/$cmd" ]; then
+        if sudo ln -sf "$VENV_BIN/$cmd" "$LOCAL_BIN/$cmd" 2>/dev/null; then
+            echo "  $LOCAL_BIN/$cmd -> $VENV_BIN/$cmd"
+        else
+            echo "  WARN: Could not create symlink for $cmd (try running with sudo)"
+            echo "  Manual fix: sudo ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd"
+        fi
+    fi
+done
+
 # --- Result ---
 echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "=== Setup complete ==="
     echo ""
-    echo "To activate the environment, run:"
-    echo ""
-    echo "  source .venv/bin/activate"
+    echo "drone and seedgo are available globally via /usr/local/bin symlinks."
+    echo "No venv activation needed."
     echo ""
 else
     echo "=== Setup finished with errors ==="

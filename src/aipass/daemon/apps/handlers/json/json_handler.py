@@ -55,7 +55,9 @@ def load_template(json_type: str, module_name: str) -> Any:
 
     template_str = json.dumps(template)
     template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("2026-01-21", datetime.now().date().isoformat())
+    current_date = datetime.now().date().isoformat()
+    template_str = template_str.replace("{{CURRENT_DATE}}", current_date)
+    template_str = template_str.replace("2026-01-21", current_date)
 
     return json.loads(template_str)
 

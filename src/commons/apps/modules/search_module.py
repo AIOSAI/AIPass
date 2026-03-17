@@ -26,6 +26,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.search.search_ops import run_search, run_log_export
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -57,10 +58,15 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     if command == "search":
-        return _handle_search(args)
+        result = _handle_search(args)
     elif command == "log":
-        return _handle_log(args)
-    return False
+        result = _handle_log(args)
+    else:
+        return False
+
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

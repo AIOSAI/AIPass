@@ -28,6 +28,7 @@ except ImportError:
 from rich.panel import Panel
 
 from commons.apps.handlers.digest.digest_ops import show_digest
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -147,4 +148,5 @@ def _handle_digest(args: List[str]) -> bool:
         console.print("[dim]  No new branches in the last 24h[/dim]")
         console.print()
 
+    json_handler.log_operation("digest_executed", {"command": "digest", "success": True})
     return True

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -164,6 +165,7 @@ def get_caller_branch() -> Optional[Dict[str, Any]]:
         # Auto-register as Commons agent
         _ensure_agent_registered(branch_info)
 
+        json_handler.log_operation("caller_detected", {"branch": branch_info.get("name", "unknown")})
         return branch_info
 
     except Exception as e:

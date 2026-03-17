@@ -24,8 +24,11 @@ try:
 except ImportError:
     from rich.console import Console
     console = Console()
-    def error(msg: str) -> None:
-        console.print(f"[red]{msg}[/red]")
+
+    def error(message: str, suggestion: str | None = None) -> None:  # type: ignore[misc]
+        console.print(f"[red]{message}[/red]")
+        if suggestion:
+            console.print(f"  [yellow]{suggestion}[/yellow]")
 
 from rich.panel import Panel
 
@@ -36,6 +39,7 @@ from commons.apps.handlers.rooms.space_ops import (
     get_visitors_data,
 )
 from commons.apps.modules.commons_identity import get_caller_branch
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -99,16 +103,30 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ["enter", "look", "decorate", "visitors"]:
         return False
 
-    if command == "enter":
-        return _cmd_enter(args)
-    elif command == "look":
-        return _cmd_look(args)
-    elif command == "decorate":
-        return _cmd_decorate(args)
-    elif command == "visitors":
-        return _cmd_visitors(args)
+    # Action commands that work without args — route before introspection gate
+    if command in ("look", "visitors"):
+        if command == "look":
+            result = _cmd_look(args)
+        else:
+            result = _cmd_visitors(args)
+        if result:
+            json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+        return result
 
-    return False
+    if not args:
+        print_introspection()
+        return True
+
+    if command == "enter":
+        result = _cmd_enter(args)
+    elif command == "decorate":
+        result = _cmd_decorate(args)
+    else:
+        return False
+
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

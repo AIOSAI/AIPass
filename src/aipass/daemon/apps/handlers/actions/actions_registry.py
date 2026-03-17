@@ -27,6 +27,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from aipass.daemon.apps.handlers.json import json_handler
+
 # logger imported from aipass.prax
 
 # Paths
@@ -151,6 +153,7 @@ def create_action(
     registry["actions"].append(action)
     save_registry(registry)
 
+    json_handler.log_operation("action_registry_modified", {"action": name})
     logger.info("[actions_registry] Created action %s: %s (%s)", action_id, name, action_type)
     return action
 
@@ -261,7 +264,12 @@ def is_action_due(action: dict) -> bool:
             target_h, target_m = map(int, target_time.split(":"))
         except (ValueError, AttributeError):
             return False
-        if now.hour != target_h or now.minute != target_m:
+        # Fuzzy 15-minute window (cron may not fire at exact minute)
+        current_minutes = now.hour * 60 + now.minute
+        target_minutes = target_h * 60 + target_m
+        minutes_diff = abs(current_minutes - target_minutes)
+        minutes_diff = min(minutes_diff, 1440 - minutes_diff)  # midnight wrap
+        if minutes_diff > 15:
             return False
         last_run = action.get("last_run")
         if last_run:
@@ -279,7 +287,10 @@ def is_action_due(action: dict) -> bool:
             target_m = int(target_m_str)
         except (ValueError, TypeError):
             return False
-        if now.minute != target_m:
+        # Fuzzy 15-minute window (cron may not fire at exact minute)
+        minutes_diff = abs(now.minute - target_m)
+        minutes_diff = min(minutes_diff, 60 - minutes_diff)  # hour wrap
+        if minutes_diff > 15:
             return False
         last_run = action.get("last_run")
         if last_run:

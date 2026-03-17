@@ -30,6 +30,7 @@ from rich.text import Text
 
 from commons.apps.handlers.posts.post_ops import create_post, view_thread, delete_post
 from commons.apps.handlers.identity.identity_ops import resolve_display_name
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -64,13 +65,20 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise.
     """
     if command == "post":
-        return _handle_create_post(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_create_post(args)
     elif command == "thread":
-        return _handle_view_thread(args)
+        result = _handle_view_thread(args)
     elif command == "delete":
-        return _handle_delete_post(args)
+        result = _handle_delete_post(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

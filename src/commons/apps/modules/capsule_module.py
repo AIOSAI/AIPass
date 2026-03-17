@@ -31,6 +31,7 @@ from rich.table import Table
 from commons.apps.handlers.artifacts.capsule_ops import (
     seal_capsule, list_capsules, open_capsule,
 )
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -57,13 +58,20 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "capsule":
-        return _handle_seal(args)
+        if not args:
+            print_introspection()
+            return True
+        result = _handle_seal(args)
     elif command == "capsules":
-        return _handle_list(args)
+        result = _handle_list(args)
     elif command == "open":
-        return _handle_open(args)
+        result = _handle_open(args)
+    else:
+        return False
 
-    return False
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

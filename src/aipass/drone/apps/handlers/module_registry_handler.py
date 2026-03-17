@@ -19,6 +19,7 @@ import importlib
 from dataclasses import dataclass
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.json import json_handler
 
 
 # Maps module name -> import path for its drone_adapter
@@ -75,7 +76,9 @@ def route_module_command(name: str, command: str, args: list[str] | None = None)
     adapter_path = _MODULE_REGISTRY[name]
     mod = importlib.import_module(adapter_path)
     handler = getattr(mod, "handle_command")
-    return handler(command, args)
+    result = handler(command, args)
+    json_handler.log_operation("route_module_command", {"module": name, "command": command})
+    return result
 
 
 def get_module_help(name: str, command: str | None = None) -> str:

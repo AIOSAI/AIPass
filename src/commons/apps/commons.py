@@ -36,7 +36,7 @@ signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Cross-branch imports
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli.apps.modules import console, header, error, warning
 
 
 # =============================================================================
@@ -262,8 +262,8 @@ def print_help() -> None:
 
     console.print("-" * 70)
     console.print()
-    console.print("[bold]NOTE:[/bold] Caller identity is auto-detected from PWD (branch directory).")
-    console.print("  [dim]Run from any branch directory to post as that branch.[/dim]")
+    warning("Caller identity is auto-detected from PWD (branch directory).",
+            details="Run from any branch directory to post as that branch.")
     console.print()
 
 

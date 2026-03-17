@@ -15,7 +15,6 @@ CLI interface for the numbered action registry.
 # =============================================
 
 import sys
-from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -42,6 +41,7 @@ from aipass.daemon.apps.handlers.actions.actions_registry import (
     migrate_plugins,
     next_due_str,
 )
+from aipass.daemon.apps.handlers.json import json_handler
 
 # =============================================
 # CONSTANTS
@@ -456,12 +456,19 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     try:
-        # No args or help
-        if not args or args[0] in ['--help', '-h', 'help']:
+        # No args -- introspection gate
+        if not args:
+            print_introspection()
+            return True
+
+        # Help flag
+        if args[0] in ['--help', '-h', 'help']:
             print_help()
             return True
 
         subcommand = args[0]
+
+        json_handler.log_operation("actions_command", {"subcommand": args[0] if args else "introspection"})
 
         # Named subcommands
         if subcommand == "list":

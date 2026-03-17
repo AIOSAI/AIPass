@@ -21,6 +21,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -167,6 +168,7 @@ def add_comment(args: List[str]) -> dict:
         logger.info(
             f"[comment_ops] Comment #{comment_id} on post #{post_id} by {author}"
         )
+        json_handler.log_operation("add_comment", {"comment_id": comment_id, "post_id": post_id, "author": author})
 
         return {
             "success": True,

@@ -32,6 +32,7 @@ from commons.apps.handlers.notifications.notification_ops import (
     set_track,
     show_preferences,
 )
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -67,16 +68,29 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("watch", "mute", "track", "preferences"):
         return False
 
-    if command == "watch":
-        return _handle_level(set_watch(args), "watch")
-    elif command == "mute":
-        return _handle_level(set_mute(args), "mute")
-    elif command == "track":
-        return _handle_level(set_track(args), "track")
-    elif command == "preferences":
-        return _handle_preferences(args)
+    # Action command that works without args — route before introspection gate
+    if command == "preferences":
+        result = _handle_preferences(args)
+        if result:
+            json_handler.log_operation("preferences_executed", {"command": "preferences", "success": True})
+        return result
 
-    return False
+    if not args:
+        print_introspection()
+        return True
+
+    if command == "watch":
+        result = _handle_level(set_watch(args), "watch")
+    elif command == "mute":
+        result = _handle_level(set_mute(args), "mute")
+    elif command == "track":
+        result = _handle_level(set_track(args), "track")
+    else:
+        return False
+
+    if result:
+        json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
+    return result
 
 
 # =============================================================================

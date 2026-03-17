@@ -16,7 +16,9 @@ Delegates registry access to the handler layer.
 from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
+from aipass.prax.apps.modules.logger import system_logger
 from aipass.drone.apps.handlers.exceptions import BranchNotFoundError
+from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
     load_registry,
     get_all_branches,
@@ -24,7 +26,7 @@ from aipass.drone.apps.handlers.registry_handler import (
 )
 
 
-def handle_command(command: str, args: List[str]) -> bool:
+def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
     """Route resolver commands to handler functions.
 
     Args:
@@ -34,6 +36,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    if not args:
+        if command is None:
+            print_introspection()
+            return True
+        args = []
+    json_handler.log_operation("handle_command", {"module": "resolver", "command": command})
     if command == "resolve":
         if not args:
             logger.warning("resolver resolve requires a branch name")
@@ -132,6 +140,7 @@ def resolve_branch(symbolic_name: str) -> str:
             f"Branch '{symbolic_name}' not found in registry"
         )
 
+    system_logger.info("Resolved @%s → %s", name, branch["path"])
     return branch["path"]
 
 

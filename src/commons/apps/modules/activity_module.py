@@ -29,6 +29,7 @@ from rich.table import Table
 
 from commons.apps.handlers.activity.activity_ops import run_activity
 from commons.apps.handlers.identity.identity_ops import resolve_display_name
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -118,4 +119,5 @@ def _handle_activity(args: List[str]) -> bool:
     console.print(table)
     console.print()
 
+    json_handler.log_operation("activity_executed", {"command": "activity", "success": True})
     return True

@@ -21,7 +21,7 @@ Usage:
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Tuple, List, Dict, Any
+from typing import Callable, Tuple, List, Dict, Any
 
 from aipass.prax import logger
 # logger imported from aipass.prax
@@ -38,11 +38,11 @@ MODULE_NAME = "create_plan"
 # HELPERS
 # =============================================
 
-def slugify_subject(subject: str) -> str:
-    """Sanitize subject for filename: lowercase, underscores, max 40 chars."""
+def slugify_subject(subject: str, max_length: int = 40) -> str:
+    """Sanitize subject for filename: lowercase, underscores, max *max_length* chars."""
     slug = re.sub(r'[^\w\s-]', '', subject.lower())
     slug = re.sub(r'[\s-]+', '_', slug)
-    return slug.strip('_')[:40]
+    return slug.strip('_')[:max_length]
 
 
 # =============================================
@@ -50,23 +50,24 @@ def slugify_subject(subject: str) -> str:
 # =============================================
 
 def create_plan_impl(
-    location=None,
-    subject="",
-    template_type="default",
+    location: str | None = None,
+    subject: str = "",
+    template_type: str = "default",
+    plan_type_config: Dict[str, Any] | None = None,
     # Dependencies injected from module
-    ecosystem_root=None,
-    load_registry=None,
-    save_registry=None,
-    auto_close_orphaned_plans=None,
-    resolve_plan_location=None,
-    calculate_relative_location=None,
-    get_template=None,
-    create_plan_file=None,
-    build_plan_registry_entry=None,
-    display_plan_created=None,
-    update_dashboard_local=None,
-    push_to_plans_central=None,
-    push_flow_to_branch_dashboard=None,
+    ecosystem_root: Path | None = None,
+    load_registry: Callable[..., Dict[str, Any]] | None = None,
+    save_registry: Callable[..., bool] | None = None,
+    auto_close_orphaned_plans: Callable[..., tuple] | None = None,
+    resolve_plan_location: Callable[..., tuple] | None = None,
+    calculate_relative_location: Callable[..., str] | None = None,
+    get_template: Callable[..., str] | None = None,
+    create_plan_file: Callable[..., tuple] | None = None,
+    build_plan_registry_entry: Callable[..., Dict[str, Any]] | None = None,
+    display_plan_created: Callable[..., str] | None = None,
+    update_dashboard_local: Callable[..., bool] | None = None,
+    push_to_plans_central: Callable[..., bool] | None = None,
+    push_flow_to_branch_dashboard: Callable[..., bool] | None = None,
 ) -> Tuple[bool, int, str, str, str, List[Dict[str, Any]]]:
     """
     Implement plan creation workflow
@@ -96,14 +97,55 @@ def create_plan_impl(
     """
     messages: List[Dict[str, Any]] = []
 
+    # Validate required dependencies are provided
+    required_deps = {
+        "load_registry": load_registry,
+        "save_registry": save_registry,
+        "auto_close_orphaned_plans": auto_close_orphaned_plans,
+        "resolve_plan_location": resolve_plan_location,
+        "calculate_relative_location": calculate_relative_location,
+        "get_template": get_template,
+        "create_plan_file": create_plan_file,
+        "build_plan_registry_entry": build_plan_registry_entry,
+        "display_plan_created": display_plan_created,
+        "update_dashboard_local": update_dashboard_local,
+        "push_to_plans_central": push_to_plans_central,
+        "push_flow_to_branch_dashboard": push_flow_to_branch_dashboard,
+    }
+    for dep_name, dep_fn in required_deps.items():
+        if dep_fn is None:
+            error_msg = f"Missing required dependency: {dep_name}"
+            logger.error(f"[{MODULE_NAME}] {error_msg}")
+            return False, 0, "", "", error_msg, messages
+
+    # All deps validated as non-None above; assign to satisfy type checker
+    assert load_registry is not None
+    assert save_registry is not None
+    assert auto_close_orphaned_plans is not None
+    assert resolve_plan_location is not None
+    assert calculate_relative_location is not None
+    assert get_template is not None
+    assert create_plan_file is not None
+    assert build_plan_registry_entry is not None
+    assert display_plan_created is not None
+    assert update_dashboard_local is not None
+    assert push_to_plans_central is not None
+    assert push_flow_to_branch_dashboard is not None
+
+    # Extract plan type settings from config (or fall back to FPLAN defaults)
+    prefix = plan_type_config["prefix"] if plan_type_config else "FPLAN"
+    digits = plan_type_config["digits"] if plan_type_config else 4
+    slug_max = plan_type_config.get("slug_max_length", 45) if plan_type_config else 40
+    registry_file = plan_type_config.get("registry_file") if plan_type_config else None
+
     try:
-        # STEP 1: Load registry
-        registry = load_registry()
+        # STEP 1: Load registry (type-specific when registry_file provided)
+        registry = load_registry(registry_file=registry_file)
 
         # STEP 2: Auto-cleanup orphaned plans
         registry, auto_closed_count = auto_close_orphaned_plans(registry)
         if auto_closed_count > 0:
-            save_registry(registry)
+            save_registry(registry, registry_file=registry_file)
             messages.append({"type": "dim", "text": f"[AUTO-CLEANUP] Closed {auto_closed_count} orphaned plan(s)"})
 
         # STEP 3: Get next plan number
@@ -117,21 +159,35 @@ def create_plan_impl(
         # STEP 5: Calculate relative path for display
         RELATIVE_LOCATION = calculate_relative_location(target_dir, ecosystem_root)
 
-        # STEP 6: Build plan file path (FPLAN-XXXX_topic_slug_YYYY-MM-DD.md)
-        topic_slug = slugify_subject(subject)
+        # STEP 6: Build plan file path ({PREFIX}-{XXXX}_{topic_slug}_{date}.md)
+        topic_slug = slugify_subject(subject, max_length=slug_max)
         date_str = datetime.now().strftime("%Y-%m-%d")
+        formatted_num = f"{NEXT_NUM:0{digits}d}"
         if topic_slug:
-            PLAN_FILE = target_dir / f"FPLAN-{NEXT_NUM:04d}_{topic_slug}_{date_str}.md"
+            PLAN_FILE = target_dir / f"{prefix}-{formatted_num}_{topic_slug}_{date_str}.md"
         else:
-            PLAN_FILE = target_dir / f"FPLAN-{NEXT_NUM:04d}_{date_str}.md"
+            PLAN_FILE = target_dir / f"{prefix}-{formatted_num}_{date_str}.md"
 
         # STEP 7: Get template content
+        # Resolve template path from plan_type_config when available
+        template_path: Path | None = None
+        if plan_type_config is not None:
+            tmpl_name = plan_type_config.get("default_template", "default")
+            tmpl_dir: Path | None = plan_type_config.get("_directory")
+            if tmpl_dir is not None:
+                candidate = tmpl_dir / "templates" / f"{tmpl_name}.md"
+                if candidate.is_file():
+                    template_path = candidate
+
         try:
             CONTENT = get_template(
                 template_type,
                 number=NEXT_NUM,
                 location=RELATIVE_LOCATION,
-                subject=subject
+                subject=subject,
+                template_path=template_path,
+                prefix=prefix,
+                digits=digits,
             )
         except Exception as e:
             error_msg = f"Failed to load template '{template_type}': {e}"
@@ -147,13 +203,13 @@ def create_plan_impl(
         if "plans" not in registry:
             registry["plans"] = {}
 
-        registry["plans"][f"{NEXT_NUM:04d}"] = build_plan_registry_entry(
+        registry["plans"][formatted_num] = build_plan_registry_entry(
             NEXT_NUM, target_dir, RELATIVE_LOCATION, subject, PLAN_FILE, template_type
         )
         registry["next_number"] = NEXT_NUM + 1
 
-        # STEP 10: Save updated registry
-        if not save_registry(registry):
+        # STEP 10: Save updated registry (type-specific when registry_file provided)
+        if not save_registry(registry, registry_file=registry_file):
             error_msg = "Failed to save registry after plan creation"
             logger.error(f"[{MODULE_NAME}] {error_msg}")
             messages.append({"type": "warning", "text": f"[WARNING] {error_msg}"})
@@ -174,10 +230,14 @@ def create_plan_impl(
             messages.append({"type": "dim", "text": f"No branch dashboard at {target_dir} -- no branch is tracking this plan"})
 
         # STEP 12: Log success
-        logger.info(f"[{MODULE_NAME}] Created FPLAN-{NEXT_NUM:04d} in {RELATIVE_LOCATION}")
+        plan_id = f"{prefix}-{formatted_num}"
+        logger.info(f"[{MODULE_NAME}] Created {plan_id} in {RELATIVE_LOCATION}")
 
         # Build display message
-        display_msg = display_plan_created(NEXT_NUM, RELATIVE_LOCATION, subject, template_type)
+        display_msg = display_plan_created(
+            NEXT_NUM, RELATIVE_LOCATION, subject, template_type,
+            prefix=prefix, digits=digits,
+        )
         messages.append({"type": "display", "text": display_msg})
 
         # Fire trigger event for plan creation

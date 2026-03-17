@@ -38,6 +38,7 @@ from commons.apps.handlers.identity.identity_ops import (
     extract_mentions,
     resolve_display_name,
 )
+from commons.apps.handlers.json import json_handler
 
 __all__ = [
     "find_branch_root",
@@ -81,7 +82,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     if command == "whoami":
-        return _handle_whoami(args)
+        result = _handle_whoami(args)
+        if result:
+            json_handler.log_operation("whoami_executed", {"command": "whoami", "success": True})
+        return result
     return False
 
 

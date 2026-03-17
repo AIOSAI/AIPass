@@ -19,30 +19,48 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     """
     Parse arguments for plan creation
 
+    The third argument is treated as a plan type identifier and mapped
+    to a plan_type_key understood by the plan_types plugin system:
+
+    - No 3rd arg or "default" -> "flow_plans" (FPLAN with default template)
+    - "master"                -> "master"     (FPLAN with master template)
+    - "dplan"                 -> "dev_plans"  (DPLAN with default template)
+    - Any other value         -> passed through for plan_type_loader lookup
+
     Args:
         args: List of command arguments
 
     Returns:
-        Tuple of (location, subject, template_type)
+        Tuple of (location, subject, plan_type_key)
         - location: First arg or None
         - subject: Second arg or empty string
-        - template_type: Third arg or "default"
+        - plan_type_key: Resolved plan type key for the plugin system
 
     Examples:
         >>> parse_create_plan_args(["@flow", "My task", "master"])
         ("@flow", "My task", "master")
 
+        >>> parse_create_plan_args(["@flow", "My task", "dplan"])
+        ("@flow", "My task", "dev_plans")
+
         >>> parse_create_plan_args([])
-        (None, "", "default")
+        (None, "", "flow_plans")
 
         >>> parse_create_plan_args(["@flow"])
-        ("@flow", "", "default")
+        ("@flow", "", "flow_plans")
     """
     location = args[0] if len(args) > 0 else None
     subject = args[1] if len(args) > 1 else ""
-    template_type = args[2] if len(args) > 2 else "default"
+    raw_type = args[2] if len(args) > 2 else "default"
 
-    return location, subject, template_type
+    # Map raw type argument to plan_type_key
+    _TYPE_MAP = {
+        "default": "flow_plans",
+        "dplan": "dev_plans",
+    }
+    plan_type_key = _TYPE_MAP.get(raw_type.lower(), raw_type)
+
+    return location, subject, plan_type_key
 
 
 def parse_delete_command_args(args: List[str]) -> Tuple[str | None, bool, str | None]:

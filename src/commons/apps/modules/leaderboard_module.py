@@ -28,6 +28,7 @@ except ImportError:
 from rich.table import Table
 
 from commons.apps.handlers.social.leaderboard_ops import show_leaderboard, VALID_CATEGORIES
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -127,4 +128,5 @@ def _handle_leaderboard(args: List[str]) -> bool:
         console.print(table)
         console.print()
 
+    json_handler.log_operation("leaderboard_executed", {"command": "leaderboard", "success": True})
     return True

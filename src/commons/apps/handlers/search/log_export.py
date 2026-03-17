@@ -17,6 +17,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, List
 
+from commons.apps.handlers.json import json_handler
+
 
 def export_room_log(
     conn: sqlite3.Connection,
@@ -34,6 +36,7 @@ def export_room_log(
     Returns:
         Formatted plaintext string of the room log.
     """
+    json_handler.log_operation("log_export", {"room": room_name, "limit": limit})
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     post_rows = conn.execute(

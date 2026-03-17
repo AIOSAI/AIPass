@@ -10,7 +10,7 @@
 Branch Activity Data Collector Handler
 
 Collects activity data from all branches in the AIPass system.
-Scans for code files (.py) and memory files (.local.json, .observations.json, README.md).
+Scans for code files (.py) and memory files (.trinity/*.json, README.md, DASHBOARD.local.json).
 Provides file modification timestamps for activity tracking.
 """
 
@@ -19,6 +19,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+
+from aipass.daemon.apps.handlers.json import json_handler
 
 
 # Constants — find registry: env var > repo root > ~/.aipass/
@@ -29,7 +31,7 @@ _REGISTRY_CANDIDATES = [
     Path.home() / '.aipass' / 'AIPASS_REGISTRY.json',
 ]
 REGISTRY_PATH = next((p for p in _REGISTRY_CANDIDATES if p.name and p.exists()), _REGISTRY_CANDIDATES[-1])
-MEMORY_FILE_PATTERNS = [".local.json", ".observations.json", "README.md"]
+MEMORY_FILE_PATTERNS = ["local.json", "observations.json", "passport.json", "README.md", "DASHBOARD.local.json"]
 CODE_FILE_EXTENSION = ".py"
 
 
@@ -53,7 +55,10 @@ def load_branch_registry() -> Dict[str, Any]:
 
 def get_branch_paths() -> List[Dict[str, str]]:
     """
-    Get all branch names and paths from the registry.
+    Get all branch names and absolute paths from the registry.
+
+    Registry stores relative paths (e.g. 'src/aipass/daemon').
+    This resolves them against the repo root so consumers get absolute paths.
 
     Returns:
         List of dicts with 'name' and 'path' keys for each branch.
@@ -61,11 +66,18 @@ def get_branch_paths() -> List[Dict[str, str]]:
     registry = load_branch_registry()
     branches = registry.get("branches", [])
 
-    return [
-        {"name": b.get("name", ""), "path": b.get("path", "")}
-        for b in branches
-        if b.get("name") and b.get("path")
-    ]
+    result = []
+    for b in branches:
+        name = b.get("name", "")
+        raw_path = b.get("path", "")
+        if not name or not raw_path:
+            continue
+        # Resolve relative registry paths against repo root
+        resolved = Path(raw_path)
+        if not resolved.is_absolute():
+            resolved = _REPO_ROOT / raw_path
+        result.append({"name": name, "path": str(resolved)})
+    return result
 
 
 def _get_file_mtime(file_path: Path) -> Optional[datetime]:
@@ -91,8 +103,9 @@ def _is_memory_file(file_path: Path, branch_name: str) -> bool:
     Check if a file is a memory file for this branch.
 
     Memory files follow patterns:
-    - [BRANCH].local.json
-    - [BRANCH].observations.json
+    - .trinity/local.json
+    - .trinity/observations.json
+    - .trinity/passport.json
     - README.md
     - DASHBOARD.local.json
 
@@ -104,11 +117,10 @@ def _is_memory_file(file_path: Path, branch_name: str) -> bool:
         True if file is a memory file.
     """
     name = file_path.name
+    parent_name = file_path.parent.name
 
-    # Check for branch-specific memory files
-    if name == f"{branch_name}.local.json":
-        return True
-    if name == f"{branch_name}.observations.json":
+    # Check for .trinity/ memory files
+    if parent_name == ".trinity" and name in ("local.json", "observations.json", "passport.json"):
         return True
     if name == "README.md":
         return True
@@ -148,9 +160,11 @@ def _scan_directory_files(
 
         try:
             for item in path.iterdir():
-                # Skip hidden directories and __pycache__
+                # Skip hidden directories and __pycache__ (but allow .trinity)
                 if item.is_dir():
-                    if item.name.startswith('.') or item.name == '__pycache__':
+                    if item.name == '__pycache__':
+                        continue
+                    if item.name.startswith('.') and item.name != '.trinity':
                         continue
                     scan_recursive(item, depth + 1)
                 elif item.is_file():
@@ -267,6 +281,7 @@ def get_all_branch_activity(
     if since is None:
         since = datetime.now() - timedelta(hours=24)
 
+    json_handler.log_operation("activity_scan")
     time_window_hours = (datetime.now() - since).total_seconds() / 3600
 
     branch_paths = get_branch_paths()

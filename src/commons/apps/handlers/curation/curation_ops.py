@@ -33,6 +33,7 @@ from commons.apps.handlers.curation.pin_queries import (
     is_pinned,
 )
 from commons.apps.handlers.curation.trending_queries import get_trending_posts
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -95,6 +96,7 @@ def add_react(args: List[str]) -> dict:
 
         is_new = add_reaction(conn, agent_name, reaction, post_id=post_id, comment_id=comment_id)
         close_db(conn)
+        json_handler.log_operation("add_reaction", {"reaction": reaction, "target_type": target_type, "target_id": target_id})
 
         return {
             "success": True,

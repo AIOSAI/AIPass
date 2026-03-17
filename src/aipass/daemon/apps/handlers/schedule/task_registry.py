@@ -21,6 +21,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import re
 
+from aipass.daemon.apps.handlers.json import json_handler
+
 # =============================================
 # CONSTANTS
 # =============================================
@@ -158,8 +160,8 @@ def parse_due_date(date_str: str) -> str:
 # =============================================
 
 def _generate_task_id() -> str:
-    """Generate 8-character UUID for task ID."""
-    return uuid.uuid4().hex[:8]
+    """Generate 16-character UUID for task ID."""
+    return uuid.uuid4().hex[:16]
 
 
 def create_task(
@@ -183,6 +185,7 @@ def create_task(
     Raises:
         ValueError: If due_date format is invalid
     """
+    json_handler.log_operation("task_created")
     parsed_due = parse_due_date(due_date)
 
     new_task: Dict[str, Any] = {

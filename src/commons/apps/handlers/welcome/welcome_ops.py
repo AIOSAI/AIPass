@@ -23,6 +23,7 @@ from commons.apps.handlers.welcome.welcome_handler import (
     create_welcome_post,
     has_been_welcomed,
 )
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -56,6 +57,7 @@ def run_welcome(args: List[str]) -> dict:
 
         close_db(conn)
         conn = None
+        json_handler.log_operation("welcome_run", {"action": result.get("action", "unknown"), "success": result.get("success", False)})
         return result
 
     except Exception as e:

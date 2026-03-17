@@ -16,6 +16,8 @@
 
 ## Commands / Usage
 
+Drone provides a CLI for terminal use and a Python API for programmatic access.
+
 ### CLI
 
 ```bash
@@ -137,4 +139,4 @@ To add: edit `interactive_commands` or `interactive_branches` in `_handle_target
 
 ---
 
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-03-17

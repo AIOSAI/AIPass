@@ -26,6 +26,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.welcome.welcome_ops import run_welcome
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -97,4 +98,5 @@ def _handle_welcome(args: List[str]) -> bool:
 
     console.print()
 
+    json_handler.log_operation("welcome_executed", {"command": "welcome", "success": True})
     return True

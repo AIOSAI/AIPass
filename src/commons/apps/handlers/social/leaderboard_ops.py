@@ -20,6 +20,7 @@ from typing import List, Dict, Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -128,6 +129,7 @@ def show_leaderboard(args: List[str]) -> dict:
                 boards[cat] = query_map[cat](conn)
 
         close_db(conn)
+        json_handler.log_operation("leaderboard_query", {"category": category or "all"})
 
         return {
             "success": True,

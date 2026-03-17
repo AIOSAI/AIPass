@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -69,6 +70,7 @@ def seal_capsule(args: List[str]) -> dict:
         capsule_id = cursor.lastrowid
         conn.commit()
         close_db(conn)
+        json_handler.log_operation("seal_capsule", {"capsule_id": capsule_id, "creator": creator, "days": days})
 
         return {
             "success": True,

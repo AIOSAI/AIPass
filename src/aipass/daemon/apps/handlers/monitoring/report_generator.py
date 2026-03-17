@@ -18,6 +18,7 @@ from typing import Dict, Any, List, Optional
 
 from aipass.prax import logger
 # logger imported from aipass.prax
+from aipass.daemon.apps.handlers.json import json_handler
 
 # Import sibling monitoring handlers
 from aipass.daemon.apps.handlers.monitoring import activity_collector
@@ -163,6 +164,7 @@ def generate_activity_report(
     Returns:
         Formatted string report suitable for CLI display.
     """
+    json_handler.log_operation("report_generated")
     data = _aggregate_data(since_hours)
 
     red_flags = data["red_flag_summary"]

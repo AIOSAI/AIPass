@@ -12,6 +12,8 @@ Drone module custom exceptions.
 Defines the exception hierarchy for routing and branch resolution errors.
 """
 
+from aipass.drone.apps.handlers.json import json_handler
+
 
 class RoutingError(Exception):
     """Base exception for all routing-related errors."""
@@ -65,3 +67,8 @@ class RegistryPermissionError(RegistryError):
 class CommandExecutionError(RoutingError):
     """Raised when command execution fails."""
     pass
+
+
+def log_exceptions_loaded():
+    """Log module initialization for operational JSON tracking."""
+    json_handler.log_operation("exceptions_loaded", {"exception_count": 8})

@@ -42,8 +42,14 @@ REGISTRY_FILE = FLOW_JSON_DIR / "flow_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
-def load_registry() -> Dict[str, Any]:
+def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
     """Load PLAN registry
+
+    Args:
+        registry_file: Optional filename (e.g. "fplan_registry.json",
+            "dplan_registry.json"). When provided, loads from
+            ``FLOW_JSON_DIR / registry_file`` instead of the default
+            ``flow_registry.json``.
 
     Returns:
         Dict containing:
@@ -52,11 +58,13 @@ def load_registry() -> Dict[str, Any]:
 
     Returns default structure if file doesn't exist or on error.
     """
-    if not REGISTRY_FILE.exists():
+    target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
+
+    if not target.exists():
         return {"plans": {}, "next_number": 1}
 
     try:
-        with open(REGISTRY_FILE, 'r', encoding='utf-8') as f:
+        with open(target, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return {"plans": {}, "next_number": 1}

@@ -21,6 +21,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -125,6 +126,7 @@ def create_post(args: List[str]) -> dict:
         logger.info(
             f"[post_ops] Post #{post_id} created by {author} in {room_name}: {title}"
         )
+        json_handler.log_operation("create_post", {"post_id": post_id, "room": room_name, "author": author})
 
         return {
             "success": True,

@@ -20,6 +20,7 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, error
+from aipass.daemon.apps.handlers.json import json_handler
 
 def _header(text):
     console.print(f"\n[bold cyan]{'='*70}[/bold cyan]")
@@ -149,11 +150,16 @@ def handle_command(command: str, args: list) -> bool:
     if command != "update":
         return False
 
+    if not args:
+        print_introspection()
+        return True
+
     try:
         if args and args[0] in ['--help', '-h', 'help']:
             print_help()
             return True
 
+        json_handler.log_operation("update_digest")
         inbox_data = load_inbox()
         local_data = load_local()
         _print_digest(inbox_data, local_data)
@@ -164,7 +170,7 @@ def handle_command(command: str, args: list) -> bool:
     except Exception as e:
         logger.error(f"[DAEMON] Error generating update digest: {e}", exc_info=True)
         error(f"Error: {e}")
-        return True
+        return False
 
 
 # =============================================

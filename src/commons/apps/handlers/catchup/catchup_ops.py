@@ -25,6 +25,7 @@ from commons.apps.handlers.database.catchup_queries import (
     update_last_active,
 )
 from commons.apps.modules.commons_identity import get_caller_branch
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -120,6 +121,7 @@ def run_catchup(args: List[str]) -> dict:
     except Exception:
         pass
 
+    json_handler.log_operation("catchup_run", {"branch": branch_name, "is_first_visit": is_first_visit})
     return {
         "success": True,
         "is_first_visit": is_first_visit,

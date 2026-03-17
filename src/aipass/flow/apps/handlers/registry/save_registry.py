@@ -45,11 +45,15 @@ REGISTRY_FILE = FLOW_JSON_DIR / "flow_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
-def save_registry(registry: Dict[str, Any]) -> bool:
+def save_registry(registry: Dict[str, Any], registry_file: str | None = None) -> bool:
     """Save PLAN registry
 
     Args:
         registry: Dictionary containing registry data
+        registry_file: Optional filename (e.g. "fplan_registry.json",
+            "dplan_registry.json"). When provided, saves to
+            ``FLOW_JSON_DIR / registry_file`` instead of the default
+            ``flow_registry.json``.
 
     Returns:
         True if save successful, False on error
@@ -57,10 +61,12 @@ def save_registry(registry: Dict[str, Any]) -> bool:
     Automatically updates the last_updated timestamp before saving.
     Creates the flow_json directory if it doesn't exist.
     """
+    target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
+
     try:
         FLOW_JSON_DIR.mkdir(parents=True, exist_ok=True)
         registry["last_updated"] = datetime.now(timezone.utc).isoformat()
-        with open(REGISTRY_FILE, 'w', encoding='utf-8') as f:
+        with open(target, 'w', encoding='utf-8') as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
         return True
     except Exception:

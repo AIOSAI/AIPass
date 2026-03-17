@@ -47,6 +47,7 @@ tools/
 # Claude Code local state
 .claude/hooks/__pycache__/
 .claude/hooks/.last_diagnostics_file
+**/.claude/settings.local.json
 
 # Disabled files (AIPass convention: rename with (disabled) instead of delete)
 *(disabled)
@@ -65,3 +66,5 @@ backup_system
 src/aipass/flow/CLOSED_PLANS.local.json
 src/aipass/memory/config/fragmented_memory_config.json
 src/aipass/memory/config/fragmented_memory_state.json
+
+

@@ -16,6 +16,8 @@ Provides search, filtering, and FTS index sync functions.
 import sqlite3
 from typing import List, Dict, Any, Optional
 
+from commons.apps.handlers.json import json_handler
+
 
 def search_posts(
     conn: sqlite3.Connection,
@@ -122,6 +124,7 @@ def search_all(
     """
     posts = search_posts(conn, query, room=room, author=author, limit=limit)
     comments = search_comments(conn, query, author=author, limit=limit)
+    json_handler.log_operation("fts_search_all", {"query": query, "posts_found": len(posts), "comments_found": len(comments)})
     return {"posts": posts, "comments": comments}
 
 

@@ -18,6 +18,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
 
+from aipass.daemon.apps.handlers.json import json_handler
+
 
 # Health status constants
 STATUS_OK = "OK"
@@ -25,10 +27,11 @@ STATUS_WARNING = "WARNING"
 STATUS_RED = "RED"
 
 # Required memory files (branch cannot function properly without these)
-REQUIRED_FILES = ["local.json", "README.md"]
+# These live inside the .trinity/ subdirectory of each branch
+REQUIRED_FILES = [".trinity/local.json", "README.md"]
 
 # Optional memory files (nice to have, warning if missing)
-OPTIONAL_FILES = ["observations.json", "id.json"]
+OPTIONAL_FILES = [".trinity/observations.json"]
 
 # Freshness thresholds (in days)
 FRESHNESS_WARNING_DAYS = 7
@@ -42,13 +45,12 @@ def check_memory_files_exist(
     """
     Check if required memory files exist for a branch.
 
-    Required files:
-    - [BRANCH].local.json
+    Required files (actual .trinity/ structure):
+    - .trinity/local.json
     - README.md
 
     Optional files:
-    - [BRANCH].observations.json
-    - [BRANCH].id.json
+    - .trinity/observations.json
     - DASHBOARD.local.json
 
     Args:
@@ -66,16 +68,16 @@ def check_memory_files_exist(
         }
     """
     directory = Path(branch_path)
+    trinity_dir = directory / ".trinity"
 
     # Build expected file paths
     required_checks = {
-        f"{branch_name}.local.json": directory / f"{branch_name}.local.json",
+        ".trinity/local.json": trinity_dir / "local.json",
         "README.md": directory / "README.md",
     }
 
     optional_checks = {
-        f"{branch_name}.observations.json": directory / f"{branch_name}.observations.json",
-        f"{branch_name}.id.json": directory / f"{branch_name}.id.json",
+        ".trinity/observations.json": trinity_dir / "observations.json",
         "DASHBOARD.local.json": directory / "DASHBOARD.local.json",
     }
 
@@ -297,6 +299,7 @@ def get_memory_health_status(
             "check_time": str
         }
     """
+    json_handler.log_operation("memory_health_check", {"branch": branch_name})
     directory = Path(branch_path)
     issues: List[str] = []
 
@@ -310,29 +313,30 @@ def get_memory_health_status(
     for missing in file_check["missing_optional"]:
         issues.append(f"Missing optional file: {missing}")
 
-    # Step 2: Validate structure of existing memory files
+    # Step 2: Validate structure of existing memory files (.trinity/ paths)
     structure_checks = {}
-    local_file = directory / f"{branch_name}.local.json"
-    obs_file = directory / f"{branch_name}.observations.json"
+    trinity_dir = directory / ".trinity"
+    local_file = trinity_dir / "local.json"
+    obs_file = trinity_dir / "observations.json"
 
     if local_file.exists():
         local_validation = validate_memory_structure(str(local_file))
-        structure_checks[f"{branch_name}.local.json"] = local_validation
+        structure_checks[".trinity/local.json"] = local_validation
         if not local_validation["valid"]:
             for issue in local_validation["issues"]:
-                issues.append(f"{branch_name}.local.json: {issue}")
+                issues.append(f".trinity/local.json: {issue}")
 
     if obs_file.exists():
         obs_validation = validate_memory_structure(str(obs_file))
-        structure_checks[f"{branch_name}.observations.json"] = obs_validation
+        structure_checks[".trinity/observations.json"] = obs_validation
         if not obs_validation["valid"]:
             for issue in obs_validation["issues"]:
-                issues.append(f"{branch_name}.observations.json: {issue}")
+                issues.append(f".trinity/observations.json: {issue}")
 
     # Step 3: Check freshness
     freshness_checks = {}
     files_to_check = [
-        (f"{branch_name}.local.json", local_file),
+        (".trinity/local.json", local_file),
         ("README.md", directory / "README.md"),
     ]
 

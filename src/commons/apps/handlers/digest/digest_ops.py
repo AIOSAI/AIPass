@@ -21,6 +21,7 @@ from typing import List, Dict, Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -199,6 +200,7 @@ def show_digest(args: List[str]) -> dict:
         logger.error(f"Digest query failed: {e}")
         return {"success": False, "error": str(e)}
 
+    json_handler.log_operation("digest_query", {"top_posts": len(top_posts), "totals": totals})
     return {
         "success": True,
         "top_posts": top_posts,

@@ -16,6 +16,8 @@ and convenience setters for room personality columns (mood, flavor, entrance).
 import sqlite3
 from typing import Dict, Optional
 
+from commons.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # ROOM STATE KEY/VALUE OPERATIONS
@@ -32,6 +34,7 @@ def set_room_state(conn: sqlite3.Connection, room_name: str, key: str, value: st
             (room_name, key, value),
         )
         conn.commit()
+        json_handler.log_operation("set_room_state", {"room": room_name, "key": key})
         return True
     except Exception:
         return False

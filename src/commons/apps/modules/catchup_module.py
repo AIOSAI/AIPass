@@ -26,6 +26,7 @@ except ImportError:
     console = Console()
 
 from commons.apps.handlers.catchup.catchup_ops import run_catchup
+from commons.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -159,4 +160,5 @@ def _handle_catchup(args: List[str]) -> bool:
         console.print(f"  [yellow]TIP:[/yellow] {nudge}")
         console.print()
 
+    json_handler.log_operation("catchup_executed", {"command": "catchup", "success": True})
     return True

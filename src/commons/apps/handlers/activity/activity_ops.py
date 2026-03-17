@@ -20,6 +20,7 @@ from typing import List, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -171,6 +172,8 @@ def run_activity(args: List[str]) -> dict:
             "title": _truncate(row["title"], 28),
             "room_name": row["room_name"],
         })
+
+    json_handler.log_operation("activity_query", {"count": len(activities), "room_filter": room})
 
     return {
         "success": True,

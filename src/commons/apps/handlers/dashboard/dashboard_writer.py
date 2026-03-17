@@ -28,30 +28,33 @@ Usage:
 import json
 import os
 import sqlite3
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 # Constants
 AIPASS_ROOT = os.environ.get("AIPASS_ROOT", os.path.expanduser("~"))
 BRANCH_REGISTRY_PATH = os.path.join(AIPASS_ROOT, "BRANCH_REGISTRY.json")
 
 # Lazy-loaded write_section reference
-_WRITE_SECTION_FN = None
+_write_section_fn: Optional[Callable[..., Any]] = None
+_write_section_loaded = False
 
 
-def _get_write_section():
-    """Lazy import write_section from devpulse module API."""
-    global _WRITE_SECTION_FN
-    if _WRITE_SECTION_FN is None:
+def _get_write_section() -> Optional[Callable[..., Any]]:
+    """Lazy import write_section from devpulse module API. Returns callable or None."""
+    global _write_section_fn, _write_section_loaded
+    if not _write_section_loaded:
+        _write_section_loaded = True
         try:
-            from aipass.devpulse.apps.modules.dashboard import write_section
-            _WRITE_SECTION_FN = write_section
+            from aipass.devpulse.apps.modules import dashboard as _dashboard  # type: ignore[import-not-found]
+            _write_section_fn = _dashboard.write_section
         except ImportError:
-            _WRITE_SECTION_FN = lambda *a, **kw: False
-    return _WRITE_SECTION_FN
+            _write_section_fn = None
+    return _write_section_fn
 
 
 def _find_branch_path(branch_name: str) -> Optional[str]:
@@ -101,6 +104,9 @@ def write_commons_activity(branch_name: str, activity: Dict[str, Any]) -> bool:
             return False
 
         write_section = _get_write_section()
+        if write_section is None:
+            logger.warning(f"[commons] write_section unavailable, skipping dashboard for {branch_name}")
+            return False
         result = write_section(branch_path, "commons_activity", activity)
 
         if result:
@@ -158,6 +164,9 @@ def update_commons_dashboard(branch_name: str) -> bool:
         }
 
         write_section = _get_write_section()
+        if write_section is None:
+            logger.warning(f"[commons] write_section unavailable, skipping dashboard for {branch_name}")
+            return False
         result = write_section(branch_path, "commons_activity", section_data)
 
         if result:
@@ -165,6 +174,7 @@ def update_commons_dashboard(branch_name: str) -> bool:
                 f"[commons] Dashboard counts for {branch_name}: "
                 f"mentions={mentions_count}, posts={new_posts}, comments={new_comments}"
             )
+            json_handler.log_operation("update_dashboard", {"branch": branch_name, "mentions": mentions_count, "success": True})
         else:
             logger.warning(f"[commons] Dashboard write failed for {branch_name}")
 

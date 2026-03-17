@@ -22,6 +22,7 @@ from typing import List
 from aipass.prax import logger
 
 from aipass.cli.apps.modules import console, error as cli_error
+from aipass.daemon.apps.handlers.json import json_handler
 
 def _header(text):
     console.print(f"\n[bold cyan]{'='*70}[/bold cyan]")
@@ -60,7 +61,7 @@ def _send_email_via_drone(to_branch, subject, message, from_branch='@daemon',
     if auto_execute:
         cmd.append("--dispatch")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=DRONE_SUBPROCESS_TIMEOUT)
         return result.returncode == 0
     except (subprocess.SubprocessError, OSError):
         return False
@@ -73,6 +74,11 @@ send_email_direct = _send_email_via_drone
 # =============================================
 
 MODULE_NAME = "schedule"
+
+# Constants
+DRONE_SUBPROCESS_TIMEOUT = 15  # seconds
+STALE_DISPATCH_MAX_AGE = 5     # minutes
+LOCK_ACQUIRE_TIMEOUT = 0       # seconds (non-blocking)
 
 
 # =============================================
@@ -268,11 +274,12 @@ def _handle_run_due(_args: List[str]) -> bool:
     ensure_lock_dir()
 
     # Try to acquire lock (non-blocking)
-    lock = FileLock(lock_file, timeout=0)
+    # FILELOCK_AVAILABLE guard above ensures these are not None
+    lock = FileLock(lock_file, timeout=LOCK_ACQUIRE_TIMEOUT)  # type: ignore[misc]
     try:
-        with lock.acquire(timeout=0):
+        with lock.acquire(timeout=LOCK_ACQUIRE_TIMEOUT):
             return _process_due_tasks()
-    except Timeout:
+    except Timeout:  # type: ignore[misc]
         console.print("[dim]Schedule run-due already in progress, skipping.[/dim]")
         return True
 
@@ -282,7 +289,7 @@ def _process_due_tasks() -> bool:
     try:
         # Delegate to handler for all implementation logic
         email_fn = send_email_direct if AI_MAIL_AVAILABLE else None
-        results = process_due_tasks_batch(send_email_fn=email_fn, stale_max_age=5)
+        results = process_due_tasks_batch(send_email_fn=email_fn, stale_max_age=STALE_DISPATCH_MAX_AGE)
 
         # Display results (module responsibility)
         if results["recovered"]:
@@ -345,13 +352,20 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     try:
+        # No args -- introspection gate
+        if not args:
+            print_introspection()
+            return True
+
         # Handle help flag
-        if not args or args[0] in ['--help', '-h', 'help']:
+        if args[0] in ['--help', '-h', 'help']:
             _print_help()
             return True
 
         subcommand = args[0]
         subargs = args[1:]
+
+        json_handler.log_operation("schedule_command", {"subcommand": args[0] if args else "list"})
 
         # Route to subcommand handlers
         if subcommand == "create":

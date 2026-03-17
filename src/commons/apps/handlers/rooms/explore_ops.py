@@ -19,6 +19,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -77,6 +78,7 @@ def explore_rooms(args: List[str]) -> dict:
         if rooms_visited >= 3 and hidden_rooms:
             result["revealed"] = hidden_rooms[0]
 
+        json_handler.log_operation("explore_rooms", {"branch": branch_name, "rooms_visited": rooms_visited})
         return result
 
     except Exception as e:

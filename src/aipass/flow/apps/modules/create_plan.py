@@ -31,7 +31,7 @@ Usage:
 
 import sys
 from pathlib import Path
-from typing import Tuple, List
+from typing import Any, Dict, Tuple, List
 
 # INFRASTRUCTURE IMPORT PATTERN
 _PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
@@ -52,6 +52,7 @@ from aipass.flow.apps.handlers.registry.save_registry import save_registry
 
 # Template handlers (cross-domain - OK for modules)
 from aipass.flow.apps.handlers.template.get_template import get_template
+from aipass.flow.apps.handlers.template.plan_type_loader import get_plan_type
 
 # Plan handlers (same-domain)
 from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
@@ -150,7 +151,8 @@ def print_help():
 def create_plan(
     location: str | None = None,
     subject: str = "",
-    template_type: str = "default"
+    plan_type_key: str = "flow_plans",
+    plan_type_config: Dict[str, Any] | None = None,
 ) -> Tuple[bool, int, str, str, str]:
     """
     Orchestrate plan creation workflow (thin orchestrator)
@@ -161,15 +163,31 @@ def create_plan(
     Args:
         location: Target directory for plan (@folder syntax supported)
         subject: Plan subject/title
-        template_type: Template to use (default, master, etc.)
+        plan_type_key: Plan type key for the plugin system
+            (e.g. "flow_plans", "dev_plans", "master")
+        plan_type_config: Pre-resolved plan type config dict.
+            If not provided, resolved from *plan_type_key*.
 
     Returns:
         (success, plan_number, location_description, template_type, error_message)
     """
+    # Resolve plan type config from key when not provided
+    if plan_type_config is None:
+        try:
+            plan_type_config = get_plan_type(plan_type_key)
+        except ValueError as exc:
+            return False, 0, "", "", str(exc)
+
+    assert plan_type_config is not None  # guaranteed by get_plan_type or caller
+
+    # Determine template_type for backward-compat display/registry
+    template_type = plan_type_config.get("default_template", "default")
+
     result = create_plan_impl(
         location=location,
         subject=subject,
         template_type=template_type,
+        plan_type_config=plan_type_config,
         # Inject dependencies
         ecosystem_root=ECOSYSTEM_ROOT,
         load_registry=load_registry,
@@ -233,13 +251,28 @@ def handle_command(command: str, args: List[str]) -> bool:
     )
 
     # STEP 1: Parse arguments (delegate to handler)
-    location, subject, template_type = parse_create_plan_args(args)
+    location, subject, plan_type_key = parse_create_plan_args(args)
+
+    # STEP 1b: Resolve plan type config (for prefix/digits in display)
+    try:
+        plan_type_config = get_plan_type(plan_type_key)
+    except ValueError:
+        plan_type_config = None
 
     # STEP 2: Execute workflow
-    success, num, loc, tmpl, error = create_plan(location, subject, template_type)
+    success, num, loc, tmpl, error = create_plan(
+        location, subject,
+        plan_type_key=plan_type_key,
+        plan_type_config=plan_type_config,
+    )
 
     # STEP 3: Display results (delegate to display handler)
-    result_msg = display_plan_result(success, num, loc, tmpl, error)
+    prefix = plan_type_config["prefix"] if plan_type_config else "FPLAN"
+    digits = plan_type_config["digits"] if plan_type_config else 4
+    result_msg = display_plan_result(
+        success, num, loc, tmpl, error,
+        prefix=prefix, digits=digits,
+    )
     console.print(result_msg)
 
     # Return boolean result

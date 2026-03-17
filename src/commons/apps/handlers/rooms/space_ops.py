@@ -20,6 +20,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.handlers.rooms.room_state_ops import get_all_room_state, set_room_state
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -69,6 +70,7 @@ def get_room_enter_data(room_name: str) -> Dict[str, Any]:
             "recent_count": recent_count,
             "decorations": decorations,
         })
+        json_handler.log_operation("room_enter", {"room": room_name, "post_count": post_count})
 
     except Exception as e:
         result["error"] = str(e)

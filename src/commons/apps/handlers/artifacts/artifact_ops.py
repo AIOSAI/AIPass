@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
+from commons.apps.handlers.json import json_handler
 
 # Constants
 BRANCH_REGISTRY_PATH = os.path.join(os.path.expanduser("~"), "BRANCH_REGISTRY.json")
@@ -153,6 +154,7 @@ def craft_artifact(args: List[str]) -> dict:
 
         conn.commit()
         close_db(conn)
+        json_handler.log_operation("craft_artifact", {"artifact_id": artifact_id, "name": name, "rarity": rarity, "creator": creator})
 
         return {
             "success": True,

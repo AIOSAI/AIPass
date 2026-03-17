@@ -18,6 +18,8 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
+from commons.apps.handlers.json import json_handler
+
 
 def query_catchup_data(
     conn: sqlite3.Connection, branch_name: str, since_time: str
@@ -41,6 +43,7 @@ def query_catchup_data(
     trending = _get_trending_post(conn)
     karma_change = _get_karma_change(conn, branch_name, since_time)
 
+    json_handler.log_operation("catchup_query", {"branch": branch_name, "new_posts": new_posts_count, "new_comments": new_comments_count})
     return {
         "new_posts_count": new_posts_count,
         "new_comments_count": new_comments_count,

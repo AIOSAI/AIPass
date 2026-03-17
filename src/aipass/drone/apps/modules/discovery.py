@@ -16,10 +16,11 @@ from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.discovery_handler import HelpResult
+from aipass.drone.apps.handlers.json import json_handler
 from .resolver import list_branches, resolve_branch
 
 
-def handle_command(command: str, args: List[str]) -> bool:
+def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
     """Route discovery commands to handler functions.
 
     Args:
@@ -29,6 +30,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    if not args:
+        if command is None:
+            print_introspection()
+            return True
+        args = []
+    json_handler.log_operation("handle_command", {"module": "discovery", "command": command})
     if command == "modules":
         if not args:
             logger.warning("discovery modules requires a target argument")

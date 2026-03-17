@@ -23,6 +23,7 @@ from commons.apps.handlers.notifications.preferences import (
     set_preference,
     get_all_preferences,
 )
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -122,6 +123,7 @@ def _set_notification_level(args: List[str], level: str) -> dict:
         close_db(conn)
 
         if success:
+            json_handler.log_operation("notification_set", {"agent": agent_name, "level": level, "target_type": target_type})
             return {
                 "success": True,
                 "level": level,

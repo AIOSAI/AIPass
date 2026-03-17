@@ -14,9 +14,6 @@ Seed checks BRANCH_REGISTRY completeness, runs drone @seed audit @all,
 fixes non-compliance issues, and emails a summary to @dev_central.
 """
 
-from aipass.prax import logger
-# logger imported from aipass.prax
-
 PLUGIN_CONFIG = {
     "name": "daily_audit",
     "schedule": "daily",

@@ -19,6 +19,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.modules.commons_identity import get_caller_branch
+from commons.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -92,6 +93,7 @@ def create_room(args: List[str]) -> dict:
         close_db(conn)
 
         logger.info(f"[commons.rooms] Room '{room_name}' created by {caller_name}")
+        json_handler.log_operation("create_room", {"room": room_name, "created_by": caller_name})
 
         return {
             "success": True,

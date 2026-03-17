@@ -17,6 +17,8 @@ Pure sqlite3 - no external dependencies.
 import sqlite3
 from typing import Optional, List, Dict, Any
 
+from commons.apps.handlers.json import json_handler
+
 
 def pin_post(conn: sqlite3.Connection, post_id: int) -> bool:
     """Pin a post (sets pinned=1)."""
@@ -25,6 +27,7 @@ def pin_post(conn: sqlite3.Connection, post_id: int) -> bool:
         (post_id,),
     )
     conn.commit()
+    json_handler.log_operation("pin_post", {"post_id": post_id, "success": cursor.rowcount > 0})
     return cursor.rowcount > 0
 
 
