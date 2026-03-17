@@ -112,12 +112,16 @@ def get_user_by_email(email: str) -> Dict | None:
 
     try:
         import json
+        _repo_root = registry_path.parent
+
         with open(registry_path, 'r', encoding='utf-8') as f:
             registry = json.load(f)
 
         for branch in _get_branches_list(registry):
             if branch.get("email") == email:
                 branch_path = Path(branch.get("path", ""))
+                if branch_path and not branch_path.is_absolute():
+                    branch_path = (_repo_root / branch_path).resolve()
                 return {
                     "email_address": branch.get("email"),
                     "display_name": branch.get("name"),
@@ -147,11 +151,14 @@ def get_all_users() -> Dict[str, Dict]:
         with open(registry_path, 'r', encoding='utf-8') as f:
             registry = json.load(f)
 
+        _repo_root = registry_path.parent
         users = {}
         for branch in _get_branches_list(registry):
             email = branch.get("email", "")
             if email:
                 branch_path = Path(branch.get("path", ""))
+                if branch_path and not branch_path.is_absolute():
+                    branch_path = (_repo_root / branch_path).resolve()
                 users[email] = {
                     "email_address": email,
                     "display_name": branch.get("name"),

@@ -21,6 +21,6 @@ Contains handlers that respond to Trigger events.
 These handlers are registered by Trigger's event registry.
 """
 
-from .error_handler import handle_error_detected
-
-__all__ = ['handle_error_detected']
+# error_handler.py moved to apps/.archive/trigger_error_handler(disabled).py
+# Trigger branch owns event handling — ai_mail provides delivery only.
+__all__ = []
