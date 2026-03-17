@@ -18,10 +18,11 @@ Uses Rich library for beautiful terminal output.
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import List
 
 # Import console from CLI display module (using our own service!)
 from aipass.cli.apps.modules.display import console as CONSOLE
+from aipass.cli.apps.handlers.json import json_handler
 # NOTE: Cannot import prax here — circular import (prax depends on cli)
 # from aipass.prax import logger
 
@@ -116,21 +117,17 @@ def print_help():
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle 'templates' and 'demo' commands"""
-    # Handle demo as direct command
     if command == "demo":
         run_demo()
         return True
-
-    # Handle templates command
-    if command == "templates":
-        # Check for subcommand in args
-        if args and args[0] == "demo":
-            run_demo()
-        else:
-            # templates just shows introspection
-            print_introspection()
+    if command != "templates":
+        return False
+    if not args:
+        print_introspection()
         return True
-
+    if args[0] == "demo":
+        run_demo()
+        return True
     return False
 
 
@@ -161,6 +158,9 @@ def run_demo():
 
     CONSOLE.print("[bold green]✨ Rich library integration complete![/bold green]")
     CONSOLE.print("[dim]Templates provide consistent operation patterns across all branches[/dim]")
+
+    json_handler.log_operation("templates_demo")
+
     CONSOLE.print()
 
 

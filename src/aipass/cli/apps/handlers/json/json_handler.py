@@ -13,22 +13,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 import inspect
-from aipass.prax.apps.modules.logger import system_logger as logger
 
-def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root (contains pyproject.toml or AIPASS_REGISTRY.json)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "pyproject.toml").exists() or (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-# Constants — resolved via repo root walk-up (portable across any machine)
-_REPO_ROOT = _find_repo_root()
-CLI_ROOT = _REPO_ROOT / "src" / "aipass" / "cli"
-CLI_JSON_DIR = CLI_ROOT / "cli_json"
-JSON_TEMPLATES_DIR = CLI_ROOT / "apps" / "json_templates"
+# Constants — resolved via __file__ (portable across any machine)
+_BRANCH_ROOT = Path(__file__).resolve().parents[3]   # json/ -> handlers/ -> apps/ -> cli/
+_BRANCH_NAME = _BRANCH_ROOT.name
+JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+JSON_TEMPLATES_DIR = _BRANCH_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -94,12 +84,12 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Get path for module JSON file"""
     filename = f"{module_name}_{json_type}.json"
-    return CLI_JSON_DIR / filename
+    return JSON_DIR / filename
 
 
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
     """Ensure JSON file exists, create from template if missing"""
-    CLI_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    JSON_DIR.mkdir(parents=True, exist_ok=True)
 
     json_path = get_json_path(module_name, json_type)
 
@@ -111,8 +101,9 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             if validate_json_structure(data, json_type):
                 return True
             # If corrupted, fall through to regenerate
-        except Exception as exc:
-            logger.warning("JSON unreadable at %s, regenerating: %s", json_path, exc)
+        except Exception:
+            # If unreadable, fall through to regenerate
+            pass
 
     template = load_template(json_type, module_name)
 
@@ -257,7 +248,7 @@ if __name__ == "__main__":
     update_data_metrics("cli", test_metric="working")
 
     console.print()
-    console.print(f"[green]Check {CLI_JSON_DIR}/ for created files:[/green]")
+    console.print(f"[green]Check {JSON_DIR}/ for created files:[/green]")
     console.print("  [dim]•[/dim] cli_config.json")
     console.print("  [dim]•[/dim] cli_data.json")
     console.print("  [dim]•[/dim] cli_log.json")

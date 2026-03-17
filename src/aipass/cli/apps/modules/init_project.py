@@ -22,6 +22,7 @@ from typing import List
 
 from aipass.cli.apps.handlers.init.bootstrap import init_project
 from aipass.cli.apps.modules.display import console, success, error, header
+from aipass.cli.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -217,6 +218,13 @@ def _handle_init(args: List[str]) -> bool:
     console.print()
 
     success(f"Created {len(result['created_files'])} files")
+
+    json_handler.log_operation("aipass_init", {
+        "project_name": result["project_name"],
+        "target": result["target"],
+        "files_created": len(result["created_files"]),
+    })
+
     console.print()
 
     return True

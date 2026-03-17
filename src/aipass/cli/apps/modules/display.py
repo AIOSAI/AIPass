@@ -29,6 +29,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.columns import Columns
 
+from aipass.cli.apps.handlers.json import json_handler
+
 # NOTE: Cannot import prax here — circular import (prax depends on cli)
 # from aipass.prax import logger
 
@@ -226,11 +228,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command == "demo":
         run_demo()
         return True
-    elif command in ["display", "show"]:
+    if command not in ("display", "show"):
+        return False
+    if not args:
         print_introspection()
         return True
-    else:
-        return False
+    if args[0] == "demo":
+        run_demo()
+        return True
+    return False
 
 
 def run_demo():
@@ -262,6 +268,9 @@ def run_demo():
 
     CONSOLE.print("[bold green]✨ Rich library integration complete![/bold green]")
     CONSOLE.print("[dim]All display functions now use Rich for beautiful terminal output[/dim]")
+
+    json_handler.log_operation("display_demo")
+
     CONSOLE.print()
 
 
