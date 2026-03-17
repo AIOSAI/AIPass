@@ -29,6 +29,9 @@ from typing import Dict, Any, List, Optional
 # Standard library for JSON operations
 import json
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 # =============================================
 # MODULE CONSTANTS
@@ -222,6 +225,7 @@ def calculate_totals(usage_data: List[Dict]) -> Dict[str, float]:
         }
 
         # logger.info(f"[{MODULE_NAME}] Calculated totals: {result['total_requests']} requests, ${result['total_cost']:.6f}")
+        json_handler.log_operation("usage_aggregated", {"total_requests": result["total_requests"], "total_cost": result["total_cost"]})
         return result
 
     except Exception as e:

@@ -29,6 +29,9 @@ from typing import Optional, Dict, List
 # Logging
 from aipass.prax import logger
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 # ==============================================
 # CONSTANTS
@@ -86,6 +89,7 @@ def read_env_file(env_var: str, search_paths: Optional[List[Path]] = None) -> Op
                         key, value = line.split('=', 1)
                         if key.strip() == env_var:
                             # Found env_var in env_file
+                            json_handler.log_operation("env_loaded", {"variable": env_var, "source": str(env_file)})
                             return value.strip()
         except Exception as e:
             # Error reading env_file

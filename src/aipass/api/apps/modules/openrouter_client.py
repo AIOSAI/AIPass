@@ -125,17 +125,33 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["test", "call", "models", "status"]:
             return False
 
+        # Help gate
+        if args and args[0] in ("--help", "-h", "help"):
+            print_help()
+            return True
+
         # Log operation
         json_handler.log_operation(f"openrouter_{command}", {"command": command})
 
+        # Standalone commands — route before introspection gate
         if command == "test":
             test_connection()
-        elif command == "call":
-            make_call(args)
-        elif command == "models":
+            return True
+        if command == "models":
             list_models()
-        elif command == "status":
+            return True
+        if command == "status":
             check_status()
+            return True
+
+        # NO-ARGS GATE (seedgo standard)
+        if not args:
+            print_introspection()
+            return True
+
+        # Arg-required commands
+        if command == "call":
+            make_call(args)
 
         return True
     except Exception as e:

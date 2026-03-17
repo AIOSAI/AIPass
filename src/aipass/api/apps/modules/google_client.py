@@ -124,8 +124,20 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command was handled, False to pass through.
     """
+    # Help gate
+    if args and args[0] in ("--help", "-h", "help"):
+        print_help()
+        return True
+
+    # NO-ARGS GATE (seedgo standard)
+    if not args:
+        if command == "google":
+            print_introspection()
+            return True
+        return False
+
     # Only handle commands with "google" as the provider argument
-    if not args or args[0] != "google":
+    if args[0] != "google":
         return False
 
     if command == "validate":

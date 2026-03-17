@@ -31,6 +31,9 @@ from typing import Optional, Dict, Any
 # Internal handlers
 from aipass.api.apps.handlers.auth.env import read_env_file
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 # ==============================================
 # CONSTANTS
@@ -86,23 +89,31 @@ def get_api_key(provider: str = "openrouter") -> Optional[str]:
         ...     print(f"Got key: {key[:20]}...")
     """
     try:
+        source = ""
+
         # 1. Try config file
         key = get_key_from_config(provider)
         if key and validate_key(key, provider):
             # Using key from config
-            return key
+            source = "config"
 
         # 2. Try environment variable
-        key = get_key_from_env(provider)
-        if key and validate_key(key, provider):
-            # Using key from environment
-            return key
+        if not source:
+            key = get_key_from_env(provider)
+            if key and validate_key(key, provider):
+                # Using key from environment
+                source = "env"
 
         # 3. Try .env file
-        env_var = f"{provider.upper()}_API_KEY"
-        key = read_env_file(env_var)
-        if key and validate_key(key, provider):
-            # Using key from .env file
+        if not source:
+            env_var = f"{provider.upper()}_API_KEY"
+            key = read_env_file(env_var)
+            if key and validate_key(key, provider):
+                # Using key from .env file
+                source = "dotenv"
+
+        if source:
+            json_handler.log_operation("key_retrieved", {"provider": provider, "source": source})
             return key
 
         # No valid key found

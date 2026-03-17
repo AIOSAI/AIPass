@@ -29,6 +29,9 @@ import ssl
 import time
 from typing import Any, Callable, Optional
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 def is_ssl_error(exc: Exception) -> bool:
     """Check if an exception is a transient SSL/connection error.
@@ -81,6 +84,7 @@ def api_call_with_retry(
         except Exception as e:
             if attempt < max_retries and is_ssl_error(e):
                 wait = 2 ** attempt
+                json_handler.log_operation("api_retry_attempted", {"attempt": attempt + 1, "wait_seconds": wait})
                 time.sleep(wait)
                 if rebuild_service_fn:
                     rebuild_service_fn()

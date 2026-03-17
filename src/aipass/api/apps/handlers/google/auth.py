@@ -5,6 +5,7 @@
 # Created: 2026-03-14
 # Modified: 2026-03-14
 # =============================================
+# pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalMemberAccess=false, reportOptionalCall=false
 
 """
 Google OAuth2 Authentication Handler
@@ -21,6 +22,9 @@ Consumers get authenticated credentials, they decide what to do with them.
 
 from pathlib import Path
 from typing import Optional
+
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
 
 # =============================================
 # CONSTANTS
@@ -84,6 +88,7 @@ def load_credentials(scopes: Optional[list] = None) -> Optional["Credentials"]:
 
     try:
         creds = Credentials.from_authorized_user_file(str(CREDS_PATH), effective_scopes)
+        json_handler.log_operation("credentials_loaded", {"source": str(CREDS_PATH)})
         return creds
     except Exception:
         return None

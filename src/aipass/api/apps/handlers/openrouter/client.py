@@ -5,6 +5,7 @@
 # Created: 2025-11-15
 # Modified: 2025-11-15
 # =============================================
+# pyright: reportInvalidTypeForm=false, reportOptionalCall=false
 
 """
 OpenRouter Client Handler
@@ -49,12 +50,16 @@ try:
     OPENAI_AVAILABLE = True
 except ImportError:
     # logger.error("OpenAI SDK not available. Install with: pip install openai")
+    OpenAI = None  # type: ignore[assignment,misc]
     OPENAI_AVAILABLE = False
 
 # Handler imports
 from aipass.api.apps.handlers.auth.keys import get_api_key
 from aipass.api.apps.handlers.openrouter.caller import get_caller_info
 from aipass.api.apps.handlers.usage.tracking import track_usage
+
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
 
 # =============================================
 # CONFIGURATION
@@ -116,6 +121,7 @@ def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: in
         )
 
         # logger.info(f"Created OpenRouter client - base_url: {base_url}, timeout: {timeout}s")
+        json_handler.log_operation("client_initialized", {"base_url": base_url, "timeout": timeout})
         return client
 
     except Exception as e:

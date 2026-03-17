@@ -29,6 +29,9 @@ import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 # =============================================
 # MODULE CONSTANTS
 # =============================================
@@ -99,6 +102,7 @@ def track_usage(generation_id: str, caller: str, model: str = "unknown", api_key
         # Store the usage data
         if store_usage_data(caller, model, generation_id, metrics):
             # Successfully tracked usage
+            json_handler.log_operation("usage_tracked", {"caller": caller, "model": model, "generation_id": generation_id})
             return {"success": True, "metrics": metrics}
         else:
             # Failed to store usage data

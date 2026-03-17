@@ -31,6 +31,9 @@ from typing import Dict, Any, Optional
 # Internal handlers
 from aipass.api.apps.handlers.json.json_handler import load_json, save_json
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 # Logging
 from aipass.prax import logger
 
@@ -115,6 +118,7 @@ def load_provider_config(provider: str = "openrouter") -> Optional[Dict[str, Any
 
             if provider_config:
                 # Loaded config for provider
+                json_handler.log_operation("config_loaded", {"provider": provider})
                 return provider_config
             else:
                 # Provider not found in config

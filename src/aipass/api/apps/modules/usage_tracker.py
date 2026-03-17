@@ -134,15 +134,30 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["track", "stats", "session", "caller-usage", "cleanup"]:
             return False
 
+        # Help gate
+        if args and args[0] in ("--help", "-h", "help"):
+            print_help()
+            return True
+
         # Log operation
         json_handler.log_operation(f"usage_{command}", {"command": command})
 
+        # Standalone commands — route before introspection gate
+        if command == "stats":
+            show_stats()
+            return True
+        if command == "session":
+            show_session()
+            return True
+
+        # NO-ARGS GATE (seedgo standard)
+        if not args:
+            print_introspection()
+            return True
+
+        # Arg-required commands
         if command == "track":
             track_usage(args)
-        elif command == "stats":
-            show_stats()
-        elif command == "session":
-            show_session()
         elif command == "caller-usage":
             show_caller_usage(args)
         elif command == "cleanup":

@@ -27,6 +27,9 @@ from pathlib import Path
 import inspect
 from typing import Dict, Any, Optional, Tuple
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 # =============================================
 # CONFIGURATION
 # =============================================
@@ -61,11 +64,17 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
             frame_path = Path(frame_info.filename)
 
             if "flow" in frame_path.parts:
-                return _detect_flow_caller(frame_path)
+                result = _detect_flow_caller(frame_path)
+                json_handler.log_operation("caller_detected", {"caller": result.get("caller_name"), "category": "flow"})
+                return result
             elif "prax" in frame_path.parts:
-                return _detect_prax_caller(frame_path)
+                result = _detect_prax_caller(frame_path)
+                json_handler.log_operation("caller_detected", {"caller": result.get("caller_name"), "category": "prax"})
+                return result
             elif any("skills" in part for part in frame_path.parts):
-                return _detect_skills_caller(frame_path)
+                result = _detect_skills_caller(frame_path)
+                json_handler.log_operation("caller_detected", {"caller": result.get("caller_name"), "category": "skills"})
+                return result
 
         # logger.info(f"[{MODULE_NAME}] Could not detect caller from stack trace")
         return None

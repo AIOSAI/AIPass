@@ -25,6 +25,9 @@ from typing import Optional, Dict, List
 # Logging
 from aipass.prax import logger
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 def _read_json(file_path: Path) -> Optional[Dict]:
     """Read JSON file with error handling."""
@@ -90,6 +93,7 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = 30) -> int:
         _write_json(data_file_path, data)
         # logger.info(f"Cleaned up {len(old_generations)} generation entries")
         logger.info(f"Cleaned up {len(old_generations)} generation entries older than {retention_days} days")
+        json_handler.log_operation("usage_cleanup", {"generations_removed": len(old_generations), "retention_days": retention_days})
 
         return len(old_generations)
 

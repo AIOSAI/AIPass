@@ -34,6 +34,9 @@ import requests
 # Internal imports
 from aipass.api.apps.handlers.auth.keys import get_api_key
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 # =============================================
 # CONSTANTS
@@ -80,6 +83,7 @@ def get_available_models(api_key: Optional[str] = None) -> List[Dict]:
 
         if models:
             # logger.info(f"[{MODULE_NAME}] Fetched {len(models)} models from OpenRouter")
+            json_handler.log_operation("models_listed", {"count": len(models)})
             return models
         else:
             # logger.info(f"[{MODULE_NAME}] No models returned from API")

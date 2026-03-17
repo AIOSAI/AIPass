@@ -36,6 +36,9 @@ from aipass.prax import logger
 
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_from_stack
 
+# JSON handler
+from aipass.api.apps.handlers.json import json_handler
+
 
 # ===========================================
 # JSON UTILITIES
@@ -223,6 +226,7 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
 
         logger.info(f"Auto-provisioned OpenRouter config for '{caller}'")
         logger.warning("Reload config and retry request")
+        json_handler.log_operation("provider_provisioned", {"caller": caller})
 
         return config
 

@@ -65,17 +65,32 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["get-key", "validate", "list-providers", "init"]:
             return False
 
+        # Help gate
+        if args and args[0] in ("--help", "-h", "help"):
+            print_help()
+            return True
+
         # Log operation
         json_handler.log_operation(f"api_key_{command}", {"command": command})
 
+        # Standalone commands — route before introspection gate
+        if command == "list-providers":
+            list_providers()
+            return True
+        if command == "init":
+            init_env()
+            return True
+
+        # NO-ARGS GATE (seedgo standard)
+        if not args:
+            print_introspection()
+            return True
+
+        # Arg-required commands
         if command == "get-key":
             get_key(args)
         elif command == "validate":
             validate_key(args)
-        elif command == "list-providers":
-            list_providers()
-        elif command == "init":
-            init_env()
 
         return True
     except Exception as e:
