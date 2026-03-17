@@ -3,7 +3,7 @@
 # Description: Template sync handler — implementation logic for template sync
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Template synchronization handler for branch lifecycle management.
@@ -18,6 +18,7 @@ import shutil
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Repo root — resolved from spawn package location
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
@@ -112,6 +113,8 @@ def sync_templates(sync: bool = False, dry_run: bool = False) -> dict:
             except Exception as exc:
                 errors.append(f"Failed to sync {file_key}: {exc}")
                 logger.error(f"[sync-templates] Failed to sync {file_key}: {exc}")
+
+    json_handler.log_operation("templates_pulled")
 
     return {
         "managed_files": len(managed_files),

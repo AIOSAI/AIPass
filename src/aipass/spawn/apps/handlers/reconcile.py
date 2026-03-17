@@ -3,7 +3,7 @@
 # Description: Branch state reconciliation — filesystem vs metadata
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Branch state reconciliation handler.

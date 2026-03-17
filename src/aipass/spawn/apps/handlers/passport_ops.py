@@ -3,7 +3,7 @@
 # Description: Passport command — grants birthright citizenship to a directory
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Passport command implementation for granting birthright citizenship.
@@ -36,6 +36,7 @@ from aipass.spawn.apps.handlers.registry import (
     get_next_citizen_number,
 )
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def grant_passport(
@@ -89,10 +90,10 @@ def grant_passport(
     ensure_directory(target)
 
     # Copy birthright template with placeholder replacement
-    copied, skipped = copy_template(template, target, replacements)
+    copied, _ = copy_template(template, target, replacements)
 
     # Rename any placeholder paths
-    renamed = rename_placeholder_paths(target, folder_name)
+    _ = rename_placeholder_paths(target, folder_name)
 
     # Regenerate template registry
     regenerate_template_registry(target)
@@ -107,6 +108,7 @@ def grant_passport(
     issues = validate_no_placeholders(target)
 
     logger.info(f"[passport] Granted birthright to {branch_upper} at {target}")
+    json_handler.log_operation("passport_created", data={"target": str(target)})
 
     return {
         "success": True,

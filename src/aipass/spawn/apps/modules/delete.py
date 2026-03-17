@@ -3,7 +3,7 @@
 # Description: Branch deletion — thin CLI layer for archive and deregister
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-14
 # =============================================
 
 """Delete orchestrator for branch lifecycle management.
@@ -17,6 +17,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.delete_ops import delete_branch
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -45,9 +46,15 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise.
     """
-    if command == "delete":
-        return handle_delete(args) == 0
-    return False
+    if command != "delete":
+        return False
+
+    # No args → introspection
+    if not args:
+        print_introspection()
+        return True
+
+    return handle_delete(args) == 0
 
 
 # =============================================================================
@@ -94,6 +101,9 @@ def handle_delete(args: list[str]) -> int:
         logger.error(f"[delete] Unexpected error deleting {branch_name}: {exc}")
         error(f"Error deleting {branch_name}: {exc}")
         return 1
+
+    if result.get("success"):
+        json_handler.log_operation("branch_deleted", data={"branch": branch_name})
 
     _print_summary(result, dry_run)
     return 0 if result.get("success") else 1

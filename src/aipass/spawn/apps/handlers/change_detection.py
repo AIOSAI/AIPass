@@ -3,7 +3,7 @@
 # Description: Template change detection — template vs branch metadata
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Template change detection handler.
@@ -15,8 +15,6 @@ identify additions, updates, renames, and pruned files.
 
 from pathlib import Path
 from typing import Any
-
-from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 # =============================================================================
@@ -125,8 +123,6 @@ def detect_changes(
 
         template_path = t_info.get("path", t_info.get("current_name", ""))
         branch_path = b_info.get("current_path", "")
-        template_name = t_info.get("current_name", Path(template_path).name)
-        branch_name = b_info.get("current_name", "")
 
         # Check for RENAME: same ID but path changed in template
         # Compare the template-side path against the template_name stored in branch meta

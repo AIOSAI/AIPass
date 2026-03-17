@@ -3,7 +3,7 @@
 # Description: Branch metadata operations for update tracking
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Branch metadata operations — manages .spawn/.branch_meta.json for per-branch tracking.
@@ -20,14 +20,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.json import json_handler
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-
-# Path to the agent template directory (relative to this file)
-_SPAWN_ROOT = Path(__file__).parents[2]  # spawn/
-_TEMPLATE_DIR = _SPAWN_ROOT / "templates" / "builder"
 
 _BRANCH_META_DIR = ".spawn"
 _BRANCH_META_FILE = ".branch_meta.json"
@@ -281,5 +278,7 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
         "file_tracking": file_tracking,
         "directory_tracking": directory_tracking,
     }
+
+    json_handler.log_operation("meta_generated", data={"branch": branch_name})
 
     return meta

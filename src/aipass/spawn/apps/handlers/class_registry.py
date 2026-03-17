@@ -3,7 +3,7 @@
 # Description: Citizen class registry — maps class names to template directories
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Citizen class registry for spawn template system.

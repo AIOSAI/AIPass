@@ -3,7 +3,7 @@
 # Description: Registry sync handler — implementation logic for registry repair
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -32,6 +32,7 @@ from aipass.spawn.apps.handlers.meta_ops import (
 )
 from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Repo root — resolved from spawn package location
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
@@ -103,7 +104,7 @@ def sync_registry(fix: bool = False) -> dict:
             stale.append(name)
 
     # Check filesystem branches against registry
-    for name, path in filesystem_branches.items():
+    for name, _path in filesystem_branches.items():
         if name not in registered:
             unregistered_list.append(name)
 
@@ -205,6 +206,8 @@ def sync_registry(fix: bool = False) -> dict:
                     save_branch_meta(branch_path, branch_meta)
                     spawn_rebuilt.append(name)
                     logger.info(f"[sync-registry] Rebuilt .spawn/ for: {name}")
+
+    json_handler.log_operation("registry_scanned")
 
     return {
         "stale": stale,

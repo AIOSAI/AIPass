@@ -3,7 +3,7 @@
 # Description: Main orchestrator for agent spawning
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """
@@ -36,11 +36,12 @@ from aipass.spawn.apps.handlers.file_ops import copy_template, rename_placeholde
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
 from aipass.spawn.apps.handlers.registry import find_registry, add_to_registry, get_next_citizen_number
 from aipass.spawn.apps.handlers.class_registry import (
-    validate_class,
-    get_default_class,
-    get_available_classes,
     get_template_dir as _get_template_dir,
+    validate_class as validate_class,
+    get_default_class as get_default_class,
+    get_available_classes as get_available_classes,
 )
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Default template location (relative to spawn package root)
 DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "builder"
@@ -74,6 +75,11 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command succeeded, False otherwise
     """
+    # No args → introspection
+    if not args:
+        print_introspection()
+        return True
+
     if command == "create":
         if not args:
             logger.error("spawn create requires a target path")
@@ -184,6 +190,8 @@ def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
 
     # Step 5: Validate no unreplaced placeholders
     issues = validate_no_placeholders(target)
+
+    json_handler.log_operation("branch_created", data={"branch": branch_upper})
 
     return {
         "success": True,

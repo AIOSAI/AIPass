@@ -3,7 +3,7 @@
 # Description: Update handler — implementation logic for branch updates
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Update handler implementation for branch lifecycle management.
@@ -22,7 +22,6 @@ from typing import Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.spawn.apps.handlers.meta_ops import (
-    compute_file_hash,
     generate_branch_meta,
     get_template_dir,
     load_branch_meta,
@@ -34,6 +33,7 @@ from aipass.spawn.apps.handlers.change_detection import detect_changes
 from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import find_registry, load_registry, _branches_as_list
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Repo root — resolved from spawn package location
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
@@ -241,6 +241,8 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     # 10. Return summary
     # ------------------------------------------------------------------
     success = len(errors) == 0
+    if success:
+        json_handler.log_operation("update_executed", data={"branch": branch_name})
     return _result(branch_name, success, counts, errors, dry_run)
 
 
@@ -367,7 +369,7 @@ def _execute_addition(
     template_dir: Path,
     add_info: dict,
     replacements: dict,
-    template_registry: dict,
+    _template_registry: dict,
     trace: bool,
 ) -> None:
     """Copy a new template file/directory to the branch with placeholder replacement."""
