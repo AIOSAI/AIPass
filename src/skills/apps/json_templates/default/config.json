@@ -1,0 +1,9 @@
+{
+  "module_name": "{{MODULE_NAME}}",
+  "version": "1.0.0",
+  "timestamp": "{{TIMESTAMP}}",
+  "config": {
+    "auto_save": true,
+    "enabled": true
+  }
+}

@@ -15,6 +15,7 @@ checking skill requirements (pip packages, CLI bins, config/env vars).
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from skills.apps.handlers.validator import validate_skill as _handler_validate
+from skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -27,6 +28,10 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         bool: True if command was handled, False otherwise.
     """
+    if not args:
+        print_introspection()
+        return True
+
     if command == "validate":
         if not args:
             error("Error: skill name required. Usage: skills validate <name>")
@@ -77,7 +82,11 @@ def validate_skill(skill_metadata):
             "missing_config": list[str]
         }
     """
-    return _handler_validate(skill_metadata)
+    result = _handler_validate(skill_metadata)
+    json_handler.log_operation("skill_validated", {
+        "valid": result["valid"],
+    })
+    return result
 
 
 def print_introspection():

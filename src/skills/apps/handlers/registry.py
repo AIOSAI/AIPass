@@ -8,6 +8,8 @@
 
 from pathlib import Path
 
+from skills.apps.handlers.json import json_handler
+
 
 def build_registry(search_paths, discover_fn):
     """Discover and cache all skills from search paths.
@@ -35,6 +37,11 @@ def build_registry(search_paths, discover_fn):
             if skill["name"] not in seen_names:
                 seen_names.add(skill["name"])
                 registry.append(skill)
+
+    json_handler.log_operation("registry_built", {
+        "paths_scanned": len(search_paths),
+        "skills_found": len(registry),
+    })
 
     return registry
 

@@ -1,13 +1,121 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: __init__.py - Skills handlers package
-# Date: 2026-03-07
-# Version: 1.0.0
-# Category: skills/apps/handlers
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Initial implementation
-#
-# CODE STANDARDS:
-#   - Handlers layer: implementation details (returns dicts, NEVER prints)
-# =============================================
+"""Skills handlers package - Security protected."""
+
+import inspect
+from pathlib import Path
+
+MY_BRANCH = "skills"
+
+
+def _find_real_caller():
+    """
+    Walk the stack to find the actual file that triggered this import.
+
+    Skips:
+    - This file (handlers/__init__.py)
+    - Python's importlib internals
+    - Frozen modules
+
+    Returns tuple: (file_path, import_line) or (None, None)
+    """
+    stack = inspect.stack()
+    this_file = str(Path(__file__).resolve())
+
+    for frame_info in stack:
+        filename = frame_info.filename
+
+        # Skip this file
+        if this_file in str(Path(filename).resolve()):
+            continue
+
+        # Skip Python internals
+        if filename.startswith("<") or "importlib" in filename:
+            continue
+
+        # Found a real file - try to get the import line
+        import_line = None
+        if frame_info.code_context:
+            import_line = frame_info.code_context[0].strip()
+
+        return str(Path(filename).resolve()), import_line
+
+    return None, None
+
+
+def _extract_branch_name(filepath: str) -> str:
+    """Extract branch name from a file path."""
+    parts = Path(filepath).parts
+    for i, part in enumerate(parts):
+        if part in ("aipass", "MEMORY_BANK", "Nexus"):
+            if i + 1 < len(parts):
+                return parts[i + 1]
+    return "unknown"
+
+
+def _guard_branch_access():
+    """
+    Block cross-branch handler imports.
+
+    Only code from within the 'skills' branch can import these handlers.
+    External branches must use skills.apps.modules instead.
+    """
+    caller_file, import_line = _find_real_caller()
+
+    import os
+    if os.environ.get("AIPASS_DEBUG_GUARD"):
+        import sys
+        print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
+        print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
+
+    if caller_file is None:
+        stack = inspect.stack()
+        for frame in stack:
+            if frame.filename in ("<string>", "<stdin>"):
+                target_line = "unknown"
+                if frame.code_context:
+                    target_line = frame.code_context[0].strip()
+                raise ImportError(
+                    f"\n{'='*60}\n"
+                    f"ACCESS DENIED: Cross-branch handler import blocked\n"
+                    f"{'='*60}\n"
+                    f"  Caller:  interactive/script\n"
+                    f"  Blocked: {target_line}\n"
+                    f"\n"
+                    f"  Handlers are internal to their branch.\n"
+                    f"  Use the module API instead:\n"
+                    f"    from {MY_BRANCH}.apps.modules.<module> import <function>\n"
+                    f"\n"
+                    f"  For full standards guide:\n"
+                    f"    drone @seedgo handlers\n"
+                    f"{'='*60}"
+                )
+        return
+
+    # Check if caller is from our branch
+    if f"/{MY_BRANCH}/" in caller_file:
+        return
+
+    # External caller - block access
+    caller_branch = _extract_branch_name(caller_file)
+    caller_filename = Path(caller_file).name
+    blocked_import = import_line if import_line else "unknown"
+
+    raise ImportError(
+        f"\n{'='*60}\n"
+        f"ACCESS DENIED: Cross-branch handler import blocked\n"
+        f"{'='*60}\n"
+        f"  Caller branch: {caller_branch}\n"
+        f"  Caller file:   {caller_filename}\n"
+        f"  Blocked:       {blocked_import}\n"
+        f"\n"
+        f"  Handlers are internal to their branch.\n"
+        f"  Use the module API instead:\n"
+        f"    from {MY_BRANCH}.apps.modules.<module> import <function>\n"
+        f"\n"
+        f"  For full standards guide:\n"
+        f"    drone @seedgo handlers\n"
+        f"{'='*60}"
+    )
+
+
+# Run guard at import time
+_guard_branch_access()

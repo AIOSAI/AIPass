@@ -10,6 +10,8 @@ import importlib.util
 import os
 import shutil
 
+from skills.apps.handlers.json import json_handler
+
 
 def validate_skill(skill_metadata):
     """Check if a skill's requirements are met.
@@ -39,6 +41,11 @@ def validate_skill(skill_metadata):
     missing_config = _check_config(config_keys)
 
     valid = not (missing_pip or missing_bins or missing_config)
+
+    json_handler.log_operation("validation_check", {
+        "valid": valid,
+        "missing_count": len(missing_pip) + len(missing_bins) + len(missing_config),
+    })
 
     return {
         "valid": valid,

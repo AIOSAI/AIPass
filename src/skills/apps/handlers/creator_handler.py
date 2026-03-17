@@ -20,6 +20,7 @@ Purpose:
 from pathlib import Path
 
 from aipass.prax import logger
+from skills.apps.handlers.json import json_handler
 from skills.apps.handlers.template import copy_template, get_template
 
 # logger imported from aipass.prax
@@ -92,6 +93,12 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
 
     # Copy template
     result = copy_template(template_result["path"], target_path, name)
+
+    json_handler.log_operation("skill_scaffold", {
+        "name": name,
+        "template_type": template_type,
+        "success": result["success"],
+    })
 
     return {
         "success": result["success"],

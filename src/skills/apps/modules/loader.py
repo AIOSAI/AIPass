@@ -16,6 +16,7 @@ from aipass.cli.apps.modules import console, warning
 from aipass.prax import logger
 from skills.apps.modules.discovery import discover_all
 from skills.apps.handlers.loader_handler import load_skill as _handler_load_skill
+from skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -31,6 +32,10 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         bool: Always False - loader is a service module, not a command handler.
     """
+    if not args:
+        print_introspection()
+        return True
+
     return False
 
 
@@ -61,6 +66,10 @@ def load_skill(name):
     if result["success"] and result["handler"] is None and result["metadata"].get("has_handler", False):
         warning(f"Warning: has_handler is true but handler.py not found at {result['path']}")
 
+    json_handler.log_operation("skill_loaded", {
+        "name": name,
+        "success": result["success"],
+    })
     return result
 
 

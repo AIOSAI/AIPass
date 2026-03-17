@@ -20,6 +20,7 @@ from skills.apps.handlers.discovery_handler import (
     parse_frontmatter,
 )
 from skills.apps.handlers.registry import build_registry
+from skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -32,6 +33,10 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         bool: True if command was handled, False otherwise.
     """
+    if not args:
+        print_introspection()
+        return True
+
     if command in ("discover", "list"):
         skills = discover_all()
 
@@ -76,7 +81,9 @@ def discover_all():
             (first match wins).
     """
     search_paths = get_search_paths()
-    return build_registry(search_paths, discover_skills_in_path)
+    result = build_registry(search_paths, discover_skills_in_path)
+    json_handler.log_operation("skills_discovered", {"count": len(result)})
+    return result
 
 
 def print_introspection():

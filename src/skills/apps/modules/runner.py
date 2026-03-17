@@ -16,6 +16,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from skills.apps.modules.loader import load_skill
 from skills.apps.handlers.runner_handler import run_handler, run_markdown
+from skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -28,6 +29,10 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         bool: True if command was handled, False otherwise.
     """
+    if not args:
+        print_introspection()
+        return True
+
     if command == "run":
         if not args:
             error("Error: skill name required. Usage: skills run <name> [action] [args...]")
@@ -96,9 +101,16 @@ def run_skill(name, action=None, args=None, config=None):
 
     # Delegate to handler for execution
     if handler is not None:
-        return run_handler(handler, name, action, args, config)
+        result = run_handler(handler, name, action, args, config)
+    else:
+        result = run_markdown(name, metadata, body)
 
-    return run_markdown(name, metadata, body)
+    json_handler.log_operation("skill_executed", {
+        "name": name,
+        "success": result["success"],
+        "has_handler": handler is not None,
+    })
+    return result
 
 
 def print_introspection():

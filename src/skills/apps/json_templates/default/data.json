@@ -1,0 +1,8 @@
+{
+  "module_name": "{{MODULE_NAME}}",
+  "created": "{{TIMESTAMP}}",
+  "last_updated": "{{TIMESTAMP}}",
+  "operations_total": 0,
+  "operations_successful": 0,
+  "operations_failed": 0
+}

@@ -17,6 +17,8 @@ Purpose:
     orchestration layer to satisfy thin-module standard.
 """
 
+from skills.apps.handlers.json import json_handler
+
 
 def run_handler(handler, name, action, args, config):
     """Run a skill's handler module.
@@ -63,6 +65,11 @@ def run_handler(handler, name, action, args, config):
 
     try:
         result = handler.run(action, args=args, config=config)
+        json_handler.log_operation("handler_executed", {
+            "name": name,
+            "action": action,
+            "success": True,
+        })
         if isinstance(result, dict):
             return {
                 "success": result.get("success", False),

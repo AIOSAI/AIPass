@@ -23,6 +23,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from skills.apps.handlers.discovery_handler import parse_frontmatter
+from skills.apps.handlers.json import json_handler
 
 
 def parse_full_skill_md(skill_md_path):
@@ -162,8 +163,13 @@ def load_skill(name, registry):
 
     # Import handler if present
     handler = None
-    if metadata.get("has_handler", False):
+    if isinstance(metadata, dict) and metadata.get("has_handler", False):
         handler = import_handler(skill_path, name)
+
+    json_handler.log_operation("skill_load", {
+        "name": name,
+        "has_handler": handler is not None,
+    })
 
     return {
         "success": True,

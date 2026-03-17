@@ -9,6 +9,8 @@
 import shutil
 from pathlib import Path
 
+from skills.apps.handlers.json import json_handler
+
 
 # Template directory lives at src/skills/templates/
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
@@ -80,6 +82,12 @@ def copy_template(template_path, target_path, skill_name):
                 except UnicodeDecodeError:
                     # Skip binary files
                     pass
+
+        json_handler.log_operation("template_copied", {
+            "template": str(template_path.name),
+            "target": str(target),
+            "files_count": len(created_files),
+        })
 
         return {
             "success": True,

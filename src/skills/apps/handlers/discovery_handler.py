@@ -20,6 +20,7 @@ Purpose:
 from pathlib import Path
 
 from aipass.prax import logger
+from skills.apps.handlers.json import json_handler
 
 # Try yaml, fall back to simple parser
 yaml = None
@@ -84,6 +85,8 @@ def discover_skills_in_path(search_path, source_label):
         metadata = parse_frontmatter(skill_md)
         if metadata is None:
             continue
+        if not isinstance(metadata, dict):
+            continue
 
         skills.append({
             "name": metadata.get("name", item.name),
@@ -94,6 +97,11 @@ def discover_skills_in_path(search_path, source_label):
             "tags": metadata.get("tags", []),
         })
 
+    json_handler.log_operation("discovery_scan", {
+        "path": str(path),
+        "source": source_label,
+        "found": len(skills),
+    })
     return skills
 
 
@@ -141,7 +149,7 @@ def _extract_frontmatter(content):
 
     frontmatter_text = "\n".join(lines[1:end_idx])
 
-    if HAS_YAML:
+    if yaml is not None:
         try:
             return yaml.safe_load(frontmatter_text)
         except yaml.YAMLError:
