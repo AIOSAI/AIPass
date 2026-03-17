@@ -3,7 +3,7 @@
 # Description: Update orchestrator — thin CLI layer for branch updates
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-14
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.update_ops import (
     update_branch,
     update_all,
 )
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -48,9 +49,15 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise.
     """
-    if command == "update":
-        return handle_update(args) == 0
-    return False
+    if command != "update":
+        return False
+
+    # No args → introspection
+    if not args:
+        print_introspection()
+        return True
+
+    return handle_update(args) == 0
 
 
 # =============================================================================
@@ -120,6 +127,9 @@ def handle_update(args: list[str]) -> int:
         logger.error(f"[update] Unexpected error updating {branch_name}: {exc}")
         error(f"Error updating {branch_name}: {exc}")
         return 1
+
+    if result.get("success"):
+        json_handler.log_operation("branch_updated", data={"branch": branch_name})
 
     _print_branch_summary(result, dry_run)
     return 0 if result.get("success") else 1

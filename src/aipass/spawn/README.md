@@ -91,6 +91,12 @@ spawn/
 │       ├── metadata.py           # Branch name extraction, profile detection
 │       ├── placeholders.py       # {{PLACEHOLDER}} replacement engine
 │       ├── registry.py           # AIPASS_REGISTRY.json CRUD
+│       ├── json_ops.py           # JSON read/write operations
+│       ├── json/
+│       │   └── json_handler.py   # JSON I/O abstraction
+│       ├── meta_ops.py           # Branch metadata generation
+│       ├── change_detection.py   # File diff detection
+│       ├── reconcile.py          # Registry/filesystem reconciliation
 │       ├── update_ops.py         # Update implementation (class-aware)
 │       ├── delete_ops.py         # Delete implementation logic
 │       ├── sync_registry_ops.py  # Registry sync implementation
@@ -98,7 +104,8 @@ spawn/
 ├── templates/
 │   ├── builder/             # Full scaffold template (apps/, modules/, handlers/)
 │   ├── birthright/          # Minimal template (.trinity/, .aipass/, README.md)
-│   └── agent_mock_branch/   # Reference implementation
+│   └── .archive/
+│       └── agent_mock_branch/   # Reference implementation
 ├── tools/                   # Branch verification utilities
 ├── docs/                    # Documentation
 ├── spawn_json/              # JSON tracking directory
@@ -144,4 +151,4 @@ spawn/
 
 ---
 
-*Last Updated: 2026-03-07*
+*Last Updated: 2026-03-17*

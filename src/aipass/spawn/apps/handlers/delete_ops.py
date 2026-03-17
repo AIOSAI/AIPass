@@ -3,7 +3,7 @@
 # Description: Delete handler — implementation logic for branch deletion
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Delete handler implementation for branch lifecycle management.
@@ -24,6 +24,7 @@ from aipass.spawn.apps.handlers.registry import (
     save_registry,
     _branches_as_list,
 )
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Repo root — resolved from spawn package location
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
@@ -192,6 +193,8 @@ def delete_branch(
             "registry_updated": registry_updated,
             "error": msg,
         }
+
+    json_handler.log_operation("delete_executed", data={"branch": branch_name})
 
     return {
         "branch": branch_name,

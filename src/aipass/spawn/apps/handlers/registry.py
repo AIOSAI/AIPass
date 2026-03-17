@@ -3,7 +3,7 @@
 # Description: *_REGISTRY.json discovery and CRUD operations
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-07
+# Modified: 2026-03-13
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations."""
@@ -12,6 +12,8 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def _branches_as_list(branches):
@@ -216,5 +218,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         branches.append(entry)
     registry["branches"] = branches
     registry["metadata"]["total_branches"] = len(_branches_as_list(branches))
+
+    json_handler.log_operation("registry_updated", data={"branch": branch_name})
 
     return save_registry(registry_path, registry)

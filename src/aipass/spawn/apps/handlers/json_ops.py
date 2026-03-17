@@ -3,7 +3,7 @@
 # Description: JSON operations — deep merge, migrations, backups
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """JSON operations handler for branch updates.
@@ -16,11 +16,11 @@ transformations, and backup utilities.
 import json
 import shutil
 from datetime import datetime
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Branch metadata location
 _BRANCH_META_DIR = ".spawn"
@@ -171,10 +171,12 @@ def apply_migrations(data: dict, migrations: list) -> dict:
                     f"'{op_type}' failed: {exc}"
                 )
 
+        json_handler.log_operation("migration_applied", data={"migration": migration_id})
+
     return data
 
 
-def _apply_key_rename(data: dict, op: dict, migration_id: str) -> None:
+def _apply_key_rename(data: dict, op: dict, _migration_id: str) -> None:
     """Rename a key, preserving its value.
 
     Args:
@@ -202,7 +204,7 @@ def _apply_key_rename(data: dict, op: dict, migration_id: str) -> None:
     _delete_nested_key(data, from_key)
 
 
-def _apply_move_to_nested(data: dict, op: dict, migration_id: str) -> None:
+def _apply_move_to_nested(data: dict, op: dict, _migration_id: str) -> None:
     """Move multiple keys under a new parent key.
 
     Args:
@@ -242,7 +244,7 @@ def _apply_move_to_nested(data: dict, op: dict, migration_id: str) -> None:
         del data[key]
 
 
-def _apply_add_missing_keys(data: dict, op: dict, migration_id: str) -> None:
+def _apply_add_missing_keys(data: dict, op: dict, _migration_id: str) -> None:
     """Add keys with default values if they don't exist.
 
     Args:

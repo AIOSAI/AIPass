@@ -3,7 +3,7 @@
 # Description: Template copy and file operations
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-07
+# Modified: 2026-03-10
 # =============================================
 
 """Template copy and file rename operations."""
@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
+from aipass.spawn.apps.handlers.json import json_handler
 
 # Patterns to skip during template copy
 SKIP_NAMES = {"__pycache__", ".git", ".template_registry.json"}
@@ -71,6 +72,8 @@ def copy_template(template_dir, target_dir, replacements):
             except (UnicodeDecodeError, UnicodeEncodeError):
                 shutil.copy2(item, dest)
                 copied.append(f"{dest_rel} (binary)")
+
+    json_handler.log_operation("template_copied", data={"target": str(target_dir)})
 
     return copied, skipped
 

@@ -3,7 +3,7 @@
 # Description: Passport command — thin CLI layer for granting birthright citizenship
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-14
 # =============================================
 
 """Passport command orchestrator for branch lifecycle management.
@@ -14,10 +14,10 @@ All implementation logic lives in apps/handlers/passport_ops.py.
 
 import argparse
 
-from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.passport_ops import grant_passport
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -42,9 +42,15 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise.
     """
-    if command == "passport":
-        return handle_passport(args) == 0
-    return False
+    if command != "passport":
+        return False
+
+    # No args → introspection
+    if not args:
+        print_introspection()
+        return True
+
+    return handle_passport(args) == 0
 
 
 def handle_passport(args: list[str]) -> int:
@@ -89,6 +95,7 @@ def handle_passport(args: list[str]) -> int:
     )
 
     if result["success"]:
+        json_handler.log_operation("passport_granted", data={"branch": result["branch_name"]})
         console.print()
         console.print(f"[green]Passport granted: {result['branch_name']}[/green]")
         console.print(f"  Class: birthright")

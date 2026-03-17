@@ -3,7 +3,7 @@
 # Description: Template sync — thin CLI layer for template synchronization
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-03-14
 # =============================================
 
 """Template synchronization for branch lifecycle management.
@@ -17,6 +17,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.sync_templates_ops import sync_templates
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -45,9 +46,15 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise.
     """
-    if command == "sync-templates":
-        return handle_sync_templates(args) == 0
-    return False
+    if command != "sync-templates":
+        return False
+
+    # No args → introspection
+    if not args:
+        print_introspection()
+        return True
+
+    return handle_sync_templates(args) == 0
 
 
 # =============================================================================
@@ -83,6 +90,8 @@ def handle_sync_templates(args: list[str]) -> int:
         logger.error(f"[sync-templates] Unexpected error: {exc}")
         error(str(exc))
         return 1
+
+    json_handler.log_operation("templates_synced")
 
     _print_summary(result, dry_run)
     return 0
