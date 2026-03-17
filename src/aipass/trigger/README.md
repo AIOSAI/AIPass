@@ -2,7 +2,7 @@
 
 **Purpose:** Event bus for AIPass. Branches fire events, registered handlers react. Decouples producers from consumers — the module that detects a condition doesn't need to know what should happen next.
 **Module:** `aipass.trigger`
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-17
 
 ## Commands / Usage
 
@@ -115,4 +115,4 @@ trigger/
 
 ---
 
-*Last Updated: 2026-03-08*
+*Last Updated: 2026-03-17*

@@ -21,6 +21,7 @@ from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.json import json_handler
 
 # Import handler functions
 from aipass.trigger.apps.handlers.watchers.log_watcher import (
@@ -129,7 +130,10 @@ def handle_command(command: str, args: list) -> bool:
 
     # Handle module-name routing (drone @trigger log_events <subcmd>)
     if command == "log_events":
-        if not args or args[0] in ['--help', '-h', 'help']:
+        if not args:
+            print_introspection()
+            return True
+        if args[0] in ['--help', '-h', 'help']:
             print_help()
             return True
         return handle_command(args[0], args[1:])
@@ -156,6 +160,7 @@ def handle_command(command: str, args: list) -> bool:
         console.print(f"  Active: {info['active']}")
         console.print(f"  Log dir: {info['log_dir']}")
 
+    json_handler.log_operation("log_watcher_command", {"command": command})
     return True
 
 

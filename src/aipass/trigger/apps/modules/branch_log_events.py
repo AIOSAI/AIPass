@@ -22,6 +22,7 @@ from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules.core import trigger
 
 from aipass.trigger.apps.handlers.log_watcher import (
@@ -148,7 +149,7 @@ def handle_command(command: str, args: list) -> bool:
     # Handle module-name routing (drone @trigger branch_log_events <subcmd>)
     if command == "branch_log_events":
         if not args:
-            print_help()
+            print_introspection()
             return True
         subcommand = args[0]
         remaining = args[1:]
@@ -184,6 +185,7 @@ def handle_command(command: str, args: list) -> bool:
         reset_hashes()
         console.print("✅ Error deduplication hashes cleared")
 
+    json_handler.log_operation("watcher_command", {"command": command})
     return True
 
 

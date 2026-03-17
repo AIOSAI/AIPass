@@ -10,6 +10,8 @@
 
 from pathlib import Path
 
+from aipass.trigger.apps.handlers.json import json_handler
+
 
 
 def setup_handlers():
@@ -66,3 +68,5 @@ def setup_handlers():
     trigger.on('bulletin_created', handle_bulletin_created)
     trigger.on('memory_threshold_exceeded', handle_memory_threshold_exceeded)
     trigger.on('memory_template_updated', handle_memory_template_updated)
+
+    json_handler.log_operation("handlers_registered", {"success": True})

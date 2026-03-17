@@ -21,6 +21,8 @@ Event data expected:
 from pathlib import Path
 from typing import Any
 
+from aipass.trigger.apps.handlers.json import json_handler
+
 
 # Path resolution not needed - this handler delegates to Memory Bank's pusher
 
@@ -36,4 +38,5 @@ def handle_memory_template_updated(**kwargs: Any) -> None:
         **kwargs: Event data (template_name, updated_by, timestamp, etc.)
     """
     # memory_bank integration (optional, requires memory_bank package)
+    json_handler.log_operation("memory_template_event", {"success": True})
     pass

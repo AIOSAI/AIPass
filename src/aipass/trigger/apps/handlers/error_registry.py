@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 REGISTRY_FILE = TRIGGER_ROOT / "trigger_json" / "error_registry.json"
@@ -590,6 +591,7 @@ def report(
             _save_registry(registry)
             result = dict(entry)
             result["is_new"] = False
+            json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]})
             return result
         else:
             # New error - create entry
@@ -616,6 +618,7 @@ def report(
             _save_registry(registry)
             result = dict(entry_dict)
             result["is_new"] = True
+            json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": 1})
             return result
 
     except Exception:

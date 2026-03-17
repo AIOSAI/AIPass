@@ -26,6 +26,7 @@ from typing import Optional
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import (
     query, get_entry, update_status, clear_resolved, get_stats,
     get_circuit_breaker_status, circuit_breaker_reset,
@@ -153,7 +154,8 @@ def handle_command(command: str, args: list) -> bool:
         return False
 
     if not args:
-        return _cmd_list(console, [])
+        print_introspection()
+        return True
     if args[0] in ['--help', '-h', 'help']:
         print_help()
         return True
@@ -168,7 +170,9 @@ def handle_command(command: str, args: list) -> bool:
     }
 
     if sub in routes:
-        return routes[sub](console, rest)
+        result = routes[sub](console, rest)
+        json_handler.log_operation("error_command", {"subcommand": sub})
+        return result
 
     error(f"Unknown subcommand: {sub}", suggestion="Run 'drone @trigger errors help' for available commands")
     return True

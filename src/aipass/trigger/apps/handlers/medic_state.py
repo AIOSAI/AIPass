@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
 MEDIC_SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
@@ -91,6 +92,7 @@ def set_enabled(enabled: bool) -> bool:
     data['timestamp'] = datetime.now().strftime("%Y-%m-%d")
 
     if write_config(data):
+        json_handler.log_operation("state_persisted", {"key": "medic_enabled", "value": enabled})
         return True
     return False
 

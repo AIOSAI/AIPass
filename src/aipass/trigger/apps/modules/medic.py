@@ -24,6 +24,7 @@ from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.json import json_handler
 
 from aipass.trigger.apps.handlers.medic_state import (
     is_enabled,
@@ -187,7 +188,7 @@ def handle_command(command: str, args: list) -> bool:
     # Handle module-name routing (drone @trigger medic <subcmd>)
     if command == "medic":
         if not args:
-            print_help()
+            print_introspection()
             return True
         if args[0] in ['--help', '-h', 'help']:
             print_help()
@@ -305,6 +306,7 @@ def handle_command(command: str, args: list) -> bool:
         if not enabled:
             console.print("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.log[/dim]")
 
+    json_handler.log_operation("medic_toggled", {"command": command})
     return True
 
 

@@ -35,6 +35,7 @@ from typing import Dict, Any
 
 # System logs directory (package-relative via config)
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent / "system_logs"
 
 # Try to import watchdog
@@ -257,8 +258,10 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
 
             if level == 'error':
                 trigger.fire('error_logged', **event_data)
+                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
             elif level == 'warning':
                 trigger.fire('warning_logged', **event_data)
+                json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
 
         except Exception:
             pass

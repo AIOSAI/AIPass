@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aipass.trigger.apps.handlers.json import json_handler
+
 
 # Path resolution not needed - this handler uses only event data passed in kwargs
 
@@ -155,6 +157,8 @@ def handle_memory_threshold_exceeded(
         }
 
         deliver_email_to_branch(target_branch, email_data)
+
+        json_handler.log_operation("memory_threshold_event", {"success": True})
 
     except Exception:
         pass

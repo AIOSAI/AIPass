@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.json import json_handler
 
 from typing import Callable
 
@@ -189,7 +190,10 @@ def handle_command(command: str, args: list) -> bool:
 
     # Handle module-name routing (drone @trigger core <subcmd>)
     if command == "core":
-        if not args or args[0] in ['--help', '-h', 'help']:
+        if not args:
+            print_introspection()
+            return True
+        if args[0] in ['--help', '-h', 'help']:
             _print_help(console)
             return True
         return handle_command(args[0], args[1:])
@@ -216,6 +220,7 @@ def handle_command(command: str, args: list) -> bool:
                 logger.warning(f"[TRIGGER] Ignoring unparseable arg: {arg}")
         Trigger.fire(event_name, **data)
         console.print(f"[green]Fired event:[/green] {event_name}")
+        json_handler.log_operation("event_fired", {"event": event_name})
         if data:
             for k, v in data.items():
                 console.print(f"  [dim]{k}={v}[/dim]")

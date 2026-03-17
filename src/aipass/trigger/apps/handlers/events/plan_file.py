@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
@@ -132,6 +133,8 @@ def handle_plan_file_created(path: str, **kwargs):
             registry["next_number"] = plan_num_int + 1
 
         _save_registry(registry)
+
+        json_handler.log_operation("plan_event", {"success": True})
 
     except Exception as e:
         _log_error(f"handle_plan_file_created failed for {path}: {e}")

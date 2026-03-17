@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
@@ -313,6 +314,8 @@ def handle_error_logged(
 
         # Record dispatch for rate limiting
         _record_dispatch(recipient)
+
+        json_handler.log_operation("error_logged_event", {"success": True})
 
     except Exception:
         return

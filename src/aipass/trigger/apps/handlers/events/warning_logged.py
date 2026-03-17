@@ -25,6 +25,7 @@ Event data expected:
 
 from pathlib import Path
 from typing import Any
+from aipass.trigger.apps.handlers.json import json_handler
 
 
 
@@ -65,3 +66,4 @@ def handle_warning_logged(
     #
     # Suppress unused variable warnings - all params are part of event contract
     _ = (branch, message, error_hash, timestamp, log_file, module_name, level, kwargs)
+    json_handler.log_operation("warning_logged_event", {"success": True})

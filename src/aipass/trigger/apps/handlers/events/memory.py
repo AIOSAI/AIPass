@@ -13,6 +13,8 @@ Placeholder for future memory event handling.
 
 from pathlib import Path
 
+from aipass.trigger.apps.handlers.json import json_handler
+
 
 
 def handle_memory_saved(**kwargs):
@@ -26,4 +28,5 @@ def handle_memory_saved(**kwargs):
     # Future: Check line count and trigger rollover
     # if lines > 600:
     #     trigger_rollover(branch)
+    json_handler.log_operation("memory_event", {"success": True})
     pass

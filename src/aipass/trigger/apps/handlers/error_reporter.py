@@ -25,6 +25,7 @@ from aipass.prax import logger
 from aipass.trigger.apps.handlers.error_registry import (
     report as _registry_report,
 )
+from aipass.trigger.apps.handlers.json import json_handler
 
 
 def send_source_fix_email(entry: dict) -> bool:
@@ -168,4 +169,5 @@ def report_error(
     except Exception:
         pass
 
+    json_handler.log_operation("error_reported", {"branch": component, "error_type": error_type})
     return result

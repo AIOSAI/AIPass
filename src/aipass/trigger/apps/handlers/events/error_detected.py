@@ -39,6 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
@@ -67,6 +68,18 @@ try:
     _REGISTRY_DISPATCH_AVAILABLE = True
 except ImportError:
     _REGISTRY_DISPATCH_AVAILABLE = False
+
+    def circuit_breaker_allows() -> bool:
+        return True
+
+    def circuit_breaker_record_error() -> None:
+        pass
+
+    def registry_should_dispatch(fingerprint: str) -> bool:
+        return True
+
+    def registry_record_dispatch(fingerprint: str) -> None:
+        pass
 
 # Legacy rate limiting (kept for backward compat when registry unavailable)
 _dispatch_timestamps: Dict[str, List[float]] = {}
@@ -530,6 +543,8 @@ def handle_error_detected(
             reply_to='@trigger',
             from_branch='@trigger'
         )
+
+        json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
         # Record dispatch for tracking
         if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:

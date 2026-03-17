@@ -24,6 +24,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
 from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent / "system_logs"
 TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_data.json"
@@ -333,6 +334,8 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
 
         _save_trigger_data(data)
 
+        json_handler.log_operation("startup_catchup", {"errors_found": len(errors)})
+
     except Exception:
         return
 
@@ -340,15 +343,14 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
 def _run_memory_bank_check() -> None:
     """Run Memory Bank rollover check if available.
 
-    Lazy-imports Memory Bank watcher to avoid hard dependency.
+    Uses memory's public modules API to avoid cross-branch handler guard.
     Silent failure - handlers cannot use logger or print.
     """
     try:
-        import importlib
-        mod = importlib.import_module('MEMORY_BANK.apps.handlers.monitor.memory_watcher')
-        mod.check_and_rollover()
+        from aipass.memory.apps.modules.rollover import check_and_rollover
+        check_and_rollover()
     except ImportError:
-        return  # Memory Bank not available
+        return  # Memory not available
     except Exception:
         return
 

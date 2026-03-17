@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Set, Optional, Callable
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 
@@ -75,6 +76,9 @@ try:
     _REGISTRY_AVAILABLE = True
 except ImportError:
     _REGISTRY_AVAILABLE = False
+
+    def registry_report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
+        return {"is_new": False, "count": 0}
 
 # Try to import watchdog
 try:
@@ -530,6 +534,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                             last_seen=result.get('last_seen', ''),
                             count=error_count,
                         )
+                        json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
                     else:
                         logger.warning(
                             "Cannot fire error_detected event: _fire_event callback not set "
@@ -560,6 +565,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                     error_hash=error_hash,
                     timestamp=parsed['timestamp']
                 )
+                json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
             else:
                 logger.warning(
                     "Cannot fire error_detected event: _fire_event callback not set "

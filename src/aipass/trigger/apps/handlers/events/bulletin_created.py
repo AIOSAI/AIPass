@@ -25,6 +25,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+from aipass.trigger.apps.handlers.json import json_handler
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
@@ -228,6 +229,8 @@ def handle_bulletin_created(
         # We reload from central storage to ensure consistency
         # (the newly created bulletin should already be saved there)
         _propagate_bulletins_to_branches()
+
+        json_handler.log_operation("bulletin_event", {"success": True})
 
     except Exception:
         pass
