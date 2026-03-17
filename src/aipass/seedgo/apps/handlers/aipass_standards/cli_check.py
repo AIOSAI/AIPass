@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
@@ -148,6 +150,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     # Overall pass if score >= 75%
     overall_passed = score >= 75
 
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli"})
     return {
         'passed': overall_passed,
         'checks': checks,

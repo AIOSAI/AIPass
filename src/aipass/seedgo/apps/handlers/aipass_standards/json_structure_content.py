@@ -13,6 +13,8 @@ Provides formatted JSON structure standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_json_structure_standards() -> str:
     """Return formatted JSON structure standards content with Rich markup.
@@ -79,6 +81,32 @@ def get_json_structure_standards() -> str:
         "  [green]No per-branch customization needed.[/green]",
         "  Spawn ships the template, branches just copy it.",
         "",
+        "  [yellow]CRITICAL:[/yellow] json_handler.py must be [bold]dependency-free[/bold].",
+        "  Only stdlib imports (json, pathlib, datetime, inspect).",
+        "  [red]No prax.[/red] [red]No branch imports.[/red] [red]No cli.[/red]",
+        "  If a module needs to log the JSON write, the CALLER logs via prax —",
+        "  not the handler. This prevents circular imports (e.g. prax → cli → json_handler → prax).",
+        "",
+        "─" * 70,
+        "",
+        "[bold cyan]VALID BYPASSES:[/bold cyan]",
+        "",
+        "  Some files legitimately cannot import json_handler. Add these to",
+        "  [dim].seedgo/bypass.json[/dim] with a reason:",
+        "",
+        "  [green]•[/green] [bold]Pure-Python bootstrap files[/bold] — designed with zero branch imports",
+        "    (e.g. handlers/init/bootstrap.py). Adding json_handler would break",
+        "    the design contract.",
+        "  [green]•[/green] [bold]Circular import chains[/bold] — if your branch has a dependency that",
+        "    json_handler imports, and that dependency imports your module.",
+        "    Fix: remove the dependency from json_handler (see rule above).",
+        "    Bypass only if the circular import is truly unavoidable.",
+        "",
+        "  [dim]Example bypass entry:[/dim]",
+        "  [dim]{\"file\": \"apps/handlers/init/bootstrap.py\",[/dim]",
+        "  [dim] \"standard\": \"json_structure\",[/dim]",
+        "  [dim] \"reason\": \"Pure Python bootstrap — no branch imports by design\"}[/dim]",
+        "",
         "─" * 70,
         "",
         "[bold cyan]SCORING:[/bold cyan]",
@@ -127,4 +155,5 @@ def get_json_structure_standards() -> str:
         "  [dim]See: FPLAN-0056 (Three-JSON Pattern Redesign)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "json_structure"})
     return "\n".join(lines)

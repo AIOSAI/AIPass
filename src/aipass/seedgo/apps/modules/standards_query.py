@@ -216,6 +216,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Load and display content
     content = _load_content(standards[standard_name], standard_name)
+    json_handler.log_operation("standard_queried", {"pack": pack_name, "standard": standard_name})
     if content:
         console.print()
         # Handle both str and List[str] return types from content handlers

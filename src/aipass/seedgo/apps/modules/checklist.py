@@ -42,6 +42,9 @@ from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
     load_bypass_rules,
 )
 
+# JSON handler for tracking
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # CHECKER APPLICABILITY
@@ -141,6 +144,7 @@ def run_checklist(file_path: str, pack_name: str = "aipass") -> List[Dict]:
     if not results:
         return [{"standard": "(skip)", "passed": True, "detail": "No applicable checkers for this file"}]
 
+    json_handler.log_operation("checklist_completed", {"file": str(file_path), "standards_run": len(results)})
     return results
 
 

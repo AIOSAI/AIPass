@@ -16,6 +16,8 @@ Module orchestrates, handler implements.
 import sys
 from pathlib import Path
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_trigger_standards() -> str:
     """Return formatted trigger standards content with Rich markup
 
@@ -125,4 +127,5 @@ def get_trigger_standards() -> str:
         "  [dim]See: src/aipass/trigger/apps/handlers/events/[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "trigger"})
     return "\n".join(lines)

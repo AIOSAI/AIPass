@@ -13,6 +13,8 @@ Provides formatted import standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_imports_standards() -> str:
     """Return formatted import standards content with Rich markup
 
@@ -98,4 +100,5 @@ def get_imports_standards() -> str:
         "─" * 70,
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "imports"})
     return "\n".join(lines)

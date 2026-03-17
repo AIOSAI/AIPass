@@ -13,6 +13,8 @@ Provides formatted module standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_modules_standards() -> str:
     """Return formatted module standards content with Rich markup
 
@@ -80,4 +82,5 @@ def get_modules_standards() -> str:
         "  [dim]See: seedgo standards pack (modules)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "modules"})
     return "\n".join(lines)

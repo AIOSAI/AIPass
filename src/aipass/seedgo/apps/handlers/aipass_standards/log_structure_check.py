@@ -19,6 +19,31 @@ No hardcoded absolute log paths.
 import re
 from pathlib import Path
 from typing import Dict
+from aipass.seedgo.apps.handlers.json import json_handler
+
+
+def _find_branch_root(file_path: Path) -> Path:
+    """Walk up from file to find branch root (directory containing apps/).
+
+    The branch root is the directory that directly contains an ``apps/``
+    subdirectory. For example::
+
+        apps/seedgo.py          -> branch root is parent.parent (seedgo/)
+        apps/modules/foo.py     -> branch root is parent.parent.parent
+        apps/handlers/audit/bar -> branch root is parent x4
+
+    Falls back to the file's parent when no ``apps/`` directory is found
+    within 10 levels.
+    """
+    current = file_path.resolve().parent
+    for _ in range(10):  # Safety limit
+        if (current / "apps").is_dir():
+            return current
+        if current == current.parent:
+            break
+        current = current.parent
+    # Fallback: assume parent of file
+    return file_path.parent
 
 
 def is_bypassed(file_path: str, standard: str, bypass_rules: list | None = None) -> bool:
@@ -73,7 +98,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     # Check 1: Branch-root log placement — logs/ directory at the branch root
-    branch_root = path.parent
+    branch_root = _find_branch_root(path)
     logs_dir = branch_root / "logs"
     has_logs_dir = logs_dir.is_dir()
     checks.append({
@@ -136,4 +161,5 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     passed = all(c['passed'] for c in checks)
     score = int(sum(1 for c in checks if c['passed']) / len(checks) * 100) if checks else 0
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "log_structure"})
     return {'passed': passed, 'checks': checks, 'score': score, 'standard': 'LOG_STRUCTURE'}

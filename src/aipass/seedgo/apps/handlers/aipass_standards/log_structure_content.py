@@ -14,6 +14,8 @@ Describes the two-tier logging model: system_logs/ at repo root,
 logs/ at branch root only.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_log_structure_standards() -> str:
     """Return formatted log structure standards for display."""
     lines = [
@@ -60,4 +62,5 @@ def get_log_structure_standards() -> str:
         "[bold cyan]REFERENCE:[/bold cyan]",
         "  [dim]Prax logger: src/aipass/prax/apps/modules/logger.py[/dim]",
     ]
+    json_handler.log_operation("standard_content_queried", {"standard": "log_structure"})
     return "\n".join(lines)

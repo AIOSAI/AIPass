@@ -13,6 +13,8 @@ Provides formatted error handling standards content (3-tier architecture).
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_error_handling_standards() -> str:
     """Return formatted error handling standards content with Rich markup
 
@@ -159,4 +161,5 @@ def get_error_handling_standards() -> str:
         "[bold]Added:[/bold] 2026-02-04 - Service logging for user-facing interactions",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "error_handling"})
     return "\n".join(lines)

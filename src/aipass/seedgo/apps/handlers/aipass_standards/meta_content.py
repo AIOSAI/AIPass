@@ -13,6 +13,8 @@ Provides formatted meta standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_meta_standards() -> str:
     """Return formatted meta standards content with Rich markup.
@@ -108,4 +110,5 @@ def get_meta_standards() -> str:
         "  [dim]See: seedgo standards pack (meta)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "meta"})
     return "\n".join(lines)

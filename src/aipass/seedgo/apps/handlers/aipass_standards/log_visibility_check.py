@@ -24,6 +24,7 @@ import sys
 import re
 from pathlib import Path
 from typing import Dict, List
+from aipass.seedgo.apps.handlers.json import json_handler
 
 # Patterns built via concatenation to avoid self-detection by checkers
 _GETLOGGER_PAT = r'logging' + r'\.getLogger\s*\('
@@ -140,6 +141,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
     overall_passed = score >= 75
 
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "log_visibility"})
     return {
         'passed': overall_passed,
         'checks': checks,

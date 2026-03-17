@@ -89,12 +89,16 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("readme", "readme_update"):
         return False
 
+    if not args:
+        print_introspection()
+        return True
+
     if "--help" in args or "-h" in args:
         print_help()
         return True
 
     # Subcommands: update, check
-    subcommand = args[0] if args else "update"
+    subcommand = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
     if subcommand == "update":

@@ -24,6 +24,8 @@ from typing import List, Dict
 
 import json
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 # =============================================================================
 # PRIVATE BRANCH DETECTION
 # =============================================================================
@@ -122,6 +124,7 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
         if not include_private:
             branches = [b for b in branches if not _is_branch_private(b['name'])]
 
+        json_handler.log_operation("branches_discovered", {"count": len(branches)})
         return sorted(branches, key=lambda x: x['name'])
 
     except (json.JSONDecodeError, IOError):

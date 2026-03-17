@@ -13,6 +13,8 @@ Provides formatted testing standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_testing_standards() -> str:
     """Return formatted testing standards content with Rich markup.
@@ -141,4 +143,5 @@ def get_testing_standards() -> str:
         "[bold]Philosophy:[/bold] Build fast, verify as you go, handle errors honestly",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "testing"})
     return "\n".join(lines)

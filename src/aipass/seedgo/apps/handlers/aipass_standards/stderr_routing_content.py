@@ -13,6 +13,8 @@ Provides formatted stderr routing standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_stderr_routing_standards() -> str:
     """Return formatted stderr routing standards content with Rich markup."""
@@ -70,4 +72,5 @@ def get_stderr_routing_standards() -> str:
         "  [dim]See: FPLAN-0033 (Phase 3: branch migration — gates on this standard)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "stderr_routing"})
     return "\n".join(lines)

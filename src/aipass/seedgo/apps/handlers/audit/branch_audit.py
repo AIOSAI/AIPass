@@ -11,6 +11,7 @@ import importlib.util
 from pathlib import Path
 from typing import Dict, List
 from aipass.seedgo.apps.handlers.bypass import ignore_handler
+from aipass.seedgo.apps.handlers.json import json_handler
 
 def discover_checkers(pack_path: Path = None) -> Dict[str, object]:
     """Auto-discover all *_check.py modules from a pack directory.
@@ -69,29 +70,64 @@ def _run_all_files(checker, name: str, files: List[Dict], bypass_rules: list) ->
     return violations, scores
 
 def _log_structure_post_checks(branch_path: Path) -> tuple:
-    """Branch-level log structure checks. Returns (violations, scores)."""
-    violations, scores = [], []
+    """Branch-level log structure checks. Returns (violations, scores).
+
+    Two-tier model:
+      - ``system_logs/`` at repo root is managed by prax (runtime dispatch).
+        Having many system logs and few local logs is *normal*.
+      - ``logs/`` at branch root holds local-only logs. Flat placement is
+        fine -- hierarchical sub-directories are only expected when there
+        are enough logs to warrant organisation (>5).
+    """
+    violations: list[dict] = []
+    scores: list[int] = []
+
+    root_logs_dir = branch_path / "logs"
     in_dirs = [f for f in branch_path.rglob("*.log") if f.parent.name == "logs"]
-    if in_dirs:
-        root_dir = branch_path / "logs"
-        root_only = [f for f in in_dirs if f.parent == root_dir]
-        if root_only and not any(f.parent != root_dir for f in in_dirs):
-            scores.append(0)
-            violations.append({"file": "(branch-level)", "path": str(root_dir), "score": 0,
-                               "issues": [f"All {len(root_only)} logs at branch root — no hierarchical placement"]})
+
+    # Check 1: If the branch has a logs/ directory, verify it is not empty
+    # and only flag flat placement when there are enough files to warrant
+    # hierarchical organisation.
+    if root_logs_dir.is_dir():
+        root_only = [f for f in in_dirs if f.parent == root_logs_dir]
+        has_subdirs = any(f.parent != root_logs_dir for f in in_dirs)
+        if not root_only and not has_subdirs:
+            # logs/ exists but is empty -- acceptable (no violation)
+            scores.append(100)
+        elif len(root_only) > 5 and not has_subdirs:
+            # Many logs piled at root with no subdirectories
+            scores.append(50)
+            violations.append({
+                "file": "(branch-level)", "path": str(root_logs_dir), "score": 50,
+                "issues": [f"{len(root_only)} logs at branch root with no sub-directories — consider hierarchical placement"],
+            })
         else:
             scores.append(100)
-    repo = next((p for p in [branch_path] + list(branch_path.parents)
-                 if (p / "AIPASS_REGISTRY.json").is_file()), None)
+
+    # Check 2: Verify system_logs/ exists when the branch produces logs.
+    # The two-tier model expects prax to dispatch runtime logs to
+    # system_logs/.  A mismatch only matters when the branch has NO
+    # system logs at all despite having local logs (potential prax
+    # misconfiguration).
+    repo = next(
+        (p for p in [branch_path] + list(branch_path.parents)
+         if (p / "AIPASS_REGISTRY.json").is_file()),
+        None,
+    )
     if repo and (repo / "system_logs").is_dir():
         sd = repo / "system_logs"
-        sc, lc = len(list(sd.glob(f"{branch_path.name}_*.log"))), len(in_dirs)
-        if sc > 0 and lc < sc * 0.5:
-            scores.append(0)
-            violations.append({"file": "(branch-level)", "path": str(sd), "score": 0,
-                               "issues": [f"System logs ({sc}) vs local ({lc}) — mismatch"]})
+        system_count = len(list(sd.glob(f"{branch_path.name}_*.log")))
+        if in_dirs and system_count == 0:
+            # Branch has local logs but zero system logs -- prax may not
+            # be dispatching for this branch.
+            scores.append(50)
+            violations.append({
+                "file": "(branch-level)", "path": str(sd), "score": 50,
+                "issues": [f"Branch has {len(in_dirs)} local log(s) but 0 system logs — prax dispatch may be misconfigured"],
+            })
         else:
             scores.append(100)
+
     return violations, scores
 
 def _load_diagnostics_checker():
@@ -159,6 +195,7 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path = N
         if ps:
             scores["log_structure"] = int(sum(ps + [scores["log_structure"]]) / (len(ps) + 1))
 
+    json_handler.log_operation("branch_audit_completed", {"branch": branch["name"], "checkers": len(checkers)})
     avg = int(sum(scores.values()) / len(scores)) if scores else 0
 
     # Deprecated DOCUMENTS/ directory check

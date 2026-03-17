@@ -31,6 +31,9 @@ from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
+# JSON handler for tracking
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 # =============================================================================
 # INTROSPECTION
@@ -69,6 +72,7 @@ def print_introspection() -> None:
 
 def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | None = None, overall_system_avg: int = 0):
     """Print summary for a single branch - always shows full details (audit = comprehensive)"""
+    json_handler.log_operation("audit_display_rendered", {"branch": audit_result['branch']['name']})
     branch = audit_result['branch']
     scores = audit_result['scores']
     avg = audit_result['average']

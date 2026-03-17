@@ -15,6 +15,8 @@ Provides Rich-formatted reference text for the log visibility standard.
 import sys
 from pathlib import Path
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 _GETLOGGER = "logging" + ".getLogger"
 _FILEHANDLER = "logging" + ".FileHandler"
 _PRAX_IMPORT = "from aipass.prax.apps.modules.logger import system_logger as logger"
@@ -22,6 +24,7 @@ _PRAX_IMPORT = "from aipass.prax.apps.modules.logger import system_logger as log
 
 def get_log_visibility_standards() -> str:
     """Return Rich-formatted log visibility standards text"""
+    json_handler.log_operation("standard_content_queried", {"standard": "log_visibility"})
     return f"""[bold white]LOG VISIBILITY STANDARD[/bold white]
 
 [yellow]PURPOSE:[/yellow]

@@ -15,7 +15,6 @@ import inspect
 _BRANCH_ROOT = Path(__file__).resolve().parents[3]   # json/ -> handlers/ -> apps/ -> {branch}/
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
-JSON_TEMPLATES_DIR = _BRANCH_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -41,22 +40,35 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file"""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
+def _create_default(json_type: str, module_name: str) -> Any:
+    """Create default JSON structure for a given type."""
+    today = datetime.now().date().isoformat()
 
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "timestamp": today,
+            "config": {
+                "auto_save": True,
+                "enabled": True,
+            },
+        }
 
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
+    if json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": today,
+            "last_updated": today,
+            "operations_total": 0,
+            "operations_successful": 0,
+            "operations_failed": 0,
+        }
 
-    # Replace placeholders
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
+    if json_type == "log":
+        return []
 
-    return json.loads(template_str)
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -103,7 +115,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             # If unreadable, fall through to regenerate
             pass
 
-    template = load_template(json_type, module_name)
+    template = _create_default(json_type, module_name)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(template, f, indent=2, ensure_ascii=False)

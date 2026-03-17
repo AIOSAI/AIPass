@@ -21,6 +21,7 @@ Checks:
 import ast
 from pathlib import Path
 from typing import Dict, Optional
+from aipass.seedgo.apps.handlers.json import json_handler
 
 # Run on ALL .py files so modules (apps/modules/*.py) are checked, not just entry points
 AUDIT_SCOPE = "all_files"
@@ -175,6 +176,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     # Overall pass if score >= 75%
     overall_passed = score >= 75
 
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "introspection"})
     return {
         'passed': overall_passed,
         'checks': checks,

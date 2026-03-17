@@ -13,6 +13,8 @@ Provides formatted shebang standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_shebang_standards() -> str:
     """Return formatted shebang standards content with Rich markup.
@@ -87,4 +89,5 @@ def get_shebang_standards() -> str:
         "  [dim]See: seedgo standards pack (shebang)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "shebang"})
     return "\n".join(lines)

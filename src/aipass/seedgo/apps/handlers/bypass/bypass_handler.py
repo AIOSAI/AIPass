@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -160,7 +161,9 @@ def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:
         if bypass_file.exists():
             with open(bypass_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            return config.get('bypass', [])
+            rules = config.get('bypass', [])
+            json_handler.log_operation("bypass_rules_loaded", {"branch": branch_path, "count": len(rules)})
+            return rules
     except Exception as e:
         logger.error(f"[bypass_handler] Error loading bypass rules: {e}")
 

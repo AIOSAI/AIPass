@@ -20,6 +20,8 @@ import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 # =============================================================================
 # INFRASTRUCTURE SETUP
 # =============================================================================
@@ -156,6 +158,7 @@ def resolve_targets(args: List[str]) -> tuple:
         return [], "no_args"
 
     target = args[0]
+    json_handler.log_operation("readme_ops_executed", {"target": target})
 
     # Handle @all
     if target.lstrip('@').lower() == 'all':

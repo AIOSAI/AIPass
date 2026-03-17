@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def read_file(file_path: str, encoding: str = 'utf-8') -> Optional[str]:
     """
     Read text content from a file.
@@ -34,6 +36,7 @@ def read_file(file_path: str, encoding: str = 'utf-8') -> Optional[str]:
         if not path.exists():
             return None
 
+        json_handler.log_operation("file_operation", {"file": str(path)})
         with open(path, 'r', encoding=encoding) as f:
             return f.read()
 

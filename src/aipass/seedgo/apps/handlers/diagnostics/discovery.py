@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def _find_registry() -> Path:
@@ -62,6 +63,7 @@ def discover_branches() -> List[Dict]:
                     'path': str(branch_path)
                 })
 
+        json_handler.log_operation("diagnostics_discovered", {"count": len(branches)})
         return sorted(branches, key=lambda x: x['name'])
 
     except (json.JSONDecodeError, IOError) as e:

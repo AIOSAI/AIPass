@@ -29,6 +29,7 @@ console = Console()
 
 # Import ignore patterns from bypass handler
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_audit_ignore_patterns
+from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "branch_level"
 
@@ -493,6 +494,7 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
     # Calculate score
     score = 100 if total_errors == 0 else max(0, 100 - (total_errors * 5))
 
+    json_handler.log_operation("diagnostics_run", {"branch": branch_path, "total_errors": total_errors, "runners": len(all_runners)})
     return {
         'passed': total_errors == 0,
         'score': score,

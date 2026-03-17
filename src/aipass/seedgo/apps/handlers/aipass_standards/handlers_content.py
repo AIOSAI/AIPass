@@ -16,6 +16,8 @@ Provides formatted handlers standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_handlers_standards() -> str:
     """Return formatted handlers standards content with Rich markup
 
@@ -120,4 +122,5 @@ def get_handlers_standards() -> str:
         "─" * 70,
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "handlers"})
     return "\n".join(lines)

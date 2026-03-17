@@ -1,6 +1,6 @@
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass modules. Audits Python code against checker packs, scores each file, and reports violations. Ships with the `aipass_standards` pack (17 checkers covering imports, architecture, naming, logging, documentation, and more).
+**Purpose:** Standards compliance platform for AIPass modules. Audits Python code against checker packs, scores each file, and reports violations. Ships with the `aipass_standards` pack (24 checkers covering imports, architecture, naming, logging, documentation, and more).
 **Module:** `aipass.seedgo`
 **Created:** 2026-03-05
 
@@ -15,6 +15,8 @@
 - Support bypass rules for deliberate exceptions
 
 ## Commands / Usage
+
+Seedgo provides standards auditing, content queries, per-file checklists, diagnostics, and README generation.
 
 ### CLI
 
@@ -55,6 +57,7 @@ seedgo/
 │   │   ├── standards_audit.py       # Pack-aware compliance audit
 │   │   ├── standards_query.py       # Pack-aware content query
 │   │   ├── diagnostics_audit.py     # Pyright diagnostics
+│   │   ├── checklist.py             # Per-file standards checklist (hook consumption)
 │   │   └── readme_update.py         # README generation
 │   └── handlers/
 │       ├── aipass_standards/        # Built-in checker pack (17 standards)
@@ -85,7 +88,7 @@ Checker packs live in `handlers/*_standards/` directories. A valid pack must con
 
 ## Checker Packs
 
-The `aipass_standards` pack checks: architecture, CLI, CLI flags, documentation, encapsulation, error handling, handlers, imports, introspection, JSON structure, log handler, log level, log structure, log visibility, modules, naming, permission flags, readme, testing, trigger, and diagnostics patterns.
+The `aipass_standards` pack checks: architecture, CLI, CLI flags, documentation, encapsulation, error handling, handlers, imports, introspection, JSON structure, log handler, log level, log structure, log visibility, meta, modules, naming, permission flags, readme, shebang, stderr routing, testing, trigger, and diagnostics patterns.
 
 New packs go in `handlers/<name>_standards/` — add `*_check.py` files that implement scoring functions, and optionally `*_content.py` files that provide `get_<name>_standards()` for content queries.
 
@@ -106,4 +109,4 @@ New packs go in `handlers/<name>_standards/` — add `*_check.py` files that imp
 
 ---
 
-**Last Updated:** 2026-03-09
+**Last Updated:** 2026-03-17

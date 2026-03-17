@@ -17,6 +17,7 @@ and should be removed.
 
 from pathlib import Path
 from typing import Dict
+from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit scope: scan every .py file, not just entry point
 AUDIT_SCOPE = "all_files"
@@ -96,9 +97,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             'standard': 'SHEBANG'
         }
 
+    score = 100
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "shebang"})
     return {
         'passed': True,
         'checks': [{'name': 'No shebang line', 'passed': True, 'message': 'No shebang line found'}],
-        'score': 100,
+        'score': score,
         'standard': 'SHEBANG'
     }

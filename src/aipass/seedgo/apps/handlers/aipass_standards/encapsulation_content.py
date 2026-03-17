@@ -13,6 +13,8 @@ Provides formatted encapsulation standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_encapsulation_standards() -> str:
     """Return formatted encapsulation standards content with Rich markup."""
@@ -71,4 +73,5 @@ def get_encapsulation_standards() -> str:
         "  Line-specific bypasses supported for granular control.",
         f"[dim]{sep}[/dim]",
     ]
+    json_handler.log_operation("standard_content_queried", {"standard": "encapsulation"})
     return "\n".join(lines)

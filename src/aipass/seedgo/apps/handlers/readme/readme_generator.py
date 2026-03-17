@@ -30,6 +30,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 TREE_EXCLUDE = {
     '__pycache__', '.gitkeep', '.git', 'node_modules',
     '.pytest_cache', '.mypy_cache',
@@ -563,9 +565,10 @@ def generate_all_sections(branch_path: str) -> dict:
     for name, generator in generators.items():
         try:
             sections[name] = generator()
-        except Exception as e:
+        except Exception:
             sections[name] = ""
 
+    json_handler.log_operation("readme_generated", {"branch": branch_path, "sections": list(sections.keys())})
     return sections
 
 

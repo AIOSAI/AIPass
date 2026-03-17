@@ -13,6 +13,8 @@ Provides formatted Architecture standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_architecture_standards() -> str:
     """Return formatted architecture standards content with Rich markup
 
@@ -105,4 +107,5 @@ def get_architecture_standards() -> str:
         "  [dim]See: src/aipass/*/apps/ (production examples)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "architecture"})
     return "\n".join(lines)

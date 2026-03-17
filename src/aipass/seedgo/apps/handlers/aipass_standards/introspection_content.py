@@ -13,6 +13,8 @@ Provides formatted introspection standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_introspection_standards() -> str:
     """Return formatted introspection standards content with Rich markup
 
@@ -121,4 +123,5 @@ def get_introspection_standards() -> str:
         "  [dim]See: src/aipass/seedgo/apps/seedgo.py (Level 1 reference)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "introspection"})
     return "\n".join(lines)

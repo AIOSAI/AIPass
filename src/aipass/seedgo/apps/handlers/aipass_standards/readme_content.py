@@ -15,8 +15,11 @@ Provides Rich-formatted reference text for the README standard.
 import sys
 from pathlib import Path
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_readme_standards() -> str:
     """Return Rich-formatted README standards text"""
+    json_handler.log_operation("standard_content_queried", {"standard": "readme"})
     return """[bold white]README STANDARD[/bold white]
 
 [yellow]PURPOSE:[/yellow]

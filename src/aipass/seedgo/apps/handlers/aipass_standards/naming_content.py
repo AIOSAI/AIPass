@@ -13,6 +13,8 @@ Provides formatted naming standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_naming_standards() -> str:
     """Return formatted naming standards content with Rich markup
 
@@ -73,4 +75,5 @@ def get_naming_standards() -> str:
         "  [dim]See: seedgo standards pack (naming)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "naming"})
     return "\n".join(lines)

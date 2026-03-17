@@ -13,6 +13,8 @@ Provides formatted CLI standards content.
 Module orchestrates, handler implements.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_cli_standards() -> str:
     """Return formatted CLI standards content with Rich markup
 
@@ -105,4 +107,5 @@ def get_cli_standards() -> str:
         "  [link=https://rich.readthedocs.io/en/stable/markup.html]https://rich.readthedocs.io/en/stable/markup.html[/link]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "cli"})
     return "\n".join(lines)

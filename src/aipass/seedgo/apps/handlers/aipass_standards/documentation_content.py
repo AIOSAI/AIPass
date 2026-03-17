@@ -13,6 +13,8 @@ Condensed documentation standards verified against actual codebase.
 Truth-checked 2025-11-13 against spawn and seedgo production code.
 """
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def get_documentation_standards() -> str:
     """Return formatted documentation standards content with Rich markup
 
@@ -127,4 +129,5 @@ def get_documentation_standards() -> str:
         "  [dim]See: seedgo standards pack (documentation)[/dim]",
     ]
 
+    json_handler.log_operation("standard_content_queried", {"standard": "documentation"})
     return "\n".join(lines)

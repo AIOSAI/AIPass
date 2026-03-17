@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 def _find_registry() -> Path:
     """Find AIPASS_REGISTRY.json by walking up from this file's location."""
     current = Path(__file__).resolve().parent
@@ -354,6 +356,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 100
 
+    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "encapsulation"})
     return {
         'passed': score >= 75,
         'checks': checks,

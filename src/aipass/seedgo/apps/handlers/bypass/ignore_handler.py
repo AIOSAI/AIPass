@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import List, Set, Optional
 import fnmatch
 
+from aipass.seedgo.apps.handlers.json import json_handler
+
 # =============================================
 # AIPASS_ROOT PATTERN
 # =============================================
@@ -113,6 +115,7 @@ def get_ignore_patterns() -> List[str]:
             if fnmatch.fnmatch(var_name, pattern):
                 # Skip this variable
     """
+    json_handler.log_operation("ignore_patterns_loaded", {"count": len(IGNORE_PATTERNS)})
     return IGNORE_PATTERNS.copy()
 
 
