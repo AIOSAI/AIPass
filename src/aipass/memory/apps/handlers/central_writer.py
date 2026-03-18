@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -258,6 +259,8 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
 
         if verbose:
             result["stats"] = stats
+
+        log_operation("update_central", {"vectors": stats.get("total_vectors", 0), "success": True})
 
         return result
 

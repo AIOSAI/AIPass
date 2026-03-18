@@ -38,6 +38,7 @@ from pathlib import Path
 # Handler imports (domain-organized, no modules)
 from aipass.memory.apps.handlers.vector import embedder
 from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 
 # =============================================================================
@@ -402,6 +403,7 @@ def retrieve_fragments(
     # Return top n_results
     final_results = ranked[:n_results]
 
+    log_operation("symbolic_retrieve", {"results": len(final_results), "methods": search_methods_used, "success": True})
     return {
         'success': True,
         'results': final_results,

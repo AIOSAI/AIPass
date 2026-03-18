@@ -33,7 +33,8 @@ from typing import Dict, List, Any, Tuple
 from datetime import datetime
 
 # Handler imports (relative within package)
-from aipass.memory.apps.handlers.json.json_handler import read_memory_file_data, write_memory_file_simple
+from aipass.memory.apps.handlers.json.json_handler import log_operation
+from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
@@ -125,8 +126,8 @@ def restore_from_backup(file_path: Path) -> Dict[str, Any]:
 # FILE OPERATIONS
 # =============================================================================
 
-def _read_memory_file(file_path: Path) -> Dict[str, Any]:
-    """Read memory JSON file using json_handler"""
+def _read_memory_file(file_path: Path) -> Dict[str, Any] | None:
+    """Read memory JSON file using memory_files handler."""
     return read_memory_file_data(file_path)
 
 
@@ -380,6 +381,11 @@ def extract_items(
     # Read file
     try:
         data = _read_memory_file(file_path)
+        if data is None:
+            return {
+                'success': False,
+                'error': f"Failed to parse memory file: {file_path.name}"
+            }
         current_lines = _count_file_lines(file_path)
     except Exception as e:
         return {

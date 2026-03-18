@@ -28,6 +28,7 @@ from typing import Dict, Any
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -123,6 +124,8 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
                 f.write('\n')
         except Exception as e:
             return {'success': False, 'error': f"Failed to write: {e}"}
+
+    log_operation("normalize_memory_file", {"file": file_path.name, "changes": len(changes), "success": True})
 
     return {
         'success': True,

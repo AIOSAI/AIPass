@@ -34,6 +34,8 @@ Key Functions:
 from typing import Dict, Any
 from pathlib import Path
 
+from aipass.memory.apps.handlers.json.json_handler import log_operation
+
 
 # =============================================================================
 # CONSTANTS
@@ -128,6 +130,7 @@ def get_collection(
                 embedding_function=None
             )
 
+        log_operation("chroma_get_collection", {"collection": collection_name, "create": create, "success": True})
         return {
             'success': True,
             'collection': collection

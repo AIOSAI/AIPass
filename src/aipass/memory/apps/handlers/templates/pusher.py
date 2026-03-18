@@ -30,9 +30,10 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 
 from aipass.prax import logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # Handler imports (same-branch allowed per handler boundaries)
-from aipass.memory.apps.handlers.json.json_handler import (
+from aipass.memory.apps.handlers.json.memory_files import (
     read_memory_file_data,
     write_memory_file_simple
 )
@@ -81,7 +82,7 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
     """Replace {{BRANCHNAME}} and {{DATE}} in template values. Returns new dict."""
     today = datetime.now().strftime("%Y-%m-%d")
 
-    def _walk(val):
+    def _walk(val: Any) -> Any:
         if isinstance(val, str):
             return val.replace("{{BRANCHNAME}}", branch_name).replace("{{DATE}}", today)
         elif isinstance(val, list):
@@ -90,7 +91,9 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
             return {k: _walk(v) for k, v in val.items()}
         return val
 
-    return _walk(copy.deepcopy(template))
+    result = _walk(copy.deepcopy(template))
+    assert isinstance(result, dict)
+    return result
 
 
 # =============================================================================
@@ -417,6 +420,7 @@ def push_templates(dry_run: bool = False) -> dict:
         if not _update_version_file(result["branches_list"]):
             result["errors"].append("Failed to update template version file")
 
+    log_operation("template_push", {"branches": result["branches_updated"], "files": result["files_modified"], "dry_run": dry_run, "success": True})
     return result
 
 

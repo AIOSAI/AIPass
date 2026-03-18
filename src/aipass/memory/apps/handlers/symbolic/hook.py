@@ -36,7 +36,8 @@ from typing import Dict, List, Any, Tuple
 
 # Handler imports (domain-organized, no modules)
 from aipass.memory.apps.handlers.symbolic import retriever
-from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.json import memory_files
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # memory/ root resolved from symbolic/hook.py
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -82,7 +83,7 @@ def load_config(config_path: Path | None = None) -> Dict[str, Any]:
     path = config_path or DEFAULT_CONFIG_PATH
 
     if path.exists():
-        result = json_handler.read_memory_file(path)
+        result = memory_files.read_memory_file(path)
         if result.get('success'):
             config = result.get('data', {})
             # Merge with defaults for any missing keys
@@ -107,7 +108,7 @@ def save_config(config: Dict[str, Any], config_path: Path | None = None) -> Dict
     # Ensure parent directory exists
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    return json_handler.write_memory_file(path, config)
+    return memory_files.write_memory_file(path, config)
 
 
 # =============================================================================
@@ -634,6 +635,7 @@ def process_hook(
     # Record the surface
     record_surface(fragment)
 
+    log_operation("symbolic_hook", {"fragment_id": fragment.get('id'), "surfaced": True, "success": True})
     return {
         'success': True,
         'surfaced': True,

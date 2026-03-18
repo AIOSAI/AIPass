@@ -35,6 +35,7 @@ from typing import List, Dict, Any
 # Service imports
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, header
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # Handler imports (domain-organized)
 from aipass.memory.apps.handlers.symbolic import extractor
@@ -980,6 +981,7 @@ def run_demo() -> None:
 
     console.print("[dim]Note: Run 'symbolic extract <file>' to use the real LLM pipeline[/dim]")
     console.print()
+    log_operation("symbolic_demo", {"success": True})
 
 
 def search_fragments_cli(args: List[str]) -> None:
@@ -1137,6 +1139,7 @@ def search_fragments_cli(args: List[str]) -> None:
 
     console.print()
     logger.info(f"[symbolic] Displayed {len(results)} fragment results")
+    log_operation("symbolic_fragments", {"query": query or "", "results": len(results)})
 
 
 def run_hook_test(args: List[str]) -> None:
@@ -1267,18 +1270,19 @@ def run_hook_test(args: List[str]) -> None:
     console.print(f"  [dim]Fragments surfaced:[/dim] {state.get('fragments_surfaced', 0)}")
     console.print(f"  [dim]Messages since last:[/dim] {state.get('messages_since_last', 0)}")
     console.print()
+    log_operation("symbolic_hook_test", {"surfaced": result.get('surfaced', False), "success": result.get('success', False)})
 
 
 def analyze_file(file_path: str) -> None:
     """Analyze a conversation JSON file"""
-    from aipass.memory.apps.handlers.json import json_handler
+    from aipass.memory.apps.handlers.json import memory_files
 
     path = Path(file_path)
     if not path.exists():
         console.print(f"[red]Error:[/red] File not found: {file_path}")
         return
 
-    read_result = json_handler.read_memory_file(path)
+    read_result = memory_files.read_memory_file(path)
     if not read_result.get('success'):
         console.print(f"[red]Error:[/red] {read_result.get('error', 'Failed to read JSON')}")
         return
@@ -1315,6 +1319,7 @@ def analyze_file(file_path: str) -> None:
         console.print(f"  [dim]Words:[/dim]    {meta.get('total_words', 0)}")
         console.print(f"  [dim]Depth:[/dim]    {meta.get('depth', 'unknown')}")
         console.print()
+        log_operation("symbolic_analyze", {"file": path.name, "messages": result['message_count']})
     else:
         console.print(f"[red]✗[/red] Analysis failed: {result.get('error', 'Unknown error')}")
 
@@ -1330,14 +1335,14 @@ def extract_file(file_path: str, source_branch: str | None = None) -> None:
         file_path: Path to JSON conversation file
         source_branch: Optional branch name tag for stored fragments
     """
-    from aipass.memory.apps.handlers.json import json_handler
+    from aipass.memory.apps.handlers.json import memory_files
 
     path = Path(file_path)
     if not path.exists():
         console.print(f"[red]Error:[/red] File not found: {file_path}")
         return
 
-    read_result = json_handler.read_memory_file(path)
+    read_result = memory_files.read_memory_file(path)
     if not read_result.get('success'):
         console.print(f"[red]Error:[/red] {read_result.get('error', 'Failed to read JSON')}")
         return
@@ -1380,6 +1385,8 @@ def extract_file(file_path: str, source_branch: str | None = None) -> None:
 
     console.print()
     logger.info(f"[symbolic] extract_file complete: {result}")
+    if result.get('success'):
+        log_operation("symbolic_extract", {"file": path.name, "added": result.get('added', 0), "updated": result.get('updated', 0)})
 
 
 # =============================================================================
@@ -1650,6 +1657,7 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
         f"{total_added} added, {total_updated} updated, "
         f"{total_skipped} skipped, {total_errors} errors"
     )
+    log_operation("symbolic_bootstrap", {"sessions": processed_count, "added": total_added, "errors": total_errors})
 
 
 # =============================================================================

@@ -31,6 +31,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+from aipass.memory.apps.handlers.json.json_handler import log_operation
+
 # memory/ root resolved from symbolic/extractor.py
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -450,7 +452,7 @@ def analyze_conversation_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, An
                 'message_count': 0, 'error': None}
     llm = extract_fragments_llm(chat_history)
     reg = analyze_conversation(chat_history)
-    return {
+    result = {
         'success': llm.get('success', False),
         'fragments': llm.get('fragments', []),
         'metadata': {
@@ -462,3 +464,5 @@ def analyze_conversation_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, An
             'chunk_count': llm.get('chunk_count', 0)},
         'message_count': reg.get('message_count', len(chat_history)),
         'error': llm.get('error')}
+    log_operation("symbolic_extract", {"fragments": len(result['fragments']), "messages": result['message_count'], "success": True})
+    return result

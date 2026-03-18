@@ -34,6 +34,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 
+from aipass.memory.apps.handlers.json.json_handler import log_operation
+
 # Paths
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # handlers/intake/ → handlers/ → apps/ → memory/
 CONFIG_PATH = _MEMORY_ROOT / "config" / "memory_bank.config.json"
@@ -445,6 +447,8 @@ def process_memory_pool() -> dict:
     # Update central stats and push dashboard after processing vectors
     if results['files_processed'] > 0:
         _update_central_and_dashboard()
+
+    log_operation("process_memory_pool", {"files_processed": results['files_processed'], "total_chunks": results['total_chunks'], "success": results['success']})
 
     return results
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -315,6 +316,7 @@ def store_vectors(
         service = _get_service(db_path)
         result = service.store_vectors(branch, memory_type, embeddings, documents, metadatas)
 
+        log_operation("chroma_store_vectors", {"collection": result.get('collection'), "count": result.get('count', 0), "success": True})
         return {
             'success': True,
             **result
@@ -492,6 +494,7 @@ def search_vectors(
         # Sort by distance (lower is better)
         all_results.sort(key=lambda x: x['distance'] if x['distance'] is not None else float('inf'))
 
+        log_operation("chroma_search_vectors", {"collections": len(collection_names), "results": len(all_results), "success": True})
         return {
             'success': True,
             'results': all_results[:n_results * len(collection_names)] if all_results else [],

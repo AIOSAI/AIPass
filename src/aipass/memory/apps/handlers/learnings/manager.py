@@ -34,11 +34,12 @@ from typing import Dict, Any, List, Tuple
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
 # Handler imports (relative within package)
-from aipass.memory.apps.handlers.json.json_handler import (
+from aipass.memory.apps.handlers.json.memory_files import (
     read_memory_file_data,
     write_memory_file_simple
 )
@@ -493,6 +494,8 @@ def ensure_timestamps(file_path: Path) -> Dict[str, Any]:
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 
@@ -543,6 +546,8 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 
@@ -592,6 +597,8 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
     except Exception as e:
         return {'success': False, 'error': f'Failed to write file: {e}'}
 
+    log_operation("enforce_limit", {"removed": to_remove_count, "remaining": len(to_keep), "success": True})
+
     return {
         'success': True,
         'removed': to_remove_count,
@@ -623,6 +630,8 @@ def ensure_timestamps_completed(file_path: Path) -> Dict[str, Any]:
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 
@@ -676,6 +685,8 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 
@@ -756,6 +767,8 @@ def add_learning(
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 
@@ -777,6 +790,8 @@ def add_learning(
 
     # Enforce limit after adding
     enforce_result = enforce_limit(file_path)
+
+    log_operation("add_learning", {"key": key, "action": "updated" if is_update else "added", "success": True})
 
     return {
         'success': True,
@@ -808,6 +823,8 @@ def update_status_counts(file_path: Path) -> Dict[str, Any]:
 
     try:
         data = read_memory_file_data(file_path)
+        if data is None:
+            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
     except Exception as e:
         return {'success': False, 'error': f'Failed to read file: {e}'}
 

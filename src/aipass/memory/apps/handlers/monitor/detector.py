@@ -27,6 +27,7 @@ from typing import List, Dict, Any
 from dataclasses import dataclass
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 

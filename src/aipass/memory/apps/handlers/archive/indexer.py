@@ -25,6 +25,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -270,6 +271,8 @@ def check_for_new_files() -> Dict[str, Any]:
                 index['categories'][category].append(info['filename'])
 
     save_index(index)
+
+    log_operation("index_sync", {"new_files": len(new_files), "deleted_files": len(deleted_files), "success": True})
 
     return {
         'success': True,

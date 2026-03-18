@@ -28,6 +28,7 @@ from rich import box
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -256,6 +257,7 @@ def show_search_results(
         ))
 
     console.print()
+    log_operation("search_query", {"query": query, "results": len(filtered_results)})
     return True
 
 

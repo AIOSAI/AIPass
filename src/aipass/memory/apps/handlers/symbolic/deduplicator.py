@@ -32,6 +32,8 @@ import re
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
+from aipass.memory.apps.handlers.json.json_handler import log_operation
+
 # memory/ root resolved from symbolic/deduplicator.py
 _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -188,6 +190,8 @@ def deduplicate_fragment(
 
     action = parsed['action']
     reason = parsed.get('reason', 'No reason provided')
+
+    log_operation("symbolic_dedup", {"action": action, "existing_count": len(existing_fragments), "success": True})
 
     # Apply action to fragment
     if action == 'UPDATE':

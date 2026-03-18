@@ -33,6 +33,7 @@ from typing import List, Dict, Any
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -117,11 +118,12 @@ class EmbeddingService:
 
         # Pre-sort by length (reduces padding waste by 30%)
         sorted_pairs = sorted(enumerate(texts), key=lambda x: len(x[1]))
-        sorted_indices, sorted_texts = zip(*sorted_pairs)
+        sorted_indices: list[int] = [p[0] for p in sorted_pairs]
+        sorted_text_list: list[str] = [p[1] for p in sorted_pairs]
 
         # Encode with optimal settings
         embeddings = self.model.encode(
-            sorted_texts,
+            sorted_text_list,
             batch_size=self.batch_size,
             convert_to_tensor=False,  # Return numpy for Chroma
             normalize_embeddings=True,  # Critical for L2 distance
@@ -195,6 +197,7 @@ def encode_batch(texts: List[str]) -> Dict[str, Any]:
         service = _get_service()
         result = service.encode_batch(texts)
 
+        log_operation("vector_encode_batch", {"count": result.get('count', 0), "dimension": result.get('dimension', 0), "success": True})
         return {
             'success': True,
             **result

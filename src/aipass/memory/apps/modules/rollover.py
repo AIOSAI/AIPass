@@ -29,6 +29,7 @@ from rich import box
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -221,6 +222,7 @@ def run_rollover() -> bool:
         for fail in failed:
             error(f"{fail['trigger']} - {fail['stage']}: {fail['error']}")
 
+    log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
     return success_count > 0
 
 
@@ -253,6 +255,7 @@ def sync_line_counts() -> None:
             warning(f"{result['failed']} files failed")
             for branch, mem_type, err_msg in result.get('failures', []):
                 error(f"{branch}.{mem_type}: {err_msg}")
+        log_operation("rollover_sync_lines", {"updated": result['updated'], "failed": result['failed']})
     else:
         error("Failed to sync line counts")
 
@@ -325,6 +328,8 @@ def show_status() -> None:
 
             console.print()
 
+    log_operation("rollover_status", {"branches_checked": stats['total_branches'], "files_ready": stats['files_ready']})
+
 
 def check_triggers() -> None:
     """
@@ -351,6 +356,7 @@ def check_triggers() -> None:
 
     if not triggers:
         console.print("[green]>[/green] No files need rollover")
+        log_operation("rollover_check", {"files_needing_rollover": 0})
         return
 
     console.print(f"[bold cyan]Found {len(triggers)} files ready for rollover:[/bold cyan]")
@@ -362,6 +368,7 @@ def check_triggers() -> None:
     console.print()
     console.print("[dim]Run 'drone @memory rollover' to process these files[/dim]")
     console.print()
+    log_operation("rollover_check", {"files_needing_rollover": len(triggers)})
 
 
 # =============================================================================

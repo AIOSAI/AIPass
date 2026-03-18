@@ -28,6 +28,7 @@ from rich import box
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -37,7 +38,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.templates.pusher import push_templates, get_template_status
 from aipass.memory.apps.handlers.templates.differ import diff_template_vs_branch
 from aipass.memory.apps.handlers.templates.spawn_pusher import push_to_spawn_templates
-from aipass.memory.apps.handlers.json.json_handler import read_memory_file_data
+from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data
 
 
 def _find_repo_root() -> Path:
@@ -286,6 +287,7 @@ def _display_push_results(result: dict, dry_run: bool) -> None:
         f"{result['branches_updated']}/{result['branches_scanned']} branches, "
         f"{result['files_modified']} files"
     )
+    log_operation("templates_push", {"branches_updated": result['branches_updated'], "files_modified": result['files_modified']})
     console.print()
 
 
@@ -424,6 +426,7 @@ def _display_diff_results(branch_name: str | None = None) -> None:
             console.print(f"[red]{total_errors} errors encountered[/red]")
 
     logger.info(f"[templates] Diff complete: {total_diffs} branches with diffs, {total_errors} errors")
+    log_operation("templates_diff", {"branches_compared": len(branches), "branches_with_diffs": total_diffs})
     console.print()
 
 
@@ -481,6 +484,7 @@ def _display_status(status: dict) -> None:
         console.print("[cyan]Branches pushed:[/cyan]    none")
 
     logger.info(f"[templates] Status checked - version: {version}, last push: {last_push}")
+    log_operation("templates_status", {"version": version, "branches_pushed": len(pushed)})
     console.print()
 
 

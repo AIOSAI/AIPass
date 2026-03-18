@@ -26,8 +26,9 @@ from typing import Dict, Any
 from datetime import datetime
 
 # Handler imports (relative within package)
-from aipass.memory.apps.handlers.json.json_handler import update_metadata
+from aipass.memory.apps.handlers.json.memory_files import update_metadata
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -90,6 +91,8 @@ def update_line_count(file_path: Path) -> Dict[str, Any]:
             'success': False,
             'error': f"Failed to update metadata: {result['error']}"
         }
+
+    log_operation("update_line_count", {"file": file_path.name, "lines": line_count, "success": True})
 
     return {
         'success': True,

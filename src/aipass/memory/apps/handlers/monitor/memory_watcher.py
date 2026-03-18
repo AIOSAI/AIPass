@@ -24,7 +24,11 @@ Independence:
 
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any
+
+if TYPE_CHECKING:
+    from watchdog.observers import Observer as _ObserverType
+    from watchdog.events import FileSystemEventHandler as _HandlerType
 
 try:
     from watchdog.observers import Observer
@@ -33,12 +37,13 @@ try:
 except ImportError:
     WATCHDOG_AVAILABLE = False
     Observer = None
-    FileSystemEventHandler = object
+    FileSystemEventHandler = object  # type: ignore[assignment,misc]
 
 # Handler imports (relative within package)
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
 from aipass.memory.apps.handlers.monitor.detector import check_single_file
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -46,7 +51,7 @@ logger = get_system_logger()
 _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 
 # Global observer instance
-_observer: Optional[Observer] = None
+_observer: Any = None
 
 
 # =============================================================================
@@ -221,6 +226,8 @@ def check_and_rollover() -> Dict[str, Any]:
 
     # Check code_archive for new files to index
     results['code_archive'] = _check_code_archive()
+
+    log_operation("check_and_rollover", {"files_checked": results.get('files_checked', 0), "rollover_triggered": results.get('rollover_triggered', False)})
 
     return results
 
@@ -425,7 +432,7 @@ def _is_memory_file(file_path: Path) -> bool:
 # FILE SYSTEM EVENT HANDLER
 # =============================================================================
 
-class MemoryFileWatcher(FileSystemEventHandler):
+class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
     """Watch for memory file modifications"""
 
     def __init__(self):
@@ -525,7 +532,7 @@ def start_memory_watcher() -> Dict[str, Any]:
     watcher = MemoryFileWatcher()
 
     # Create observer
-    new_observer = Observer()
+    new_observer = Observer()  # type: ignore[misc]
 
     # Schedule watcher for each branch path (silent - no logging during startup)
     watched_paths = []

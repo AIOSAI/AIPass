@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from aipass.prax import logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = Path(__file__).resolve().parent.parent
@@ -274,6 +275,7 @@ def execute_search(
 
     logger.info(f"[search] Filtered to {len(filtered_results)} relevant results")
 
+    log_operation("search_execute", {"query_len": len(query), "results": len(filtered_results), "success": True})
     return {
         'success': True,
         'query': query,

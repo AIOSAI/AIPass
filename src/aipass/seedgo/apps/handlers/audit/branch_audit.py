@@ -9,11 +9,11 @@
 
 import importlib.util
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 from aipass.seedgo.apps.handlers.bypass import ignore_handler
 from aipass.seedgo.apps.handlers.json import json_handler
 
-def discover_checkers(pack_path: Path = None) -> Dict[str, object]:
+def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     """Auto-discover all *_check.py modules from a pack directory.
 
     Args:
@@ -76,35 +76,14 @@ def _log_structure_post_checks(branch_path: Path) -> tuple:
       - ``system_logs/`` at repo root is managed by prax (runtime dispatch).
         Having many system logs and few local logs is *normal*.
       - ``logs/`` at branch root holds local-only logs. Flat placement is
-        fine -- hierarchical sub-directories are only expected when there
-        are enough logs to warrant organisation (>5).
+        fine — the standard does not prescribe internal organisation.
     """
     violations: list[dict] = []
     scores: list[int] = []
 
-    root_logs_dir = branch_path / "logs"
     in_dirs = [f for f in branch_path.rglob("*.log") if f.parent.name == "logs"]
 
-    # Check 1: If the branch has a logs/ directory, verify it is not empty
-    # and only flag flat placement when there are enough files to warrant
-    # hierarchical organisation.
-    if root_logs_dir.is_dir():
-        root_only = [f for f in in_dirs if f.parent == root_logs_dir]
-        has_subdirs = any(f.parent != root_logs_dir for f in in_dirs)
-        if not root_only and not has_subdirs:
-            # logs/ exists but is empty -- acceptable (no violation)
-            scores.append(100)
-        elif len(root_only) > 5 and not has_subdirs:
-            # Many logs piled at root with no subdirectories
-            scores.append(50)
-            violations.append({
-                "file": "(branch-level)", "path": str(root_logs_dir), "score": 50,
-                "issues": [f"{len(root_only)} logs at branch root with no sub-directories — consider hierarchical placement"],
-            })
-        else:
-            scores.append(100)
-
-    # Check 2: Verify system_logs/ exists when the branch produces logs.
+    # Check: Verify system_logs/ exists when the branch produces logs.
     # The two-tier model expects prax to dispatch runtime logs to
     # system_logs/.  A mismatch only matters when the branch has NO
     # system logs at all despite having local logs (potential prax
@@ -146,7 +125,7 @@ def _load_diagnostics_checker():
     return mod
 
 
-def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path = None) -> Dict:
+def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | None = None) -> Dict:
     """Audit a branch for standards compliance. Returns backward-compatible dict."""
     entry_file, branch_path = branch["entry_file"], Path(branch["path"])
     checkers, all_files = discover_checkers(pack_path), _collect_py_files(branch_path)

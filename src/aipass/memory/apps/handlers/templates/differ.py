@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from aipass.prax import logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 # =============================================================================
 # PATH SETUP
@@ -65,7 +66,7 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
     today = datetime.now().strftime("%Y-%m-%d")
     result = copy.deepcopy(template)
 
-    def _replace_in_value(val):
+    def _replace_in_value(val: Any) -> Any:
         if isinstance(val, str):
             return val.replace("{{BRANCHNAME}}", branch_name).replace("{{DATE}}", today)
         elif isinstance(val, list):
@@ -74,7 +75,9 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
             return {k: _replace_in_value(v) for k, v in val.items()}
         return val
 
-    return _replace_in_value(result)
+    replaced = _replace_in_value(result)
+    assert isinstance(replaced, dict)
+    return replaced
 
 
 # =============================================================================
@@ -295,6 +298,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
         if file_diff["additions"] or file_diff["removals"] or file_diff["modifications"]:
             result["observations"].append(file_diff)
 
+    log_operation("template_diff", {"branch": branch_name, "local_diffs": len(result["local"]), "obs_diffs": len(result["observations"]), "success": True})
     return result
 
 

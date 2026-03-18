@@ -33,6 +33,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 logger = get_system_logger()
 
@@ -150,6 +151,8 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
             # Atomic rename (overwrites original)
             Path(temp_path).rename(file_path)
+
+            log_operation("write_memory_file", {"file": file_path.name, "success": True})
 
             return {
                 'success': True,

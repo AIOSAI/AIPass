@@ -40,6 +40,7 @@ from pathlib import Path
 
 # Handler imports (domain-organized, no modules)
 from aipass.memory.apps.handlers.vector import embedder
+from aipass.memory.apps.handlers.json.json_handler import log_operation
 
 
 # =============================================================================
@@ -306,11 +307,13 @@ def store_fragment(
             metadatas=[flat_meta]
         )
 
+        total = collection.count()
+        log_operation("symbolic_store_fragment", {"fragment_id": frag_id, "total": total, "success": True})
         return {
             'success': True,
             'fragment_id': frag_id,
             'collection': COLLECTION_NAME,
-            'total_fragments': collection.count()
+            'total_fragments': total
         }
 
     except Exception as e:
@@ -416,11 +419,13 @@ def store_fragments_batch(
             metadatas=batch_metadatas
         )
 
+        total = collection.count()
+        log_operation("symbolic_store_batch", {"stored": len(batch_ids), "total": total, "success": True})
         return {
             'success': True,
             'stored': len(batch_ids),
             'collection': COLLECTION_NAME,
-            'total_fragments': collection.count()
+            'total_fragments': total
         }
 
     except Exception as e:
@@ -534,11 +539,13 @@ def store_llm_fragment(
             metadatas=[flat_meta]
         )
 
+        total = collection.count()
+        log_operation("symbolic_store_llm_fragment", {"fragment_id": frag_id, "total": total, "success": True})
         return {
             'success': True,
             'fragment_id': frag_id,
             'collection': COLLECTION_NAME,
-            'total_fragments': collection.count()
+            'total_fragments': total
         }
 
     except Exception as e:
@@ -660,11 +667,13 @@ def store_llm_fragments_batch(
             metadatas=frag_metas
         )
 
+        total = collection.count()
+        log_operation("symbolic_store_llm_batch", {"stored": len(frag_ids), "total": total, "success": True})
         return {
             'success': True,
             'stored': len(frag_ids),
             'collection': COLLECTION_NAME,
-            'total_fragments': collection.count()
+            'total_fragments': total
         }
 
     except Exception as e:
@@ -703,10 +712,12 @@ def delete_fragment(
 
         collection.delete(ids=[fragment_id])
 
+        total = collection.count()
+        log_operation("symbolic_delete_fragment", {"deleted_id": fragment_id, "total": total, "success": True})
         return {
             'success': True,
             'deleted_id': fragment_id,
-            'total_fragments': collection.count()
+            'total_fragments': total
         }
 
     except Exception as e:
