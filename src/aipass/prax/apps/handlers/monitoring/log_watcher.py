@@ -285,6 +285,21 @@ class LogFileWatcher(FileSystemEventHandler):
             if "fired" in log_line.lower() or "triggered" in log_line.lower():
                 return {'command': "trigger fire", 'caller': None, 'target': None}
 
+        # Pattern 12: Drone routing with caller attribution - HIGHEST PRIORITY
+        # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
+        if "Routing @" in log_line and "[CALLER:" in log_line:
+            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
+            caller = caller_match.group(1) if caller_match else None
+
+            # Extract target branch and command from "Routing @target ... → command [args]"
+            route_match = re.search(r"Routing\s+@(\w+).*?→\s*(\S+)\s*(.*)", log_line)
+            if route_match:
+                target = route_match.group(1).upper()
+                cmd_name = route_match.group(2)
+                cmd_args = route_match.group(3).strip()
+                display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
+                return {'command': display_cmd, 'caller': caller, 'target': target}
+
         # Pattern 7: ALL drone command executions - HIGH PRIORITY
         # Format: "Executing command [CALLER:PRAX]: seed.py audit @prax"
         if "Executing" in log_line and "command" in log_line:

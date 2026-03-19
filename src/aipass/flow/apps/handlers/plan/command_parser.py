@@ -55,12 +55,13 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     subject = args[1] if len(args) > 1 else ""
     raw_type = args[2] if len(args) > 2 else "default"
 
-    # Map raw type argument to plan_type_key
-    _TYPE_MAP = {
-        "default": "flow_plans",
-        "dplan": "dev_plans",
-    }
-    plan_type_key = _TYPE_MAP.get(raw_type.lower(), raw_type)
+    # Map raw type argument to plan_type_key via registry
+    try:
+        from aipass.flow.apps.handlers.template.registry_ops import get_type_map
+        type_map = get_type_map()
+    except Exception:
+        type_map = {"default": "flow_plans", "dplan": "dev_plans"}
+    plan_type_key = type_map.get(raw_type.lower(), raw_type)
 
     json_handler.log_operation("create_args_parsed", {"location": location, "subject": subject, "plan_type_key": plan_type_key})
     return location, subject, plan_type_key

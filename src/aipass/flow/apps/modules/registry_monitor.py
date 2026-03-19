@@ -177,6 +177,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
+        return True
+
     # Get subcommand
     subcommand = args[0] if args else "status"
 
@@ -304,48 +309,30 @@ def print_introspection():
     console.print("  • [cyan]handlers/registry/save_registry.py[/cyan]")
     console.print()
 
-    console.print("[dim]Run 'python3 registry_monitor.py --help' for detailed usage[/dim]")
+    console.print("[dim]Run 'drone @flow registry --help' for usage[/dim]")
     console.print()
 
 
 def print_help():
     """Print help information for registry_monitor module"""
     console.print()
-    console.print("[bold cyan]registry_monitor.py[/bold cyan] - Auto-healing PLAN registry")
-    console.print()
-    console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  scan     - One-time scan and heal registry")
-    console.print("  heal     - Alias for scan")
-    console.print("  start    - Start watchdog monitoring (runs until Ctrl+C)")
-    console.print("  stop     - Stop watchdog monitoring")
-    console.print("  status   - Show monitoring status")
+    console.print("[bold cyan]registry_monitor[/bold cyan] — Auto-healing PLAN registry")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  python3 registry_monitor.py scan")
-    console.print("  python3 registry_monitor.py start")
-    console.print("  python3 registry_monitor.py status")
-    console.print("  python3 registry_monitor.py --help")
+    console.print("  drone @flow registry <subcommand>")
+    console.print()
+    console.print("[yellow]SUBCOMMANDS:[/yellow]")
+    console.print("  scan      One-time scan and heal")
+    console.print("  heal      Alias for scan")
+    console.print("  start     Start persistent watchdog monitoring")
+    console.print("  stop      Stop watchdog monitoring")
+    console.print("  status    Check monitoring status")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [dim]# Run one-time scan and heal[/dim]")
-    console.print("  python3 registry_monitor.py scan")
-    console.print()
-    console.print("  [dim]# Start persistent monitoring[/dim]")
-    console.print("  python3 registry_monitor.py start")
-    console.print()
-    console.print("  [dim]# Check monitoring status[/dim]")
-    console.print("  python3 registry_monitor.py status")
-    console.print()
-    console.print("  [dim]# Stop monitoring[/dim]")
-    console.print("  python3 registry_monitor.py stop")
-    console.print()
-    console.print("[yellow]FEATURES:[/yellow]")
-    console.print("  - Auto-detect PLAN file changes (create/move/delete)")
-    console.print("  - Preserve metadata on file moves (status, closed date, etc.)")
-    console.print("  - Detect and fix orphaned registry entries")
-    console.print("  - Auto-renumber duplicate plan numbers")
-    console.print("  - System-wide scanning from repo root")
-    console.print("  - Ignore common directories (.git, backups, etc.)")
+    console.print("  [dim]drone @flow registry scan[/dim]             # One-time scan and heal")
+    console.print("  [dim]drone @flow registry start[/dim]            # Start persistent monitoring")
+    console.print("  [dim]drone @flow registry status[/dim]           # Check monitoring status")
+    console.print("  [dim]drone @flow registry stop[/dim]             # Stop monitoring")
     console.print()
 
 

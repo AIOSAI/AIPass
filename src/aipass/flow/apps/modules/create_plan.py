@@ -117,30 +117,29 @@ def print_introspection():
     console.print("    [dim]- push_central.py[/dim]")
     console.print()
 
-    console.print("[dim]Run 'python3 create_plan.py --help' for usage[/dim]")
+    console.print("[dim]Run 'drone @flow create --help' for usage[/dim]")
     console.print()
 
 def print_help():
     """Print help information for create_plan module"""
     console.print()
-    console.print("[bold cyan]create_plan.py[/bold cyan] - Create new PLAN file")
-    console.print()
-    console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  create, create_plan")
+    console.print("[bold cyan]create_plan[/bold cyan] — Create new PLAN file")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  python3 create_plan.py create [location] [subject] [template]")
-    console.print("  python3 create_plan.py --help")
+    console.print('  drone @flow create <location> "Subject" [template] [type]')
+    console.print()
+    console.print("[yellow]TEMPLATES:[/yellow]")
+    console.print("  default     Single task [dim](default)[/dim]")
+    console.print("  master      Multi-phase project")
+    console.print()
+    console.print("[yellow]TYPES:[/yellow]")
+    console.print("  (none)      FPLAN [dim](default)[/dim]")
+    console.print("  dplan       DPLAN")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [dim]# Create in current directory[/dim]")
-    console.print("  python3 create_plan.py create")
-    console.print()
-    console.print("  [dim]# Create with location and subject[/dim]")
-    console.print("  python3 create_plan.py create @flow \"New feature implementation\"")
-    console.print()
-    console.print("  [dim]# Create with custom template[/dim]")
-    console.print("  python3 create_plan.py create @flow \"Research task\" master")
+    console.print('  [dim]drone @flow create . "Implementation task"[/dim]           # FPLAN default')
+    console.print('  [dim]drone @flow create . "Multi-phase project" master[/dim]    # FPLAN master')
+    console.print('  [dim]drone @flow create . "Design investigation" dplan[/dim]    # DPLAN')
     console.print()
 
 
@@ -246,6 +245,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         print_introspection()
+        return True
+
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
         return True
 
     # Log the operation

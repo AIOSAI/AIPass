@@ -171,8 +171,27 @@ def print_introspection():
     console.print("    [dim]- push_central.py[/dim]")
     console.print()
 
-    console.print("[dim]Run 'python3 close_plan.py --help' for usage[/dim]")
+    console.print("[dim]Run 'drone @flow close --help' for usage[/dim]")
     console.print()
+
+def print_help():
+    """Print help information for close_plan module"""
+    console.print()
+    console.print("[bold cyan]close_plan[/bold cyan] — Close PLAN files")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @flow close <PLAN-ID> [options]")
+    console.print()
+    console.print("[yellow]OPTIONS:[/yellow]")
+    console.print("  --all       Close all open plans")
+    console.print("  --confirm   Interactive confirmation prompt")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]drone @flow close FPLAN-0042[/dim]          # Close specific plan")
+    console.print("  [dim]drone @flow close DPLAN-0005[/dim]          # Close a DPLAN")
+    console.print("  [dim]drone @flow close --all[/dim]               # Close all open plans")
+    console.print()
+
 
 # =============================================
 # CLOSE PLAN WORKFLOW (thin orchestrator)
@@ -277,6 +296,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         print_introspection()
+        return True
+
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
         return True
 
     # Import parser here (after command check)

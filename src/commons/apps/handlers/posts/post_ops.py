@@ -22,6 +22,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
 from commons.apps.handlers.json import json_handler
+from commons.apps.handlers.search.search_queries import sync_post_to_fts
+from commons.apps.handlers.profiles.profile_queries import increment_post_count
 
 
 # =============================================================================
@@ -104,6 +106,7 @@ def create_post(args: List[str]) -> dict:
             (room_name, author, title, content, post_type),
         )
         post_id = cursor.lastrowid
+        assert post_id is not None, "INSERT must return a lastrowid"
         conn.commit()
 
         # --- Extract and store mentions ---
@@ -122,6 +125,20 @@ def create_post(args: List[str]) -> dict:
 
         if mentions:
             conn.commit()
+
+        # --- Sync to FTS5 search index ---
+        try:
+            sync_post_to_fts(conn, post_id, title, content, author, room_name)
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[post_ops] FTS sync failed for post #{post_id}: {e}")
+
+        # --- Increment author post count ---
+        try:
+            increment_post_count(conn, author)
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[post_ops] Post count increment failed for {author}: {e}")
 
         logger.info(
             f"[post_ops] Post #{post_id} created by {author} in {room_name}: {title}"

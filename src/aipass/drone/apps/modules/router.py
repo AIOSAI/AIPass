@@ -13,13 +13,18 @@ Thin orchestrator that resolves targets and delegates execution
 to the handler layer.
 """
 
+import os
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.drone.apps.handlers.router_handler import execute_branch_command
+from aipass.drone.apps.handlers.router_handler import (
+    detect_caller_branch_name,
+    execute_branch_command,
+)
 from .resolver import list_branches, resolve_branch
 
 logger = system_logger
@@ -92,7 +97,11 @@ def route_command(
     branch_path = resolve_branch(target)
     branch_name = target.lstrip("@").lower()
 
-    logger.info("Routing @%s → %s %s", branch_name, command or "(introspection)", args or [])
+    caller = detect_caller_branch_name(Path.cwd())
+    if not caller:
+        caller = os.environ.get("AIPASS_BRANCH_NAME")
+    caller_tag = f" [CALLER:{caller.upper()}]" if caller else ""
+    logger.info("Routing @%s%s → %s %s", branch_name, caller_tag, command or "(introspection)", args or [])
     return execute_branch_command(
         branch_path=branch_path,
         branch_name=branch_name,

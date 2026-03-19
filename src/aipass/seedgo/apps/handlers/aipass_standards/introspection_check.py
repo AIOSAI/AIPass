@@ -168,6 +168,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         if gate_check:
             checks.append(gate_check)
 
+    # Check 5: Content references — help/introspection text should reference drone, not python3
+    content_check = check_content_references(tree, path.name)
+    if content_check:
+        checks.append(content_check)
+
+    # Check 6: Module help interception — handle_command() should intercept --help (modules only)
+    if is_module:
+        help_check = check_module_help_interception(tree, path.name)
+        if help_check:
+            checks.append(help_check)
+
     # Calculate score
     passed_checks = sum(1 for check in checks if check['passed'])
     total_checks = len(checks)
@@ -553,3 +564,72 @@ def _get_function_calls_in_block(body: list) -> set:
             elif isinstance(node.func, ast.Attribute):
                 calls.add(node.func.attr)
     return calls
+
+
+def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
+    """
+    Check that print_introspection() and print_help() reference drone commands,
+    not python3 standalone execution.
+
+    Users and agents use `drone @branch command`, not `python3 module.py`.
+    Help/introspection text that references python3 is misleading and causes
+    agents to follow instructions that don't work.
+    """
+    target_funcs = {'print_introspection', 'print_help'}
+    python3_refs = []
+
+    found_funcs = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in target_funcs:
+            found_funcs.add(node.name)
+            # Walk function body looking for string literals containing python3
+            for child in ast.walk(node):
+                if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                    val = child.value.lower()
+                    if 'python3 ' in val or 'python3\n' in val:
+                        python3_refs.append((node.name, child.lineno))
+
+    if not found_funcs:
+        return None  # No relevant functions to check
+
+    if python3_refs:
+        refs_str = ', '.join(f'{fn}() line {ln}' for fn, ln in python3_refs[:3])
+        return {
+            'name': 'Content references',
+            'passed': False,
+            'message': f'Help/introspection text references python3 instead of drone commands: {refs_str} in {filename} — use "drone @branch command" instead'
+        }
+
+    return {
+        'name': 'Content references',
+        'passed': True,
+        'message': 'Help/introspection text uses correct command references'
+    }
+
+
+def check_module_help_interception(tree: ast.Module, filename: str) -> Optional[Dict]:
+    """
+    For modules, verify that handle_command() intercepts --help/-h before
+    processing arguments as business logic.
+
+    Without interception, --help gets treated as a regular argument
+    (e.g., as a directory path or unknown filter).
+    """
+    handle_cmd = _find_handle_command_function(tree)
+    if handle_cmd is None:
+        return None  # No handle_command — skip
+
+    # Look for --help check in handle_command()
+    for node in ast.walk(handle_cmd):
+        if isinstance(node, ast.If) and _is_help_check(node):
+            return {
+                'name': 'Module help interception',
+                'passed': True,
+                'message': f'handle_command() intercepts --help at line {node.lineno}'
+            }
+
+    return {
+        'name': 'Module help interception',
+        'passed': False,
+        'message': f'handle_command() in {filename} does not intercept --help — flag may fall through to business logic'
+    }

@@ -176,7 +176,7 @@ def create_plan_impl(
             tmpl_name = plan_type_config.get("default_template", "default")
             tmpl_dir: Path | None = plan_type_config.get("_directory")
             if tmpl_dir is not None:
-                candidate = tmpl_dir / "templates" / f"{tmpl_name}.md"
+                candidate = tmpl_dir / f"{tmpl_name}.md"
                 if candidate.is_file():
                     template_path = candidate
 

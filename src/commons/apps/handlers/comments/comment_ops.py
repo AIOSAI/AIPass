@@ -22,6 +22,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.modules.commons_identity import get_caller_branch, extract_mentions
 from commons.apps.handlers.json import json_handler
+from commons.apps.handlers.search.search_queries import sync_comment_to_fts
+from commons.apps.handlers.profiles.profile_queries import increment_comment_count
 
 
 # =============================================================================
@@ -136,6 +138,7 @@ def add_comment(args: List[str]) -> dict:
             (post_id, parent_id, author, content),
         )
         comment_id = cursor.lastrowid
+        assert comment_id is not None, "INSERT must return a lastrowid"
 
         # --- Update post comment_count and last_comment_at ---
         conn.execute(
@@ -164,6 +167,20 @@ def add_comment(args: List[str]) -> dict:
 
         if mentions:
             conn.commit()
+
+        # --- Sync to FTS5 search index ---
+        try:
+            sync_comment_to_fts(conn, comment_id, content, author)
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[comment_ops] FTS sync failed for comment #{comment_id}: {e}")
+
+        # --- Increment author comment count ---
+        try:
+            increment_comment_count(conn, author)
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"[comment_ops] Comment count increment failed for {author}: {e}")
 
         logger.info(
             f"[comment_ops] Comment #{comment_id} on post #{post_id} by {author}"

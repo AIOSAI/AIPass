@@ -78,6 +78,28 @@ def get_room_enter_data(room_name: str) -> Dict[str, Any]:
     return result
 
 
+def record_visit(room_name: str, visitor: str) -> None:
+    """
+    Record a branch entering a room in the room_visits table.
+
+    Each call inserts a new row — no deduplication, every enter is a visit.
+
+    Args:
+        room_name: The room being entered.
+        visitor: The branch name of the visitor.
+    """
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO room_visits (room_name, visitor) VALUES (?, ?)",
+            (room_name, visitor),
+        )
+        conn.commit()
+        close_db(conn)
+    except Exception as e:
+        logger.warning(f"[commons.space_ops] Failed to record visit: {e}")
+
+
 def get_room_look_data(room_name: str) -> Dict[str, Any]:
     """
     Gather all data needed to render the 'look' view for a room.
@@ -161,7 +183,10 @@ def place_decoration(room_name: str, item_name: str, description: str, branch_na
 
 def get_visitors_data(room_name: str) -> Dict[str, Any]:
     """
-    Get distinct authors who posted or commented in a room in the last 48h.
+    Get distinct visitors in a room in the last 48h.
+
+    Combines explicit room visits (room_visits table) with authors
+    who posted or commented, for a complete picture.
 
     Returns:
         Dict with keys: found, visitors (sorted list), error
@@ -179,6 +204,14 @@ def get_visitors_data(room_name: str) -> Dict[str, Any]:
 
         cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        # Primary source: explicit room visits
+        visit_rows = conn.execute(
+            "SELECT DISTINCT visitor FROM room_visits "
+            "WHERE room_name = ? AND visited_at > ?",
+            (room_name, cutoff),
+        ).fetchall()
+
+        # Secondary source: post/comment authors (for backward compat)
         post_authors = conn.execute(
             "SELECT DISTINCT author FROM posts WHERE room_name = ? AND created_at > ?",
             (room_name, cutoff),
@@ -194,6 +227,8 @@ def get_visitors_data(room_name: str) -> Dict[str, Any]:
         close_db(conn)
 
         visitors = set()
+        for row in visit_rows:
+            visitors.add(row["visitor"])
         for row in post_authors:
             visitors.add(row["author"])
         for row in comment_authors:

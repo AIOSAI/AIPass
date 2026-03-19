@@ -9,12 +9,11 @@
 """
 Plan Type Loader
 
-Discovers and loads plan type plugins from the plan_types/ directory.
-Each plan type is a subdirectory containing a plan_type.json config
-and a templates/ directory with Markdown templates.
-
-Plan types are DATA, not code -- the loader reads JSON configs and
-resolves template paths without requiring any per-type Python modules.
+Discovers plan type plugins from the templates/ directory using
+filesystem-driven auto-discovery.  Each plan type is a subdirectory
+containing one or more Markdown template files.  No per-type JSON
+config is required -- the only manual configuration is the PREFIX_MAP
+dict defined in this module.
 
 Usage:
     from aipass.flow.apps.handlers.template.plan_type_loader import (
@@ -42,7 +41,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Dict, List
 
@@ -58,10 +56,33 @@ MODULE_NAME = "plan_type_loader"
 # Resolve flow root: this file lives at flow/apps/handlers/template/
 # so parents[3] walks up to flow/
 FLOW_ROOT = Path(__file__).resolve().parents[3]
-PLAN_TYPES_DIR = FLOW_ROOT / "plan_types"
+PLAN_TYPES_DIR = FLOW_ROOT / "templates"
 
-_CONFIG_FILENAME = "plan_type.json"
-_TEMPLATES_SUBDIR = "templates"
+# Prefix map loaded from persistent registry (template_registry.json)
+# Fallback to defaults if registry unavailable
+_FALLBACK_PREFIX_MAP: Dict[str, str] = {
+    "flow_plans": "FPLAN",
+    "dev_plans": "DPLAN",
+}
+
+
+def _get_prefix_map() -> Dict[str, str]:
+    """Load prefix map from persistent template registry."""
+    try:
+        from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+        return get_prefix_map()
+    except Exception as exc:
+        logger.warning(
+            "%s: failed to load template registry, using fallback -- %s",
+            MODULE_NAME,
+            exc,
+        )
+        return _FALLBACK_PREFIX_MAP
+
+# Standardised defaults applied to every discovered plan type
+STANDARD_DIGITS = 4
+STANDARD_SLUG_MAX = 45
+DEFAULT_TEMPLATE_NAME = "default"
 
 # Cache for discovered plan types -- populated on first call
 _plan_type_cache: Dict[str, Dict] | None = None
@@ -71,41 +92,19 @@ _plan_type_cache: Dict[str, Dict] | None = None
 # =============================================
 
 
-def _load_plan_type_config(directory: Path) -> Dict:
-    """Load and validate a single plan_type.json from *directory*.
-
-    Returns the parsed config dict with an injected ``_directory`` key
-    pointing to the plugin folder, or an empty dict if the config is
-    missing or invalid.
-    """
-    config_path = directory / _CONFIG_FILENAME
-    if not config_path.is_file():
-        return {}
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as fh:
-            config: Dict = json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(
-            "%s: failed to load %s -- %s",
-            MODULE_NAME,
-            config_path,
-            exc,
-        )
-        return {}
-
-    # Inject the resolved directory so callers can find templates
-    config["_directory"] = directory
-    return config
-
-
 def _build_cache() -> Dict[str, Dict]:
-    """Scan ``plan_types/`` and return ``{type_key: config}``."""
+    """Scan ``templates/`` for subdirectories and build config dicts.
+
+    Each subdirectory that contains at least one ``.md`` file and has a
+    corresponding entry in :data:`PREFIX_MAP` becomes a plan type.
+    No JSON config files are read -- all metadata is derived from the
+    filesystem layout and the constants defined in this module.
+    """
     cache: Dict[str, Dict] = {}
 
     if not PLAN_TYPES_DIR.is_dir():
         logger.warning(
-            "%s: plan_types directory not found at %s",
+            "%s: templates directory not found at %s",
             MODULE_NAME,
             PLAN_TYPES_DIR,
         )
@@ -118,18 +117,45 @@ def _build_cache() -> Dict[str, Dict]:
         if child.name.startswith(("_", ".")):
             continue
 
-        config = _load_plan_type_config(child)
-        if not config:
+        # Must contain at least one .md template file
+        md_files = sorted(child.glob("*.md"))
+        if not md_files:
             continue
 
-        # Key by the ``name`` field from the JSON, falling back to dir name
-        type_key = config.get("name", child.name)
-        cache[type_key] = config
+        # Look up prefix from registry -- skip unknown directories
+        dir_name = child.name
+        prefix_map = _get_prefix_map()
+        prefix = prefix_map.get(dir_name)
+        if prefix is None:
+            logger.warning(
+                "%s: Unknown plan type '%s' in templates/. "
+                "Register with: drone @flow register %s <PREFIX>",
+                MODULE_NAME,
+                dir_name,
+                dir_name,
+            )
+            continue
+
+        available_templates = [p.stem for p in md_files]
+
+        config: Dict = {
+            "name": dir_name,
+            "prefix": prefix,
+            "digits": STANDARD_DIGITS,
+            "registry_file": f"{prefix.lower()}_registry.json",
+            "available_templates": available_templates,
+            "default_template": DEFAULT_TEMPLATE_NAME,
+            "slug_max_length": STANDARD_SLUG_MAX,
+            "_directory": child,
+        }
+
+        cache[dir_name] = config
         logger.info(
-            "%s: discovered plan type '%s' (prefix=%s)",
+            "%s: discovered plan type '%s' (prefix=%s, templates=%s)",
             MODULE_NAME,
-            type_key,
-            config.get("prefix", "?"),
+            dir_name,
+            prefix,
+            available_templates,
         )
 
     return cache
@@ -146,10 +172,14 @@ def _get_cache() -> Dict[str, Dict]:
 def _resolve_type_key(type_key: str) -> tuple[str, str | None]:
     """Normalise *type_key* to a cache key and optional template override.
 
-    Accepted forms:
-    - Directory name: ``"flow_plans"``, ``"dev_plans"``
-    - Prefix (any case): ``"FPLAN"``, ``"dplan"``
-    - Shorthand ``"master"`` -> ``flow_plans`` with template override ``"master"``
+    Accepted forms (checked in order):
+
+    1. Direct directory name: ``"flow_plans"``, ``"dev_plans"``
+    2. Prefix (case-insensitive): ``"FPLAN"``, ``"dplan"``
+    3. Template shorthand: if *type_key* matches any ``.md`` file stem in
+       any plan type, resolve to that type with a template override.
+       E.g. ``"master"`` resolves to ``flow_plans`` with template ``"master"``.
+    4. Case-insensitive directory name fallback.
 
     Returns ``(cache_key, template_override_or_None)``.
     Raises ``ValueError`` when the key cannot be resolved.
@@ -167,14 +197,15 @@ def _resolve_type_key(type_key: str) -> tuple[str, str | None]:
         if cfg.get("prefix", "").upper() == upper:
             return key, None
 
-    # 3. Shorthand "master" -> flow_plans with template override
-    if type_key.lower() == "master":
-        for key, cfg in cache.items():
-            if "master" in cfg.get("available_templates", []):
-                return key, "master"
+    # 3. Dynamic template shorthand -- resolve if type_key matches any
+    #    .md file stem that is NOT the default template name
+    lower = type_key.lower()
+    for key, cfg in cache.items():
+        templates = cfg.get("available_templates", [])
+        if lower in templates and lower != DEFAULT_TEMPLATE_NAME:
+            return key, lower
 
     # 4. Case-insensitive match on name / directory
-    lower = type_key.lower()
     for key, cfg in cache.items():
         if key.lower() == lower:
             return key, None
@@ -191,11 +222,13 @@ def _resolve_type_key(type_key: str) -> tuple[str, str | None]:
 
 
 def discover_plan_types() -> Dict[str, Dict]:
-    """Scan ``plan_types/`` and return ``{type_key: config}``.
+    """Scan ``templates/`` and return ``{type_key: config}``.
 
-    The *type_key* is derived from the ``name`` field inside each
-    ``plan_type.json`` (falling back to the directory name).  Configs
-    are also reachable by prefix -- use :func:`get_plan_type` for that.
+    The *type_key* is derived from the subdirectory name.  Plan types
+    are auto-discovered from the filesystem -- each subdirectory that
+    contains ``.md`` files and has an entry in :data:`PREFIX_MAP` becomes
+    a plan type.  Configs are also reachable by prefix -- use
+    :func:`get_plan_type` for that.
     """
     # Force a fresh scan (useful after adding new plan types at runtime)
     global _plan_type_cache  # noqa: PLW0603
@@ -253,7 +286,7 @@ def get_template_path(
     """
     config = get_plan_type(type_key)
     template = template_name or config.get("default_template", "default")
-    templates_dir: Path = config["_directory"] / _TEMPLATES_SUBDIR
+    templates_dir: Path = config["_directory"]
     template_path = templates_dir / f"{template}.md"
 
     if not template_path.is_file():
@@ -275,7 +308,7 @@ def get_template_path(
 def list_available_types() -> List[Dict]:
     """Return a list of all discovered plan-type configs.
 
-    Each entry is a dict copied from the JSON config with an extra
+    Each entry is a filesystem-derived config dict that includes an
     ``_directory`` key.  Useful for ``--help`` output and introspection.
     """
     cache = _get_cache()

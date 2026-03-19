@@ -218,6 +218,15 @@ CREATE TABLE IF NOT EXISTS time_capsules (
     FOREIGN KEY (creator) REFERENCES agents(branch_name)
 );
 
+-- Room visits: tracks each branch entry into a room
+CREATE TABLE IF NOT EXISTS room_visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_name TEXT NOT NULL,
+    visitor TEXT NOT NULL,
+    visited_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    FOREIGN KEY (room_name) REFERENCES rooms(name)
+);
+
 -- FTS5 virtual tables for full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
     title, content, author, room_name,
@@ -280,3 +289,8 @@ CREATE INDEX IF NOT EXISTS idx_artifact_history_artifact ON artifact_history(art
 
 -- Room state indexes
 CREATE INDEX IF NOT EXISTS idx_room_state_room ON room_state(room_name);
+
+-- Room visits indexes
+CREATE INDEX IF NOT EXISTS idx_room_visits_room ON room_visits(room_name);
+CREATE INDEX IF NOT EXISTS idx_room_visits_visitor ON room_visits(visitor);
+CREATE INDEX IF NOT EXISTS idx_room_visits_visited_at ON room_visits(visited_at DESC);

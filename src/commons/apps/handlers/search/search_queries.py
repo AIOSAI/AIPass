@@ -174,3 +174,50 @@ def sync_comment_to_fts(
         "VALUES (?, ?, ?)",
         (comment_id, content, author),
     )
+
+
+def backfill_fts_index(conn: sqlite3.Connection) -> Dict[str, int]:
+    """
+    Backfill the FTS5 index with all existing posts and comments.
+
+    Intended to be run once to populate the index for content created
+    before FTS sync was wired into create_post/add_comment.
+
+    Uses INSERT OR REPLACE so it is safe to run multiple times.
+
+    Args:
+        conn: Active database connection.
+
+    Returns:
+        Dict with counts: {"posts_indexed": int, "comments_indexed": int}
+    """
+    # --- Backfill posts ---
+    post_rows = conn.execute(
+        "SELECT id, title, content, author, room_name FROM posts"
+    ).fetchall()
+
+    for row in post_rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO posts_fts(rowid, title, content, author, room_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (row["id"], row["title"], row["content"], row["author"], row["room_name"]),
+        )
+
+    # --- Backfill comments ---
+    comment_rows = conn.execute(
+        "SELECT id, content, author FROM comments"
+    ).fetchall()
+
+    for row in comment_rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO comments_fts(rowid, content, author) "
+            "VALUES (?, ?, ?)",
+            (row["id"], row["content"], row["author"]),
+        )
+
+    conn.commit()
+
+    return {
+        "posts_indexed": len(post_rows),
+        "comments_indexed": len(comment_rows),
+    }

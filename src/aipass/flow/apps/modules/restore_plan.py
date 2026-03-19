@@ -128,8 +128,25 @@ def print_introspection():
     console.print("    [dim]- push_central.py[/dim]")
     console.print()
 
-    console.print("[dim]Run 'python3 restore_plan.py --help' for usage[/dim]")
+    console.print("[dim]Run 'drone @flow restore --help' for usage[/dim]")
     console.print()
+
+def print_help():
+    """Print help information for restore_plan module"""
+    console.print()
+    console.print("[bold cyan]restore_plan[/bold cyan] — Reopen closed PLAN files")
+    console.print()
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @flow restore <PLAN-ID>")
+    console.print()
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]drone @flow restore FPLAN-0042[/dim]        # Reopen a closed plan")
+    console.print("  [dim]drone @flow restore DPLAN-0005[/dim]        # Reopen a closed DPLAN")
+    console.print()
+    console.print("[yellow]NOTES:[/yellow]")
+    console.print("  Plan must be closed. File must exist at registered location.")
+    console.print()
+
 
 # =============================================
 # RECOVERY FUNCTIONS
@@ -213,6 +230,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         print_introspection()
+        return True
+
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
         return True
 
     # Import parser here (after command check)

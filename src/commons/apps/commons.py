@@ -63,7 +63,7 @@ def ensure_database() -> bool:
         True if database is ready, False on error.
     """
     try:
-        from commons.apps.modules.database_module import init_db, close_db
+        from commons.apps.modules.database import init_db, close_db
         conn = init_db()
         close_db(conn)
         return True

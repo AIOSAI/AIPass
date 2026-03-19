@@ -20,14 +20,14 @@ drone @flow restore FPLAN-0042              # Reopen a closed plan
 - `apps/flow.py` -- Entry point. Auto-discovers modules in `apps/modules/` via `handle_command()` convention.
 - `apps/modules/` -- Thin orchestrators. No business logic. Route to handlers and display results.
 - `apps/handlers/` -- Implementation. Grouped by domain: `plan/`, `registry/`, `template/`, `dashboard/`, `mbank/`, `summary/`.
-- `plan_types/` -- Data-only plugins. Each subdirectory has `plan_type.json` config + `templates/` with Markdown templates.
+- `templates/` -- Data-only plugins. Each subdirectory has `plan_type.json` config + Markdown templates.
 - `flow_json/` -- Per-type JSON registries (`fplan_registry.json`, `dplan_registry.json`).
 
 ## Plan Type Plugins
 
-Plan types are DATA, not code. Each plugin directory under `plan_types/` contains:
+Plan types are DATA, not code. Each plugin directory under `templates/` contains:
 - `plan_type.json` -- prefix, digits, registry_file, available_templates, default_template
-- `templates/` -- Markdown plan templates
+- Markdown template files (e.g. default.md, master.md)
 
 Discovered at runtime by `apps/handlers/template/plan_type_loader.py`. Add a new type by creating a new directory with these files.
 

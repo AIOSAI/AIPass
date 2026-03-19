@@ -86,38 +86,28 @@ def print_introspection():
     console.print("    [dim]- display.py[/dim]")
     console.print()
 
-    console.print("[dim]Run 'python3 list_plans.py --help' for usage[/dim]")
+    console.print("[dim]Run 'drone @flow list --help' for usage[/dim]")
     console.print()
 
 
 def print_help():
     """Print help information for list_plans module"""
     console.print()
-    console.print("[bold cyan]list_plans.py[/bold cyan] - List PLAN files from registry")
-    console.print()
-    console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  list, list_plans")
+    console.print("[bold cyan]list_plans[/bold cyan] — List PLAN files from registry")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  python3 list_plans.py [filter]")
-    console.print("  python3 list_plans.py --help")
+    console.print("  drone @flow list [filter]")
     console.print()
     console.print("[yellow]FILTERS:[/yellow]")
-    console.print("  (none)    List open plans only (default)")
-    console.print("  open      List open plans only")
+    console.print("  open      List open plans only [dim](default)[/dim]")
     console.print("  closed    List closed plans only")
-    console.print("  all       List all plans")
+    console.print("  all       List all plans (open + closed)")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [dim]# List open plans (default)[/dim]")
-    console.print("  python3 list_plans.py")
-    console.print("  python3 list_plans.py open")
+    console.print("  [dim]drone @flow list open[/dim]       # Open plans")
+    console.print("  [dim]drone @flow list closed[/dim]     # Closed plans")
+    console.print("  [dim]drone @flow list all[/dim]        # Everything")
     console.print()
-    console.print("  [dim]# List closed plans[/dim]")
-    console.print("  python3 list_plans.py closed")
-    console.print()
-    console.print("  [dim]# List all plans[/dim]")
-    console.print("  python3 list_plans.py all")
     console.print()
 
 
@@ -193,6 +183,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
+        return True
+
     # Log the operation
     json_handler.log_operation(
         "plans_listed",
@@ -202,13 +197,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     # STEP 1: Parse filter argument
     filter_type = "open"  # Default to open plans
 
-    if args:
-        filter_arg = args[0].lower()
-        if filter_arg in ["open", "closed", "all"]:
-            filter_type = filter_arg
-        else:
-            warning(f"Unknown filter '{filter_arg}', defaulting to 'open'")
-            console.print("[dim]Valid filters: open, closed, all[/dim]")
+    filter_arg = args[0].lower()
+    if filter_arg in ["open", "closed", "all"]:
+        filter_type = filter_arg
+    else:
+        warning(f"Unknown filter '{filter_arg}', defaulting to 'open'")
+        console.print("[dim]Valid filters: open, closed, all[/dim]")
 
     # STEP 2: Execute workflow
     list_plans(filter_type)

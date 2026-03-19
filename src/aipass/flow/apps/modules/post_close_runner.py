@@ -64,7 +64,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args and args[0] in ("--help", "-h"):
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -117,25 +118,31 @@ def _release_lock():
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("post_close_runner Module")
-    console.print("Background post-close processing — runs memory bank archival")
+    console.print("[bold cyan]post_close_runner Module[/bold cyan]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/mbank/")
-    console.print("    - process.py (process_closed_plans — scan and archive closed plans)")
+
+    console.print("[yellow]Connected Handlers:[/yellow]")
+    console.print()
+    console.print("  [cyan]handlers/mbank/[/cyan]")
+    console.print("    [dim]- process.py (process_closed_plans — scan and archive closed plans)[/dim]")
+    console.print()
+
+    console.print("[dim]Run 'drone @flow post --help' for usage[/dim]")
     console.print()
 
 
 def print_help():
-    """Display help for this background runner."""
-    console.print(f"Usage: python {Path(__file__).name}")
+    """Print help information for post_close_runner module"""
     console.print()
-    console.print("Post-Close Background Runner")
-    console.print("Runs memory bank archival as a background process.")
-    console.print("Called by close_plan.py via subprocess — not intended for direct use.")
+    console.print("[bold cyan]post_close_runner[/bold cyan] — Background post-close processing")
     console.print()
-    console.print("Options:")
-    console.print("  -h, --help    Show this help message")
+    console.print("[yellow]USAGE:[/yellow]")
+    console.print("  drone @flow post")
+    console.print()
+    console.print("[yellow]NOTES:[/yellow]")
+    console.print("  Background utility — called by close_plan.py via subprocess.")
+    console.print("  Not typically invoked directly.")
+    console.print()
 
 
 if __name__ == "__main__":

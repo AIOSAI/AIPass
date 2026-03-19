@@ -112,7 +112,8 @@ def execute_branch_command(
         interactive=interactive,
     )
 
-    logger.info("Executed @%s %s → exit %d", branch_name, command or "(introspection)", result.exit_code)
+    caller_tag = f" [CALLER:{caller_branch.upper()}]" if caller_branch else ""
+    logger.info("Executed @%s%s %s → exit %d", branch_name, caller_tag, command or "(introspection)", result.exit_code)
     json_handler.log_operation("execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code})
 
     return CommandResult(

@@ -96,48 +96,34 @@ def aggregate_central(heal: bool = True) -> bool:
 def print_introspection():
     """Display module introspection info."""
     console.print()
-    console.print("aggregate_central Module")
-    console.print("Thin orchestrator for central plans aggregation and self-healing validation")
+    console.print("[bold cyan]aggregate_central Module[/bold cyan]")
     console.print()
-    console.print("Connected Handlers:")
-    console.print("  handlers/plan/")
-    console.print("    - aggregate_ops.py (aggregate_central_impl — aggregation and healing logic)")
+
+    console.print("[yellow]Connected Handlers:[/yellow]")
+    console.print()
+    console.print("  [cyan]handlers/plan/[/cyan]")
+    console.print("    [dim]- aggregate_ops.py (aggregate_central_impl — aggregation and healing logic)[/dim]")
+    console.print()
+
+    console.print("[dim]Run 'drone @flow aggregate --help' for usage[/dim]")
     console.print()
 
 
 def print_help():
     """Print help information for aggregate_central module"""
     console.print()
-    console.print("[bold cyan]aggregate_central - Central Plans Aggregator[/bold cyan]")
-    console.print()
-    console.print("[yellow]DESCRIPTION:[/yellow]")
-    console.print("  Self-healing central aggregator for PLANS.central.json that validates")
-    console.print("  file existence and rebuilds the active_plans list.")
-    console.print()
-    console.print("[yellow]FEATURES:[/yellow]")
-    console.print("  • Validates all plans in branches have files on disk")
-    console.print("  • Auto-closes plans with missing files in their branch registries")
-    console.print("  • Aggregates active plans from all branches into central list")
-    console.print("  • Builds recently_closed array from all branches")
-    console.print("  • Updates statistics across all branches")
+    console.print("[bold cyan]aggregate_central[/bold cyan] — Central plans aggregation and self-healing")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  python3 aggregate_central.py aggregate [options]")
-    console.print("  python3 aggregate_central.py --help")
+    console.print("  drone @flow aggregate [options]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
-    console.print("  --heal      Enable auto-closing of missing plans (default)")
-    console.print("  --no-heal   Disable auto-closing (validation only)")
+    console.print("  --heal      Auto-close missing plans [dim](default)[/dim]")
+    console.print("  --no-heal   Validation only")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  # Aggregate with healing (default)")
-    console.print("  python3 aggregate_central.py aggregate")
-    console.print()
-    console.print("  # Aggregate with explicit healing")
-    console.print("  python3 aggregate_central.py aggregate --heal")
-    console.print()
-    console.print("  # Aggregate without healing (validation only)")
-    console.print("  python3 aggregate_central.py aggregate --no-heal")
+    console.print("  [dim]drone @flow aggregate[/dim]                 # Aggregate with healing (default)")
+    console.print("  [dim]drone @flow aggregate --no-heal[/dim]       # Validation only")
     console.print()
 
 
@@ -160,6 +146,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if not args:
         print_introspection()
+        return True
+
+    # Handle help flag
+    if args[0] in ["--help", "-h", "help"]:
+        print_help()
         return True
 
     # Log the operation

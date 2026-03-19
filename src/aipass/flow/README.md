@@ -10,7 +10,7 @@
 ## Overview
 
 ### What I Do
-- Create numbered plans from type-specific templates via `plan_types/` plugins
+- Create numbered plans from type-specific templates via `templates/` plugins
 - Unified create/close/list commands for all plan types (FPLAN, DPLAN, ...)
 - Close plans with async post-processing and archival to `backup/processed_plans/`
 - Vector processing on close (via `aipass.memory` intake pipeline)
@@ -55,7 +55,7 @@ flow/
 │       ├── dashboard/           # Status aggregation
 │       ├── mbank/               # Memory bank archival
 │       └── summary/             # AI-generated plan summaries
-├── plan_types/                  # Plan type plugins (DATA, not code)
+├── templates/                   # Plan type plugins (DATA, not code)
 │   ├── flow_plans/              # FPLAN config + templates (default, master)
 │   └── dev_plans/               # DPLAN config + templates (default)
 ├── flow_json/                   # Per-type registries (fplan_registry.json, dplan_registry.json)
@@ -68,7 +68,7 @@ flow/
 
 ## Plan Types (Plugins)
 
-Plan types live in `plan_types/` as data-only plugins. Each contains a `plan_type.json` config and a `templates/` directory. No per-type Python code is needed.
+Plan types live in `templates/` as data-only plugins. Each subdirectory contains a `plan_type.json` config and Markdown template files. No per-type Python code is needed.
 
 | Type | Prefix | Registry | Description |
 |------|--------|----------|-------------|
