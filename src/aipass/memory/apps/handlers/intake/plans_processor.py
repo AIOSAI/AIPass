@@ -259,9 +259,15 @@ def process_plans() -> Dict[str, Any]:
 
     logger.info(f"[plans] Found {len(unprocessed)} unprocessed plan files")
 
-    total_chunks = 0
-    files_processed = 0
     errors = []
+
+    # -- Phase 1: Read all files, chunk them, collect texts + metadatas ----------
+    all_texts: List[str] = []
+    all_metadatas: List[Dict[str, str]] = []
+    # Track which files produced chunks (for manifest update)
+    files_with_chunks: List[Path] = []
+    # Files with 0 chunks still get marked in manifest (e.g. template content)
+    files_without_chunks: List[Path] = []
 
     for plan_file in unprocessed:
         try:
@@ -270,58 +276,65 @@ def process_plans() -> Dict[str, Any]:
             errors.append(f'{plan_file.name}: read error: {e}')
             continue
 
-        # Chunk the plan
         chunks = _chunk_plan_text(text, plan_file.name)
         if not chunks:
-            manifest[plan_file.name] = datetime.now().isoformat()
+            files_without_chunks.append(plan_file)
             continue
 
-        # Extract texts and build metadata
-        texts = [c['text'] for c in chunks]
-        metadatas = [
-            {
+        files_with_chunks.append(plan_file)
+        for c in chunks:
+            all_texts.append(c['text'])
+            all_metadatas.append({
                 'source_file': plan_file.name,
                 'section': c['section'],
                 'processed_at': datetime.now().isoformat(),
                 'type': 'plan'
-            }
-            for c in chunks
-        ]
+            })
 
-        # Embed
-        embed_result = _embed_texts(texts)
-        if not embed_result.get('success'):
-            errors.append(f"{plan_file.name}: embed error: {embed_result.get('error')}")
-            continue
+    total_chunks = len(all_texts)
+    files_processed = 0
 
-        embeddings = embed_result.get('embeddings', [])
-        if not embeddings:
-            errors.append(f'{plan_file.name}: no embeddings returned')
-            continue
-
-        # Store
-        store_result = _store_vectors(embeddings, texts, metadatas, collection_name)
-        if not store_result.get('success'):
-            errors.append(f"{plan_file.name}: store error: {store_result.get('error')}")
-            continue
-
-        # Mark as processed
+    # Mark empty-chunk files in manifest immediately (nothing to embed)
+    for plan_file in files_without_chunks:
         manifest[plan_file.name] = datetime.now().isoformat()
-        files_processed += 1
-        total_chunks += len(chunks)
-        logger.info(f"[plans] Processed {plan_file.name}: {len(chunks)} chunks vectorized")
 
-    # Save manifest
+    # -- Phase 2: Batch embed + store (single subprocess each) ------------------
+    if all_texts:
+        logger.info(f"[plans] Batch embedding {total_chunks} chunks from {len(files_with_chunks)} files")
+
+        embed_result = _embed_texts(all_texts)
+        if not embed_result.get('success'):
+            error_msg = f"batch embed error: {embed_result.get('error')}"
+            logger.error(f"[plans] {error_msg}")
+            errors.append(error_msg)
+        else:
+            embeddings = embed_result.get('embeddings', [])
+            if not embeddings:
+                errors.append('batch embed returned no embeddings')
+            else:
+                store_result = _store_vectors(embeddings, all_texts, all_metadatas, collection_name)
+                if not store_result.get('success'):
+                    error_msg = f"batch store error: {store_result.get('error')}"
+                    logger.error(f"[plans] {error_msg}")
+                    errors.append(error_msg)
+                else:
+                    # Success — mark all chunk-producing files in manifest
+                    for plan_file in files_with_chunks:
+                        manifest[plan_file.name] = datetime.now().isoformat()
+                    files_processed = len(files_with_chunks)
+                    logger.info(f"[plans] Batch complete: {files_processed} files, {total_chunks} chunks vectorized")
+
+    # Save manifest (includes empty-chunk files even if embedding failed)
     _save_manifest(manifest)
 
-    result = {
-        'success': files_processed > 0 or not errors,
+    result: Dict[str, Any] = {
+        'success': files_processed > 0 or (not errors and not files_with_chunks),
         'files_processed': files_processed,
-        'total_chunks': total_chunks,
+        'total_chunks': total_chunks if files_processed > 0 else 0,
     }
     if errors:
         result['errors'] = errors
 
-    json_handler.log_operation("process_plans", {"files_processed": files_processed, "total_chunks": total_chunks, "success": result['success']})
+    json_handler.log_operation("process_plans", {"files_processed": files_processed, "total_chunks": result['total_chunks'], "success": result['success']})
 
     return result

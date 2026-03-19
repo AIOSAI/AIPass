@@ -17,6 +17,8 @@
   "plans": {
     "enabled": true,
     "path": "src/aipass/flow/backup/processed_plans",
+    "path": "src/aipass/backup/processed_plans",
+
     "supported_extensions": [".md"],
     "collection_name": "flow_plans"
   }

@@ -185,11 +185,13 @@ def print_help():
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  --all       Close all open plans")
     console.print("  --confirm   Interactive confirmation prompt")
+    console.print("  --dry-run   Preview what would be closed (no action taken)")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [dim]drone @flow close FPLAN-0042[/dim]          # Close specific plan")
     console.print("  [dim]drone @flow close DPLAN-0005[/dim]          # Close a DPLAN")
     console.print("  [dim]drone @flow close --all[/dim]               # Close all open plans")
+    console.print("  [dim]drone @flow close --all --dry-run[/dim]     # Preview close-all")
     console.print()
 
 
@@ -197,7 +199,7 @@ def print_help():
 # CLOSE PLAN WORKFLOW (thin orchestrator)
 # =============================================
 
-def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bool = False, spawn_background: bool = True) -> bool:
+def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bool = False, spawn_background: bool = True, dry_run: bool = False) -> bool:
     """
     Orchestrate plan closure workflow (thin orchestrator)
 
@@ -218,6 +220,7 @@ def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bo
         all_plans: If True, close all open plans (default False)
         spawn_background: Whether to spawn background post-processing (default True).
                           Set False when called from close_all_plans() to avoid race condition.
+        dry_run: If True, preview what would be closed without taking action (default False)
 
     Returns:
         True if successful, False otherwise
@@ -227,6 +230,7 @@ def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bo
         confirm=confirm,
         all_plans=all_plans,
         spawn_background=spawn_background,
+        dry_run=dry_run,
         # Inject dependencies
         normalize_plan_number=normalize_plan_number,
         load_registry=load_registry,
@@ -249,18 +253,20 @@ def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bo
     return bool(result)
 
 
-def close_all_plans(confirm: bool = False) -> bool:
+def close_all_plans(confirm: bool = False, dry_run: bool = False) -> bool:
     """
     Close all open plans in one operation (thin orchestrator)
 
     Args:
         confirm: Whether to ask for bulk confirmation (default False, auto-confirms)
+        dry_run: If True, preview what would be closed without taking action (default False)
 
     Returns:
         True if at least one plan closed successfully, False otherwise
     """
     result = close_all_plans_impl(
         confirm=confirm,
+        dry_run=dry_run,
         get_open_plans=get_open_plans,
         close_plan_fn=close_plan,
     )
@@ -313,7 +319,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     )
 
     # 1. PARSE ARGS: Use command_parser handler
-    plan_num, confirm, all_plans, error = parse_close_command_args(args)
+    plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(args)
 
     # 2. VALIDATE: Check for parsing errors
     if error:
@@ -321,7 +327,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True  # Command was handled (error already displayed)
 
     # 3. EXECUTE: Run workflow orchestrator
-    close_plan(plan_num=plan_num, confirm=confirm, all_plans=all_plans)
+    close_plan(plan_num=plan_num, confirm=confirm, all_plans=all_plans, dry_run=dry_run)
 
     # 4. RETURN: True = command was handled (even if the operation failed,
     #    the error has already been displayed -- returning False would cause

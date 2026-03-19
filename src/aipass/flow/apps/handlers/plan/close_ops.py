@@ -108,6 +108,7 @@ def _spawn_background_runner():
 
 def close_plan_impl(plan_num: Any = None, confirm: bool = False,
                     all_plans: bool = False, spawn_background: bool = True,
+                    dry_run: bool = False,
                     # Dependencies injected from module
                     normalize_plan_number: Any = None,
                     load_registry: Any = None,
@@ -131,6 +132,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         all_plans: If True, close all open plans (default False)
         spawn_background: Whether to spawn background post-processing (default True).
                           Set False when called from close_all_plans() to avoid race condition.
+        dry_run: If True, preview what would be closed without taking action (default False)
         (remaining args): Handler/service dependencies injected by module
 
     Returns:
@@ -141,7 +143,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
 
     # Handle --all flag
     if all_plans:
-        return close_all_plans_fn(confirm)
+        return close_all_plans_fn(confirm, dry_run=dry_run)
 
     # Single plan closure
     if not plan_num:
@@ -193,6 +195,24 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
 
         # Extract prefix for display functions (e.g. "FPLAN", "DPLAN")
         plan_prefix = _extract_prefix(plan_label) or "FPLAN"
+
+        # DRY RUN: Preview what would be closed, then return early
+        if dry_run:
+            location = plan_info.get("location", "unknown")
+            subject = plan_info.get("subject", "No subject")
+            status = plan_info.get("status", "unknown")
+            messages.append({"type": "dim", "text": f"[DRY RUN] Would close {plan_label}"})
+            messages.append({"type": "dim", "text": f"  Location: {location}"})
+            messages.append({"type": "dim", "text": f"  Subject:  {subject}"})
+            messages.append({"type": "dim", "text": f"  Status:   {status}"})
+            messages.append({"type": "dim", "text": "No action taken."})
+            logger.info(f"[{MODULE_NAME}] Dry run: would close {plan_label}")
+            return {
+                "success": True,
+                "messages": messages,
+                "plan_key": plan_key,
+                "cancelled": False,
+            }
 
         # 4. IDEMPOTENCY CHECK: Prevent double-closing (with orphan cleanup)
         if plan_info['status'] == 'closed':
@@ -300,21 +320,57 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
                 "cancelled": False,
             }
 
-        # --- Step 3/5: Background processing ---
-        if spawn_background:
-            messages.append({"type": "step", "text": "[3/5] Starting background processing..."})
-            try:
-                _spawn_background_runner()
-                logger.info(f"[{MODULE_NAME}] Spawned background post-processing for {plan_label}")
-                messages.append({"type": "dim", "text": "  Summary generation and archival running in background"})
-            except FileNotFoundError as e:
-                logger.warning(f"[{MODULE_NAME}] Background runner not found: {e}")
-                messages.append({"type": "warning", "text": "  Background runner not found - will retry on next close"})
-            except Exception as e:
-                logger.warning(f"[{MODULE_NAME}] Failed to spawn background post-processing: {e}")
-                messages.append({"type": "warning", "text": "  Background archival failed to start - will retry on next close"})
-        else:
-            messages.append({"type": "step", "text": "[3/5] Background processing deferred (batch mode)"})
+        # --- Step 3/5: Archive plan to processed_plans ---
+        messages.append({"type": "step", "text": "[3/5] Archiving plan..."})
+        try:
+            from aipass.flow.apps.handlers.mbank.process import archive_plan
+            archive_success = archive_plan(plan_file)
+            if archive_success:
+                # Set flags on same registry object we already have in memory
+                plan_info["processed"] = True
+                plan_info["processed_date"] = datetime.now(timezone.utc).isoformat()
+                plan_info["cleanup_completed"] = True
+                plan_info["cleanup_date"] = datetime.now(timezone.utc).isoformat()
+                if reg_file:
+                    save_registry(registry, registry_file=reg_file)
+                else:
+                    save_registry(registry)
+                logger.info(f"[{MODULE_NAME}] Archived {plan_label} to processed_plans")
+                messages.append({"type": "dim", "text": "  Plan archived to processed_plans/"})
+            else:
+                logger.error(f"[{MODULE_NAME}] Failed to archive {plan_label}")
+                messages.append({"type": "warning", "text": "  Archive failed — plan file not moved"})
+        except Exception as e:
+            logger.error(f"[{MODULE_NAME}] Archive error for {plan_label}: {e}")
+            messages.append({"type": "warning", "text": f"  Archive error: {e}"})
+
+        # --- Vector intake + verification ---
+        # Trigger memory's plan processor via drone (no cross-branch imports)
+        try:
+            subprocess.run(
+                ["drone", "@memory", "process-plans"],
+                capture_output=True, timeout=30,
+            )
+        except Exception:
+            pass  # Best effort — verification below reports actual status
+
+        # Verify vectorization via memory's verify module
+        try:
+            from aipass.memory.apps.modules.verify import is_plan_vectorized  # type: ignore[import-not-found]
+            result = is_plan_vectorized(plan_label)
+            if result.get("found"):
+                chunk_count = result.get("count", 0)
+                logger.info(f"[{MODULE_NAME}] Vectorized: {plan_label} ({chunk_count} chunks)")
+                messages.append({"type": "dim", "text": f"  Vectorized: {chunk_count} chunks in chroma"})
+            else:
+                logger.warning(f"[{MODULE_NAME}] NOT vectorized: {plan_label}")
+                messages.append({"type": "warning", "text": "  NOT vectorized — check drone @memory process-plans"})
+        except ImportError:
+            logger.warning(f"[{MODULE_NAME}] Vector verify unavailable — memory verify module not found")
+            messages.append({"type": "warning", "text": "  Vector status: unknown (memory verify not available)"})
+        except Exception as vec_err:
+            logger.warning(f"[{MODULE_NAME}] Vector verify failed: {vec_err}")
+            messages.append({"type": "warning", "text": f"  Vector status: unknown ({vec_err})"})
 
         # --- Step 4/5: Update dashboards ---
         messages.append({"type": "step", "text": "[4/5] Updating dashboards..."})
@@ -385,7 +441,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         }
 
 
-def close_all_plans_impl(confirm: bool = False,
+def close_all_plans_impl(confirm: bool = False, dry_run: bool = False,
                          # Dependencies injected from module
                          get_open_plans: Any = None,
                          close_plan_fn: Any = None) -> Dict[str, Any]:
@@ -394,6 +450,7 @@ def close_all_plans_impl(confirm: bool = False,
 
     Args:
         confirm: Whether to ask for bulk confirmation (default False, auto-confirms)
+        dry_run: If True, preview what would be closed without taking action (default False)
         get_open_plans: Handler function to get open plans
         close_plan_fn: Function to close a single plan (the module's close_plan)
 
@@ -414,6 +471,28 @@ def close_all_plans_impl(confirm: bool = False,
                 "success_count": 0,
                 "failure_count": 0,
                 "total": 0,
+            }
+
+        # DRY RUN: Preview all plans that would be closed, then return early
+        if dry_run:
+            messages.append({"type": "dim", "text": f"[DRY RUN] Would close {len(open_plans)} plan(s):"})
+            for plan_num, plan_info in open_plans:
+                subject = plan_info.get("subject", "No subject")
+                location = plan_info.get("location", "unknown")
+                # Derive prefix from file_path if available
+                plan_file = Path(plan_info.get("file_path", ""))
+                plan_label = plan_file.stem if plan_file.name else f"PLAN-{plan_num}"
+                prefix = _extract_prefix(plan_label) or "FPLAN"
+                display_id = f"{prefix}-{plan_num}"
+                messages.append({"type": "dim", "text": f"  {display_id:<14}{location:<14}{subject}"})
+            messages.append({"type": "dim", "text": "No action taken."})
+            logger.info(f"[{MODULE_NAME}] Dry run: would close {len(open_plans)} plan(s)")
+            return {
+                "success": True,
+                "messages": messages,
+                "success_count": 0,
+                "failure_count": 0,
+                "total": len(open_plans),
             }
 
         # Build plan list for display

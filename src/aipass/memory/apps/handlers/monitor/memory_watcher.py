@@ -295,12 +295,14 @@ def _check_memory_pool() -> Dict[str, Any]:
 
 def _check_plans() -> Dict[str, Any]:
     """
-    Check plans directory for files to vectorize.
+    Check plans directory for unprocessed files (count only).
 
-    Processes any plan files that haven't been vectorized yet.
+    Does NOT call process_plans() — that spawns heavy ML subprocesses.
+    Only counts pending files and reports. Use 'drone @memory process-plans'
+    to trigger actual vectorization.
 
     Returns:
-        Dict with processing status
+        Dict with pending file count
     """
     import json
 
@@ -308,7 +310,7 @@ def _check_plans() -> Dict[str, Any]:
 
     # Load config
     try:
-        with open(config_path) as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         plans_config = config.get('plans', {})
     except Exception:
@@ -320,7 +322,8 @@ def _check_plans() -> Dict[str, Any]:
 
     # Get plans path and count files (supports absolute paths)
     plans_dir = plans_config.get('path', 'plans')
-    plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else _MEMORY_ROOT / plans_dir
+    repo_root = _find_repo_root()
+    plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else repo_root / plans_dir
     extensions = plans_config.get('supported_extensions', ['.md'])
 
     if not plans_path.exists():
@@ -333,21 +336,24 @@ def _check_plans() -> Dict[str, Any]:
     file_count = len(files)
 
     if file_count == 0:
-        return {'success': True, 'files_in_plans': 0, 'action': 'none'}
+        return {'success': True, 'pending_files': 0, 'action': 'count_only'}
 
-    # Process plans to vectors
-    try:
-        # NOTE: intake module not yet ported to aipass.memory package
-        from aipass.memory.apps.handlers.intake.plans_processor import process_plans  # type: ignore[import-not-found]
-        result = process_plans()
-        return {
-            'success': result.get('success', False),
-            'files_processed': result.get('files_processed', 0),
-            'total_chunks': result.get('total_chunks', 0),
-            'action': 'processed'
-        }
-    except Exception as e:
-        return {'success': False, 'error': str(e), 'action': 'failed'}
+    # Load manifest to count unprocessed files
+    manifest_path = _MEMORY_ROOT / "config" / ".plans_processed.json"
+    manifest: Dict[str, str] = {}
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+
+    pending = [f for f in files if f.name not in manifest]
+    pending_count = len(pending)
+
+    if pending_count > 0:
+        logger.info(f"[plans] {pending_count} plans pending vectorization. Run: drone @memory process-plans")
+
+    return {'success': True, 'pending_files': pending_count, 'action': 'count_only'}
 
 
 def _check_code_archive() -> Dict[str, Any]:

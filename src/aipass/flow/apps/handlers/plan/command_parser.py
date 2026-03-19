@@ -99,45 +99,53 @@ def parse_delete_command_args(args: List[str]) -> Tuple[str | None, bool, str | 
     return plan_num, confirm, None
 
 
-def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, str | None]:
+def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, bool, str | None]:
     """
     Parse arguments for close command
 
     Auto-confirms by default (running 'close' IS the intent).
     Use --confirm or --interactive to explicitly request a confirmation prompt.
     --yes/-y kept for backwards compatibility (now redundant, already auto-confirms).
+    --dry-run or --preview previews what would be closed without taking action.
 
     Args:
         args: Command arguments
 
     Returns:
-        Tuple of (plan_num, confirm, all_plans, error_message)
+        Tuple of (plan_num, confirm, all_plans, dry_run, error_message)
         - plan_num: Plan number from first arg, or None if --all or missing
         - confirm: True only if --confirm or --interactive flag present, False otherwise
         - all_plans: True if --all flag present, False otherwise
+        - dry_run: True if --dry-run or --preview flag present, False otherwise
         - error_message: None if valid, error string if invalid args
 
     Examples:
         >>> parse_close_command_args(["42"])
-        ("42", False, False, None)
+        ("42", False, False, False, None)
 
         >>> parse_close_command_args(["42", "--yes"])
-        ("42", False, False, None)
+        ("42", False, False, False, None)
 
         >>> parse_close_command_args(["42", "--confirm"])
-        ("42", True, False, None)
+        ("42", True, False, False, None)
 
         >>> parse_close_command_args(["42", "--interactive"])
-        ("42", True, False, None)
+        ("42", True, False, False, None)
 
         >>> parse_close_command_args(["--all"])
-        (None, False, True, None)
+        (None, False, True, False, None)
 
         >>> parse_close_command_args(["--all", "--confirm"])
-        (None, True, True, None)
+        (None, True, True, False, None)
+
+        >>> parse_close_command_args(["42", "--dry-run"])
+        ("42", False, False, True, None)
+
+        >>> parse_close_command_args(["--all", "--preview"])
+        (None, False, True, True, None)
 
         >>> parse_close_command_args([])
-        (None, False, False, "Plan number or --all required")
+        (None, False, False, False, "Plan number or --all required")
     """
     # Check for --all flag
     all_plans = '--all' in args
@@ -147,18 +155,21 @@ def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, s
     # --yes/-y kept for backwards compat (redundant, already auto-confirms)
     confirm = '--confirm' in args or '--interactive' in args
 
+    # Check for --dry-run or --preview flag
+    dry_run = '--dry-run' in args or '--preview' in args
+
     # If --all, plan_num is None
     if all_plans:
-        return None, confirm, True, None
+        return None, confirm, True, dry_run, None
 
     # Otherwise, need plan number
     # Filter out flag args to find the plan number
     non_flag_args = [a for a in args if not a.startswith('--') and a not in ('-y',)]
     if not non_flag_args:
-        return None, False, False, "Plan number or --all required"
+        return None, False, False, dry_run, "Plan number or --all required"
 
     plan_num = non_flag_args[0]
-    return plan_num, confirm, False, None
+    return plan_num, confirm, False, dry_run, None
 
 
 def parse_restore_command_args(args: List[str]) -> Tuple[str | None, str | None]:

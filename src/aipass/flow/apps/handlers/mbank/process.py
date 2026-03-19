@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli.apps.modules import error as cli_error, warning as cli_warning
 
 # AI summarization removed — OpenRouter API no longer needed here
 # from aipass.api.apps.modules.openrouter_client import get_response
@@ -689,7 +691,10 @@ def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
         except Exception:
             continue
         for plan_num, plan_info in registry.get("plans", {}).items():
-            if plan_info.get("processed") is True and plan_info.get("cleanup_completed") is True:
+            # Heal ANY closed plan whose file still sits at its original location.
+            # Covers both fully-processed plans and auto-closed orphans that
+            # never entered the post-close pipeline.
+            if plan_info.get("status") == "closed":
                 original_path = Path(plan_info.get("file_path", ""))
                 if original_path.exists():
                     orphans_found += 1
@@ -757,12 +762,17 @@ def process_closed_plans() -> Dict[str, Any]:
 
                 if archive_success:
                     processed_count += 1
-                    # Best-effort vector processing
+                    # Vector processing — errors go to prax log + console
                     try:
                         from aipass.memory.apps.handlers.intake.plans_processor import process_plans  # type: ignore[import-not-found]
                         process_plans()
-                    except Exception:
-                        pass
+                        logger.info("[mbank] Vector intake completed for %s", plan_label)
+                    except ImportError:
+                        logger.error("[mbank] Vector intake FAILED for %s — plans_processor not found", plan_label)
+                        cli_error(f"Vector intake unavailable — memory plans_processor not found ({plan_label})")
+                    except Exception as vec_err:
+                        logger.error("[mbank] Vector intake FAILED for %s: %s", plan_label, vec_err)
+                        cli_error(f"Vector intake failed for {plan_label}: {vec_err}")
                     results.append({"plan": plan_label, "status": "archived", "correlation_id": correlation_id})
                 else:
                     error_count += 1

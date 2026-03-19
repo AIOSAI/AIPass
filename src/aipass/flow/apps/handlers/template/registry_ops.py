@@ -147,6 +147,38 @@ def load_registry() -> Dict[str, Any]:
             "type_count": len(data["types"]),
         }
 
+    # Auto-heal: prune orphaned types (directory deleted but registry entry remains)
+    templates_dir = FLOW_ROOT / "templates"
+    orphaned = [
+        dir_name
+        for dir_name in data["types"]
+        if dir_name not in _PROTECTED_TYPES
+        and not (templates_dir / dir_name).is_dir()
+    ]
+    if orphaned:
+        plan_registry_dir = FLOW_ROOT / "flow_json"
+        for dir_name in orphaned:
+            entry = data["types"][dir_name]
+            shorthand = entry.get("shorthand", entry.get("prefix", "").lower())
+            logger.info(
+                "[%s] Auto-pruning orphaned type '%s' (directory missing)",
+                MODULE_NAME,
+                dir_name,
+            )
+            del data["types"][dir_name]
+
+            # Clean up the per-type plan registry JSON
+            if shorthand:
+                plan_reg = plan_registry_dir / f"{shorthand}_registry.json"
+                if plan_reg.exists():
+                    plan_reg.unlink()
+                    logger.info(
+                        "[%s] Removed orphaned plan registry: %s",
+                        MODULE_NAME,
+                        plan_reg.name,
+                    )
+        save_registry(data)
+
     return data
 
 

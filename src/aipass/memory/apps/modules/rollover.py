@@ -133,6 +133,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         sync_line_counts()
         return True
 
+    elif command == 'process-plans':
+        process_plans_command()
+        return True
+
     return False
 
 
@@ -224,6 +228,61 @@ def run_rollover() -> bool:
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
     return success_count > 0
+
+
+# =============================================================================
+# PLAN VECTORIZATION
+# =============================================================================
+
+def process_plans_command() -> None:
+    """
+    Process pending plan files into vector storage.
+
+    Batches all chunks from all files into a single embed + store call.
+    """
+    console.print()
+    console.print(Panel.fit(
+        "[bold cyan]Memory - Process Plans[/bold cyan]",
+        border_style="cyan",
+        box=box.ROUNDED
+    ))
+    console.print()
+
+    console.print("[cyan]Processing plan files into vector storage...[/cyan]")
+    console.print()
+
+    try:
+        from ..handlers.intake.plans_processor import process_plans
+        result = process_plans()
+    except Exception as e:
+        error(f"Plan processing failed: {e}")
+        return
+
+    if not result.get('success'):
+        error(result.get('error', 'Unknown error'))
+        if result.get('errors'):
+            for err in result['errors']:
+                error(err)
+        return
+
+    files_processed = result.get('files_processed', 0)
+    total_chunks = result.get('total_chunks', 0)
+    reason = result.get('reason', '')
+
+    if files_processed == 0 and reason:
+        console.print(f"[green]>[/green] {reason}")
+    elif files_processed == 0:
+        console.print("[green]>[/green] No new plans to process")
+    else:
+        console.print(f"[green]>[/green] Processed {files_processed} files ({total_chunks} chunks vectorized)")
+
+    if result.get('errors'):
+        console.print()
+        for err in result['errors']:
+            error(err)
+
+    console.print()
+    json_handler.log_operation("process_plans_command", {"files_processed": files_processed, "total_chunks": total_chunks})
 
 
 # =============================================================================
