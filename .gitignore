@@ -70,3 +70,4 @@ src/aipass/memory/config/fragmented_memory_state.json
 
 
 .vscode
+src/aipass/memory/config/memory_bank.config.json
