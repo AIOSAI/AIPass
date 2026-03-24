@@ -150,7 +150,7 @@ def print_help() -> None:
     ))
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  python3 -m aipass.memory.apps.modules.rollover <command>")
+    console.print("  drone @memory rollover <command>")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits")

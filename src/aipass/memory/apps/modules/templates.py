@@ -197,7 +197,7 @@ def print_help() -> None:
     ))
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  python3 -m aipass.memory.apps.modules.templates <command>")
+    console.print("  drone @memory templates <command>")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]push-templates[/cyan]              Push template updates to all branches")

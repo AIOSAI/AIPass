@@ -126,7 +126,7 @@ def print_help() -> None:
     ))
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  python3 -m aipass.memory.apps.modules.search search <query> [options]")
+    console.print("  drone @memory search <query> [options]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]search <query>[/cyan]     Search across all memory collections")

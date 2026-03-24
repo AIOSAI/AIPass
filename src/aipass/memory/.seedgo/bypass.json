@@ -19,6 +19,51 @@
       "file": "apps/handlers/vector/embed_subprocess.py",
       "standard": "json_structure",
       "reason": "Self-contained subprocess — no branch imports by design"
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "cli",
+      "reason": "Subprocess IPC script — print(json.dumps()) outputs JSON to stdout for parent process. Not display output."
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "debug_print",
+      "reason": "Subprocess IPC — print() is the output mechanism (JSON to stdout). Not debug output."
+    },
+    {
+      "file": "apps/handlers/vector/embed_subprocess.py",
+      "standard": "silent_catch",
+      "reason": "Self-contained subprocess — cannot import prax logger. Uses stdlib logging."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "error_handling",
+      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "log_visibility",
+      "reason": "Self-contained subprocess — runs in memory venv without aipass package. Cannot import prax. Uses stdlib logging.getLogger()."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "debug_print",
+      "reason": "Subprocess IPC — print(json.dumps()) is the output mechanism (JSON to stdout). Not debug output."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "naming",
+      "reason": "_clients is a module-level mutable cache (dict), not a constant. Lowercase is appropriate."
+    },
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "modules",
+      "reason": "Templates module orchestrates 6 subcommands across 3 handlers — splitting further would fragment related orchestration. Will refactor when subcommands grow."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "modules",
+      "reason": "Symbolic module is 1669 lines — legacy port from old memory bank. Full refactor deferred. Functions flagged as implementation are CLI-display orchestration, not raw logic."
     }
   ],
   "notes": {

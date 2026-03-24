@@ -66,7 +66,7 @@ def print_introspection():
         console.print("  [dim]No modules discovered yet[/dim]")
 
     console.print()
-    console.print("[dim]Run 'python3 -m aipass.memory.apps.memory --help' for usage information[/dim]")
+    console.print("[dim]Run 'drone @memory help' for usage information[/dim]")
     console.print()
 
 
@@ -130,8 +130,8 @@ def print_help():
     console.print("    [dim]drone @memory rollover run[/dim]")
     console.print()
     console.print("  [bold]Direct execution:[/bold]")
-    console.print("    [dim]python3 -m aipass.memory.apps.memory search \"query\"[/dim]")
-    console.print("    [dim]python3 -m aipass.memory.apps.memory rollover run[/dim]")
+    console.print("    [dim]drone @memory search \"query\"[/dim]")
+    console.print("    [dim]drone @memory rollover run[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -245,13 +245,13 @@ def start_watch() -> None:
 
     Press Ctrl+C to stop.
     """
-    from ..handlers.monitor.memory_watcher import (
+    from ..handlers.monitor.memory_watcher import (  # type: ignore[import-not-found]
         start_memory_watcher,
         stop_memory_watcher,
         is_memory_watcher_active,
         get_watcher_status
     )
-    from ..handlers.monitor.detector import get_rollover_stats
+    from ..handlers.monitor.detector import get_rollover_stats  # type: ignore[import-not-found]
 
     # Signal handler for graceful shutdown
     def signal_handler(sig, frame):
@@ -333,7 +333,7 @@ def main():
         return  # Module handled it successfully
     else:
         console.print()
-        error(f"Unknown command: {command}", suggestion="Run 'python3 -m aipass.memory.apps.memory --help' for available commands")
+        error(f"Unknown command: {command}", suggestion="Run 'drone @memory help' for available commands")
         console.print()
         return
 
