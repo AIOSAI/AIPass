@@ -29,7 +29,7 @@ from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error, warning
+from aipass.cli.apps.modules import error
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -67,6 +67,111 @@ def print_introspection() -> None:
 
 
 # =============================================================================
+# PRIVATE HELPERS — Generic violation rendering
+# =============================================================================
+
+def _format_standard_name(name: str) -> str:
+    """Convert 'DEEP_NESTING' or 'deep_nesting' to 'Deep Nesting'."""
+    return name.replace('_', ' ').title()
+
+
+def _render_violations(standard_name: str, violations: list, console_obj) -> None:
+    """Generic renderer for standard violation lists.
+
+    Handles both 'path' and 'file' keys (tries 'path' first, falls back to 'file').
+    Shows up to 5 violations with their issues, then a 'and N more...' note.
+    """
+    console_obj.print()
+    console_obj.print(f"  [bold red]{standard_name.upper()} VIOLATIONS ({len(violations)} files):[/bold red]")
+
+    shown = violations[:5]
+    for violation in shown:
+        file_path = violation.get('path', violation.get('file', ''))
+        score = violation.get('score', 0)
+        console_obj.print(f"    [red]✗[/red] [magenta]{file_path}[/magenta] [dim](score: {score}%)[/dim]")
+        for issue in violation.get('issues', []):
+            console_obj.print(f"      [dim]• {issue}[/dim]")
+        # Fallback: if no 'issues' key but 'message' exists, show that
+        if not violation.get('issues') and violation.get('message'):
+            console_obj.print(f"      [dim]• {violation['message']}[/dim]")
+
+    if len(violations) > 5:
+        console_obj.print(f"    [dim]... and {len(violations) - 5} more[/dim]")
+
+
+def _render_architecture_violations(audit_result: dict, console_obj) -> None:
+    """Special renderer for architecture standard — reads from results['checks']."""
+    results = audit_result.get('results', {})
+    arch_result = results.get('architecture', {})
+    checks = arch_result.get('checks', [])
+    failed_checks = [c for c in checks if not c.get('passed', False)]
+
+    if not failed_checks:
+        return
+
+    console_obj.print()
+    console_obj.print(f"  [bold red]ARCHITECTURE VIOLATIONS ({len(failed_checks)} missing):[/bold red]")
+
+    # Group by type for clarity (match both "Dir:" and "Directory:" prefixes)
+    missing_dirs = [c for c in failed_checks if 'Dir:' in c.get('name', '') or 'Directory:' in c.get('name', '')]
+    missing_files = [c for c in failed_checks if 'File:' in c.get('name', '')]
+    other_failures = [c for c in failed_checks if c not in missing_dirs and c not in missing_files]
+
+    if missing_dirs:
+        console_obj.print(f"       [dim]Missing directories ({len(missing_dirs)}):[/dim]")
+        for check in missing_dirs[:5]:
+            name = check.get('name', '').replace('Dir: ', '').replace('Directory: ', '')
+            console_obj.print(f"         [red]✗[/red] {name}")
+        if len(missing_dirs) > 5:
+            console_obj.print(f"         [dim]... and {len(missing_dirs) - 5} more[/dim]")
+
+    if missing_files:
+        console_obj.print(f"       [dim]Missing files ({len(missing_files)}):[/dim]")
+        for check in missing_files[:5]:
+            name = check.get('name', '').replace('File: ', '')
+            console_obj.print(f"         [red]✗[/red] {name}")
+        if len(missing_files) > 5:
+            console_obj.print(f"         [dim]... and {len(missing_files) - 5} more[/dim]")
+
+    if other_failures:
+        for check in other_failures:
+            console_obj.print(f"         [dim]• {check.get('message', '')}[/dim]")
+
+
+def _render_type_errors(audit_result: dict, console_obj) -> None:
+    """Special renderer for type errors (pyright diagnostics) — different structure."""
+    type_errors = audit_result.get('type_errors', 0)
+    type_error_files = audit_result.get('type_error_files', [])
+    files_checked = audit_result.get('files_checked', 0)
+
+    if type_errors > 0:
+        console_obj.print()
+        console_obj.print(f"  [bold red]TYPE ERRORS ({type_errors} errors):[/bold red]")
+        for file_result in type_error_files[:10]:  # Top 10 files
+            if file_result.get('errors', 0) > 0:
+                console_obj.print(f"    [red]✗[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
+                for diag in file_result.get('diagnostics', [])[:3]:  # Top 3 per file
+                    msg = diag.get('message', '')[:60]
+                    console_obj.print(f"      [dim]L{diag.get('line', '?')}: {msg}[/dim]")
+    elif files_checked > 0:
+        console_obj.print(f"  [green]✓[/green] No type errors")
+
+
+def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
+    """Special renderer for deprecated patterns — different structure."""
+    deprecated_patterns = audit_result.get('deprecated_patterns', [])
+
+    if not deprecated_patterns:
+        return
+
+    console_obj.print()
+    console_obj.print(f"  [bold yellow]DEPRECATED PATTERNS ({len(deprecated_patterns)}):[/bold yellow]")
+    for pattern in deprecated_patterns:
+        console_obj.print(f"    [yellow]⚠[/yellow] {pattern['path']}")
+        console_obj.print(f"      [dim]→ {pattern['message']}[/dim]")
+
+
+# =============================================================================
 # PUBLIC API
 # =============================================================================
 
@@ -76,8 +181,6 @@ def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | N
     branch = audit_result['branch']
     scores = audit_result['scores']
     avg = audit_result['average']
-    cli_violations = audit_result.get('cli_violations', [])
-    modules_violations = audit_result.get('modules_violations', [])
     files_checked = audit_result.get('files_checked', 0)
 
     # Branch header - always show files checked
@@ -105,213 +208,48 @@ def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | N
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"
     console.print(f"  [bold]Overall:{' ' * 8} {avg:3}% {overall_icon}[/bold]")
 
-    # Always show failures (audit = comprehensive)
-    results = audit_result['results']
-    for standard_name, result in results.items():
-        # Show issues if standard failed OR if it's architecture with violations
-        has_failures = any(not check.get('passed', False) for check in result.get('checks', []))
+    # Display violation details for any standard with violations
+    rendered_standards = set()
+    for standard_name, score in sorted(audit_result.get('scores', {}).items()):
+        if score >= 100:
+            continue
+        violations_key = f'{standard_name}_violations'
+        violations = audit_result.get(violations_key, [])
+        if standard_name == 'architecture':
+            _render_architecture_violations(audit_result, console)
+            rendered_standards.add(standard_name)
+        elif violations:
+            _render_violations(standard_name, violations, console)
+            rendered_standards.add(standard_name)
+        else:
+            # Branch-level checkers: no violations list, read from results[standard]['checks']
+            result_data = audit_result.get('results', {}).get(standard_name, {})
+            failed_checks = [c for c in result_data.get('checks', []) if not c.get('passed', True)]
+            if failed_checks:
+                formatted = _format_standard_name(standard_name)
+                console.print(f"    [red]└─ {formatted} issues:[/red]")
+                for check in failed_checks[:5]:
+                    console.print(f"       [dim]• {check.get('message', '')}[/dim]")
+                if len(failed_checks) > 5:
+                    console.print(f"       [dim]... and {len(failed_checks) - 5} more[/dim]")
+                rendered_standards.add(standard_name)
 
-        if not result.get('passed', False) or (standard_name == 'architecture' and has_failures):
-            # Count failures for architecture
-            if standard_name == 'architecture' and has_failures:
-                failed_checks = [c for c in result.get('checks', []) if not c.get('passed', False)]
-                warning(f"  └─ Architecture violations ({len(failed_checks)} missing):")
+    # Catch any violation lists not represented in scores (defensive)
+    for key in audit_result:
+        if not key.endswith('_violations'):
+            continue
+        standard_name = key.removesuffix('_violations')
+        if standard_name in rendered_standards:
+            continue
+        violations = audit_result[key]
+        if violations:
+            _render_violations(standard_name, violations, console)
 
-                # Group by type for clarity (match both "Dir:" and "Directory:" prefixes)
-                missing_dirs = [c for c in failed_checks if 'Dir:' in c.get('name', '') or 'Directory:' in c.get('name', '')]
-                missing_files = [c for c in failed_checks if 'File:' in c.get('name', '')]
-                other_failures = [c for c in failed_checks if c not in missing_dirs and c not in missing_files]
+    # Type errors (separate from standards)
+    _render_type_errors(audit_result, console)
 
-                if missing_dirs:
-                    console.print(f"       [dim]Missing directories ({len(missing_dirs)}):[/dim]")
-                    for check in missing_dirs[:5]:
-                        name = check.get('name', '').replace('Dir: ', '').replace('Directory: ', '')
-                        console.print(f"         [red]✗[/red] {name}")
-                    if len(missing_dirs) > 5:
-                        console.print(f"         [dim]... and {len(missing_dirs) - 5} more[/dim]")
-
-                if missing_files:
-                    console.print(f"       [dim]Missing files ({len(missing_files)}):[/dim]")
-                    for check in missing_files[:5]:
-                        name = check.get('name', '').replace('File: ', '')
-                        console.print(f"         [red]✗[/red] {name}")
-                    if len(missing_files) > 5:
-                        console.print(f"         [dim]... and {len(missing_files) - 5} more[/dim]")
-
-                if other_failures:
-                    for check in other_failures:
-                        console.print(f"         [dim]• {check.get('message', '')}[/dim]")
-            else:
-                # Non-architecture failures — check for per-file violations first
-                per_file_violations = audit_result.get(f'{standard_name}_violations', [])
-                if per_file_violations:
-                    console.print(f"    [red]└─ {standard_name.replace('_', ' ').title()} issues:[/red]")
-                    for violation in per_file_violations:
-                        file_path = violation.get('path', violation.get('file', ''))
-                        score = violation.get('score', 0)
-                        console.print(f"    [red]✗[/red] [magenta]{file_path}[/magenta] [dim](score: {score}%)[/dim]")
-                        for issue in violation.get('issues', []):
-                            console.print(f"      [dim]• {issue}[/dim]")
-                else:
-                    # Fallback: show check messages directly
-                    console.print(f"    [red]└─ {standard_name.replace('_', ' ').title()} issues:[/red]")
-                    for check in result.get('checks', []):
-                        if not check.get('passed', False):
-                            console.print(f"       [dim]• {check.get('message', 'Unknown error')}[/dim]")
-
-    # Always show CLI violations (audit = comprehensive)
-    # Use absolute paths for reliable VS Code clickability
-    if cli_violations:
-        console.print()
-        console.print(f"  [bold red]CLI VIOLATIONS ({len(cli_violations)} files):[/bold red]")
-        for violation in cli_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation['issues']:
-                console.print(f"      [dim]• {issue}[/dim]")
-    elif files_checked > 0 and not cli_violations:
-        console.print(f"  [green]✓ All {files_checked} files pass CLI standard[/green]")
-
-    # Show MODULES violations (business logic in modules)
-    if modules_violations:
-        console.print()
-        console.print(f"  [bold red]MODULES VIOLATIONS ({len(modules_violations)} files):[/bold red]")
-        for violation in modules_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            console.print(f"      [dim]• {violation['message']}[/dim]")
-
-    # Show ENCAPSULATION violations (cross-branch/package handler imports)
-    encapsulation_violations = audit_result.get('encapsulation_violations', [])
-    if encapsulation_violations:
-        console.print()
-        console.print(f"  [bold red]ENCAPSULATION VIOLATIONS ({len(encapsulation_violations)} files):[/bold red]")
-        for violation in encapsulation_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show ERROR_HANDLING violations (3-tier: entry/modules/handlers)
-    error_handling_violations = audit_result.get('error_handling_violations', [])
-    if error_handling_violations:
-        console.print()
-        console.print(f"  [bold red]ERROR_HANDLING VIOLATIONS ({len(error_handling_violations)} files):[/bold red]")
-        for violation in error_handling_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show TRIGGER violations (event bus patterns in handlers)
-    trigger_violations = audit_result.get('trigger_violations', [])
-    if trigger_violations:
-        console.print()
-        console.print(f"  [bold red]TRIGGER VIOLATIONS ({len(trigger_violations)} files):[/bold red]")
-        for violation in trigger_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show LOG_LEVEL violations (ERROR vs WARNING hygiene)
-    log_level_violations = audit_result.get('log_level_violations', [])
-    if log_level_violations:
-        console.print()
-        console.print(f"  [bold red]LOG_LEVEL VIOLATIONS ({len(log_level_violations)} files):[/bold red]")
-        for violation in log_level_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show LOG_VISIBILITY violations (raw getLogger without prax)
-    log_visibility_violations = audit_result.get('log_visibility_violations', [])
-    if log_visibility_violations:
-        console.print()
-        console.print(f"  [bold red]LOG_VISIBILITY VIOLATIONS ({len(log_visibility_violations)} files):[/bold red]")
-        for violation in log_visibility_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show JSON_STRUCTURE violations (json_handler misconfiguration)
-    json_structure_violations = audit_result.get('json_structure_violations', [])
-    if json_structure_violations:
-        console.print()
-        console.print(f"  [bold red]JSON_STRUCTURE VIOLATIONS ({len(json_structure_violations)} files):[/bold red]")
-        for violation in json_structure_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show META violations (META block at top of every .py file)
-    meta_violations = audit_result.get('meta_violations', [])
-    if meta_violations:
-        console.print()
-        console.print(f"  [bold red]META VIOLATIONS ({len(meta_violations)} files):[/bold red]")
-        for violation in meta_violations:
-            console.print(f"    [red]✗[/red] {violation['file']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show STDERR_ROUTING violations (console.print red/yellow → use error()/warning())
-    stderr_routing_violations = audit_result.get('stderr_routing_violations', [])
-    if stderr_routing_violations:
-        console.print()
-        console.print(f"  [bold red]STDERR_ROUTING VIOLATIONS ({len(stderr_routing_violations)} files):[/bold red]")
-        for violation in stderr_routing_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show SHEBANG violations (no #!/... in pip packages)
-    shebang_violations = audit_result.get('shebang_violations', [])
-    if shebang_violations:
-        console.print()
-        console.print(f"  [bold red]SHEBANG VIOLATIONS ({len(shebang_violations)} files):[/bold red]")
-        for violation in shebang_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show LOG_STRUCTURE violations (log directory/file structure)
-    log_structure_violations = audit_result.get('log_structure_violations', [])
-    if log_structure_violations:
-        console.print()
-        console.print(f"  [bold red]LOG_STRUCTURE VIOLATIONS ({len(log_structure_violations)} files):[/bold red]")
-        for violation in log_structure_violations:
-            console.print(f"    [red]✗[/red] {violation['path']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show INTROSPECTION violations
-    introspection_violations = audit_result.get('introspection_violations', [])
-    if introspection_violations:
-        console.print()
-        console.print(f"  [bold red]INTROSPECTION VIOLATIONS ({len(introspection_violations)} files):[/bold red]")
-        for violation in introspection_violations:
-            console.print(f"    [red]✗[/red] {violation['file']} [dim](score: {violation['score']}%)[/dim]")
-            for issue in violation.get('issues', []):
-                console.print(f"      [dim]• {issue}[/dim]")
-
-    # Show TYPE ERRORS (pyright diagnostics)
-    type_errors = audit_result.get('type_errors', 0)
-    type_error_files = audit_result.get('type_error_files', [])
-    if type_errors > 0:
-        console.print()
-        console.print(f"  [bold red]TYPE ERRORS ({type_errors} errors):[/bold red]")
-        for file_result in type_error_files[:10]:  # Top 10 files
-            if file_result.get('errors', 0) > 0:
-                console.print(f"    [red]✗[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
-                for diag in file_result.get('diagnostics', [])[:3]:  # Top 3 per file
-                    msg = diag.get('message', '')[:60]
-                    console.print(f"      [dim]L{diag.get('line', '?')}: {msg}[/dim]")
-    elif files_checked > 0:
-        console.print(f"  [green]✓[/green] No type errors")
-
-    # Show DEPRECATED PATTERNS (DOCUMENTS/ → docs/)
-    deprecated_patterns = audit_result.get('deprecated_patterns', [])
-    if deprecated_patterns:
-        console.print()
-        console.print(f"  [bold yellow]DEPRECATED PATTERNS ({len(deprecated_patterns)}):[/bold yellow]")
-        for pattern in deprecated_patterns:
-            console.print(f"    [yellow]⚠[/yellow] {pattern['path']}")
-            console.print(f"      [dim]→ {pattern['message']}[/dim]")
+    # Deprecated patterns
+    _render_deprecated_patterns(audit_result, console)
 
 
 def print_system_summary(audit_results: List[Dict]):
