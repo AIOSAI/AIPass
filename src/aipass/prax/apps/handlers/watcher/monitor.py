@@ -14,13 +14,13 @@ Monitors all files (including __pycache__, .pyc, etc.) to provide
 complete visibility into branch modifications.
 """
 
-from aipass.prax.apps.modules.logger import get_direct_logger
-logger = get_direct_logger()
-
 from pathlib import Path
 from typing import List, Callable, Optional, TYPE_CHECKING, Any
 
+from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
+
+logger = get_direct_logger()
 
 # =============================================================================
 # WATCHDOG IMPORT (external dependency)
@@ -36,14 +36,15 @@ except ImportError as e:
     WATCHDOG_AVAILABLE = False
     # Create placeholder classes for when watchdog not available
     class Observer:  # type: ignore
-        def schedule(self, *args, **kwargs): pass
-        def start(self): pass
-        def stop(self): pass
-        def join(self): pass
+        """Placeholder when watchdog unavailable."""
+        def schedule(self, *args, **kwargs): return None
+        def start(self): return None
+        def stop(self): return None
+        def join(self): return None
     class FileSystemEventHandler:  # type: ignore
-        pass
+        """Placeholder when watchdog unavailable."""
     class FileSystemEvent:  # type: ignore
-        pass
+        """Placeholder when watchdog unavailable."""
 
 # =============================================================================
 # EVENT HANDLER

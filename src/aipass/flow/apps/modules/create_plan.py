@@ -26,7 +26,7 @@ Workflow:
 
 Usage:
     From flow.py: flow plan create [location] [subject] [template]
-    Standalone: python3 create_plan.py [location] [subject] [template]
+    Standalone: drone @flow create [location] [subject] [template]
 """
 
 import sys
@@ -175,6 +175,7 @@ def create_plan(
         try:
             plan_type_config = get_plan_type(plan_type_key)
         except ValueError as exc:
+            logger.warning("[create_plan] Failed to resolve plan type '%s': %s", plan_type_key, exc)
             return False, 0, "", "", str(exc)
 
     assert plan_type_config is not None  # guaranteed by get_plan_type or caller
@@ -265,6 +266,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     try:
         plan_type_config = get_plan_type(plan_type_key)
     except ValueError as exc:
+        logger.warning("[create_plan] Invalid plan type '%s': %s", plan_type_key, exc)
         cli_error(str(exc))
         console.print()
         console.print("[dim]Registered types: drone @flow templates[/dim]")

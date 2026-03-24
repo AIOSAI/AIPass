@@ -157,6 +157,7 @@ def _scan_directory_files(
         return {"code_files": code_files, "memory_files": memory_files}
 
     def scan_recursive(path: Path, depth: int = 0) -> None:
+        """Recursively collect code and memory files up to max_depth."""
         if depth > max_depth:
             return
 

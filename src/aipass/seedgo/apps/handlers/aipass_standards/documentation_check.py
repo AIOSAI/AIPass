@@ -165,11 +165,18 @@ def check_function_docstrings(content: str, lines: List[str]) -> Dict:  # noqa: 
     undocumented = []
     for func_name, line_num in public_functions:
         has_docstring = False
-        for check_line in range(line_num, min(line_num + 5, len(lines) + 1)):
+        # Scan past the full function signature (may span many lines for
+        # functions with lots of parameters) up to 30 lines ahead.
+        for check_line in range(line_num, min(line_num + 30, len(lines) + 1)):
             if check_line - 1 < len(lines):
                 check_stripped = lines[check_line - 1].strip()
                 if check_stripped.startswith('"""') or check_stripped.startswith("'''"):
                     has_docstring = True
+                    break
+                # Stop scanning if we hit another def or class -- no docstring found
+                if check_line > line_num and (
+                    check_stripped.startswith('def ') or check_stripped.startswith('class ')
+                ):
                     break
         if not has_docstring:
             undocumented.append(f'{func_name} (line {line_num})')

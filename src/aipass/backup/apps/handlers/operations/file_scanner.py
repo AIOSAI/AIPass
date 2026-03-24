@@ -112,7 +112,7 @@ def scan_files(source_dir: Path, should_ignore: Callable, show_progress: bool = 
                         rel_file = str(file_path.relative_to(source_dir))
                         skipped_items["files"].add(rel_file)
                     elif _check_file_size(file_path):
-                        pass  # Already tracked in too_large
+                        continue  # Already tracked in too_large
                     else:
                         files_to_backup.append(file_path)
                         # Update spinner description with count occasionally
@@ -122,7 +122,7 @@ def scan_files(source_dir: Path, should_ignore: Callable, show_progress: bool = 
         # Walk directory tree without progress display
         def _walk_error(err):
             """Handle os.walk errors (broken symlinks, permission denied)."""
-            pass  # Skip inaccessible paths silently
+            logger.info(f"[file_scanner] Skipping inaccessible path during walk: {err}")
 
         for dirpath, dirnames, filenames in os.walk(source_dir, onerror=_walk_error):
             # Apply whitelist at top level
@@ -146,7 +146,7 @@ def scan_files(source_dir: Path, should_ignore: Callable, show_progress: bool = 
                     rel_file = str(file_path.relative_to(source_dir))
                     skipped_items["files"].add(rel_file)
                 elif _check_file_size(file_path):
-                    pass  # Already tracked in too_large
+                    continue  # Already tracked in too_large
                 elif file_path.exists():
                     files_to_backup.append(file_path)
 

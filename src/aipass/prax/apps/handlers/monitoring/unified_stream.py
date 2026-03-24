@@ -16,14 +16,14 @@ Single point for all monitoring terminal output with:
 - Status displays and headers
 """
 
-from pathlib import Path
-
-from aipass.prax.apps.modules.logger import get_direct_logger
-logger = get_direct_logger()
-
 from datetime import datetime
 from typing import Optional, Dict, List
 from threading import Lock
+
+from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.json import json_handler
+
+logger = get_direct_logger()
 
 try:
     from aipass.cli.apps.modules import console
@@ -31,8 +31,6 @@ except ImportError as e:
     logger.info(f"[unified_stream] CLI console not available, falling back to rich.Console: {e}")
     from rich.console import Console
     console = Console()
-
-from aipass.prax.apps.handlers.json import json_handler
 
 # Thread safety
 _print_lock = Lock()
@@ -225,97 +223,6 @@ def get_file_category(filename: str) -> str:
     return ''
 
 
-def print_file_event(event_type: str, branch: str, file_path: str, details: Optional[str] = None):
-    """
-    Print file system event
-
-    Args:
-        event_type: created, modified, deleted, moved
-        branch: Branch name
-        file_path: Path to file
-        details: Optional additional details
-    """
-    # Get file category for context
-    filename = file_path.split('/')[-1] if '/' in file_path else file_path
-    category = get_file_category(filename)
-
-    # Build message with category context
-    category_tag = f"[dim]\\[{category}][/dim] " if category else ""
-    message = f"{category_tag}{event_type.upper()}: {file_path}"
-    if details:
-        message += f" ({details})"
-
-    # Map file event types to levels for color coding
-    level_map = {
-        'created': 'success',
-        'modified': 'info',
-        'deleted': 'warning',
-        'moved': 'info'
-    }
-    level = level_map.get(event_type, 'info')
-    print_event('file', branch, message, level)
-
-
-def print_log_event(branch: str, level: str, message: str, source: Optional[str] = None):
-    """
-    Print log file event
-
-    Args:
-        branch: Branch name
-        level: Log level (info, warning, error, critical)
-        message: Log message
-        source: Optional source file/module
-    """
-    # Add level prefix for errors and warnings
-    if level in ['error', 'critical']:
-        log_msg = f"ERROR: {message}"
-    elif level == 'warning':
-        log_msg = f"WARNING: {message}"
-    else:
-        log_msg = message
-
-    if source:
-        log_msg = f"[{source}] {log_msg}"
-
-    print_event('log', branch, log_msg, level)
-
-
-def print_module_event(branch: str, module_name: str, status: str, details: Optional[str] = None):
-    """
-    Print module loading event
-
-    Args:
-        branch: Branch name
-        module_name: Name of module
-        status: loaded, error, reloaded, started, stopped
-        details: Optional error or status details
-    """
-    message = f"Module {status}: {module_name}"
-    if details:
-        message += f" - {details}"
-
-    # Map status to level for color coding
-    level_map = {
-        'error': 'error',
-        'failed': 'error',
-        'loaded': 'success',
-        'started': 'success',
-        'stopped': 'warning',
-        'reloaded': 'info'
-    }
-    level = level_map.get(status, 'info')
-    print_event('module', branch, message, level)
-
-
-def print_header():
-    """Print monitoring system header"""
-    with _print_lock:
-        console.print("\n[bold cyan]═══════════════════════════════════════════[/bold cyan]")
-        console.print("[bold cyan]    PRAX Monitoring System v0.1.0[/bold cyan]")
-        console.print("[bold cyan]═══════════════════════════════════════════[/bold cyan]")
-        console.print("[dim]Type 'help' for commands, 'quit' to exit[/dim]\n")
-
-
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):
     """
     Display current monitoring status
@@ -353,64 +260,3 @@ def print_help():
         console.print("  [cyan]watch <branch>[/cyan]   - Watch specific branch")
         console.print("  [cyan]unwatch <branch>[/cyan] - Stop watching branch")
         console.print("  [cyan]quit/exit[/cyan]        - Exit monitoring\n")
-
-
-def print_error(message: str, details: Optional[str] = None):
-    """
-    Print error message
-
-    Args:
-        message: Error message
-        details: Optional error details
-    """
-    with _print_lock:
-        console.print(f"[bold red]ERROR:[/bold red] {message}")
-        if details:
-            console.print(f"[dim]{details}[/dim]")
-
-
-def print_warning(message: str):
-    """Print warning message"""
-    with _print_lock:
-        console.print(f"[yellow]WARNING:[/yellow] {message}")
-
-
-def print_success(message: str):
-    """Print success message"""
-    with _print_lock:
-        console.print(f"[green]SUCCESS:[/green] {message}")
-
-
-def print_info(message: str):
-    """Print info message"""
-    with _print_lock:
-        console.print(f"[blue]INFO:[/blue] {message}")
-
-
-def clear_screen():
-    """Clear terminal screen"""
-    with _print_lock:
-        console.clear()
-
-
-def print_separator():
-    """Print visual separator"""
-    with _print_lock:
-        console.print("[dim]─────────────────────────────────────────[/dim]")
-
-
-def format_event_summary(events: Dict[str, int]) -> str:
-    """
-    Format event summary statistics
-
-    Args:
-        events: Dictionary of event type counts
-
-    Returns:
-        Formatted summary string
-    """
-    parts = []
-    for event_type, count in events.items():
-        if count > 0:
-            parts.append(f"{event_type}: {count}")
-    return ", ".join(parts) if parts else "No events"

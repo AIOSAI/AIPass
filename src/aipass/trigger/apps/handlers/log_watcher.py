@@ -79,6 +79,7 @@ except ImportError:
     _REGISTRY_AVAILABLE = False
 
     def registry_report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
+        """Fallback no-op error registry report when error_registry is unavailable."""
         return {"is_new": False, "count": 0}
 
 # Try to import watchdog

@@ -25,8 +25,8 @@ Usage:
     success = aggregate_central()
 
 Standalone:
-    python3 apps/modules/aggregate_central.py aggregate
-    python3 apps/modules/aggregate_central.py aggregate --heal
+    drone @flow aggregate
+    drone @flow aggregate --heal
 """
 
 import sys
@@ -179,7 +179,7 @@ def main():
         sys.exit(0)
 
     if len(sys.argv) < 2:
-        console.print(f"Usage: python3 {sys.argv[0]} <command> [options]")
+        console.print("Usage: drone @flow aggregate [options]")
         console.print("Commands:")
         console.print("  aggregate         - Aggregate central plans (with healing)")
         console.print("  aggregate --heal  - Aggregate with explicit healing")

@@ -23,16 +23,14 @@ Key Functions:
 # IMPORTS
 # =============================================
 
-import sys
 import os
 import stat
-from aipass.prax import logger
-from pathlib import Path
+import sys
 from contextlib import contextmanager
+from pathlib import Path
 
+from aipass.prax import logger
 from aipass.backup.apps.handlers.json import json_handler
-
-# logger imported from aipass.prax
 
 # =============================================
 # CONSTANTS

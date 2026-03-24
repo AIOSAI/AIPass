@@ -126,6 +126,7 @@ def test_drive_connection(sync_instance: Any) -> bool:
             )
             return False
     except Exception as e:
+        logger.warning(f"[drive_sync_ops] Drive connection test failed: {e}")
         log_operation(
             _LOG_FILE,
             "test_sync",

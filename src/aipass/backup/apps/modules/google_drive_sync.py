@@ -50,28 +50,28 @@ try:
         GoogleDriveSync,
     )
     from aipass.backup.apps.handlers.json.drive_sync_json import (
-        load_config as _load_config_fn,
-        load_data as _load_data_fn,
+        load_config as _LOAD_CONFIG_FN,
+        load_data as _LOAD_DATA_FN,
     )
     DRIVE_AVAILABLE = True
 except ImportError:
     GoogleDriveSync = None  # type: ignore
-    _load_config_fn = None  # type: ignore
-    _load_data_fn = None  # type: ignore
+    _LOAD_CONFIG_FN = None  # type: ignore
+    _LOAD_DATA_FN = None  # type: ignore
     DRIVE_AVAILABLE = False
     logger.info("[google_drive_sync] Google Drive dependencies not available")
 
 def _load_config():
     """Load config using module JSON paths."""
-    if _load_config_fn is None:
+    if _LOAD_CONFIG_FN is None:
         return {}
-    return _load_config_fn(CONFIG_FILE)
+    return _LOAD_CONFIG_FN(CONFIG_FILE)
 
 def _load_data():
     """Load data using module JSON paths."""
-    if _load_data_fn is None:
+    if _LOAD_DATA_FN is None:
         return {}
-    return _load_data_fn(DATA_FILE)
+    return _LOAD_DATA_FN(DATA_FILE)
 
 
 # =============================================
@@ -472,12 +472,12 @@ OPTIONS:
   --force       - Force sync all files (ignore tracker)
 
 EXAMPLES:
-  python3 google_drive_sync.py test
-  python3 google_drive_sync.py sync /path/to/backups
-  python3 google_drive_sync.py sync /path/to/backups --project "MyProject" --note "Daily backup"
-  python3 google_drive_sync.py sync /path/to/backups --force
-  python3 google_drive_sync.py clear-tracker
-  python3 google_drive_sync.py show-stats
+  drone @backup test
+  drone @backup sync /path/to/backups
+  drone @backup sync /path/to/backups --project "MyProject" --note "Daily backup"
+  drone @backup sync /path/to/backups --force
+  drone @backup clear-tracker
+  drone @backup show-stats
         """
     )
 
@@ -514,7 +514,7 @@ EXAMPLES:
     elif args.command == 'sync':
         if not args.path:
             error("sync command requires a path argument")
-            console.print("Usage: python3 google_drive_sync.py sync /path/to/backups")
+            console.print("Usage: drone @backup sync /path/to/backups")
             sys.exit(1)
 
         backup_path = Path(args.path)

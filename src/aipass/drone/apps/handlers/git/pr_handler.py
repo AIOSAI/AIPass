@@ -16,6 +16,7 @@ and cleanup (checkout main + release lock) in a finally block.
 
 from __future__ import annotations
 
+import json as _json
 import re
 import subprocess
 from pathlib import Path
@@ -71,8 +72,7 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         Dict with success, pr_url, feature_branch, and message.
     """
     repo_root = find_repo_root()
-    slug = _slugify(description)
-    feature_branch = f"feat/{branch_name}-{slug}"
+    feature_branch = f"citizen/{branch_name}"
     lock_acquired = False
 
     result = {
@@ -143,9 +143,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 6: Create feature branch pointing to same commit (no checkout)
+        # Step 6: Create/update feature branch pointing to same commit (no checkout)
         branch_create = subprocess.run(
-            ["git", "branch", feature_branch],
+            ["git", "branch", "-f", feature_branch],
             capture_output=True, text=True, cwd=str(repo_root),
         )
         if branch_create.returncode != 0:
@@ -153,9 +153,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 7: Push feature branch (not main — main stays local-only)
+        # Step 7: Push feature branch (force-with-lease for persistent citizen branches)
         push = subprocess.run(
-            ["git", "push", "-u", "origin", feature_branch],
+            ["git", "push", "--force-with-lease", "origin", feature_branch],
             capture_output=True, text=True, cwd=str(repo_root),
         )
         if push.returncode != 0:
@@ -180,17 +180,37 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             capture_output=True, text=True, cwd=str(repo_root),
         )
         if pr_create.returncode != 0:
-            result["message"] = f"PR creation failed: {pr_create.stderr.strip()}"
-            logger.error(result["message"])
-            return result
+            # Check if PR already exists — force-push already updated it
+            existing = subprocess.run(
+                ["gh", "pr", "list", "--head", feature_branch, "--json", "url", "--limit", "1"],
+                capture_output=True, text=True, cwd=str(repo_root),
+            )
+            try:
+                existing_prs = _json.loads(existing.stdout)
+            except (ValueError, TypeError) as exc:
+                logger.warning("Failed to parse existing PR list: %s", exc)
+                existing_prs = []
+            if existing_prs:
+                pr_url = existing_prs[0]["url"]
+                logger.info("Existing PR updated via force-push: %s", pr_url)
+            else:
+                result["message"] = f"PR creation failed: {pr_create.stderr.strip()}"
+                logger.error(result["message"])
+                # Clean up local feature branch before returning
+                subprocess.run(
+                    ["git", "branch", "-D", feature_branch],
+                    capture_output=True, text=True, cwd=str(repo_root),
+                )
+                return result
+        else:
+            pr_url = pr_create.stdout.strip()
 
         # Step 9: Clean up local feature branch (remote copy is what matters)
         subprocess.run(
-            ["git", "branch", "-d", feature_branch],
+            ["git", "branch", "-D", feature_branch],
             capture_output=True, text=True, cwd=str(repo_root),
         )
 
-        pr_url = pr_create.stdout.strip()
         result["success"] = True
         result["pr_url"] = pr_url
         result["message"] = f"PR created: {pr_url}"

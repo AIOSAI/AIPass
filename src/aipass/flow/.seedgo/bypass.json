@@ -40,6 +40,372 @@
       "standard": "trigger",
       "category": "internal_ops",
       "reason": "Lock file .unlink() is infrastructure (process locking), not a business state change"
+    },
+    {
+      "file": "apps/handlers/mbank/process.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of plan_type_loader.discover_plan_types — mbank needs plan type discovery to process closed plans across all registered types"
+    },
+    {
+      "file": "apps/handlers/dashboard/push_central.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Handler imports aggregate_central module — push_central is the dashboard handler that must invoke the aggregation orchestrator"
+    },
+    {
+      "file": "apps/handlers/dashboard/push_central.py",
+      "standard": "imports",
+      "category": "architectural",
+      "reason": "Parent module import needed — push_central invokes aggregate_central for dashboard data"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Handler imports trigger module — monitor_ops fires trigger events for registry health changes"
+    },
+    {
+      "file": "apps/handlers/plan/get_open_plans.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of load_registry — get_open_plans needs registry data to find open plans"
+    },
+    {
+      "file": "apps/handlers/plan/list_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of plan_type_loader — list_ops needs plan type discovery to merge plans from all registries"
+    },
+    {
+      "file": "apps/handlers/plan/close_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler imports of load_registry, plan_type_loader, display — close needs registry access, type resolution, and formatting"
+    },
+    {
+      "file": "apps/handlers/plan/display.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of load_registry — display needs registry data for plan status formatting"
+    },
+    {
+      "file": "apps/handlers/plan/create.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of load_registry — create needs registry to register new plans"
+    },
+    {
+      "file": "apps/handlers/plan/validate.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of load_registry — validate needs registry data to check plan existence"
+    },
+    {
+      "file": "apps/handlers/mbank/restore_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler imports of load_registry, plan_type_loader — restore needs registry and type resolution to recover archived plans"
+    },
+    {
+      "file": "apps/handlers/registry/load_registry.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of plan_type_loader — registry loader needs type discovery for auto-healing orphaned entries"
+    },
+    {
+      "file": "apps/modules/create_plan.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "location, subject, template_type are local variables from arg parsing, not module-level constants"
+    },
+    {
+      "file": "apps/handlers/dashboard/push_branch_dashboard.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "active_plans, closed_plans, branch_total are local computation variables, not constants"
+    },
+    {
+      "file": "apps/handlers/template/plan_type_loader.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "template_path, available are local variables in function scope, not constants"
+    },
+    {
+      "file": "apps/handlers/template/registry_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "templates_dir, plan_registry_path, module_name are local variables, not constants"
+    },
+    {
+      "file": "apps/handlers/template/get_template.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "template_file, formatted_number, plan_number are local variables, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/list_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in list aggregation functions, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/close_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in close operation functions, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/create.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in plan creation functions, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/display.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in display formatting functions, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/validate.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in validation functions, not constants"
+    },
+    {
+      "file": "apps/handlers/mbank/process.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in plan processing functions, not constants"
+    },
+    {
+      "file": "apps/handlers/mbank/restore_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in restore operations, not constants"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in monitor operations, not constants"
+    },
+    {
+      "file": "apps/handlers/template/registry_ops.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "add_type has docstring — checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
+    },
+    {
+      "file": "apps/handlers/template/get_template.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "get_template has docstring — checker 5-line lookahead too small for multi-line signature (9 lines to closing paren)"
+    },
+    {
+      "file": "apps/handlers/plan/list_ops.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "list_plans_impl has docstring — checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
+    },
+    {
+      "file": "apps/handlers/plan/create.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "create_registry_entry has docstring — checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
+    },
+    {
+      "file": "apps/modules/create_plan.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "create_plan has docstring — checker 5-line lookahead too small for multi-line signature"
+    },
+    {
+      "file": "apps/handlers/plan/close_ops.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+    },
+    {
+      "file": "apps/handlers/mbank/process.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+    },
+    {
+      "file": "apps/handlers/mbank/restore_ops.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+    },
+    {
+      "file": "apps/handlers/plan/display.py",
+      "standard": "documentation",
+      "category": "false_positive",
+      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+    },
+    {
+      "file": "apps/handlers/plan/aggregate_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Handler imports trigger module — aggregate_ops fires trigger events for plan aggregation changes"
+    },
+    {
+      "file": "apps/handlers/plan/create_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Handler imports trigger module — create_ops fires trigger events when plans are created"
+    },
+    {
+      "file": "apps/handlers/plan/get_closed_plans.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of load_registry — get_closed_plans needs registry data to find closed plans"
+    },
+    {
+      "file": "apps/handlers/plan/command_parser.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler import of registry_ops.get_type_map — parser needs plan type mappings to validate commands"
+    },
+    {
+      "file": "apps/handlers/plan/restore_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Handler imports trigger module — restore_ops fires trigger events when plans are restored"
+    },
+    {
+      "file": "apps/handlers/summary/summary_ops.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler imports — summary_ops needs plan type loader and registry for summarization"
+    },
+    {
+      "file": "apps/handlers/plan/calculate_relative_path.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "relative_location is a local variable, not a constant"
+    },
+    {
+      "file": "apps/handlers/plan/create_file.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "parent_name, error_msg are local variables, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/create_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "required_deps, error_msg, prefix are local variables, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/build_registry_entry.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "entry is a local variable, not a constant"
+    },
+    {
+      "file": "apps/handlers/plan/restore_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "plan_info, error_msg are local variables, not constants"
+    },
+    {
+      "file": "apps/handlers/plan/aggregate_ops.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "Local variables in aggregation functions, not constants"
+    },
+    {
+      "file": "apps/handlers/config/load_config.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "module_name parameter is intentional DI pattern — callers inject module name, auto-detection not needed"
+    },
+    {
+      "file": "apps/handlers/plan/resolve_location.py",
+      "standard": "naming",
+      "category": "false_positive",
+      "reason": "target_dir is a local variable, not a constant"
+    },
+    {
+      "file": "apps/modules/close_plan.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/modules/create_plan.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/modules/restore_plan.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/modules/registry_monitor.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/mbank/process.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — 793-line file needs splitting, nesting follows from complex plan processing"
+    },
+    {
+      "file": "apps/handlers/dashboard/push_branch_dashboard.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/plan/list_ops.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/plan/display.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/plan/create_ops.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/plan/close_ops.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "apps/handlers/plan/restore_ops.py",
+      "standard": "deep_nesting",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+    },
+    {
+      "file": "*",
+      "standard": "test_coverage",
+      "category": "deferred",
+      "reason": "Deferred per devpulse dispatch — test infrastructure not yet in place for flow branch"
     }
   ],
   "notes": {

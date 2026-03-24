@@ -19,7 +19,7 @@ Workflow:
 
 Usage:
     From flow.py: drone @flow templates | register | unregister | scan
-    Standalone: python3 template_manager.py [command] [args]
+    Standalone: drone @flow templates | register | unregister | scan
 """
 
 import sys
@@ -179,12 +179,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command was recognized, False if not
     """
     # Introspection gate: no args = show module info
-    if not args and command in ("templates", "register", "unregister", "scan"):
-        if command == "templates":
-            pass  # templates with no args is valid — fall through to show types
-        else:
-            print_introspection()
-            return True
+    if not args:
+        print_introspection()
+        return True
 
     # ---- templates ----
     if command == "templates":

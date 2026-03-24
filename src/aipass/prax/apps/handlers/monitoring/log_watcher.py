@@ -454,7 +454,6 @@ class LogFileWatcher(FileSystemEventHandler):
         Initialize log positions to END of existing files.
 
         Only show NEW entries after watcher starts.
-        Call replay_recent() before this to show startup context.
         """
         if not get_system_logs_dir().exists():
             logger.warning(f"System logs directory not found: {get_system_logs_dir()}")
@@ -465,48 +464,6 @@ class LogFileWatcher(FileSystemEventHandler):
                 self.log_positions[str(log_file)] = log_file.stat().st_size
             except Exception as e:
                 logger.info(f"Could not get size for {log_file}: {e}")
-
-    def replay_recent(self, num_lines: int = 1):
-        """
-        Replay the last N lines from each log file as startup context.
-
-        Shows recent activity so the monitor isn't blank on startup.
-        Skips command separators (stale) and noise patterns.
-
-        Args:
-            num_lines: Number of recent lines to replay per log file
-        """
-        logs_dir = get_system_logs_dir()
-        if not logs_dir.exists():
-            return
-
-        for log_file in sorted(logs_dir.glob("*.log")):
-            try:
-                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    all_lines = f.readlines()
-
-                if not all_lines:
-                    continue
-
-                recent = all_lines[-num_lines:]
-                branch = detect_branch_from_log(str(log_file))
-
-                for line in recent:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    # Skip commands in replay (they're stale)
-                    if self._extract_command_info(line):
-                        continue
-
-                    if self._should_display_log(line):
-                        level = self._detect_log_level(line)
-                        self._emit_log_event(branch, line, level, str(log_file))
-
-            except Exception as e:
-                logger.info(f"Error replaying {log_file}: {e}")
-
 
 def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -> Any:
     """
@@ -582,7 +539,7 @@ if __name__ == '__main__':
     Standalone test - starts log watcher and prints events from queue.
 
     Usage:
-        python3 log_watcher.py
+        drone @prax log-watcher
 
     Then trigger some log activity in another terminal:
         prax [command]

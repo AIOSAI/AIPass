@@ -21,12 +21,11 @@ Functions:
 # IMPORTS
 # =============================================
 
-from aipass.prax import logger
-import shutil
 import datetime
+import shutil
 from pathlib import Path
 
-# logger imported from aipass.prax
+from aipass.prax import logger
 
 # Import from handlers modules
 from aipass.backup.apps.handlers.utils.system_utils import temporarily_writable, safe_print

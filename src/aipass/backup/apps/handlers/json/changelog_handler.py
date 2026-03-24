@@ -22,11 +22,12 @@ Functions:
 # IMPORTS
 # =============================================
 
-import json
-from aipass.prax import logger
 import datetime
+import json
 from pathlib import Path
 from typing import Dict
+
+from aipass.prax import logger
 
 # logger imported from aipass.prax
 

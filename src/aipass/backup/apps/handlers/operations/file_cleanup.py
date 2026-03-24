@@ -16,12 +16,10 @@ Handles cleanup of backup files when source files are deleted.
 # IMPORTS
 # =============================================
 
-from aipass.prax import logger
 from pathlib import Path
 from typing import Callable
 
-# logger imported from aipass.prax
-
+from aipass.prax import logger
 from aipass.backup.apps.handlers.utils.system_utils import temporarily_writable, safe_print
 from aipass.backup.apps.handlers.models.backup_models import BackupResult
 from aipass.backup.apps.handlers.json import json_handler
@@ -113,10 +111,12 @@ def cleanup_deleted_files(backup_path: Path, source_dir: Path, should_ignore: Ca
                 except PermissionError as e:
                     error_msg = f"Permission denied deleting {backup_file}: {e}"
                     result.add_error(error_msg)
+                    logger.warning(f"[file_cleanup] {error_msg}")
                     safe_print(f"{error_msg}")
                 except Exception as e:
                     error_msg = f"Error deleting {backup_file}: {e}"
                     result.add_warning(error_msg)
+                    logger.warning(f"[file_cleanup] {error_msg}")
                     safe_print(f"{error_msg}")
 
         # Third pass: remove empty directories (bottom-up)

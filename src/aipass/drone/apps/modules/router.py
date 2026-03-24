@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
+from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
@@ -58,7 +59,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         cmd_args = args[2:] if len(args) > 2 else None
         result = route_command(target, cmd, args=cmd_args)
         if result.stdout:
-            logger.info("%s", result.stdout)
+            console.print(result.stdout, highlight=False)
         return result.exit_code == 0
     if command == "route_all":
         if not args:
@@ -68,7 +69,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         cmd_args = args[1:] if len(args) > 1 else None
         results = route_all(cmd, args=cmd_args)
         for name, result in results.items():
-            logger.info("%s: exit_code=%d", name, result.exit_code)
+            console.print(f"{name}: exit_code={result.exit_code}")
         return all(r.exit_code == 0 for r in results.values())
     logger.warning("router: unknown command '%s'", command)
     return False

@@ -652,6 +652,7 @@ def cleanup_temp_files() -> Dict[str, Any]:
                         })
 
                 except Exception as e:
+                    logger.warning("[mbank] Failed to delete temp file '%s': %s", temp_file.name, e)
                     failed_deletes += 1
                     details.append({
                         "file": temp_file.name,
@@ -661,6 +662,7 @@ def cleanup_temp_files() -> Dict[str, Any]:
 
     except Exception as e:
         # Failed to scan directory
+        logger.error("[mbank] Failed to scan MEMORY_BANK for temp files: %s", e)
         return {
             "files_found": 0,
             "files_deleted": 0,
@@ -718,6 +720,7 @@ def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
                             orphan_details.append({"plan": plan_label, "status": "heal_failed",
                                                    "error": "Verification failed", "path": str(original_path)})
                     except Exception as e:
+                        logger.warning("[mbank] Failed to heal orphaned plan '%s': %s", plan_label, e)
                         failed_to_heal += 1
                         orphan_details.append({"plan": plan_label, "status": "heal_failed",
                                                "error": str(e), "path": str(original_path)})
@@ -773,6 +776,7 @@ def process_closed_plans() -> Dict[str, Any]:
                                     "error": "Failed to move plan to backup/processed_plans/",
                                     "correlation_id": correlation_id})
             except Exception as e:
+                logger.error("[mbank] Error processing closed plan '%s': %s", plan.get("path", "unknown"), e)
                 error_count += 1
                 results.append({"plan": str(plan.get("path", "unknown")), "status": "error", "error": str(e)})
 
@@ -789,4 +793,5 @@ def process_closed_plans() -> Dict[str, Any]:
                 "results": results, "cleanup": cleanup_result}
 
     except Exception as e:
+        logger.error("[mbank] Unexpected error in process_closed_plans: %s", e)
         return {"success": False, "processed": 0, "errors": 0, "results": [], "error": str(e)}

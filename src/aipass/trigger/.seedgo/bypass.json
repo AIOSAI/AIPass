@@ -101,6 +101,175 @@
       "standard": "handlers",
       "lines": [371],
       "reason": "Startup handler imports memory rollover module to trigger memory checks on startup events. Cross-branch integration via modules layer public API."
+    },
+
+    {
+      "file": "apps/config.py",
+      "standard": "testing",
+      "lines": [31],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/modules/core.py",
+      "standard": "testing",
+      "lines": [160],
+      "pattern": "except Exception: pass",
+      "reason": "Deferred event queue handler execution — logging would cause infinite recursion (logger fires events via trigger). Same as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "testing",
+      "lines": [24],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/plan_file.py",
+      "standard": "testing",
+      "lines": [58],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_error() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/memory_threshold_exceeded.py",
+      "standard": "testing",
+      "lines": [46],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/error_logged.py",
+      "standard": "testing",
+      "lines": [48],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/bulletin_created.py",
+      "standard": "testing",
+      "lines": [55],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "testing",
+      "lines": [54],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/startup.py",
+      "standard": "testing",
+      "lines": [51],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/registry.py",
+      "standard": "testing",
+      "lines": [28],
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+
+    {
+      "file": "apps/handlers/error_registry.py",
+      "standard": "architecture",
+      "pattern": "file_length",
+      "reason": "Error registry at 870 lines — core dedup engine with fingerprinting, circuit breaker, backoff, and CLI. Splitting would break cohesion of the error tracking lifecycle."
+    },
+    {
+      "file": "apps/handlers/log_watcher.py",
+      "standard": "architecture",
+      "pattern": "file_length",
+      "reason": "Log watcher at 782 lines — watchdog event handler with position tracking, dedup, and medic integration. Splitting would break the file monitoring pipeline."
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "architecture",
+      "lines": [153, 243],
+      "pattern": "handler importing from parent module",
+      "reason": "error_detected imports error_registry (line 76) and medic_state — core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
+    },
+    {
+      "file": "apps/handlers/events/registry.py",
+      "standard": "architecture",
+      "lines": [34],
+      "pattern": "handler importing from parent module",
+      "reason": "Registry handler imports trigger module to wire event handlers via trigger.on(). The wiring function must reference the event bus."
+    },
+
+    {
+      "file": "apps/handlers/events/warning_logged.py",
+      "standard": "handlers",
+      "pattern": "module_name auto-detection",
+      "reason": "module_name parameter is passed by the event bus caller, not auto-detected. Event handlers receive context from fire() data, not from inspect.stack()."
+    },
+    {
+      "file": "apps/handlers/events/error_logged.py",
+      "standard": "handlers",
+      "pattern": "module_name auto-detection",
+      "reason": "module_name parameter is passed by the event bus caller, not auto-detected. Event handlers receive context from fire() data, not from inspect.stack()."
+    },
+    {
+      "file": "apps/handlers/events/registry.py",
+      "standard": "handlers",
+      "lines": [34],
+      "pattern": "handler imports modules",
+      "reason": "Registry wiring function imports trigger module to call trigger.on(). Must access the event bus to register handlers — this IS its purpose."
+    },
+
+    {
+      "file": "apps/handlers/error_registry.py",
+      "standard": "naming",
+      "pattern": "severity, entry, initial_status",
+      "reason": "Local variables inside functions, not module-level constants. Checker false positive on function-scoped assignments."
+    },
+    {
+      "file": "apps/handlers/error_reporter.py",
+      "standard": "naming",
+      "pattern": "email_data, error_type, message",
+      "reason": "Local variables inside report_error() function, not module-level constants. Checker false positive on function-scoped assignments."
+    },
+    {
+      "file": "apps/handlers/events/memory_threshold_exceeded.py",
+      "standard": "naming",
+      "pattern": "threshold, subject, branch",
+      "reason": "Local variables inside handle_memory_threshold_exceeded(), not module-level constants. Checker false positive on function-scoped assignments."
+    },
+    {
+      "file": "apps/handlers/events/error_logged.py",
+      "standard": "naming",
+      "pattern": "effective_module, effective_log_file, email_subject",
+      "reason": "Local variables inside handle_error_logged(), not module-level constants. Checker false positive on function-scoped assignments."
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "naming",
+      "pattern": "context_block, registry_block, display_fp",
+      "reason": "Local variables inside handle_error_detected(), not module-level constants. Checker false positive on function-scoped assignments."
+    },
+    {
+      "file": "apps/handlers/events/startup.py",
+      "standard": "naming",
+      "pattern": "local variable naming",
+      "reason": "Local variables inside startup handler functions, not module-level constants. Checker false positive on function-scoped assignments."
+    },
+
+    {
+      "file": "apps/config.py",
+      "standard": "imports",
+      "pattern": "prax logger import",
+      "reason": "config.py cannot import prax logger — circular dependency. Uses _log_warning() file-based pattern instead. Comment on line 26 documents this."
+    },
+
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "unused_function",
+      "pattern": "validate_json_structure, get_json_path, increment_counter, update_data_metrics",
+      "reason": "JSON handler framework utilities — part of the json_structure standard infrastructure. Available for future use by modules that need JSON validation and metrics."
     }
   ],
   "notes": {

@@ -16,7 +16,7 @@ Module handles all display output.
 Usage:
     From flow.py: flow close <number>
     From flow.py: flow close --all
-    Standalone: python3 close_plan.py <number>
+    Standalone: drone @flow close <number>
 """
 
 import sys
@@ -357,10 +357,10 @@ COMMANDS:
   close --all            Close all open plans
 
 USAGE:
-  python3 close_plan.py close <plan_number>
-  python3 close_plan.py close <plan_number> --confirm
-  python3 close_plan.py close --all
-  python3 close_plan.py --help
+  drone @flow close <PLAN-ID>
+  drone @flow close <PLAN-ID> --confirm
+  drone @flow close --all
+  drone @flow close --help
 
 OPTIONS:
   --confirm, --interactive   Request confirmation prompt (off by default)
@@ -369,13 +369,13 @@ OPTIONS:
 
 EXAMPLES:
   # Close plan (auto-confirms)
-  python3 close_plan.py close 42
+  drone @flow close FPLAN-0042
 
   # Close with interactive confirmation prompt
-  python3 close_plan.py close 42 --confirm
+  drone @flow close FPLAN-0042 --confirm
 
   # Close all open plans (auto-confirms)
-  python3 close_plan.py close --all
+  drone @flow close --all
             """
         )
         PARSER.print_help()

@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from aipass.prax import logger
+from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.command_registry.ops import (
     add_command as _add_command,
@@ -112,15 +113,17 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         else:
             cmds = list_all()
         for cmd_entry in cmds:
-            logger.info(
-                "  %s -> %s %s %s",
-                cmd_entry.get("name", "?"),
-                cmd_entry.get("target", "?"),
-                cmd_entry.get("command", "?"),
-                " ".join(cmd_entry.get("args", [])),
+            console.print(
+                "  %s -> %s %s %s"
+                % (
+                    cmd_entry.get("name", "?"),
+                    cmd_entry.get("target", "?"),
+                    cmd_entry.get("command", "?"),
+                    " ".join(cmd_entry.get("args", [])),
+                )
             )
         if not cmds:
-            logger.info("  (no commands registered)")
+            console.print("  (no commands registered)")
         return True
 
     if command == "lookup":
@@ -129,7 +132,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return False
         result = lookup(args[0])
         if result:
-            logger.info("  %s -> %s %s %s", result["name"], result["target"], result["command"], " ".join(result.get("args", [])))
+            console.print("  %s -> %s %s %s" % (result["name"], result["target"], result["command"], " ".join(result.get("args", []))))
         else:
             logger.warning("  Command '%s' not found", args[0])
             return False

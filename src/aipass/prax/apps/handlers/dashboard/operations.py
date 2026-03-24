@@ -148,60 +148,6 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
     }
 
 
-def ensure_dashboard_structure(branch_path: Path) -> Dict:
-    """
-    Load dashboard, ensure all sections exist, return data.
-
-    If dashboard doesn't exist, creates with default structure.
-    If sections are missing, adds them with defaults.
-    This allows services to always find their section ready.
-
-    Args:
-        branch_path: Path to the branch directory
-
-    Returns:
-        Dict with complete dashboard structure
-
-    Raises:
-        json.JSONDecodeError: If dashboard file is corrupted
-    """
-    dashboard_path = branch_path / "DASHBOARD.local.json"
-
-    # Default structure - quick_status at top, flow at bottom (stacked output)
-    now = datetime.now().isoformat()
-    default = {
-        "branch": branch_path.name.upper(),
-        "last_updated": now,
-        "quick_status": {"action_required": False},
-        "sections": {
-            "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
-            "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
-            "memory_bank": {"managed_by": "memory_bank", "vectors_stored": 0, "notes": {}, "last_updated": ""},
-            "commons_activity": {"managed_by": "the_commons", "mentions": 0, "new_posts_since_last_visit": 0, "new_comments_since_last_visit": 0, "last_updated": ""}
-        }
-    }
-
-    if dashboard_path.exists():
-        try:
-            content = dashboard_path.read_text().strip()
-            # Handle empty or whitespace-only files (race condition protection)
-            if not content:
-                return default
-            data = json.loads(content)
-            # Merge: keep existing data, add missing sections
-            if "sections" not in data:
-                data["sections"] = {}
-            for section, content in default["sections"].items():
-                if section not in data["sections"]:
-                    data["sections"][section] = content
-            return data
-        except json.JSONDecodeError:
-            # Re-raise to let caller handle
-            raise
-    else:
-        return default
-
-
 def update_section(
     branch_path: Path,
     section_name: str,

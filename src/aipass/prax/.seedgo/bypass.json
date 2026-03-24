@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
-    "last_updated": "2026-03-23",
+    "last_updated": "2026-03-24",
     "description": "Standards bypass configuration for prax branch"
   },
   "bypass": [
@@ -263,6 +263,138 @@
       "file": "apps/modules/monitor.py",
       "standard": "modules",
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery — routing through json_handler would add unnecessary dependency for a simple registry read."
+    },
+
+    {
+      "file": "apps/handlers/dashboard/agent_status_writer.py",
+      "standard": "debug_print",
+      "pattern": "print(ok)",
+      "reason": "False positive — print(ok) is inside a subprocess script string passed to python -c, not a bare print() call in this module's execution context."
+    },
+
+    {
+      "file": "apps/modules/logger.py",
+      "standard": "imports",
+      "reason": "logger.py IS the prax logger module — it cannot import itself. 'Prax logger import not found' is expected."
+    },
+    {
+      "file": "apps/modules/agent_status.py",
+      "standard": "imports",
+      "reason": "agent_status.py manages agent status tracking independently of the prax logging pipeline. Uses get_direct_logger() for its own logging needs."
+    },
+    {
+      "file": "apps/modules/monitor.py",
+      "standard": "imports",
+      "reason": "False positive — stdlib imports (lines 49-55) are correctly before aipass imports (lines 58+). Checker misidentifies docstring content as import lines."
+    },
+
+    {
+      "file": "apps/modules/dashboard.py",
+      "standard": "documentation",
+      "reason": "False positive — multiline function signatures cause the docstring checker to miss existing docstrings."
+    },
+    {
+      "file": "apps/handlers/monitoring/filesystem_handler.py",
+      "standard": "documentation",
+      "reason": "False positive — property getter/setter and watchdog callback methods with multiline signatures."
+    },
+    {
+      "file": "apps/handlers/watcher/monitor.py",
+      "standard": "documentation",
+      "reason": "False positive — placeholder class methods inside except block detected as missing docstrings."
+    },
+    {
+      "file": "apps/handlers/dashboard/operations.py",
+      "standard": "documentation",
+      "reason": "False positive — multiline function signature causes docstring checker to miss existing docstring."
+    },
+    {
+      "file": "apps/handlers/logging/monitoring.py",
+      "standard": "documentation",
+      "reason": "False positive — multiline function signature causes docstring checker to miss existing docstring."
+    },
+
+    {
+      "file": "apps/modules/dashboard.py",
+      "standard": "naming",
+      "reason": "False positive — __all__ is a Python convention (PEP 8), not a user-defined constant requiring UPPER_CASE."
+    },
+    {
+      "file": "apps/modules/logger.py",
+      "standard": "naming",
+      "reason": "False positive — __all__ is a Python convention (PEP 8), not a user-defined constant requiring UPPER_CASE."
+    },
+    {
+      "file": "apps/modules/monitor.py",
+      "standard": "naming",
+      "reason": "False positive — _monitoring_active is a mutable threading flag (threading.Event), not a constant."
+    },
+    {
+      "file": "apps/handlers/monitoring/monitoring_filters.py",
+      "standard": "naming",
+      "reason": "Redundant prefix in filename — monitoring_filters.py in monitoring/ dir. Renaming to filters.py would break existing imports across multiple files. Deferred to avoid churn."
+    },
+    {
+      "file": "apps/handlers/monitoring/file_watcher_integration.py",
+      "standard": "naming",
+      "reason": "False positive — start_monitoring, stop_monitoring, MonitoringEvent are re-exported imports at module level, not constants. They are function/class references imported for external consumers."
+    },
+    {
+      "file": "apps/handlers/monitoring/filesystem_handler.py",
+      "standard": "naming",
+      "reason": "False positive — _trigger_available is a mutable flag set conditionally in try/except, not a constant."
+    },
+    {
+      "file": "apps/handlers/logging/direct.py",
+      "standard": "naming",
+      "reason": "False positive — logger_key, target, sys_limits, backupCount, encoding, local_limits, key are local variables inside functions, not module-level constants. backupCount follows logging.handlers.RotatingFileHandler parameter naming."
+    },
+    {
+      "file": "apps/handlers/logging/monitoring.py",
+      "standard": "naming",
+      "reason": "False positive — module_name and counter are local variables inside functions, not module-level constants."
+    },
+    {
+      "file": "apps/handlers/logging/override.py",
+      "standard": "naming",
+      "reason": "Architectural — _original_getLogger and _original_basicConfig store references to stdlib functions (camelCase follows stdlib naming). enhanced_getLogger wraps logging.getLogger (matching stdlib convention)."
+    },
+    {
+      "file": "apps/handlers/logging/setup.py",
+      "standard": "naming",
+      "reason": "False positive — _terminal_output_enabled and _terminal_module_available are mutable flags set conditionally, not constants."
+    },
+
+    {
+      "file": "apps/handlers/discovery/watcher.py",
+      "standard": "unused_function",
+      "reason": "on_created() is a watchdog.FileSystemEventHandler callback — called by watchdog.Observer at runtime, not by name in branch code."
+    },
+    {
+      "file": "apps/handlers/monitoring/filesystem_handler.py",
+      "standard": "unused_function",
+      "reason": "on_created(), on_modified(), on_deleted(), on_moved() are watchdog.FileSystemEventHandler callbacks — called by watchdog.Observer at runtime via method dispatch."
+    },
+    {
+      "file": "apps/handlers/monitoring/log_watcher.py",
+      "standard": "unused_function",
+      "reason": "on_modified() is a watchdog.FileSystemEventHandler callback — called by watchdog.Observer at runtime when log files change."
+    },
+    {
+      "file": "apps/handlers/watcher/monitor.py",
+      "standard": "unused_function",
+      "reason": "on_created(), on_modified(), on_deleted(), on_moved() are watchdog.FileSystemEventHandler callbacks — called by watchdog.Observer at runtime via method dispatch."
+    },
+    {
+      "file": "apps/handlers/logging/terminal/formatting.py",
+      "standard": "unused_function",
+      "reason": "format() is a logging.Formatter.format() override — called by the Python logging framework when formatting log records, not by name in branch code."
+    },
+
+    {
+      "file": "apps/",
+      "standard": "architecture",
+      "reason": "Template files managed by spawn — prax cannot add/remove template files. Template structure is defined in spawn/templates/builder/ and applied at branch creation time."
     }
   ],
   "notes": {

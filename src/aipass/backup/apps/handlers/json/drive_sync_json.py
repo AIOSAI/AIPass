@@ -181,7 +181,7 @@ def save_log(log_file: Path, log: Dict[str, Any]) -> None:
     """
     log_file.parent.mkdir(parents=True, exist_ok=True)
     lock_path = log_file.with_suffix('.lock')
-    with open(lock_path, 'w') as lf:
+    with open(lock_path, 'w', encoding='utf-8') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         try:
             atomic_json_write(log_file, log)

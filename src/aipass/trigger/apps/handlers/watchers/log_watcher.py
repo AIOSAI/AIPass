@@ -23,19 +23,20 @@ Architecture:
     - Consolidated from: Prax log_watcher.py, AI_Mail error_monitor.py
 """
 
-import sys
 import hashlib
-from aipass.prax import logger
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
+from aipass.prax import logger
+from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.handlers.json import json_handler
 
 # Logger - use prax system_logger for Error_Handling and Log_Visibility standards
 # logger imported from aipass.prax
 
 # System logs directory (package-relative via config)
-from aipass.trigger.apps.config import TRIGGER_ROOT
-from aipass.trigger.apps.handlers.json import json_handler
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent / "system_logs"
 
 # Try to import watchdog

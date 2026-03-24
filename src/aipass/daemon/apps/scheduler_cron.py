@@ -147,8 +147,8 @@ def print_help() -> None:
     """Display usage information for scheduler_cron."""
     console.print("\n[bold cyan]scheduler_cron.py - DAEMON Scheduler Cron Trigger[/bold cyan]")
     console.print("\n[yellow]USAGE:[/yellow]")
-    console.print("  python scheduler_cron.py          Run the cron scheduler")
-    console.print("  python scheduler_cron.py --help   Show this help message")
+    console.print("  drone @daemon scheduler_cron          Run the cron scheduler")
+    console.print("  drone @daemon scheduler_cron --help   Show this help message")
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  Processes due scheduled tasks and actions from the registry.")
     console.print("  Intended to be called periodically by cron.")

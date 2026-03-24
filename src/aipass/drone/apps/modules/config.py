@@ -15,6 +15,7 @@ Thin orchestrator that delegates to registry_handler for path resolution.
 from typing import List, Optional
 
 from aipass.prax import logger
+from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
     get_registry_path,
@@ -66,18 +67,18 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         return True
     json_handler.log_operation("handle_command", {"module": "config", "command": command})
     if command == "path":
-        logger.info("Registry path: %s", get_registry_path())
+        console.print(f"Registry path: {get_registry_path()}")
         return True
     if command == "set":
         if not args:
             logger.warning("config set requires a path argument")
             return False
         set_registry_path(args[0])
-        logger.info("Registry path set to: %s", args[0])
+        console.print(f"Registry path set to: {args[0]}")
         return True
     if command == "reset":
         reset_registry_path()
-        logger.info("Registry path reset to default")
+        console.print("Registry path reset to default")
         return True
     logger.warning("config: unknown command '%s'", command)
     return False

@@ -62,8 +62,8 @@ def print_help() -> None:
     """Display usage information for daemon_wakeup."""
     console.print("\n[bold cyan]daemon_wakeup.py - DAEMON Wake-Up Cron Trigger[/bold cyan]")
     console.print("\n[yellow]USAGE:[/yellow]")
-    console.print("  python daemon_wakeup.py          Run the wake-up checker")
-    console.print("  python daemon_wakeup.py --help   Show this help message")
+    console.print("  drone @daemon daemon_wakeup          Run the wake-up checker")
+    console.print("  drone @daemon daemon_wakeup --help   Show this help message")
     console.print("\n[yellow]DESCRIPTION:[/yellow]")
     console.print("  Checks daemon's email inbox and sends summary reports.")
     console.print("  Intended to be called periodically by cron.")

@@ -16,13 +16,10 @@ Manages backup operation statistics and runtime state persistence.
 # IMPORTS
 # =============================================
 
-from aipass.prax import logger
 import datetime
 from pathlib import Path
 
-# logger imported from aipass.prax
-
-# Import handlers
+from aipass.prax import logger
 from aipass.backup.apps.handlers.json.json_handler import load_json, save_json
 from aipass.backup.apps.handlers.models.backup_models import BackupResult
 from aipass.backup.apps.handlers.utils.system_utils import safe_print

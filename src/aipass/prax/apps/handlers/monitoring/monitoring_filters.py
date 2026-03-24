@@ -19,7 +19,7 @@ Based on backup_system/config_handler.py's excellent pattern organization.
 # =============================================
 
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Any
+from typing import Dict, Optional, Any
 
 from aipass.prax.apps.handlers.json import json_handler
 
@@ -437,68 +437,6 @@ def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_ignore_patterns() -> List[str]:
-    """Get the monitor ignore patterns list
-
-    Returns:
-        Copy of monitor ignore patterns list
-    """
-    return MONITOR_IGNORE_PATTERNS.copy()
-
-
-def get_always_patterns() -> List[str]:
-    """Get the monitor always patterns list
-
-    Returns:
-        Copy of monitor always patterns list
-    """
-    return MONITOR_ALWAYS_PATTERNS.copy()
-
-
-def should_filter_content(path: Path, content: str, filter_mode: str = "errors_only") -> bool:
-    """Determine if content should be displayed based on filter mode
-
-    Used for log files and other high-volume content files where we want
-    to reduce noise by only showing relevant entries.
-
-    Args:
-        path: Path to the file
-        content: Content to filter (single line or chunk)
-        filter_mode: Filter mode to apply ("errors_only", "structure_only", etc.)
-
-    Returns:
-        True if content should be shown, False if it should be filtered out
-
-    Example:
-        should_filter_content(Path("system.log"), "ERROR: Failed", "errors_only")  # True
-        should_filter_content(Path("system.log"), "INFO: Starting", "errors_only")  # False
-    """
-    if filter_mode == "errors_only":
-        # Only show lines with error/warning keywords
-        error_keywords = ["ERROR", "CRITICAL", "WARNING", "Failed", "Exception",
-                         "Traceback", "error:", "warning:", "WARN"]
-        content_upper = content.upper()
-        return any(keyword.upper() in content_upper for keyword in error_keywords)
-
-    elif filter_mode == "structure_only":
-        # For JSON files - would need to parse and compare structure
-        # For now, show everything (implementation placeholder)
-        return True
-
-    elif filter_mode == "keys_only":
-        # For registry files - would need to compare keys
-        # For now, show everything (implementation placeholder)
-        return True
-
-    elif filter_mode == "summary":
-        # For snapshot files - would need to summarize
-        # For now, show everything (implementation placeholder)
-        return True
-
-    # Default: show everything
-    return True
-
-
 def filter_log_content(content: str, show_errors: bool = True,
                        show_warnings: bool = True,
                        show_info: bool = False) -> Optional[str]:
@@ -589,7 +527,6 @@ def apply_content_filter(path: Path, content: str,
         return filter_log_content(content, show_errors, show_warnings, show_info)
 
     # Other filter modes not yet implemented - return original
-    # TODO: Implement structure_only, keys_only, summary filters
     return content
 
 

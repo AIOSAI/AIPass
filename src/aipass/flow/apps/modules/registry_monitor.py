@@ -27,7 +27,7 @@ Features:
 
 Usage:
     From flow.py: flow registry_monitor [scan|start|stop|status]
-    Standalone: python3 registry_monitor.py [command]
+    Standalone: drone @flow registry [command]
 
 Commands:
     scan    - One-time scan and heal registry
@@ -232,6 +232,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:
+                logger.info("[registry_monitor] Keyboard interrupt received, stopping monitor")
                 console.print()
                 console.print("[bold]Stopping monitor...[/bold]")
                 stop_monitoring()

@@ -62,5 +62,6 @@ def create_plan_file(
         json_handler.log_operation("plan_file_created", {"file_path": str(plan_file), "success": True})
         return True, ""
     except Exception as e:
+        logger.error("Failed to create plan file '%s': %s", plan_file, e)
         error_msg = f"Failed to create {plan_file}: {e}"
         return False, error_msg

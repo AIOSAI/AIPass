@@ -516,6 +516,7 @@ def close_all_plans_impl(confirm: bool = False, dry_run: bool = False,
                 try:
                     response = input("Type 'yes' to confirm: ").strip().lower()
                 except EOFError:
+                    logger.warning("[%s] EOFError on stdin during close_all confirmation, auto-confirming", MODULE_NAME)
                     response = "yes"
 
             if response != "yes":

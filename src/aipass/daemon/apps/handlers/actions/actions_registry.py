@@ -22,11 +22,11 @@ Action types:
 """
 
 import json
-from aipass.prax import logger
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
 # logger imported from aipass.prax

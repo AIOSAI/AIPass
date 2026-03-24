@@ -19,7 +19,7 @@ Workflow:
 
 Usage:
     From flow.py: flow plan list [filter]
-    Standalone: python3 list_plans.py [filter]
+    Standalone: drone @flow list [filter]
 
 Filters:
     list          - List open plans only (default)

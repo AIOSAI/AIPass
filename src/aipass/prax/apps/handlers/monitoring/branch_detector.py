@@ -397,27 +397,9 @@ def detect_branch_from_log(log_file: str) -> str:
     return get_detector().detect_from_log(log_file)
 
 
-def detect_branch_from_module(module_name: str) -> str:
-    """
-    Public API - detect branch from module name.
-
-    Args:
-        module_name: Python module dotted name
-
-    Returns:
-        Branch name in uppercase
-    """
-    return get_detector().detect_from_module(module_name)
-
-
 def reload_registry():
     """Public API - reload BRANCH_REGISTRY.json"""
     get_detector().reload_registry()
-
-
-def get_detector_stats() -> Dict[str, int]:
-    """Public API - get cache statistics"""
-    return get_detector().get_stats()
 
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ Module handles all display output.
 
 Usage:
     From flow.py: flow restore <number>
-    Standalone: python3 restore_plan.py <number>
+    Standalone: drone @flow restore <number>
 """
 
 import sys
@@ -284,15 +284,15 @@ COMMANDS:
   restore, restore_plan      Restore a closed plan to open status
 
 USAGE:
-  python3 restore_plan.py restore <plan_number>
-  python3 restore_plan.py --help
+  drone @flow restore <PLAN-ID>
+  drone @flow restore --help
 
 EXAMPLES:
   # Restore a closed plan
-  python3 restore_plan.py restore 42
+  drone @flow restore FPLAN-0042
 
   # Using plan number directly
-  python3 restore_plan.py 42
+  drone @flow restore FPLAN-0042
 
 NOTES:
   - Plan must be closed to restore

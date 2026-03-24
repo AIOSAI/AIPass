@@ -8,18 +8,17 @@
 
 """Thread-safe event coordination for monitoring system"""
 
-from aipass.prax.apps.modules.logger import get_direct_logger
-logger = get_direct_logger()
-
 from pathlib import Path
-
 from queue import Empty, PriorityQueue
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 import threading
 
+from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
+
+logger = get_direct_logger()
 
 @dataclass(order=True)
 class MonitoringEvent:

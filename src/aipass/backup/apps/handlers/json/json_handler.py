@@ -105,7 +105,6 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             # If corrupted, fall through to regenerate
         except Exception as e:
             logger.warning(f"[json_handler] Failed to read {json_path}, regenerating: {e}")
-            pass
 
     template = _get_default_template(json_type, module_name)
 

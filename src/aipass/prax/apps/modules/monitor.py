@@ -39,7 +39,7 @@ Architecture:
     - unified_stream.py       → Terminal output formatting
     - branch_detector.py      → Path-to-branch mapping
     - interactive_filter.py   → Runtime filter adjustment
-    - monitoring_filters.py   → Event filtering logic (TODO)
+    - monitoring_filters.py   → Event filtering logic
     - event_queue.py          → Event buffering and deduplication
     - module_tracker.py       → Module execution tracking
     - filesystem_handler.py   → Real-time file change detection (FileSystemEventHandler)
@@ -78,40 +78,6 @@ from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
-
-def normalize_branch_arg(arg: str) -> str:
-    """
-    Convert path or name to branch name.
-
-    DRONE now resolves @branch arguments to full paths before passing to modules.
-    This function normalizes both formats to branch names.
-
-    The package structure is: .../src/aipass/{module}/apps/...
-    Find "aipass" in path parts, then the next part is the module name.
-
-    Args:
-        arg: Branch name (e.g., "flow") or full path (e.g., ".../src/aipass/flow")
-
-    Returns:
-        Uppercase branch name (e.g., "FLOW")
-
-    Examples:
-        >>> normalize_branch_arg("flow")
-        "FLOW"
-        >>> normalize_branch_arg("/path/to/src/aipass/flow")
-        "FLOW"
-    """
-    if arg.startswith('/'):
-        from pathlib import Path
-        parts = Path(arg).parts
-        # Check if path contains "aipass" - extract module name after it
-        if 'aipass' in parts:
-            idx = parts.index('aipass')
-            if idx + 1 < len(parts):
-                return parts[idx + 1].upper()
-        # Otherwise, use last part of path
-        return Path(arg).name.upper()
-    return arg.upper()
 
 # =============================================================================
 # PID CACHE - Maps branch names to active agent PIDs from dispatch lock files

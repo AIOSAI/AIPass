@@ -26,22 +26,6 @@ from aipass.prax.apps.handlers.logging.terminal.filtering import should_display_
 
 from aipass.prax.apps.handlers.json import json_handler
 
-def detect_branch_from_logger_name(logger_name: str) -> Optional[str]:
-    """Detect branch from logger name
-
-    Logger names follow pattern: captured_{module_name}
-    We need to check if the module has a branch in its path
-
-    Args:
-        logger_name: Logger name (e.g., "captured_drone")
-
-    Returns:
-        Branch name or None
-    """
-    # This will be enhanced when we have access to module registry
-    # For now, return None (will show as SYSTEM)
-    return None
-
 def format_terminal_message(record: logging.LogRecord, branch: Optional[str] = None) -> str:
     """Format log record for terminal output
 

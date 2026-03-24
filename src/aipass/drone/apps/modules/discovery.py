@@ -15,6 +15,7 @@ Thin orchestrator that delegates all discovery logic to the handler layer.
 from typing import Dict, List, Optional
 
 from aipass.prax import logger
+from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.discovery_handler import HelpResult
 from aipass.drone.apps.handlers.json import json_handler
 from .resolver import list_branches, resolve_branch
@@ -45,7 +46,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             return False
         modules = discover_modules(args[0])
         for mod in modules:
-            logger.info("  %s", mod)
+            console.print(f"  {mod}")
         return True
     if command == "help":
         if not args:
@@ -54,12 +55,12 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         target = args[0]
         cmd = args[1] if len(args) > 1 else None
         result = get_help(target, cmd)
-        logger.info("%s", result.text)
+        console.print(result.text)
         return True
     if command == "system":
         results = get_system_help()
         for name, result in results.items():
-            logger.info("%s: %s", name, result.text[:80])
+            console.print(f"{name}: {result.text[:80]}")
         return True
     logger.warning("discovery: unknown command '%s'", command)
     return False

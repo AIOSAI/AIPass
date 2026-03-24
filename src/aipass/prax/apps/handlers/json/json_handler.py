@@ -229,36 +229,6 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
     return save_json(module_name, "log", log)
 
 
-def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
-    """Increment a counter in data JSON"""
-    ensure_module_jsons(module_name)
-
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-
-    if counter_name not in data:
-        data[counter_name] = 0
-
-    data[counter_name] += amount
-
-    return save_json(module_name, "data", data)
-
-
-def update_data_metrics(module_name: str, **metrics) -> bool:
-    """Update data metrics"""
-    ensure_module_jsons(module_name)
-
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-
-    for key, value in metrics.items():
-        data[key] = value
-
-    return save_json(module_name, "data", data)
-
-
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("JSON HANDLER - Working Implementation")
@@ -267,8 +237,6 @@ if __name__ == "__main__":
 
     # Test auto-creation
     log_operation("test_operation", {"test": "data"}, "prax")
-    increment_counter("prax", "test_counter", 1)
-    update_data_metrics("prax", test_metric="working")
 
     print("\nCheck src/aipass/prax/prax_json/ for created files:")
     print("  - prax_config.json")

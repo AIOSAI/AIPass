@@ -84,15 +84,19 @@ except ImportError:
     _REGISTRY_DISPATCH_AVAILABLE = False
 
     def circuit_breaker_allows() -> bool:
+        """Fallback circuit breaker check that always allows dispatch."""
         return True
 
     def circuit_breaker_record_error() -> None:
+        """Fallback no-op error recording when error_registry is unavailable."""
         pass
 
     def registry_should_dispatch(fingerprint: str) -> bool:
+        """Fallback dispatch check that always allows dispatch for any fingerprint."""
         return True
 
     def registry_record_dispatch(fingerprint: str) -> None:
+        """Fallback no-op dispatch recording when error_registry is unavailable."""
         pass
 
 # Legacy rate limiting (kept for backward compat when registry unavailable)

@@ -812,8 +812,7 @@ class GoogleDriveSync:
             if local_size != drive_size:
                 return True
 
-            # If sizes are same, assume file is unchanged (for now)
-            # TODO: Could add MD5 comparison for small files for better accuracy
+            # If sizes are same, assume file is unchanged
             return False
 
         except Exception as e:

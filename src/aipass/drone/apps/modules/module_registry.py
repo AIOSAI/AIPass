@@ -16,6 +16,7 @@ to the handler layer.
 from __future__ import annotations
 
 from aipass.prax import logger
+from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_registry_handler import (
     ModuleInfo,
@@ -90,9 +91,9 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         for name in modules:
             info = get_module_info(name)
             if info:
-                logger.info("  @%-18s %s", name, info.description)
+                console.print(f"  @{name:<18} {info.description}")
             else:
-                logger.info("  @%-18s (not available)", name)
+                console.print(f"  @{name:<18} (not available)")
         return True
     if command == "info":
         if not args:
@@ -100,7 +101,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return False
         info = get_module_info(args[0])
         if info:
-            logger.info("Module: %s v%s — %s", info.name, info.version, info.description)
+            console.print(f"Module: {info.name} v{info.version} — {info.description}")
         else:
             logger.warning("Module '%s' not found", args[0])
             return False
@@ -109,7 +110,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         if not args:
             logger.warning("module_registry check requires a module name")
             return False
-        logger.info("Module '%s' registered: %s", args[0], is_module(args[0]))
+        console.print(f"Module '{args[0]}' registered: {is_module(args[0])}")
         return True
     logger.warning("module_registry: unknown command '%s'", command)
     return False

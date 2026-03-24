@@ -15,12 +15,10 @@ Pattern: Like Prax logger but for events.
 
 import inspect
 from pathlib import Path
-
+from typing import Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.json import json_handler
-
-from typing import Callable
 
 
 def print_introspection():

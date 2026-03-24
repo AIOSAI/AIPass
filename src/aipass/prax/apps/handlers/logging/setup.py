@@ -204,14 +204,6 @@ def get_captured_loggers_count() -> int:
     """
     return len(_captured_loggers)
 
-def get_captured_loggers() -> Dict[str, logging.Logger]:
-    """Get dictionary of captured loggers
-
-    Returns:
-        Copy of captured loggers dict
-    """
-    return _captured_loggers.copy()
-
 def enable_terminal_output():
     """Enable terminal output for all future loggers"""
     global _terminal_output_enabled
@@ -226,10 +218,3 @@ def disable_terminal_output():
     if _system_logger:
         _system_logger.info("Terminal output disabled")
 
-def is_terminal_output_enabled() -> bool:
-    """Check if terminal output is enabled
-
-    Returns:
-        True if terminal output is enabled
-    """
-    return _terminal_output_enabled

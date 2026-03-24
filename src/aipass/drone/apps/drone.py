@@ -436,12 +436,46 @@ def main() -> int:
     if command.startswith("@"):
         return _handle_target(args)
 
+    # Module routing — discovered modules are routable as bare commands
+    # e.g. `drone commands list` or `drone @drone commands list` (via subprocess)
+    discovered = _discover_modules()
+    module_names = [m[0] for m in discovered]
+    if command in module_names:
+        remaining = args[1:]
+        cmd = remaining[0] if remaining else None
+        cmd_args = remaining[1:] if len(remaining) > 1 else None
+        try:
+            mod = importlib.import_module(f"aipass.drone.apps.modules.{command}")
+            result = mod.handle_command(cmd, cmd_args)
+        except Exception as exc:
+            logger.error("Module %s failed: %s", command, exc)
+            err_console.print(f"drone: module '{command}' error: {exc}")
+            return 1
+        if isinstance(result, dict):
+            if result.get("stdout"):
+                console.print(result["stdout"], end="", highlight=False)
+            if result.get("stderr"):
+                err_console.print(result["stderr"], end="", highlight=False)
+            return result.get("exit_code", 0)
+        return 0 if result else 1
+
     # Custom command matching (greedy multi-word, before unknown error)
     custom_result = _handle_custom_command(args)
     if custom_result != -1:
         return custom_result
 
-    # Unknown command
+    # Unknown command — check if it's a bare branch name missing @
+    try:
+        from aipass.drone.apps.modules.resolver import branch_exists
+        if branch_exists(command):
+            err_console.print(
+                f"drone: branch references require @ prefix. "
+                f"Use '@{command}' instead of '{command}'."
+            )
+            return 1
+    except Exception as exc:
+        logger.warning("Branch existence check failed for '%s': %s", command, exc)
+
     err_console.print(f"drone: unknown command '{command}'")
     err_console.print("Run 'drone --help' for usage.")
     return 1
