@@ -482,7 +482,7 @@ if __name__ == '__main__':
 
     args = _sys.argv[1:]
     if not args:
-        _out("Usage: python3 pusher.py [push|push --dry-run|status]\n\n")
+        _out("Usage: drone @memory push-templates [--dry-run] | template-status\n\n")
         _out("Commands:\n")
         _out("  push           Push template updates to all branches\n")
         _out("  push --dry-run Preview changes without writing\n")
@@ -532,5 +532,5 @@ if __name__ == '__main__':
 
     else:
         _out(f"Unknown command: {command}\n")
-        _out("Usage: python3 pusher.py [push|push --dry-run|status]\n")
+        _out("Usage: drone @memory push-templates [--dry-run] | template-status\n")
         _sys.exit(1)

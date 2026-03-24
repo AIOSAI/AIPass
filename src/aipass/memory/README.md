@@ -3,7 +3,7 @@
 **Purpose:** Central memory archive with semantic search, rollover, and archival across all AIPass branches.
 **Module:** `aipass.memory`
 **Created:** 2026-03-07
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-03-24
 **Citizen Class:** builder
 
 ---
@@ -60,7 +60,8 @@ memory/
 │   ├── modules/
 │   │   ├── __init__.py
 │   │   ├── rollover.py      # Rollover orchestrator — line checks, archival triggers
-│   │   └── search.py        # Search orchestrator — semantic query routing
+│   │   ├── search.py        # Search orchestrator — semantic query routing
+│   │   └── verify.py        # Plan verification — check vectorized plan status
 │   ├── handlers/
 │   │   ├── __init__.py
 │   │   ├── central_writer.py    # Central memory write operations
@@ -118,4 +119,4 @@ The rollover module monitors memory files across all branches registered in `AIP
 
 ---
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-24*

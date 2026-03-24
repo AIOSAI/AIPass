@@ -349,7 +349,7 @@ if __name__ == "__main__":
     if len(_sys.argv) > 1:
         test_file = Path(_sys.argv[1])
     else:
-        print("Usage: python memory_files.py <path_to_memory_file.json>")
+        print("Usage: drone @memory (via handler memory_files.py)")
         print("No file specified, exiting.")
         _sys.exit(0)
 

@@ -2,6 +2,7 @@
   "metadata": {
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
+    "last_updated": "2026-03-24",
     "description": "Standards bypass configuration for this branch"
   },
   "bypass": [
@@ -58,26 +59,479 @@
     {
       "file": "apps/modules/templates.py",
       "standard": "modules",
-      "reason": "Templates module orchestrates 6 subcommands across 3 handlers — splitting further would fragment related orchestration. Will refactor when subcommands grow."
+      "reason": "Templates module orchestrates 6 subcommands across 3 handlers — splitting further would fragment related orchestration."
     },
     {
       "file": "apps/modules/symbolic.py",
       "standard": "modules",
-      "reason": "Symbolic module is 1669 lines — legacy port from old memory bank. Full refactor deferred. Functions flagged as implementation are CLI-display orchestration, not raw logic."
+      "reason": "Symbolic module is 1669 lines — legacy port from old memory bank. Functions flagged as implementation are CLI-display orchestration, not raw logic."
+    },
+    {
+      "file": "apps/modules/rollover.py",
+      "standard": "modules",
+      "reason": "process_plans_command is a thin CLI wrapper that delegates to plans_processor handler. Orchestration, not implementation."
+    },
+
+    {
+      "file": "apps/handlers/templates/pusher.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for template read/write operations. Memory handlers share json I/O by design."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for memory file read/write during rollover extraction."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "handlers",
+      "reason": "Architectural: rollover orchestrator coordinates monitor, tracking, storage, dashboard, intake, and trigger handlers. Central pipeline hub."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for learning data read/write and vector.embedder for semantic operations."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "handlers",
+      "reason": "Architectural: watcher coordinates tracking, rollover, intake, and archive handlers for auto-rollover pipeline."
+    },
+    {
+      "file": "apps/handlers/symbolic/retriever.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports vector.embedder for semantic search across symbolic fragments."
+    },
+    {
+      "file": "apps/handlers/symbolic/storage.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports vector.embedder for embedding symbolic fragments into ChromaDB."
+    },
+    {
+      "file": "apps/handlers/symbolic/hook.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for reading memory data during symbolic extraction hooks."
+    },
+    {
+      "file": "apps/handlers/tracking/line_counter.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports json.memory_files for metadata updates and monitor.detector for registry reading."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "handlers",
+      "reason": "Architectural: imports storage.chroma for ChromaDB client access during vector search."
+    },
+
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "error_handling",
+      "reason": "stdlib logging.getLogger() used at import-time before prax is available. Immediately replaced by get_system_logger() 3 lines below."
+    },
+
+    {
+      "file": "apps/handlers/dashboard_push.py",
+      "standard": "debug_print",
+      "reason": "print(ok) is inside a subprocess script string — IPC output to stdout, not debug output."
+    },
+
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "dead_code",
+      "reason": "Called dynamically via module auto-discovery and imported by symbolic extraction pipeline."
+    },
+    {
+      "file": "apps/handlers/schema/normalize.py",
+      "standard": "dead_code",
+      "reason": "Utility handler for v1-to-v2 schema migration. Called on-demand, not wired to main pipeline."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "dead_code",
+      "reason": "Legacy search handler — query_executor.py is the active path. Retained for direct-import fallback."
+    },
+
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "naming",
+      "reason": "Local variables (source_branch, error_type, message) inside functions, not constants."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "naming",
+      "reason": "Local variables (border_style, query, branch) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/vector/embedder.py",
+      "standard": "naming",
+      "reason": "_embedding_service is a module-level mutable singleton cache, not a constant."
+    },
+    {
+      "file": "apps/handlers/json/memory_files.py",
+      "standard": "naming",
+      "reason": "Local variables (data, status) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/templates/differ.py",
+      "standard": "naming",
+      "reason": "Local variables (diffs, full_path) inside functions, not constants."
+    },
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "naming",
+      "reason": "_REPO_ROOT is a private module-level path derived at import time, not a public constant."
+    },
+    {
+      "file": "apps/modules/rollover.py",
+      "standard": "naming",
+      "reason": "_SUBCOMMANDS is a private module-level dict, not a public constant."
+    },
+    {
+      "file": "apps/modules/verify.py",
+      "standard": "naming",
+      "reason": "Module-level variables are private path derivations (_HANDLERS_DIR, _MEMORY_ROOT), not public constants."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "naming",
+      "reason": "_startup_check_done and _observer are module-level mutable state flags, not constants."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "naming",
+      "reason": "Module-level variables are path derivations and env lookups, not true constants."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "naming",
+      "reason": "Module-level variables (MEMORY_PYTHON, MAX_CHUNK_CHARS) are config values derived at import time."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "naming",
+      "reason": "Module-level variables are path configurations derived at import time."
+    },
+    {
+      "file": "apps/handlers/search/query_executor.py",
+      "standard": "naming",
+      "reason": "Module-level variables (MEMORY_PYTHON, MIN_SIMILARITY_THRESHOLD) are config values."
+    },
+    {
+      "file": "apps/handlers/storage/chroma.py",
+      "standard": "naming",
+      "reason": "_chroma_clients is a module-level mutable cache dict, not a constant."
+    },
+    {
+      "file": "apps/handlers/symbolic/hook.py",
+      "standard": "naming",
+      "reason": "Module-level variables (SESSION_STATE, DEFAULT_CONFIG) are mutable state and config dicts."
+    },
+
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "documentation",
+      "reason": "Large legacy module (1672 lines) ported from old memory bank. Multiline signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "documentation",
+      "reason": "show_search_results has multiline signature causing false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "documentation",
+      "reason": "add_learning has multiline signature causing false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/storage/chroma.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/search/query_executor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "documentation",
+      "reason": "Utility handler with clear function names. Multiline signatures cause false-positive detection."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/archive/indexer.py",
+      "standard": "documentation",
+      "reason": "Utility handler with descriptive function names. Multiline signatures cause false-positive detection."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "documentation",
+      "reason": "Multiline function signatures cause false-positive missing docstring detection."
+    },
+
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "architecture",
+      "reason": "1672 lines — legacy port from old memory bank. Full refactor into handler split deferred."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "architecture",
+      "reason": "1094 lines — complex learning extraction with multiple strategies. Splitting would fragment cohesive logic."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "architecture",
+      "reason": "Central rollover pipeline. Orchestrates entire rollover flow."
+    },
+    {
+      "file": "apps/handlers/symbolic/storage.py",
+      "standard": "architecture",
+      "reason": "724 lines — symbolic storage with ChromaDB operations. Splitting would fragment cohesive vector storage logic."
+    },
+
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "naming",
+      "reason": "Local variables (target_lines, enriched, enriched_item) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "naming",
+      "reason": "Local variables (texts, metadatas, text) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "naming",
+      "reason": "Module-level mutable singletons (_query_encoder, _search_service) and local variables, not constants."
+    },
+    {
+      "file": "apps/handlers/symbolic/deduplicator.py",
+      "standard": "naming",
+      "reason": "Module-level config (api_key, _aipass_root) and local variables (data), not constants."
+    },
+    {
+      "file": "apps/handlers/symbolic/storage.py",
+      "standard": "naming",
+      "reason": "Local variables (frag_id, frag_data, embed_vec) inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/symbolic/extractor.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/symbolic/retriever.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/archive/indexer.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/dashboard_push.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/central_writer.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/monitor/detector.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/tracking/line_counter.py",
+      "standard": "naming",
+      "reason": "Local variables inside functions, not constants."
+    },
+    {
+      "file": "apps/handlers/symbolic/chroma_client.py",
+      "standard": "naming",
+      "reason": "Module-level mutable state, not constants."
+    },
+
+    {
+      "file": "apps/handlers/templates/spawn_pusher.py",
+      "standard": "architecture",
+      "reason": "Memory doesn't use all builder templates — branch has custom structure."
+    },
+
+    {
+      "file": "handlers/learnings/manager.py",
+      "standard": "dead_code",
+      "reason": "Called dynamically via symbolic extraction pipeline — not statically imported from module layer."
+    },
+    {
+      "file": "handlers/schema/normalize.py",
+      "standard": "dead_code",
+      "reason": "Utility for v1-to-v2 schema migration — invoked on-demand, not wired to main pipeline."
+    },
+    {
+      "file": "handlers/search/vector_search.py",
+      "standard": "dead_code",
+      "reason": "Legacy search handler — query_executor.py is the active path. Retained for direct-import fallback."
+    },
+
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "architecture",
+      "reason": "Called dynamically via symbolic extraction pipeline — not statically referenced from module layer."
+    },
+    {
+      "file": "apps/handlers/schema/normalize.py",
+      "standard": "architecture",
+      "reason": "Utility for v1-to-v2 schema migration — invoked on-demand."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "architecture",
+      "reason": "Legacy search handler — query_executor.py is active path. Retained for fallback."
+    },
+
+    {
+      "file": "apps/handlers/intake/pool_processor.py",
+      "standard": "unused_function",
+      "reason": "find_source_file is part of public pool processing API, called by external consumers."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "unused_function",
+      "reason": "on_modified is a watchdog FileSystemEventHandler callback, invoked by framework."
+    },
+    {
+      "file": "apps/handlers/storage/chroma.py",
+      "standard": "unused_function",
+      "reason": "get_database_info is a diagnostic API function for runtime inspection."
+    },
+    {
+      "file": "apps/handlers/symbolic/hook.py",
+      "standard": "unused_function",
+      "reason": "format_multiple_recalls, record_message, save_config are hook API functions called by symbolic extraction pipeline."
+    },
+    {
+      "file": "apps/handlers/vector/embedder.py",
+      "standard": "unused_function",
+      "reason": "get_model_info is a diagnostic API function for runtime inspection."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "unused_function",
+      "reason": "search_fragments_by_dimensions, search_fragments_by_triggers, search_fragments_by_vector, load_hook_config are public API functions for symbolic search variants."
+    },
+    {
+      "file": "apps/modules/verify.py",
+      "standard": "unused_function",
+      "reason": "is_plan_vectorized is a public API function for external callers."
+    },
+
+    {
+      "file": "apps/modules/templates.py",
+      "standard": "deep_nesting",
+      "reason": "handle_command() routes 6 subcommands with validation — nesting is inherent to command dispatch."
+    },
+    {
+      "file": "apps/modules/symbolic.py",
+      "standard": "deep_nesting",
+      "reason": "Legacy port (1672 lines). extract_and_store_llm, search_fragments_cli, _parse_jsonl_to_chat_history have deep nesting from complex data processing. Full refactor deferred."
+    },
+    {
+      "file": "apps/modules/search.py",
+      "standard": "deep_nesting",
+      "reason": "handle_command() has deep nesting from search options parsing and result formatting."
+    },
+    {
+      "file": "apps/handlers/dashboard_push.py",
+      "standard": "deep_nesting",
+      "reason": "_find_branches_near_rollover() iterates nested JSON structures — nesting reflects data depth."
+    },
+    {
+      "file": "apps/handlers/templates/differ.py",
+      "standard": "deep_nesting",
+      "reason": "_diff_structural_section() compares nested template structures — nesting reflects data depth."
+    },
+    {
+      "file": "apps/handlers/templates/pusher.py",
+      "standard": "deep_nesting",
+      "reason": "Template push logic iterates branches × template files × diff operations."
+    },
+    {
+      "file": "apps/handlers/rollover/orchestrator.py",
+      "standard": "deep_nesting",
+      "reason": "Rollover pipeline has nested error handling and branch iteration."
+    },
+    {
+      "file": "apps/handlers/rollover/extractor.py",
+      "standard": "deep_nesting",
+      "reason": "Memory extraction parses nested JSON structures with validation."
+    },
+    {
+      "file": "apps/handlers/monitor/memory_watcher.py",
+      "standard": "deep_nesting",
+      "reason": "File watcher callbacks coordinate multiple handlers with error isolation."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "deep_nesting",
+      "reason": "Learning extraction processes nested memory structures with multiple strategies."
+    },
+    {
+      "file": "apps/handlers/symbolic/storage.py",
+      "standard": "deep_nesting",
+      "reason": "ChromaDB operations with nested error handling and batch processing."
+    },
+    {
+      "file": "apps/handlers/symbolic/hook.py",
+      "standard": "deep_nesting",
+      "reason": "Hook processing chains with nested config validation and error isolation."
+    },
+    {
+      "file": "apps/handlers/symbolic/retriever.py",
+      "standard": "deep_nesting",
+      "reason": "Vector search with nested result filtering and similarity scoring."
+    },
+    {
+      "file": "apps/handlers/symbolic/deduplicator.py",
+      "standard": "deep_nesting",
+      "reason": "Deduplication algorithm with nested comparison logic."
+    },
+    {
+      "file": "apps/handlers/storage/chroma.py",
+      "standard": "deep_nesting",
+      "reason": "search_vectors() has nested error handling for ChromaDB queries with result processing."
+    },
+    {
+      "file": "apps/handlers/storage/chroma_subprocess.py",
+      "standard": "deep_nesting",
+      "reason": "Self-contained subprocess — main() handles multiple operation types with nested JSON processing."
+    },
+    {
+      "file": "apps/handlers/intake/plans_processor.py",
+      "standard": "deep_nesting",
+      "reason": "process_plans() iterates files with nested chunking, embedding, and error handling."
+    },
+    {
+      "file": "apps/handlers/symbolic/extractor.py",
+      "standard": "deep_nesting",
+      "reason": "extract_fragments_llm() has nested JSON parsing with multiple fallback strategies."
     }
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
-    "example": {
-      "file": "apps/modules/logger.py",
-      "standard": "cli",
-      "lines": [
-        146,
-        177
-      ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
-    },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, imports, naming, etc. (required)",

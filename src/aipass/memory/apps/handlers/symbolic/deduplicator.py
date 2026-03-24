@@ -324,7 +324,6 @@ def _parse_dedup_response(raw_text: str) -> Optional[Dict[str, Any]]:
             return result
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"[deduplicator] Direct JSON parse failed, trying fallback: {e}")
-        pass
 
     # Attempt 2: Strip markdown fences
     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
@@ -335,7 +334,6 @@ def _parse_dedup_response(raw_text: str) -> Optional[Dict[str, Any]]:
                 return result
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"[deduplicator] Markdown-fenced JSON parse failed, trying fallback: {e}")
-            pass
 
     # Attempt 3: Find JSON object in text
     match = re.search(r'\{[^{}]*"action"\s*:\s*"[A-Z]+"[^{}]*\}', text, re.DOTALL)
@@ -346,7 +344,6 @@ def _parse_dedup_response(raw_text: str) -> Optional[Dict[str, Any]]:
                 return result
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"[deduplicator] Regex-extracted JSON parse failed: {e}")
-            pass
 
     return None
 

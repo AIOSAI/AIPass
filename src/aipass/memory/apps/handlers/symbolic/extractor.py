@@ -311,7 +311,6 @@ def _parse_llm_json(raw_text: str) -> Optional[List[Dict[str, Any]]]:
             return result
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"[extractor] Direct JSON parse failed, trying fallback: {e}")
-        pass
     # Attempt 2: Strip markdown fences
     match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
     if match:
@@ -321,7 +320,6 @@ def _parse_llm_json(raw_text: str) -> Optional[List[Dict[str, Any]]]:
                 return result
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"[extractor] Markdown-fenced JSON parse failed: {e}")
-            pass
     return None
 
 

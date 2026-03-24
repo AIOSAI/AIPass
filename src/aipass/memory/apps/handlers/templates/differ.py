@@ -314,7 +314,7 @@ if __name__ == '__main__':
 
     args = _sys.argv[1:]
     if not args:
-        _sys.stdout.write("Usage: python3 differ.py <branch_path>\n")
+        _sys.stdout.write("Usage: drone @memory diff-templates\n")
         _sys.stdout.write("\nCompare template structure against a branch's memory files.\n")
         _sys.exit(1)
 

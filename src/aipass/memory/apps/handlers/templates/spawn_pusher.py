@@ -247,7 +247,7 @@ if __name__ == "__main__":
     args = _sys.argv[1:]
 
     if not args or args[0] in ("-h", "--help"):
-        _out("Usage: python3 spawn_pusher.py [push|push --dry-run]\n\n")
+        _out("Usage: drone @memory push-templates [--dry-run]\n\n")
         _out("Commands:\n")
         _out("  push           Push canonical templates to spawn template sets\n")
         _out("  push --dry-run Preview changes without writing\n")
@@ -277,5 +277,5 @@ if __name__ == "__main__":
         _sys.exit(0 if push_result["success"] else 1)
     else:
         _out(f"Unknown command: {command}\n")
-        _out("Usage: python3 spawn_pusher.py [push|push --dry-run]\n")
+        _out("Usage: drone @memory push-templates [--dry-run]\n")
         _sys.exit(1)
