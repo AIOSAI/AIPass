@@ -25,12 +25,13 @@ Independence:
 
 import json
 import copy
-import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+
+logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
 

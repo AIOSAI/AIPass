@@ -60,7 +60,7 @@ drone @flow create . "Subject" dplan  # Create DPLAN (design/planning doc)
 drone @flow list open                 # List active plans
 ```
 
-**DPLAN** = Design Plan. Thinking, brainstorming, capturing ideas and decisions. Created early — even before you know if you'll build anything. The template explains more when you open it.
+**DPLAN** = Dev Plan. Thinking, brainstorming, capturing ideas and decisions. Created early — even before you know if you'll build anything. The template explains more when you open it.
 
 **FPLAN** = Flow Plan. Building and executing. Default is for single focused tasks. Master is for multi-phase projects that spawn sub-FPLANs per phase. DPLANs come first, FPLANs come when you're ready to build.
 

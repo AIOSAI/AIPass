@@ -35,6 +35,9 @@ def handle_command(command: str, args: list) -> bool:
     if not args:
         print_introspection()
         return True
+    if "--help" in args:
+        print_introspection()
+        return True
 
     return False
 

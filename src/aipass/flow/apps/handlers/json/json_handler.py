@@ -27,7 +27,6 @@ _PKG_ROOT = Path(__file__).resolve().parents[4]
 # Constants
 FLOW_ROOT = _PKG_ROOT / "flow"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
-JSON_TEMPLATES_DIR = FLOW_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -56,26 +55,26 @@ def _get_caller_module_name() -> str:
         return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file"""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
-
-    if not template_path.exists():
-        return None
-
-    try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            template = json.load(f)
-
-        # Replace placeholders
-        template_str = json.dumps(template)
-        template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-        template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
-
-        return json.loads(template_str)
-    except Exception as exc:
-        logger.warning("[json_handler] Failed to load template '%s' for module '%s': %s", json_type, module_name, exc)
-        return None
+def _default_template(json_type: str, module_name: str) -> Any:
+    """Return inline default structure for a JSON type — no file templates needed."""
+    today = datetime.now().date().isoformat()
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "config": {
+                "max_log_entries": 100,
+            },
+            "created": today,
+        }
+    if json_type == "data":
+        return {
+            "created": today,
+            "last_updated": today,
+        }
+    if json_type == "log":
+        return []
+    return None
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -121,7 +120,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             # File exists but is corrupted - will regenerate below
             logger.warning("[json_handler] Corrupted JSON file for '%s/%s', regenerating: %s", module_name, json_type, exc)
 
-    template = load_template(json_type, module_name)
+    template = _default_template(json_type, module_name)
     if template is None:
         return False
 

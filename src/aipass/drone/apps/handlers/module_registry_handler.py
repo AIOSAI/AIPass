@@ -25,7 +25,6 @@ from aipass.drone.apps.handlers.json import json_handler
 # Maps module name -> import path for its drone_adapter
 _MODULE_REGISTRY: dict[str, str] = {
     "cli": "aipass.cli.drone_adapter",
-    "drone": "aipass.drone.drone_adapter",
     "git": "aipass.drone.apps.modules.git_module",
     "seedgo": "aipass.seedgo.drone_adapter",
 }

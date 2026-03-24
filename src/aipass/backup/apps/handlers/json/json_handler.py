@@ -17,7 +17,6 @@ from aipass.prax import logger
 # Constants
 _BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 BACKUP_JSON_DIR = _BACKUP_ROOT / "backup_json"
-JSON_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -42,22 +41,26 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file"""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
-
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
-
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
-
-    # Replace placeholders
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
-
-    return json.loads(template_str)
+def _get_default_template(json_type: str, module_name: str) -> Any:
+    """Return inline default structure for a JSON type"""
+    today = datetime.now().date().isoformat()
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "config": {
+                "enabled": True,
+                "max_log_entries": 100
+            }
+        }
+    elif json_type == "data":
+        return {
+            "created": today,
+            "last_updated": today
+        }
+    elif json_type == "log":
+        return []
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -104,7 +107,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             logger.warning(f"[json_handler] Failed to read {json_path}, regenerating: {e}")
             pass
 
-    template = load_template(json_type, module_name)
+    template = _get_default_template(json_type, module_name)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(template, f, indent=2, ensure_ascii=False)

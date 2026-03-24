@@ -44,6 +44,7 @@ try:
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
+    logger.info("watchdog not available, log watcher disabled")
     WATCHDOG_AVAILABLE = False
     WatchdogObserver = None  # type: ignore
     WatchdogFileSystemEventHandler = object  # type: ignore
@@ -354,6 +355,7 @@ if __name__ == '__main__':
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        logger.info("Log watcher stopped by user")
         print("\nStopping...")
         stop_log_watcher()
         print("Stopped")

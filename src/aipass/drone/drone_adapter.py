@@ -41,6 +41,7 @@ def handle_command(command: str, args: list[str] | None = None) -> dict:
     except SystemExit as e:
         exit_code = e.code if e.code is not None else 0
     except Exception as e:
+        logger.warning("handle_command failed: %s", e)
         captured_err.write(str(e))
         exit_code = 1
     finally:
@@ -90,6 +91,6 @@ def get_introspective() -> str:
             f"  Registered branches: {len(branches)}\n"
             f"  Run 'drone @drone --help' for usage\n"
         )
-    except Exception:
-        logger.warning("get_introspective: failed to load module list or branch list")
+    except Exception as exc:
+        logger.warning("get_introspective: failed to load module list or branch list: %s", exc)
         return "@drone — Command routing and module discovery (run 'drone --help' for usage)\n"

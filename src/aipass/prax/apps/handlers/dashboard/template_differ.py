@@ -23,13 +23,14 @@ Independence:
 """
 
 import json
-import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from aipass.prax.apps.modules.logger import get_direct_logger
+
 from aipass.prax.apps.handlers.json import json_handler
 
-logger = logging.getLogger(__name__)
+logger = get_direct_logger()
 
 # =============================================================================
 # PATH RESOLUTION

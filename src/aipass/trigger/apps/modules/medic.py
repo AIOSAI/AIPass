@@ -44,6 +44,7 @@ def print_introspection():
     try:
         from aipass.cli.apps.modules.display import console
     except ImportError:
+        logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
         console = Console()
 
@@ -121,7 +122,6 @@ def print_help() -> None:
     console.rule("USAGE")
     console.print()
     console.print("  drone @trigger medic <command>")
-    console.print("  python3 trigger.py medic <command>")
     console.print()
     console.rule("COMMANDS")
     console.print()

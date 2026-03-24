@@ -160,64 +160,6 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
     return "\n".join(lines)
 
 
-def format_inbox_summary(total_messages: int, unread_count: int) -> str:
-    """
-    Format inbox summary statistics.
-
-    Args:
-        total_messages: Total number of messages
-        unread_count: Number of unread messages
-
-    Returns:
-        Formatted summary string
-    """
-    return f"📊 Total: {total_messages} messages ({unread_count} unread)"
-
-
-def format_branch_email(branch_name: str) -> str:
-    """
-    Derive email address from branch name.
-
-    Args:
-        branch_name: Branch name (e.g., "AIPASS.admin", "DRONE", "AIPASS-HELP")
-
-    Returns:
-        Email address (e.g., "@admin", "@drone", "@help")
-    """
-    if '.' in branch_name:
-        # Special case: AIPASS.admin -> admin
-        email_part = branch_name.split('.')[-1].lower()
-    elif ' ' in branch_name:
-        # Handle spaces: take first word
-        email_part = branch_name.split()[0].lower()
-    elif '-' in branch_name and branch_name.split('-')[0] == 'AIPASS':
-        # AIPASS-prefixed branches: use second part to avoid collision
-        email_part = branch_name.split('-', 1)[1].lower()
-    else:
-        # Take first word before hyphen or whole name
-        email_part = branch_name.split('-')[0].lower()
-
-    return f"@{email_part}"
-
-
-def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
-    """
-    Truncate text to maximum length with suffix.
-
-    Args:
-        text: Text to truncate
-        max_length: Maximum length
-        suffix: Suffix to append if truncated (default: "...")
-
-    Returns:
-        Truncated text with suffix if needed
-    """
-    if len(text) <= max_length:
-        return text
-
-    return text[:max_length - len(suffix)] + suffix
-
-
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
     console.print("\n" + "="*70)
@@ -230,9 +172,6 @@ if __name__ == "__main__":
     console.print("  - format_email_preview(message, max_length) -> str")
     console.print("  - format_email_header(email_data) -> str")
     console.print("  - format_email_list_item(index, email_data, show_unread) -> str")
-    console.print("  - format_inbox_summary(total_messages, unread_count) -> str")
-    console.print("  - format_branch_email(branch_name) -> str")
-    console.print("  - truncate_text(text, max_length, suffix) -> str")
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  ✓ Independent - no module dependencies")

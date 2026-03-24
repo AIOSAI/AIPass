@@ -3,11 +3,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-03-08
+**Last Updated:** 2026-03-24
 
 ---
 
-**Status:** Building. Core email workflow (send/inbox/reply/close) is functional. Dispatch system is working.
+**Status:** Operational. Core email workflow (send/inbox/reply/close), dispatch system, daemon, desktop notifications all working. Seedgo 96%.
 
 ## Commands / Usage
 
@@ -54,10 +54,14 @@ ai_mail/
 │   │   ├── dispatch.py     # Dispatch status, daemon, wake
 │   │   └── branch_ping.py  # Branch health monitoring
 │   └── handlers/
-│       ├── email/           # Delivery, formatting, inbox ops, purge
-│       ├── dispatch/        # Daemon, wake, monitoring
-│       ├── registry/        # Branch registry read/update
-│       └── users/           # Branch detection, config generation
+│       ├── email/           # Delivery, formatting, inbox ops, purge, reply
+│       ├── dispatch/        # Daemon, wake, dispatch_monitor, status
+│       ├── registry/        # Branch registry read/update/load
+│       ├── users/           # Branch detection, user lookup
+│       ├── json_utils/      # JSON I/O helpers (load_json, save_json)
+│       ├── monitoring/      # Memory health, error tracking
+│       ├── notify.py        # Desktop notifications (dbus)
+│       └── central_writer.py # Registry status aggregation
 ```
 
 ## Integration Points
@@ -75,4 +79,4 @@ ai_mail/
 
 ---
 
-*Last Updated: 2026-03-08*
+*Last Updated: 2026-03-24*

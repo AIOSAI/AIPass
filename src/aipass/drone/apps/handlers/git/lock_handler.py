@@ -187,6 +187,7 @@ def check_lock_status() -> dict:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
+            logger.info("check_lock_status: PID %d not found — lock is orphaned", pid)
             orphaned = True
         except PermissionError:
             # Process exists but we can't signal it — not orphaned

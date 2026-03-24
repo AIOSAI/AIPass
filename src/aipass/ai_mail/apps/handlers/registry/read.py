@@ -143,30 +143,6 @@ def get_branch_by_email(email: str) -> Optional[Dict]:
     return None
 
 
-def get_branch_email_map() -> Dict[str, str]:
-    """
-    Get mapping of email addresses to branch names.
-
-    Returns:
-        Dict mapping email -> branch_name
-        Example: {"@admin": "AIPASS.admin", "@flow": "FLOW"}
-    """
-    branches = get_all_branches()
-    return {branch["email"]: branch["name"] for branch in branches}
-
-
-def get_branch_path_map() -> Dict[str, str]:
-    """
-    Get mapping of email addresses to branch paths.
-
-    Returns:
-        Dict mapping email -> path
-        Example: {"@admin": "/", "@flow": "src/aipass/flow"}
-    """
-    branches = get_all_branches()
-    return {branch["email"]: branch["path"] for branch in branches}
-
-
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
     console.print("\n" + "="*70)
@@ -177,8 +153,6 @@ if __name__ == "__main__":
     console.print("FUNCTIONS PROVIDED:")
     console.print("  - get_all_branches() -> List[Dict]")
     console.print("  - get_branch_by_email(email) -> Optional[Dict]")
-    console.print("  - get_branch_email_map() -> Dict[str, str]")
-    console.print("  - get_branch_path_map() -> Dict[str, str]")
     console.print()
     console.print("TESTING:")
 

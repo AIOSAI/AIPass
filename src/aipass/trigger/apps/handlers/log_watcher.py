@@ -75,6 +75,7 @@ try:
     from aipass.trigger.apps.handlers.error_registry import report as registry_report
     _REGISTRY_AVAILABLE = True
 except ImportError:
+    logger.info("error_registry not available, using MD5 fallback dedup")
     _REGISTRY_AVAILABLE = False
 
     def registry_report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
@@ -86,6 +87,7 @@ try:
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
+    logger.info("watchdog not available, log watcher disabled")
     WATCHDOG_AVAILABLE = False
     WatchdogObserver = None  # type: ignore
     WatchdogFileSystemEventHandler = object  # type: ignore
@@ -773,6 +775,7 @@ if __name__ == '__main__':
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        logger.info("Branch log watcher stopped by user")
         print("\nStopping...")
         stop_branch_log_watcher()
         print("Stopped")

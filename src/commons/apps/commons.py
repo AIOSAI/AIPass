@@ -163,8 +163,8 @@ def print_help() -> None:
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]python3 the_commons.py <command> [args...][/dim]")
-    console.print("  [dim]python3 the_commons.py --help[/dim]")
+    console.print("  [dim]drone @commons <command> [args...][/dim]")
+    console.print("  [dim]drone @commons --help[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -239,25 +239,25 @@ def print_help() -> None:
     console.print()
 
     console.print("  [yellow]Create a post:[/yellow]")
-    console.print('    [dim]python3 the_commons.py post "general" "Hello World" "First post!"[/dim]')
-    console.print('    [dim]python3 the_commons.py post "dev" "RFC: New API" "Proposal..." --type review[/dim]')
+    console.print('    [dim]drone @commons post "general" "Hello World" "First post!"[/dim]')
+    console.print('    [dim]drone @commons post "dev" "RFC: New API" "Proposal..." --type review[/dim]')
     console.print()
 
     console.print("  [yellow]Browse feed:[/yellow]")
-    console.print("    [dim]python3 the_commons.py feed[/dim]")
-    console.print("    [dim]python3 the_commons.py feed --room general --sort new[/dim]")
+    console.print("    [dim]drone @commons feed[/dim]")
+    console.print("    [dim]drone @commons feed --room general --sort new[/dim]")
     console.print()
 
     console.print("  [yellow]View a thread:[/yellow]")
-    console.print("    [dim]python3 the_commons.py thread 42[/dim]")
+    console.print("    [dim]drone @commons thread 42[/dim]")
     console.print()
 
     console.print("  [yellow]Comment on a post:[/yellow]")
-    console.print('    [dim]python3 the_commons.py comment 42 "Great point!"[/dim]')
+    console.print('    [dim]drone @commons comment 42 "Great point!"[/dim]')
     console.print()
 
     console.print("  [yellow]Vote:[/yellow]")
-    console.print("    [dim]python3 the_commons.py vote post 42 up[/dim]")
+    console.print("    [dim]drone @commons vote post 42 up[/dim]")
     console.print()
 
     console.print("-" * 70)
@@ -289,7 +289,7 @@ def print_introspection(modules: List[Any]) -> None:
         console.print("  [dim]No modules discovered[/dim]")
 
     console.print()
-    console.print("[dim]Run 'python3 the_commons.py --help' for available commands[/dim]")
+    console.print("[dim]Run 'drone @commons --help' for available commands[/dim]")
     console.print()
 
 

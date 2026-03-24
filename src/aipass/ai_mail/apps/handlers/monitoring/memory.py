@@ -123,68 +123,6 @@ def get_health_info(file_path: Path | str) -> dict:
     }
 
 
-def format_compression_prompt(file_type: str, line_count: int) -> str:
-    """
-    Generate compression agent prompt
-
-    Args:
-        file_type: Type of file (e.g., "local.md", "observations.md")
-        line_count: Current line count
-
-    Returns:
-        Formatted compression prompt
-    """
-    return f"""Compress my {file_type} file from {line_count} lines to 400 lines following the compression rules:
-
-- Top 25% (most recent): Keep mostly intact
-- Next 25%: Reduce slightly (combine details)
-- Next 25%: Reduce more (summary format)
-- Last 25% (oldest): Delete if needed for space
-
-Preserve:
-- All session headers and dates
-- Key achievements and milestones
-- Critical errors and resolutions
-- Important patterns and learnings
-
-Remove:
-- Routine status updates
-- Redundant information
-- Low-value details
-- Completed temporary tasks
-
-Maintain chronological order (newest first)."""
-
-
-# =============================================
-# VALIDATION
-# =============================================
-
-def validate_thresholds(green_max: int, yellow_min: int, yellow_max: int, red_min: int) -> bool:
-    """
-    Validate threshold configuration
-
-    Args:
-        green_max: Maximum for green status
-        yellow_min: Minimum for yellow status
-        yellow_max: Maximum for yellow status
-        red_min: Minimum for red status
-
-    Returns:
-        True if thresholds are valid, False otherwise
-    """
-    if yellow_min != green_max + 1:
-        return False
-
-    if yellow_max < yellow_min:
-        return False
-
-    if red_min != yellow_max + 1:
-        return False
-
-    return True
-
-
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
     console.print("\n" + "="*70)
@@ -195,8 +133,6 @@ if __name__ == "__main__":
     console.print("  - get_status_from_count(line_count) -> str")
     console.print("  - should_send_email(line_count) -> bool")
     console.print("  - get_health_info(file_path) -> dict")
-    console.print("  - format_compression_prompt(file_type, line_count) -> str")
-    console.print("  - validate_thresholds(...) -> bool")
     console.print("\nThresholds:")
     console.print(f"  Green: 0-{THRESHOLD_GREEN_MAX} lines")
     console.print(f"  Yellow: {THRESHOLD_YELLOW_MIN}-{THRESHOLD_YELLOW_MAX} lines")

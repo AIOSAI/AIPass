@@ -20,16 +20,17 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 try:
-    from aipass.cli.apps.modules import console, error
+    from aipass.cli.apps.modules import console
 except ImportError:
     logger.warning("[space] CLI console unavailable, using fallback")
     from rich.console import Console
     console = Console()
 
-    def error(message: str, suggestion: str | None = None) -> None:  # type: ignore[misc]
-        console.print(f"[red]{message}[/red]")
-        if suggestion:
-            console.print(f"  [yellow]{suggestion}[/yellow]")
+try:
+    from aipass.cli.apps.modules.display import error
+except ImportError:
+    logger.warning("[space] CLI error function unavailable, using fallback")
+    error = lambda message, suggestion=None: console.print(f"[red]{message}[/red]")  # type: ignore[assignment]
 
 from rich.panel import Panel
 

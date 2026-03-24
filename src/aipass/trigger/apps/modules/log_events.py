@@ -37,6 +37,7 @@ def print_introspection():
     try:
         from aipass.cli.apps.modules.display import console
     except ImportError:
+        logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
         console = Console()
 
@@ -104,8 +105,7 @@ def print_help() -> None:
 
     console.print("Log Events - Centralized Log Watcher\n")
     console.print("USAGE:")
-    console.print("  drone trigger log_events <command>")
-    console.print("  python3 log_events.py <command>\n")
+    console.print("  drone @trigger log_events <command>\n")
     console.print("COMMANDS:")
     console.print("  start  - Start watching logs for errors/warnings")
     console.print("  stop   - Stop the log watcher")

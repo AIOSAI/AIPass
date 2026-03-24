@@ -14,8 +14,8 @@ Monitors all files (including __pycache__, .pyc, etc.) to provide
 complete visibility into branch modifications.
 """
 
-import logging
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+logger = get_direct_logger()
 
 from pathlib import Path
 from typing import List, Callable, Optional, TYPE_CHECKING, Any

@@ -23,7 +23,6 @@ from aipass.prax import logger
 # Constants
 _DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
-JSON_TEMPLATES_DIR = _DAEMON_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -45,23 +44,26 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file."""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
-
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
-
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
-
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
+def _default_template(json_type: str, module_name: str) -> Any:
+    """Return inline default structure for a JSON type."""
     current_date = datetime.now().date().isoformat()
-    template_str = template_str.replace("{{CURRENT_DATE}}", current_date)
-    template_str = template_str.replace("2026-01-21", current_date)
-
-    return json.loads(template_str)
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "timestamp": current_date,
+            "config": {"auto_save": True, "enabled": True},
+        }
+    elif json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": current_date,
+            "last_updated": current_date,
+            "operations_total": 0,
+        }
+    elif json_type == "log":
+        return []
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -108,7 +110,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         except OSError as e:
             logger.warning("[json_handler] Unreadable JSON file %s, regenerating: %s", json_path.name, e)
 
-    template = load_template(json_type, module_name)
+    template = _default_template(json_type, module_name)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(template, f, indent=2, ensure_ascii=False)

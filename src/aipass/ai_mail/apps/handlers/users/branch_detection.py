@@ -206,42 +206,6 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
         return None
 
 
-def get_branch_display_name(branch_info: Dict) -> str:
-    """
-    Generate display name for branch from registry info.
-
-    Args:
-        branch_info: Branch dict from registry
-
-    Returns:
-        Display name string (e.g., "Seed (Standards Branch)")
-    """
-    name = branch_info.get("name", "Unknown")
-    description = branch_info.get("description", "")
-
-    if description and description != "New branch - purpose TBD":
-        # Use description as context
-        return f"{name.title()} ({description})"
-    else:
-        # Just use name
-        return name.title()
-
-
-def get_local_config_path(branch_path: Path, branch_name: str) -> Path:
-    """
-    Get path to local user_config.json for a branch.
-
-    Args:
-        branch_path: Path to branch directory
-        branch_name: Branch name (e.g., "SEED", "DRONE")
-
-    Returns:
-        Path to local config file ([branch_name]_json/user_config.json)
-    """
-    branch_name_lower = branch_name.lower()
-    return branch_path / f"{branch_name_lower}_json" / "user_config.json"
-
-
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
 
@@ -256,8 +220,6 @@ if __name__ == "__main__":
     console.print("  - detect_branch_from_pwd() -> Optional[Dict]")
     console.print("  - find_branch_root(start_path) -> Optional[Path]")
     console.print("  - get_branch_info_from_registry(branch_path) -> Optional[Dict]")
-    console.print("  - get_branch_display_name(branch_info) -> str")
-    console.print("  - get_local_config_path(branch_path) -> Path")
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  ✓ Independent - no module dependencies")

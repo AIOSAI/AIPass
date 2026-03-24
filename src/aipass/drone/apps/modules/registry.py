@@ -62,6 +62,9 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
+    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+        print_help()
+        return True
     json_handler.log_operation("handle_command", {"module": "registry", "command": command})
     if command == "load":
         registry = load_registry()

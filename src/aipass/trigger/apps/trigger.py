@@ -121,7 +121,7 @@ def print_introspection(modules: List[Any]):
         console.print("  [dim]No modules discovered[/dim]")
 
     console.print()
-    console.print("[dim]Run 'python3 trigger.py --help' for usage information[/dim]")
+    console.print("[dim]Run 'drone @trigger --help' for usage information[/dim]")
     console.print()
 
 
@@ -142,8 +142,8 @@ def print_help(modules: List[Any]):
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]python3 trigger.py <command> [args...][/dim]")
-    console.print("  [dim]python3 trigger.py --help[/dim]")
+    console.print("  [dim]drone @trigger <command> [args...][/dim]")
+    console.print("  [dim]drone @trigger --help[/dim]")
     console.print()
     console.print("─" * 70)
     console.print()
@@ -168,7 +168,7 @@ def print_help(modules: List[Any]):
     console.print()
 
     console.print("[bold]TIP:[/bold] For module-specific help:")
-    console.print("  [dim]python3 trigger.py <command> --help[/dim]")
+    console.print("  [dim]drone @trigger <command> --help[/dim]")
     console.print()
 
 
@@ -209,7 +209,7 @@ def main():
         return 0
     else:
         console.print()
-        error(f"Unknown command: {command}", suggestion="Run 'python3 trigger.py --help' for available commands")
+        error(f"Unknown command: {command}", suggestion="Run 'drone @trigger --help' for available commands")
         console.print()
         return 1
 
@@ -218,6 +218,7 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
+        logger.info("Operation cancelled by user")
         console.print("\n\nOperation cancelled by user")
         sys.exit(0)
     except Exception as e:

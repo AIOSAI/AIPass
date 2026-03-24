@@ -10,20 +10,25 @@
       "standard": "cli",
       "lines": [166, 168],
       "reason": "Raw passthrough of module subprocess stdout/stderr — console.print() breaks routed output"
+    },
+    {
+      "file": "apps/handlers/scanning/formatters.py",
+      "standard": "cli",
+      "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."
+    },
+    {
+      "file": "apps/handlers/command_registry/formatters.py",
+      "standard": "cli",
+      "reason": "Formatter handler — purpose is to format and print Rich output. console.print() is the core function, not a violation."
+    },
+    {
+      "file": "apps/modules/git_module.py",
+      "standard": "modules",
+      "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
     }
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
-    "example": {
-      "file": "apps/modules/logger.py",
-      "standard": "cli",
-      "lines": [
-        146,
-        177
-      ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
-    },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, imports, naming, etc. (required)",

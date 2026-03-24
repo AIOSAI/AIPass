@@ -49,6 +49,9 @@ def handle_command(command: str, args: list) -> bool:  # noqa: ARG001
         if not args:
             print_introspection()
             return True
+        if args[0] in ("--help", "-h", "help"):
+            print_introspection()
+            return True
         json_handler.log_operation("wakeup_ops_status")
         console.print()
         console.print("[bold cyan]Wakeup Ops[/bold cyan] - Cron wake-up facade")

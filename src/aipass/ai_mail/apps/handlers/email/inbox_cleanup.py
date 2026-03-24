@@ -37,12 +37,6 @@ def _get_inbox_lock():
     return _inbox_lock
 
 
-def _get_console() -> Any:
-    """Lazy import console - only for __main__ block."""
-    from rich.console import Console
-    return Console()
-
-
 def _get_push_dashboard_update() -> Any:
     """Lazy import push_dashboard_update from dashboard_sync."""
     from aipass.ai_mail.apps.handlers.email.dashboard_sync import push_dashboard_update
@@ -440,7 +434,8 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
 
 
 if __name__ == "__main__":
-    c = _get_console()
+    from rich.console import Console
+    c = Console()
     c.print("\n" + "="*70)
     c.print("INBOX CLEANUP HANDLER")
     c.print("="*70)

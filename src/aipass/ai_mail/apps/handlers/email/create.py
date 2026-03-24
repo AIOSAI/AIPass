@@ -133,22 +133,6 @@ def load_email_file(email_file: Path) -> Optional[Dict]:
         return None
 
 
-def sanitize_subject(subject: str, max_length: int = 50) -> str:
-    """
-    Sanitize email subject for use in filenames.
-
-    Args:
-        subject: Original email subject
-        max_length: Maximum length for sanitized subject
-
-    Returns:
-        Sanitized subject string safe for filenames
-    """
-    safe_subject = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in subject)
-    safe_subject = safe_subject[:max_length].strip()
-    return safe_subject
-
-
 if __name__ == "__main__":
     from rich.console import Console
     c = Console()
@@ -161,7 +145,6 @@ if __name__ == "__main__":
     c.print("FUNCTIONS PROVIDED:")
     c.print("  - create_email_file(to_branch, subject, message, user_info) -> Path")
     c.print("  - load_email_file(email_file) -> Optional[Dict]")
-    c.print("  - sanitize_subject(subject, max_length) -> str")
     c.print()
     c.print("HANDLER CHARACTERISTICS:")
     c.print("  ✓ Independent - no module dependencies")

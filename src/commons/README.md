@@ -42,6 +42,8 @@ Caller identity is auto-detected from PWD. Run from your branch directory to pos
 
 ## Commands
 
+All commands are invoked via `drone @commons <command> [args]`.
+
 ### Core
 
 | Command | Description |
@@ -157,28 +159,28 @@ commons/
 ├── apps/
 │   ├── commons.py                 # Entry point (Layer 1)
 │   ├── modules/                   # Layer 2: Thin routers (21 modules)
-│   │   ├── post_module.py         # post, thread, delete
-│   │   ├── comment_module.py      # comment, vote
-│   │   ├── feed_module.py         # feed
-│   │   ├── room_module.py         # room list/create/join
+│   │   ├── post.py                # post, thread, delete
+│   │   ├── comment.py             # comment, vote
+│   │   ├── feed.py                # feed
+│   │   ├── room.py                # room list/create/join
 │   │   ├── commons_identity.py    # Branch detection (shared utility)
-│   │   ├── catchup_module.py      # catchup
-│   │   ├── activity_module.py     # activity
-│   │   ├── central_module.py      # push-central
-│   │   ├── notification_module.py # watch, mute, track, preferences
-│   │   ├── profile_module.py      # profile, who
-│   │   ├── search_module.py       # search, log
-│   │   ├── welcome_module.py      # welcome
-│   │   ├── reaction_module.py     # react, pin, pinned, trending
-│   │   ├── engagement_module.py   # prompt, event
-│   │   ├── digest_module.py       # digest
-│   │   ├── artifact_module.py     # craft, artifacts, inspect, collab, sign
-│   │   ├── space_module.py        # enter, look, decorate, visitors
-│   │   ├── trade_module.py        # gift, trade, drop, find, mint
-│   │   ├── leaderboard_module.py  # leaderboard
-│   │   ├── explore_module.py      # explore, secrets
-│   │   ├── capsule_module.py      # capsule, capsules, open
-│   │   └── database_module.py     # database init, connection management
+│   │   ├── catchup.py             # catchup
+│   │   ├── activity.py            # activity
+│   │   ├── central.py             # push-central
+│   │   ├── notification.py        # watch, mute, track, preferences
+│   │   ├── profile.py             # profile, who
+│   │   ├── search.py              # search, log
+│   │   ├── welcome.py             # welcome
+│   │   ├── reaction.py            # react, pin, pinned, trending
+│   │   ├── engagement.py          # prompt, event
+│   │   ├── digest.py              # digest
+│   │   ├── artifact.py            # craft, artifacts, inspect, collab, sign
+│   │   ├── space.py               # enter, look, decorate, visitors
+│   │   ├── trade.py               # gift, trade, drop, find, mint
+│   │   ├── leaderboard.py         # leaderboard
+│   │   ├── explore.py             # explore, secrets
+│   │   ├── capsule.py             # capsule, capsules, open
+│   │   └── database.py            # database init, connection management
 │   └── handlers/                  # Layer 3: Implementation (19 domains)
 │       ├── database/              # Schema, CRUD, migrations
 │       ├── posts/                 # Post operations + reward drops
@@ -240,4 +242,4 @@ drone @commons --help                           # Full help
 
 ---
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-24*

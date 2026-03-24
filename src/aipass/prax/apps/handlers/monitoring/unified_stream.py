@@ -18,8 +18,8 @@ Single point for all monitoring terminal output with:
 
 from pathlib import Path
 
-import logging
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+logger = get_direct_logger()
 
 from datetime import datetime
 from typing import Optional, Dict, List

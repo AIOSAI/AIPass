@@ -484,5 +484,5 @@ if __name__ == "__main__":
     remaining = sys.argv[2:] if len(sys.argv) > 2 else []
     if not handle_command(command, remaining):
         error(f"Unknown command: {command}")
-        console.print("[dim]Run 'python3 email.py --help' for available commands[/dim]\n")
+        console.print("[dim]Run 'drone @ai_mail --help' for available commands[/dim]\n")
         sys.exit(1)

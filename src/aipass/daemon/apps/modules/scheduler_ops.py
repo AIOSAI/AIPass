@@ -100,6 +100,9 @@ def handle_command(command: str, args: list) -> bool:
         if not args:
             print_introspection()
             return True
+        if args[0] in ("--help", "-h", "help"):
+            print_introspection()
+            return True
         json_handler.log_operation("scheduler_ops_status")
         console.print()
         console.print("[bold cyan]Scheduler Ops[/bold cyan] - Cron operations facade")

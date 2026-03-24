@@ -20,14 +20,15 @@ Data sources:
 """
 
 import json
-import logging
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+
+logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
 

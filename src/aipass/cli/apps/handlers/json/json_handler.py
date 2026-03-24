@@ -18,7 +18,6 @@ import inspect
 _BRANCH_ROOT = Path(__file__).resolve().parents[3]   # json/ -> handlers/ -> apps/ -> cli/
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
-JSON_TEMPLATES_DIR = _BRANCH_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -43,22 +42,29 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file"""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
+def _create_default(json_type: str, module_name: str) -> Any:
+    """Create default JSON structure from inline code defaults."""
+    today = datetime.now().date().isoformat()
 
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "config": {
+                "max_log_entries": 100,
+            },
+            "created": today,
+        }
+    elif json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": today,
+            "last_updated": today,
+        }
+    elif json_type == "log":
+        return []
 
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
-
-    # Replace placeholders
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
-
-    return json.loads(template_str)
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -104,7 +110,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         except Exception:
             pass
 
-    template = load_template(json_type, module_name)
+    template = _create_default(json_type, module_name)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(template, f, indent=2, ensure_ascii=False)
@@ -197,36 +203,6 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
     return save_json(module_name, "log", log)
 
 
-def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
-    """Increment a counter in data JSON"""
-    ensure_module_jsons(module_name)
-    
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-    
-    if counter_name not in data:
-        data[counter_name] = 0
-    
-    data[counter_name] += amount
-    
-    return save_json(module_name, "data", data)
-
-
-def update_data_metrics(module_name: str, **metrics) -> bool:
-    """Update data metrics"""
-    ensure_module_jsons(module_name)
-    
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-    
-    for key, value in metrics.items():
-        data[key] = value
-    
-    return save_json(module_name, "data", data)
-
-
 if __name__ == "__main__":
     from rich.console import Console
     from rich.panel import Panel
@@ -243,8 +219,6 @@ if __name__ == "__main__":
 
     # Test auto-creation
     log_operation("test_operation", {"test": "data"}, "cli")
-    increment_counter("cli", "test_counter", 1)
-    update_data_metrics("cli", test_metric="working")
 
     console.print()
     console.print(f"[green]Check {JSON_DIR}/ for created files:[/green]")

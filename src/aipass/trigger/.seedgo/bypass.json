@@ -4,7 +4,105 @@
     "created": "2026-03-07T22:43:25.317608",
     "description": "Standards bypass configuration for this branch"
   },
-  "bypass": [],
+  "bypass": [
+    {
+      "file": "apps/handlers/events/registry.py",
+      "standard": "trigger",
+      "pattern": "setup_handlers",
+      "reason": "setup_handlers() is a wiring function that registers event handlers, not an event handler itself. It does not handle any event — it calls trigger.on() to wire handle_{event} callbacks."
+    },
+    {
+      "file": "apps/modules/core.py",
+      "standard": "silent_catch",
+      "lines": [160],
+      "pattern": "except Exception: pass",
+      "reason": "Intentional: handler callback runs inside event bus fire(). Logging here would cause infinite recursion (logger fires events via trigger)."
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/error_logged.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/bulletin_created.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/startup.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/memory_threshold_exceeded.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/plan_file.py",
+      "standard": "silent_catch",
+      "pattern": "_log_error except",
+      "reason": "Meta-logging helper: _log_error() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/registry.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/config.py",
+      "standard": "silent_catch",
+      "pattern": "_log_warning except",
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/log_watcher.py",
+      "standard": "handlers",
+      "lines": [75],
+      "reason": "log_watcher imports error_registry.report() for Medic v2 dedup. This is a deliberate handler-to-handler dependency — the registry IS the dedup backend."
+    },
+    {
+      "file": "apps/handlers/error_reporter.py",
+      "standard": "handlers",
+      "lines": [25, 45],
+      "reason": "error_reporter imports error_registry for tracking and ai_mail for email delivery. These are its core dependencies — it's the dispatch endpoint of the error pipeline."
+    },
+    {
+      "file": "apps/handlers/watchers/log_watcher.py",
+      "standard": "handlers",
+      "lines": [242],
+      "reason": "Watcher imports trigger module to fire events. Handler→module import needed because watcher operates as standalone watchdog callback."
+    },
+    {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "handlers",
+      "lines": [76],
+      "reason": "error_detected handler imports error_registry to query error details during dispatch. Core integration point for the error pipeline."
+    },
+    {
+      "file": "apps/handlers/events/startup.py",
+      "standard": "handlers",
+      "lines": [371],
+      "reason": "Startup handler imports memory rollover module to trigger memory checks on startup events. Cross-branch integration via modules layer public API."
+    }
+  ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
     "example": {

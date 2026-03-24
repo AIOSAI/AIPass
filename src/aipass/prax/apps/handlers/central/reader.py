@@ -16,14 +16,14 @@ Used by dashboard/refresh.py to populate branch dashboards.
 """
 
 import json
-import logging
 from pathlib import Path
 from typing import Dict
 
+from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.config.load import _find_repo_root
 from aipass.prax.apps.handlers.json import json_handler
 
-logger = logging.getLogger(__name__)
+logger = get_direct_logger()
 
 
 def read_all_centrals() -> Dict:

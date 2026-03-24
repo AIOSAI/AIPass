@@ -10,8 +10,23 @@
 
 from pathlib import Path
 
-from aipass.trigger.apps.handlers.json import json_handler
+from datetime import datetime, timezone
 
+from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.config import TRIGGER_ROOT
+
+_HANDLER_LOG = TRIGGER_ROOT / "logs" / "registry_handler.log"
+
+
+def _log_warning(message: str) -> None:
+    """Log warning to file (event handlers cannot import Prax logger — causes recursion)."""
+    try:
+        _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"{ts} | WARNING | {message}\n")
+    except Exception:
+        pass  # Meta-logging: cannot log a failure to log
 
 
 def setup_handlers():
@@ -50,7 +65,7 @@ def setup_handlers():
 
         set_send_email_callback(_send_email_adapter)
     except ImportError:
-        pass  # ai_mail not available - error notifications won't send
+        _log_warning("ai_mail not available — error notifications won't send")
     from .warning_logged import handle_warning_logged
     from .bulletin_created import handle_bulletin_created
     from .memory_threshold_exceeded import handle_memory_threshold_exceeded

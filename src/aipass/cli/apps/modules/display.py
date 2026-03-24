@@ -40,8 +40,8 @@ console = CONSOLE  # Primary export (lowercase service instance pattern)
 err_console = Console(stderr=True, force_terminal=True)  # Stderr console for error/warning output
 
 # Trigger loaded lazily to avoid circular import
-_trigger = None
-_trigger_loaded = False
+_TRIGGER = None
+_TRIGGER_LOADED = False
 
 
 # ============================================================================
@@ -298,16 +298,16 @@ def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
         for key, value in details.items():
             CONSOLE.print(f"  [dim]{key}:[/dim] {value}")
     # Fire trigger event for header display (lazy load to avoid circular import)
-    global _trigger, _trigger_loaded
-    if not _trigger_loaded:
-        _trigger_loaded = True
+    global _TRIGGER, _TRIGGER_LOADED
+    if not _TRIGGER_LOADED:
+        _TRIGGER_LOADED = True
         try:
             from aipass.trigger.apps.modules.core import trigger as t
-            _trigger = t
+            _TRIGGER = t
         except ImportError:
             pass
-    if _trigger:
-        _trigger.fire('cli_header_displayed', title=title)
+    if _TRIGGER:
+        _TRIGGER.fire('cli_header_displayed', title=title)
     CONSOLE.print()
 
 

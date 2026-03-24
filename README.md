@@ -19,7 +19,7 @@ An operating system for AI agents. Not a chatbot wrapper. Not a prompt chain. A 
 - **Standards enforcement** keeps the system consistent as it grows (seedgo runs 34 automated checks, system-wide avg 93% compliance)
 - **Diagnostic tooling** — 20 standalone scanners cover code quality, security, documentation, and compliance
 - **Inter-agent messaging** lets citizens email each other, dispatch tasks, and wake each other up
-- **Everything is tracked** — design plans (DPLANs), execution plans (FPLANs), and seedgo audits make changes traceable even when 500+ files change in a single session
+- **Everything is tracked** — dev plans (DPLANs), execution plans (FPLANs), and seedgo audits make changes traceable even when 500+ files change in a single session
 - **Init anywhere** — `aipass init` turns any directory into a self-contained AI workspace with its own registry, identity, and memories. No repo required. A business project, a research folder, a side project — each gets its own isolated environment that works immediately
 
 ## Current State: Beta

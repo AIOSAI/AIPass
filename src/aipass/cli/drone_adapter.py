@@ -1,5 +1,12 @@
-"""
-CLI drone adapter — bridges drone routing to CLI commands.
+# =================== AIPass ====================
+# Name: drone_adapter.py
+# Description: CLI drone adapter — bridges drone routing to CLI commands
+# Version: 2.0.0
+# Created: 2025-11-13
+# Modified: 2026-03-23
+# =============================================
+
+"""CLI drone adapter — bridges drone routing to CLI commands.
 
 Drone discovers this module via aipass.drone.modules._MODULE_REGISTRY
 and routes `drone @cli <command> [args]` here.

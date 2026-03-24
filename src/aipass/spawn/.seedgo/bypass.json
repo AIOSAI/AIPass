@@ -64,6 +64,101 @@
       "file": "apps/handlers/reconcile.py",
       "standard": "deep_nesting",
       "reason": "reconcile_branch_state() depth 6 — three independent checks (tracked files, tracked dirs, untracked files) with iterdir loops and hash computation. Structure reflects algorithm necessity."
+    },
+    {
+      "file": "apps/handlers/sync_registry_ops.py",
+      "standard": "deep_nesting",
+      "reason": "sync_registry() depth 6 — iterates branches, checks passport, loads template registry, generates branch_meta. Nesting inherent to multi-step registry rebuild."
+    },
+    {
+      "file": "apps/handlers/json_ops.py",
+      "standard": "deep_nesting",
+      "reason": "apply_migrations() depth 6 — iterates migration defs, reads each JSON file, applies transforms, writes back. Nested structure reflects migration pipeline."
+    },
+    {
+      "file": "apps/modules/update.py",
+      "standard": "deep_nesting",
+      "reason": "_print_branch_summary() depth 6 — nested formatting of reconciliation results with per-category output. Display logic requires nested iteration."
+    },
+    {
+      "file": "apps/handlers/file_ops.py",
+      "standard": "handlers",
+      "reason": "Imports placeholders.replace_placeholders — file_ops is the copy engine, placeholder replacement is integral to template copying. Architectural coupling."
+    },
+    {
+      "file": "apps/handlers/delete_ops.py",
+      "standard": "handlers",
+      "reason": "Imports registry functions — deletion requires deregistering from AIPASS_REGISTRY.json. Registry is a shared data handler."
+    },
+    {
+      "file": "apps/handlers/update_ops.py",
+      "standard": "handlers",
+      "reason": "Imports meta_ops functions — update needs to load/save branch_meta, compute hashes. Meta is a shared data handler."
+    },
+    {
+      "file": "apps/handlers/sync_registry_ops.py",
+      "standard": "handlers",
+      "reason": "Imports registry functions — sync-registry rebuilds registry entries. Registry is a shared data handler."
+    },
+    {
+      "file": "apps/handlers/meta_ops.py",
+      "standard": "handlers",
+      "reason": "Imports class_registry.get_template_dir — meta needs template dir to load template registry. Class registry is a shared data handler."
+    },
+    {
+      "file": "apps/handlers/placeholders.py",
+      "standard": "handlers",
+      "reason": "Imports registry.find_registry — placeholder resolution needs registry path lookup. Registry is a shared data handler."
+    },
+    {
+      "file": "apps/handlers/passport_ops.py",
+      "standard": "handlers",
+      "reason": "Imports metadata functions — passport creation needs branch name extraction. Metadata is a shared utility handler."
+    },
+    {
+      "file": "apps/handlers/delete_ops.py",
+      "standard": "naming",
+      "reason": "branch_entry, branch_dir are local variables inside delete_branch(), not module-level constants. Checker false positive on multi-line function scope."
+    },
+    {
+      "file": "apps/handlers/update_ops.py",
+      "standard": "naming",
+      "reason": "dest, source are local variables inside helper functions, not module-level constants. Path objects for template/branch comparison."
+    },
+    {
+      "file": "apps/handlers/reconcile.py",
+      "standard": "naming",
+      "reason": "full_path, entry are local variables inside reconcile_branch_state(), not module-level constants. Loop iteration variables."
+    },
+    {
+      "file": "apps/handlers/change_detection.py",
+      "standard": "naming",
+      "reason": "common_ids is a local variable inside detect_changes(), not a module-level constant. Set intersection of template and branch IDs."
+    },
+    {
+      "file": "apps/handlers/passport_ops.py",
+      "standard": "naming",
+      "reason": "trinity_dir, role, profile are local variables/parameters inside grant_passport(), not module-level constants."
+    },
+    {
+      "file": "apps/handlers/delete_ops.py",
+      "standard": "documentation",
+      "reason": "delete_branch() has a docstring at line 45 — checker doesn't recognize it due to multi-line function signature spanning lines 40-44."
+    },
+    {
+      "file": "apps/handlers/reconcile.py",
+      "standard": "documentation",
+      "reason": "reconcile_branch_state() has a docstring at line 57 — checker doesn't recognize it due to multi-line function signature spanning lines 52-56."
+    },
+    {
+      "file": "apps/handlers/change_detection.py",
+      "standard": "documentation",
+      "reason": "detect_changes() has a docstring at line 29 — checker doesn't recognize it due to multi-line function signature spanning lines 24-28."
+    },
+    {
+      "file": "apps/handlers/passport_ops.py",
+      "standard": "documentation",
+      "reason": "grant_passport() has a docstring at line 47 — checker doesn't recognize it due to multi-line function signature spanning lines 42-46."
     }
   ],
   "notes": {

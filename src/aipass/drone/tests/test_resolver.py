@@ -158,9 +158,10 @@ class TestResolveBranch:
         path = resolve_branch("@ALPHA")
         assert Path(path).name == "alpha"
 
-    def test_resolve_without_at_prefix(self, populated_registry):
-        path = resolve_branch("ALPHA")
-        assert Path(path).name == "alpha"
+    def test_resolve_without_at_prefix_rejected(self, populated_registry):
+        """Bare branch names without @ prefix are rejected."""
+        with pytest.raises(BranchNotFoundError, match="must use @ prefix"):
+            resolve_branch("ALPHA")
 
     def test_returns_absolute_path(self, populated_registry):
         path = resolve_branch("@ALPHA")

@@ -41,6 +41,9 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
+    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+        print_help()
+        return True
     json_handler.log_operation("handle_command", {"module": "resolver", "command": command})
     if command == "resolve":
         if not args:
@@ -122,15 +125,19 @@ def resolve_branch(symbolic_name: str) -> str:
     """Resolve a symbolic branch name to its absolute path.
 
     Args:
-        symbolic_name: Branch name with or without @ prefix
+        symbolic_name: Branch name with @ prefix (e.g. "@seedgo")
 
     Returns:
         Absolute path to branch directory as string
 
     Raises:
-        BranchNotFoundError: If branch not in registry
+        BranchNotFoundError: If branch not in registry or missing @ prefix
         RegistryNotFoundError: If registry file missing
     """
+    if not symbolic_name.startswith("@"):
+        raise BranchNotFoundError(
+            f"Branch name must use @ prefix: '@{symbolic_name}' (got '{symbolic_name}')"
+        )
     registry = load_registry()
 
     name = normalize_branch_name(symbolic_name).lower()

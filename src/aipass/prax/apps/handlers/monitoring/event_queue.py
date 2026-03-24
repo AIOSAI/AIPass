@@ -8,8 +8,8 @@
 
 """Thread-safe event coordination for monitoring system"""
 
-import logging
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+logger = get_direct_logger()
 
 from pathlib import Path
 

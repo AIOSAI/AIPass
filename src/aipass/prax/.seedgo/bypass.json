@@ -1,8 +1,9 @@
 {
   "metadata": {
-    "version": "1.0.0",
+    "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
-    "description": "Standards bypass configuration for this branch"
+    "last_updated": "2026-03-23",
+    "description": "Standards bypass configuration for prax branch"
   },
   "bypass": [
     {
@@ -23,26 +24,260 @@
       "standard": "cli",
       "pattern": "console.print(",
       "reason": "Display handler for file change reporting. reporter.py formats and renders file change events to terminal using Rich markup. console.print() is its designated purpose."
+    },
+
+    {
+      "file": "apps/handlers/logging/log_watchdog.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax logging infrastructure — this file IS part of the logging system. Cannot import from aipass.prax.apps.modules.logger (circular dependency). stdlib logging.getLogger() is the correct pattern for logging infrastructure internals."
+    },
+    {
+      "file": "apps/handlers/logging/introspection.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax logging infrastructure — directly imported by logger.py (import chain). Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/logging/setup.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax logging infrastructure — directly imported by logger.py (import chain). Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/logging/terminal/filtering.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax logging infrastructure — part of the terminal output subsystem within handlers/logging/. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/config/load.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py line 69. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/config/ignore_patterns.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — imported transitively by logger.py via discovery/filtering.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py line 75. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/discovery/watcher.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py line 64. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/discovery/scanner.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — imported by logging/lifecycle.py which is in logger.py's dependency graph. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/registry/load.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py line 68. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/registry/save.py",
+      "standard": "error_handling",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — imported by discovery/watcher.py which is in logger.py's dependency graph. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+
+    {
+      "file": "apps/handlers/config/load.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency). Logs route correctly via stdlib logger with prax naming."
+    },
+    {
+      "file": "apps/handlers/config/ignore_patterns.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — transitively imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/discovery/watcher.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/discovery/scanner.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — imported via logging/lifecycle.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/registry/load.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+    {
+      "file": "apps/handlers/registry/save.py",
+      "standard": "log_visibility",
+      "pattern": "logging.getLogger(",
+      "reason": "Prax import chain — imported via discovery/watcher.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
+    },
+
+    {
+      "file": "apps/handlers/discovery/scanner.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — config/load.py provides shared constants (ECOSYSTEM_ROOT, paths) used by all prax handlers. It is shared infrastructure, not an encapsulation violation."
+    },
+    {
+      "file": "apps/handlers/discovery/filtering.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports ignore patterns config. config/ is shared infrastructure within prax."
+    },
+    {
+      "file": "apps/handlers/discovery/watcher.py",
+      "standard": "handlers",
+      "reason": "Architectural — imports config.load (shared infrastructure) and trigger.modules.core (optional cross-branch integration with graceful fallback)."
+    },
+    {
+      "file": "apps/handlers/monitoring/log_watcher.py",
+      "standard": "handlers",
+      "reason": "Architectural — imports config.load (shared infrastructure), trigger (optional integration), and uses module_name parameter for explicit caller attribution in monitoring context."
+    },
+    {
+      "file": "apps/handlers/monitoring/branch_detector.py",
+      "standard": "handlers",
+      "reason": "Architectural — module_name parameter used for explicit branch detection context. Auto-detection via inspect.stack() is not appropriate for a detection utility that receives context from callers."
+    },
+    {
+      "file": "apps/handlers/monitoring/module_tracker.py",
+      "standard": "handlers",
+      "reason": "Architectural — module_name parameter used for explicit module tracking. Auto-detection via inspect.stack() would defeat the purpose of a tracker that receives module names from external sources."
+    },
+    {
+      "file": "apps/handlers/monitoring/file_watcher_integration.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.watcher",
+      "reason": "Architectural — integrates with watcher/monitor.py for file watching coordination. Both are part of the monitoring subsystem."
+    },
+    {
+      "file": "apps/handlers/monitoring/filesystem_handler.py",
+      "standard": "handlers",
+      "pattern": "from aipass.trigger",
+      "reason": "Architectural — optional trigger integration for file system events. Import has graceful fallback if trigger is unavailable."
+    },
+    {
+      "file": "apps/handlers/monitoring/unified_stream.py",
+      "standard": "handlers",
+      "reason": "Architectural — module_name parameter used for display attribution. Auto-detection via inspect.stack() would resolve to the display thread, not the originating module."
+    },
+    {
+      "file": "apps/handlers/registry/save.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports PRAX_ROOT, ECOSYSTEM_ROOT from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/registry/load.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports PRAX_ROOT from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/status/sync.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports _find_repo_root from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/logging/override.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — logging infrastructure imports config.load for path resolution. Part of prax logging internals."
+    },
+    {
+      "file": "apps/handlers/logging/direct.py",
+      "standard": "handlers",
+      "reason": "Architectural — imports config.load (shared infrastructure) and uses module_name parameter for explicit direct-logging binding. Auto-detection is the default (get_direct_logger()), but the internal class accepts explicit names for infrastructure callers."
+    },
+    {
+      "file": "apps/handlers/logging/operations.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports PRAX_JSON_DIR from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/logging/lifecycle.py",
+      "standard": "handlers",
+      "reason": "Architectural — imports discovery/scanner for module discovery during logging lifecycle management. Uses module_name parameter for explicit lifecycle control of named modules."
+    },
+    {
+      "file": "apps/handlers/logging/setup.py",
+      "standard": "handlers",
+      "reason": "Architectural — logging infrastructure imports config.load for path configuration. Uses module_name parameter for explicit logger setup per-module. Auto-detection is not appropriate for a setup function that configures loggers for specified modules."
+    },
+    {
+      "file": "apps/handlers/config/load.py",
+      "standard": "handlers",
+      "reason": "Architectural — module_name parameter in get_module_logs_dir() receives explicit module names for log path resolution. This is the config API — callers pass module names, it resolves paths."
+    },
+    {
+      "file": "apps/handlers/central/reader.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports _find_repo_root from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/logging/terminal/formatting.py",
+      "standard": "handlers",
+      "pattern": "from aipass.prax.apps.handlers.config",
+      "reason": "Architectural — imports DEFAULT_LOG_LEVEL from config.load (shared infrastructure)."
+    },
+    {
+      "file": "apps/handlers/logging/terminal/filtering.py",
+      "standard": "handlers",
+      "reason": "Architectural — imports PRAX_JSON_DIR from config.load (shared infrastructure). Uses module_name parameter for explicit filter context from callers."
+    },
+
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "json_structure",
+      "reason": "json_handler.py IS the JSON template management system for prax. load_template() and json_templates/ are its core functionality, not a violation of the template-free standard. This file provides the template infrastructure that other files consume."
+    },
+
+    {
+      "file": "apps/modules/monitor.py",
+      "standard": "modules",
+      "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery — routing through json_handler would add unnecessary dependency for a simple registry read."
     }
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
-    "example": {
-      "file": "apps/modules/logger.py",
-      "standard": "cli",
-      "lines": [
-        146,
-        177
-      ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
-    },
     "fields": {
       "file": "Relative path from branch root (required)",
-      "standard": "Standard name: cli, imports, naming, etc. (required)",
+      "standard": "Standard name: cli, error_handling, log_visibility, handlers, etc. (required)",
       "lines": "Optional - specific line numbers to bypass",
-      "pattern": "Optional - pattern to match (e.g. 'if __name__')",
+      "pattern": "Optional - pattern to match (e.g. 'logging.getLogger(')",
       "reason": "Required - why this bypass exists"
+    },
+    "architectural_notes": {
+      "prax_import_chain": "logger.py imports from: logging/setup.py, logging/introspection.py, logging/override.py, logging/direct.py, discovery/watcher.py, registry/load.py, config/load.py, json/json_handler.py. These files (and their transitive imports) cannot import from aipass.prax.apps.modules.logger without circular dependency.",
+      "config_as_shared_infra": "config/load.py provides shared constants (ECOSYSTEM_ROOT, PRAX_ROOT, path helpers) used by nearly all prax handlers. It is intentionally shared infrastructure, not an encapsulation boundary.",
+      "trigger_integration": "Several handlers optionally import trigger.modules.core for event firing. All have graceful ImportError fallbacks. This is cross-branch integration, not an architectural violation."
     }
   }
 }

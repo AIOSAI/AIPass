@@ -58,8 +58,8 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
                 if not name:
                     name = data.get("identity", {}).get("name")
                 return name
-            except Exception:
-                logger.warning("Failed to read passport at %s", passport)
+            except Exception as exc:
+                logger.warning("Failed to read passport at %s: %s", passport, exc)
                 return None
         parent = current.parent
         if parent == current:

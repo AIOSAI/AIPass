@@ -27,7 +27,6 @@ _BRANCH_ROOT = Path(__file__).resolve().parents[3]
 
 # Constants
 SKILLS_JSON_DIR = _BRANCH_ROOT / "skills_json"
-JSON_TEMPLATES_DIR = _BRANCH_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -55,26 +54,28 @@ def _get_caller_module_name() -> str:
         return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file."""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
-
-    if not template_path.exists():
-        return None
-
-    try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            template = json.load(f)
-
-        # Replace placeholders
-        template_str = json.dumps(template)
-        template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-        template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
-
-        return json.loads(template_str)
-    except Exception:
-        logger.warning(f"Failed to load JSON template: {json_type} for {module_name}")
-        return None
+def _get_default(json_type: str, module_name: str) -> Any:
+    """Return inline default structure for a JSON type."""
+    now = datetime.now().date().isoformat()
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "timestamp": now,
+            "config": {"auto_save": True, "enabled": True},
+        }
+    if json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": now,
+            "last_updated": now,
+            "operations_total": 0,
+            "operations_successful": 0,
+            "operations_failed": 0,
+        }
+    if json_type == "log":
+        return []
+    return None
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -119,7 +120,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         except Exception:
             logger.warning(f"Corrupt JSON file, will recreate: {json_path}")
 
-    template = load_template(json_type, module_name)
+    template = _get_default(json_type, module_name)
     if template is None:
         return False
 
@@ -143,6 +144,7 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
         with open(json_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
+        logger.warning(f"Failed to load JSON: {json_path}")
         return None
 
 
@@ -161,6 +163,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception:
+        logger.error(f"Failed to save JSON for {module_name}/{json_type}")
         return False
 
 

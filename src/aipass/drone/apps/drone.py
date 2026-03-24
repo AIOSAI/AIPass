@@ -13,7 +13,9 @@ Routes commands to registered branches and internal modules.
 Standard branch entry point (apps/drone.py pattern).
 """
 
+import importlib
 import sys
+from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -32,6 +34,30 @@ from aipass.drone.apps.modules.module_registry import (
 )
 
 VERSION = "1.1.0"
+MODULES_DIR = Path(__file__).parent / "modules"
+
+
+# =============================================================================
+# AUTO-DISCOVERY
+# =============================================================================
+
+def _discover_modules() -> list[tuple[str, str]]:
+    """Auto-discover modules in apps/modules/ with handle_command()."""
+    discovered = []
+    for file_path in sorted(MODULES_DIR.glob("*.py")):
+        if file_path.name.startswith("_"):
+            continue
+        module_name = file_path.stem
+        try:
+            module = importlib.import_module(
+                f"aipass.drone.apps.modules.{module_name}"
+            )
+            if hasattr(module, "handle_command"):
+                doc = (module.__doc__ or "").strip().split("\n")[0]
+                discovered.append((module_name, doc))
+        except Exception as exc:
+            logger.warning("Failed to discover module %s: %s", module_name, exc)
+    return discovered
 
 
 # =============================================================================
@@ -77,35 +103,25 @@ def print_introspection() -> None:
 
 
 def show_introspection() -> None:
-    """Show discovery view (no args)."""
+    """Show discovery view (no args) — auto-discovers modules."""
     console.print()
-    console.print("Drone - Command Router & Discovery")
+    console.print("[bold cyan]Drone - Command Router & Discovery[/bold cyan]")
+    console.print()
+    console.print("[dim]Routes commands to AIPass branches and internal modules[/dim]")
     console.print()
 
-    modules = list_modules()
-    branches = list_branches()
+    modules = _discover_modules()
 
-    if modules:
-        console.print(f"Internal Modules ({len(modules)}):")
-        for name in modules:
-            info = get_module_info(name)
-            if info:
-                console.print(f"  @{name:<18} {info.description}")
-            else:
-                console.print(f"  @{name:<18} (not available)")
-        if branches:
-            console.print()
-
-    if branches:
-        console.print(f"Registered Branches ({len(branches)}):")
-        for name in sorted(branches):
-            console.print(f"  {name}")
-
-    if not modules and not branches:
-        console.print("No branches or modules registered.")
+    console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
+    console.print()
+    for name, description in modules:
+        if description:
+            console.print(f"  [cyan]•[/cyan] {name:<20} [dim]{description}[/dim]")
+        else:
+            console.print(f"  [cyan]•[/cyan] {name}")
 
     console.print()
-    console.print("Run 'drone --help' for usage information")
+    console.print("Run [green]'drone @drone --help'[/green] for usage information")
     console.print()
 
 

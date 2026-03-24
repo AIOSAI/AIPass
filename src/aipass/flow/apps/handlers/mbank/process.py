@@ -30,7 +30,6 @@ from typing import Dict, List, Optional, Any
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import error as cli_error, warning as cli_warning
 
 # AI summarization removed — OpenRouter API no longer needed here
 # from aipass.api.apps.modules.openrouter_client import get_response
@@ -766,17 +765,7 @@ def process_closed_plans() -> Dict[str, Any]:
 
                 if archive_success:
                     processed_count += 1
-                    # Vector processing — errors go to prax log + console
-                    try:
-                        from aipass.memory.apps.handlers.intake.plans_processor import process_plans  # type: ignore[import-not-found]
-                        process_plans()
-                        logger.info("[mbank] Vector intake completed for %s", plan_label)
-                    except ImportError:
-                        logger.error("[mbank] Vector intake FAILED for %s — plans_processor not found", plan_label)
-                        cli_error(f"Vector intake unavailable — memory plans_processor not found ({plan_label})")
-                    except Exception as vec_err:
-                        logger.error("[mbank] Vector intake FAILED for %s: %s", plan_label, vec_err)
-                        cli_error(f"Vector intake failed for {plan_label}: {vec_err}")
+                    # Vector intake handled by close_ops.py via drone @memory process-plans
                     results.append({"plan": plan_label, "status": "archived", "correlation_id": correlation_id})
                 else:
                     error_count += 1

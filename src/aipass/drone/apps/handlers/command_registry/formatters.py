@@ -14,9 +14,12 @@ using Rich tables and styled console output.
 
 from __future__ import annotations
 
+from aipass.prax import logger
+
 try:
     from aipass.cli.apps.modules import console
 except ImportError:
+    logger.warning("CLI console not available, falling back to default Rich Console")
     from rich.console import Console
     console = Console()
 

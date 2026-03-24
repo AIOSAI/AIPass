@@ -14,12 +14,13 @@ AIPASS owns all dashboards - services only maintain their central files.
 """
 
 import json
-import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+
+logger = get_direct_logger()
 
 # Same-package imports allowed
 from .operations import create_fresh_dashboard, save_dashboard

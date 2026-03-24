@@ -41,6 +41,7 @@ def print_introspection():
     try:
         from aipass.cli.apps.modules.display import console
     except ImportError:
+        logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
         console = Console()
 
@@ -118,8 +119,7 @@ def print_help() -> None:
 
     console.print("Branch Log Events - Branch Log Watcher\n")
     console.print("USAGE:")
-    console.print("  drone @trigger branch_log_events <command>")
-    console.print("  python3 branch_log_events.py <command>\n")
+    console.print("  drone @trigger branch_log_events <command>\n")
     console.print("COMMANDS:")
     console.print("  start  - Start watching branch logs for errors")
     console.print("  stop   - Stop the branch log watcher")

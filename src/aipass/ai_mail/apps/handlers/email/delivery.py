@@ -36,7 +36,6 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 
 # Lazy imports to avoid circular dependencies
-_CONSOLE = None
 _INBOX_LOCK = None
 
 
@@ -47,15 +46,6 @@ def _get_inbox_lock():
         from aipass.ai_mail.apps.handlers.email.inbox_lock import inbox_lock
         _INBOX_LOCK = inbox_lock
     return _INBOX_LOCK
-
-
-def _get_console():
-    """Lazy import console - only for __main__ block."""
-    global _CONSOLE
-    if _CONSOLE is None:
-        from rich.console import Console
-        _CONSOLE = Console()
-    return _CONSOLE
 
 
 def get_all_branches() -> List[Dict]:
@@ -480,7 +470,8 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
 
 
 if __name__ == "__main__":
-    console = _get_console()
+    from rich.console import Console
+    console = Console()
     console.print("\n" + "="*70)
     console.print("EMAIL DELIVERY HANDLER")
     console.print("="*70)

@@ -23,13 +23,12 @@ def _log_warning(msg: str) -> None:
         with open(_LOG_FILE, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | WARNING | {msg}\n")
     except Exception:
-        pass
+        pass  # Meta-logging: cannot log a failure to log
 
 
 # Constants
 TRIGGER_ROOT = Path(__file__).resolve().parents[3]
 TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
-JSON_TEMPLATES_DIR = TRIGGER_ROOT / "apps" / "json_templates"
 
 
 def _get_caller_module_name() -> str:
@@ -54,22 +53,31 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file"""
-    template_path = JSON_TEMPLATES_DIR / "default" / f"{json_type}.json"
-
-    if not template_path.exists():
-        raise FileNotFoundError(f"Template not found: {template_path}")
-
-    with open(template_path, 'r', encoding='utf-8') as f:
-        template = json.load(f)
-
-    # Replace placeholders
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("2025-11-30", datetime.now().date().isoformat())
-
-    return json.loads(template_str)
+def _get_default_template(json_type: str, module_name: str) -> Any:
+    """Return default JSON structure for a given type (inline, no file templates)."""
+    today = datetime.now().date().isoformat()
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "timestamp": today,
+            "config": {
+                "auto_save": True,
+                "enabled": True
+            }
+        }
+    elif json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": today,
+            "last_updated": today,
+            "operations_total": 0,
+            "operations_successful": 0,
+            "operations_failed": 0
+        }
+    elif json_type == "log":
+        return []
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -117,7 +125,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             _log_warning(f"ensure_json_exists failed for {module_name}_{json_type}: {exc}")
             pass
 
-    template = load_template(json_type, module_name)
+    template = _get_default_template(json_type, module_name)
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(template, f, indent=2, ensure_ascii=False)

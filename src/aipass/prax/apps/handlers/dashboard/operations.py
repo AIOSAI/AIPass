@@ -14,12 +14,13 @@ All business logic for dashboard file operations.
 """
 
 import json
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-logger = logging.getLogger(__name__)
+from aipass.prax.apps.modules.logger import get_direct_logger
+
+logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
 

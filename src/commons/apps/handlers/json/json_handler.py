@@ -27,7 +27,6 @@ _HANDLER_DIR = Path(__file__).resolve().parent          # .../commons/apps/handl
 _APPS_DIR = _HANDLER_DIR.parent.parent                  # .../commons/apps/
 _COMMONS_ROOT = _APPS_DIR.parent                        # .../commons/
 BRANCH_JSON_DIR = str(_COMMONS_ROOT / "commons_json")
-JSON_TEMPLATES_DIR = str(_APPS_DIR / "json_templates")
 
 
 def _get_caller_module_name() -> str:
@@ -47,21 +46,35 @@ def _get_caller_module_name() -> str:
     return "unknown"
 
 
-def load_template(json_type: str, module_name: str) -> Any:
-    """Load JSON template from template file."""
-    template_path = os.path.join(JSON_TEMPLATES_DIR, "default", f"{json_type}.json")
+def _get_default(json_type: str, module_name: str) -> Any:
+    """Create default JSON structure for a given type (inline, no file templates)."""
+    today = datetime.now().date().isoformat()
 
-    if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template not found: {template_path}")
+    if json_type == "config":
+        return {
+            "module_name": module_name,
+            "version": "1.0.0",
+            "timestamp": today,
+            "config": {
+                "auto_save": True,
+                "enabled": True,
+            },
+        }
 
-    with open(template_path, "r", encoding="utf-8") as f:
-        template = json.load(f)
+    if json_type == "data":
+        return {
+            "module_name": module_name,
+            "created": today,
+            "last_updated": today,
+            "operations_total": 0,
+            "operations_successful": 0,
+            "operations_failed": 0,
+        }
 
-    template_str = json.dumps(template)
-    template_str = template_str.replace("{{MODULE_NAME}}", module_name)
-    template_str = template_str.replace("{{TIMESTAMP}}", datetime.now().date().isoformat())
+    if json_type == "log":
+        return []
 
-    return json.loads(template_str)
+    raise ValueError(f"Unknown json_type: {json_type}")
 
 
 def validate_json_structure(data: Any, json_type: str) -> bool:
@@ -106,7 +119,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             logger.warning(f"[json_handler] Corrupt or unreadable JSON file: {json_path}")
             pass
 
-    template = load_template(json_type, module_name)
+    template = _get_default(json_type, module_name)
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(template, f, indent=2, ensure_ascii=False)
