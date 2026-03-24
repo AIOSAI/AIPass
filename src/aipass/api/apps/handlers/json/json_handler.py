@@ -226,36 +226,6 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
     return save_json(module_name, "log", log)
 
 
-def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
-    """Increment a counter in data JSON"""
-    ensure_module_jsons(module_name)
-    
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-    
-    if counter_name not in data:
-        data[counter_name] = 0
-    
-    data[counter_name] += amount
-    
-    return save_json(module_name, "data", data)
-
-
-def update_data_metrics(module_name: str, **metrics) -> bool:
-    """Update data metrics"""
-    ensure_module_jsons(module_name)
-    
-    data = load_json(module_name, "data")
-    if data is None:
-        return False
-    
-    for key, value in metrics.items():
-        data[key] = value
-    
-    return save_json(module_name, "data", data)
-
-
 if __name__ == "__main__":
     from rich.console import Console
     from rich.panel import Panel
@@ -272,8 +242,6 @@ if __name__ == "__main__":
 
     # Test auto-creation
     log_operation("test_operation", {"test": "data"}, "api")
-    increment_counter("api", "test_counter", 1)
-    update_data_metrics("api", test_metric="working")
 
     console.print()
     console.print(f"[green]Check {API_JSON_DIR}/ for created files:[/green]")

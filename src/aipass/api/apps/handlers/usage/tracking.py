@@ -311,27 +311,3 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         return False
 
 
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-def load_usage_data() -> Dict[str, Any]:
-    """
-    Load current usage data from JSON file
-
-    Returns:
-        Dict with usage data or empty dict if file doesn't exist
-    """
-    try:
-        data_path = API_JSON_DIR / DATA_FILE
-        if not data_path.exists():
-            return {}
-
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data_wrapper = json.load(f)
-
-        return data_wrapper.get("data", {})
-
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to load usage data: {e}")
-        return {}

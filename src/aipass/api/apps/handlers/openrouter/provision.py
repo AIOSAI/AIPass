@@ -170,7 +170,6 @@ def provision_json_folder(json_folder: Path) -> bool:
 
         return True
     except Exception as e:
-        # logger.error(f"Failed to create JSON folder {json_folder}: {e}")
         logger.error(f"Failed to create JSON folder: {e}")
         return False
 
@@ -201,7 +200,6 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
         config = get_default_caller_config()
 
         if not write_json(config_file, config):
-            # logger.error(f"Failed to write config for {caller}")
             return {}
 
         logger.info(f"Created API config for {caller}: {config_file}")
@@ -230,7 +228,6 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
         return config
 
     except Exception as e:
-        # logger.error(f"Failed to create config for {caller}: {e}")
         logger.error(f"Config creation failed: {e}")
         return {}
 
@@ -264,7 +261,6 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
         if not json_folder:
             _, json_folder = detect_caller_from_stack()
             if not json_folder:
-                # logger.error(f"Could not determine JSON folder for {caller}")
                 logger.error(f"Could not find JSON folder for '{caller}'")
                 return {}
 
@@ -283,7 +279,6 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
         return create_caller_config(caller, json_folder)
 
     except Exception as e:
-        # logger.error(f"Failed to ensure config for {caller}: {e}")
         logger.error(f"Config provisioning failed: {e}")
         return {}
 

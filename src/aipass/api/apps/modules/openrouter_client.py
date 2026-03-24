@@ -188,8 +188,6 @@ def make_call(args: List[str]):
     header("OpenRouter API Call")
     console.print()
 
-    # TODO: Parse args for model, messages
-    # TODO: Call handler to make request
     warning("API call workflow - TODO")
 
 

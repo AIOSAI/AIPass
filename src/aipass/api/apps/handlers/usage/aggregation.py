@@ -16,15 +16,13 @@ Business logic for aggregating usage statistics:
 - Model usage tracking and breakdown
 
 Extracted from legacy archive (api_usage.py).
-Functions: get_caller_usage(), get_session_summary(), get_daily_usage()
+Functions: get_caller_usage(), get_session_summary()
 """
 
-import sys
 from pathlib import Path
 
 # Standard library imports
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 # Standard library for JSON operations
 import json
@@ -84,6 +82,7 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
             return {}
 
         logger.info(f"[{MODULE_NAME}] Retrieved usage stats for {caller}: {caller_data.get('requests', 0)} requests")
+        json_handler.log_operation("get_caller_usage", {"caller": caller, "requests": caller_data.get("requests", 0)})
         return caller_data
 
     except Exception as e:
@@ -129,116 +128,5 @@ def get_session_summary(session_id: Optional[str] = None) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to get session summary: {e}")
         return {}
-
-
-def get_daily_usage(date: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Calculate daily usage rollup
-
-    Args:
-        date: Date string YYYY-MM-DD format (None = today)
-
-    Returns:
-        Dict with requests, cost, tokens for the date
-        Returns empty dict {} if no data found
-    """
-    try:
-        # Default to today if no date provided
-        if not date:
-            date = datetime.now().date().isoformat()
-
-        # Load usage data from JSON
-        data_path = API_JSON_DIR / DATA_FILE
-        if not data_path.exists():
-            logger.info(f"[{MODULE_NAME}] No daily usage data file found")
-            return {}
-
-        with open(data_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        if not data or "data" not in data:
-            logger.info(f"[{MODULE_NAME}] No daily usage data available")
-            return {}
-
-        # Extract daily totals
-        daily_totals = data["data"].get("daily_totals", {})
-        daily_data = daily_totals.get(date, {})
-
-        if not daily_data:
-            logger.info(f"[{MODULE_NAME}] No usage data found for date: {date}")
-            return {}
-
-        logger.info(f"[{MODULE_NAME}] Retrieved daily usage for {date}: {daily_data.get('requests', 0)} requests")
-        return daily_data
-
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to get daily usage for {date}: {e}")
-        return {}
-
-
-def calculate_totals(usage_data: List[Dict]) -> Dict[str, float]:
-    """
-    Aggregate cost, tokens, latency from usage records
-
-    Args:
-        usage_data: List of dicts with total_cost, tokens_prompt, tokens_completion, latency
-
-    Returns:
-        Dict with total_cost, total_tokens, total_requests, avg_latency, total_latency
-    """
-    try:
-        if not usage_data:
-            logger.info(f"[{MODULE_NAME}] No usage data provided for totals calculation")
-            return {
-                "total_cost": 0.0,
-                "total_tokens": 0,
-                "total_requests": 0,
-                "avg_latency": 0.0,
-                "total_latency": 0
-            }
-
-        total_cost = 0.0
-        total_tokens = 0
-        total_latency = 0
-        latency_count = 0
-
-        for record in usage_data:
-            # Aggregate cost
-            total_cost += float(record.get("total_cost", 0))
-
-            # Aggregate tokens (prompt + completion)
-            tokens_prompt = int(record.get("tokens_prompt", 0))
-            tokens_completion = int(record.get("tokens_completion", 0))
-            total_tokens += tokens_prompt + tokens_completion
-
-            # Aggregate latency (optional field)
-            if "latency" in record:
-                total_latency += int(record.get("latency", 0))
-                latency_count += 1
-
-        # Calculate average latency
-        avg_latency = total_latency / latency_count if latency_count > 0 else 0.0
-
-        result = {
-            "total_cost": total_cost,
-            "total_tokens": total_tokens,
-            "total_requests": len(usage_data),
-            "avg_latency": avg_latency,
-            "total_latency": total_latency
-        }
-
-        logger.info(f"[{MODULE_NAME}] Calculated totals: {result['total_requests']} requests, ${result['total_cost']:.6f}")
-        json_handler.log_operation("usage_aggregated", {"total_requests": result["total_requests"], "total_cost": result["total_cost"]})
-        return result
-
-    except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to calculate totals: {e}")
-        return {
-            "total_cost": 0.0,
-            "total_tokens": 0,
-            "total_requests": 0,
-            "avg_latency": 0.0,
-            "total_latency": 0
-        }
 
 

@@ -103,12 +103,10 @@ def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: in
         ...     # Use client for requests
     """
     if not OPENAI_AVAILABLE:
-        # logger.error("OpenAI SDK not installed - cannot create client")
         logger.error("OpenAI SDK not installed. Run: pip install openai")
         return None
 
     if not api_key:
-        # logger.error("Cannot create client - no API key provided")
         logger.error("API key required for client creation")
         return None
 
@@ -126,7 +124,6 @@ def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: in
         return client
 
     except Exception as e:
-        # logger.error(f"Failed to create OpenRouter client: {e}")
         logger.error(f"Error creating OpenRouter client: {e}")
         return None
 
@@ -240,17 +237,14 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
         ...     track_usage(caller, data['id'], data['model'], api_key)
     """
     if not response:
-        # logger.error("Cannot extract response - no response provided")
         return None
 
     try:
         # Validate response structure
         if not hasattr(response, 'choices') or not response.choices:
-            # logger.error("Invalid response structure - no choices available")
             return None
 
         if not hasattr(response.choices[0], 'message'):
-            # logger.error("Invalid response structure - no message in choice")
             return None
 
         # Extract content
@@ -324,7 +318,6 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
 
     # Step 2: Require model from caller - no defaults
     if not model:
-        # logger.error("No model specified - caller must provide model from their branch config")
         logger.error("No model specified.")
         logger.warning("Callers must provide their own model via branch config (e.g., flow_json/openrouter_config.json)")
         return None
@@ -332,14 +325,12 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
     # Step 3: Get API key
     api_key = get_api_key("openrouter")
     if not api_key:
-        # logger.error("Cannot get response - no API key available")
         logger.error("No OpenRouter API key available")
         return None
 
     # Step 4: Get or create client
     client = get_cached_client(api_key)
     if not client:
-        # logger.error("Cannot get response - client creation failed")
         return None
 
     # Step 5: Convert prompt to messages format
@@ -348,13 +339,11 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
     # Step 6: Make API request
     response = make_api_request(client, messages, model, **kwargs)
     if not response:
-        # logger.error(f"API request failed - caller: {caller}, model: {model}")
         return None
 
     # Step 7: Extract response
     result = extract_response(response)
     if not result:
-        # logger.error("Response extraction failed")
         return None
 
     # Step 8: Track usage (if response has ID)
@@ -371,17 +360,6 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
 # =============================================
 # CLEANUP
 # =============================================
-
-def clear_client_cache() -> None:
-    """
-    Clear all cached clients.
-    Useful for testing or when API keys change.
-    """
-    global _client_cache
-    count = len(_client_cache)
-    _client_cache.clear()
-    logger.info(f"Cleared {count} cached OpenRouter clients")
-
 
 def get_cache_stats() -> Dict[str, Any]:
     """

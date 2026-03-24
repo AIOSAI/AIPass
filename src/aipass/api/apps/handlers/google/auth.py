@@ -124,9 +124,7 @@ def refresh_credentials(creds: "Credentials") -> bool:
 
 
 def run_oauth_flow(
-    scopes: Optional[list] = None,
-    port: int = 0,
-    open_browser: bool = True,
+    scopes: Optional[list] = None, port: int = 0, open_browser: bool = True,
 ) -> Optional["Credentials"]:
     """Run the full OAuth2 consent flow.
 
@@ -194,9 +192,7 @@ def authenticate(scopes: Optional[list] = None) -> Optional["Credentials"]:
 
 
 def reauth(
-    scopes: Optional[list] = None,
-    port: int = 8085,
-    open_browser: bool = False,
+    scopes: Optional[list] = None, port: int = 8085, open_browser: bool = False,
 ) -> Optional["Credentials"]:
     """Force re-authentication via OAuth flow (console mode).
 

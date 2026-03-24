@@ -38,9 +38,6 @@ from aipass.api.apps.handlers.json import json_handler
 # =============================================
 
 MODULE_NAME = "openrouter.caller"
-
-# Package root: caller.py -> openrouter/ -> handlers/ -> apps/ -> api/ -> aipass/
-_PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 MODULE_VERSION = "1.0.0"
 
 CALLER_PATTERNS = {
@@ -87,12 +84,6 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_caller_name_from_stack() -> Optional[str]:
-    """Extract caller name from call stack (simplified version)."""
-    caller_info = get_caller_info()
-    return caller_info.get('caller_name') if caller_info else None
-
-
 def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
     """
     Compatibility wrapper for provision handler.
@@ -104,41 +95,6 @@ def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
     if caller_info:
         return caller_info.get('caller_name'), caller_info.get('json_folder')
     return None, None
-
-
-def get_json_folder_path(caller: str) -> Optional[Path]:
-    """
-    Determine JSON folder path for given caller name.
-    Fallback method when stack detection doesn't provide path.
-    """
-    try:
-        if caller.startswith("flow_"):
-            base_path = _PACKAGE_ROOT / "flow"
-            json_folder = base_path / "flow_json"
-
-        elif caller.startswith("prax_"):
-            base_path = _PACKAGE_ROOT / "prax"
-            json_folder = base_path / "prax_json"
-
-        elif caller.startswith("skills_"):
-            parts = caller.split("_")
-            if len(parts) >= 2:
-                skills_category = parts[1]
-                base_path = _PACKAGE_ROOT / "skills" / f"skills_{skills_category}"
-                json_folder = base_path / f"{skills_category}_json"
-            else:
-                logger.info(f"[{MODULE_NAME}] Cannot parse skills category from: {caller}")
-                return None
-        else:
-            logger.info(f"[{MODULE_NAME}] Unknown caller pattern: {caller}")
-            return None
-
-        logger.info(f"[{MODULE_NAME}] Resolved JSON folder for {caller}: {json_folder}")
-        return json_folder
-
-    except Exception as e:
-        logger.error(f"Failed to determine JSON folder for {caller}: {e}")
-        return None
 
 
 def detect_caller_category(caller_path: Path) -> str:
@@ -256,39 +212,6 @@ def _create_fallback_info(frame_path: Path) -> Dict[str, Any]:
         "category": category,
         "detection_method": "fallback"
     }
-
-
-# =============================================
-# VALIDATION HELPERS
-# =============================================
-
-def validate_caller_info(caller_info: Dict[str, Any]) -> bool:
-    """Validate caller information dictionary."""
-    try:
-        required_fields = ["caller_name", "caller_path", "category", "detection_method"]
-        for field in required_fields:
-            if field not in caller_info:
-                logger.info(f"[{MODULE_NAME}] Missing required field: {field}")
-                return False
-
-        if not caller_info["caller_name"]:
-            logger.info(f"[{MODULE_NAME}] Caller name is empty")
-            return False
-
-        if not isinstance(caller_info["caller_path"], Path):
-            logger.info(f"[{MODULE_NAME}] Caller path is not a Path object")
-            return False
-
-        valid_categories = ["flow", "prax", "skills", "unknown"]
-        if caller_info["category"] not in valid_categories:
-            logger.info(f"[{MODULE_NAME}] Invalid category: {caller_info['category']}")
-            return False
-
-        return True
-
-    except Exception as e:
-        logger.error(f"Validation failed: {e}")
-        return False
 
 
 # =============================================

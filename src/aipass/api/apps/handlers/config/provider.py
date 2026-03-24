@@ -20,16 +20,12 @@ Extracted from api_connect.py archive for new handler structure.
 """
 
 # Infrastructure
-import sys
 from pathlib import Path
 
 # Standard library
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
-
-# Internal handlers
-from aipass.api.apps.handlers.json.json_handler import load_json, save_json
 
 # JSON handler
 from aipass.api.apps.handlers.json import json_handler
@@ -133,133 +129,6 @@ def load_provider_config(provider: str = "openrouter") -> Optional[Dict[str, Any
     except Exception as e:
         logger.error(f"Failed to load provider config: {e}")
         return None
-
-
-def get_full_config() -> Optional[Dict[str, Any]]:
-    """
-    Load the complete API configuration
-
-    Returns:
-        Full config dict or None if load fails
-    """
-    try:
-        config_path = API_JSON_DIR / CONFIG_FILE
-
-        if not config_path.exists():
-            # Config file not found, creating default
-            _create_default_config()
-
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-
-    except Exception as e:
-        logger.error(f"Failed to load full config: {e}")
-        return None
-
-
-# =============================================
-# CONFIGURATION UPDATES
-# =============================================
-
-def update_provider_config(provider: str, updates: Dict[str, Any]) -> bool:
-    """
-    Deep merge updates into provider configuration
-
-    Updates the provider's configuration with new values, preserving
-    existing values not specified in updates. Uses deep merge to handle
-    nested dictionaries properly.
-
-    Args:
-        provider: Provider name (e.g., "openrouter")
-        updates: Configuration updates to apply
-
-    Returns:
-        True if update successful, False otherwise
-
-    Example:
-        success = update_provider_config("openrouter", {
-            "api_key": "sk-or-v1-new-key",
-            "temperature": 0.8
-        })
-    """
-    try:
-        config_path = API_JSON_DIR / CONFIG_FILE
-
-        # Load existing config or create default
-        if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-        else:
-            config = _get_default_config_structure()
-
-        # Ensure providers section exists
-        if "config" not in config:
-            config["config"] = {}
-        if "providers" not in config["config"]:
-            config["config"]["providers"] = {}
-
-        # Get or create provider config
-        if provider not in config["config"]["providers"]:
-            config["config"]["providers"][provider] = get_default_config(provider)
-
-        # Deep merge updates into provider config
-        merge_configs(config["config"]["providers"][provider], updates)
-
-        # Update timestamp
-        config["timestamp"] = datetime.now().isoformat()
-
-        # Save updated config
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-
-        # Updated config for provider
-        logger.info(f"Provider config updated: {provider}")
-        return True
-
-    except Exception as e:
-        # Failed to update provider config
-        logger.error(f"Failed to update provider config: {e}")
-        return False
-
-
-def update_full_config(updates: Dict[str, Any]) -> bool:
-    """
-    Update the complete API configuration with deep merge
-
-    Args:
-        updates: Configuration updates to apply
-
-    Returns:
-        True if successful
-    """
-    try:
-        config_path = API_JSON_DIR / CONFIG_FILE
-
-        # Load existing or create default
-        if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-        else:
-            config = _get_default_config_structure()
-
-        # Deep merge updates
-        merge_configs(config, updates)
-
-        # Update timestamp
-        config["timestamp"] = datetime.now().isoformat()
-
-        # Save
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-
-        # Updated full API config
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to update full config: {e}")
-        return False
 
 
 # =============================================
@@ -399,25 +268,3 @@ def get_validation_rules(provider: str) -> Optional[Dict[str, Any]]:
     return VALIDATION_RULES.get(provider)
 
 
-def list_available_providers() -> list[str]:
-    """
-    List all available providers with defaults
-
-    Returns:
-        List of provider names
-    """
-    return list(PROVIDER_DEFAULTS.keys())
-
-
-def provider_exists(provider: str) -> bool:
-    """
-    Check if provider exists in configuration
-
-    Args:
-        provider: Provider name
-
-    Returns:
-        True if provider configured, False otherwise
-    """
-    config = load_provider_config(provider)
-    return config is not None

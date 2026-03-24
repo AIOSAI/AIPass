@@ -322,8 +322,16 @@ def reauth_google(scopes: Optional[list] = None) -> bool:
 
 
 # Re-export retry utility for consumers that make raw API calls
-api_call_with_retry = google_retry.api_call_with_retry
-is_ssl_error = google_retry.is_ssl_error
+
+
+def api_call_with_retry(*args, **kwargs):
+    """Execute API call with retry logic for SSL and transient errors."""
+    return google_retry.api_call_with_retry(*args, **kwargs)
+
+
+def is_ssl_error(error):
+    """Check if an error is an SSL-related error."""
+    return google_retry.is_ssl_error(error)
 
 
 # =============================================

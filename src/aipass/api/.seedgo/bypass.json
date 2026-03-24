@@ -39,6 +39,46 @@
       "file": "apps/handlers/auth/keys.py",
       "standard": "deep_nesting",
       "reason": "2 functions: _read_key_from_secrets() depth 5 (file read with validation guards), get_key_from_config() depth 4 (config navigation with nested dict structure)"
+    },
+    {
+      "file": "apps/handlers/openrouter/client.py",
+      "standard": "handlers",
+      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for API key retrieval before making requests"
+    },
+    {
+      "file": "apps/handlers/openrouter/models.py",
+      "standard": "handlers",
+      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for API key retrieval before listing models"
+    },
+    {
+      "file": "apps/handlers/usage/tracking.py",
+      "standard": "handlers",
+      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for usage tracking with API key context"
+    },
+    {
+      "file": "apps/handlers/config/provider.py",
+      "standard": "handlers",
+      "reason": "Imports load_json/save_json from json/json_handler — same-branch handler cross-package import for config file operations"
+    },
+    {
+      "file": "apps/modules/google_client.py",
+      "standard": "documentation",
+      "reason": "False positive — get_google_service() has full Google-style docstring but multi-line signature (6 lines) exceeds checker's 5-line lookahead window"
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "naming",
+      "reason": "json_handler.py is the system-wide default handler — standard name used across all 15 branches, cannot be renamed without breaking all imports"
+    },
+    {
+      "file": "apps/handlers/google/auth.py",
+      "standard": "naming",
+      "reason": "False positive — effective_scopes is a local variable inside load_credentials() and run_oauth_flow(), not a module-level constant"
+    },
+    {
+      "file": "apps/handlers/google/retry.py",
+      "standard": "naming",
+      "reason": "False positive — wait is a local variable inside api_call_with_retry() loop body, not a module-level constant"
     }
   ],
   "notes": {

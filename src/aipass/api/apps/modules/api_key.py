@@ -143,7 +143,6 @@ def list_providers():
     header("Available Providers")
     console.print()
 
-    # TODO: Get from handler when implemented
     console.print("  - openrouter")
     console.print()
 

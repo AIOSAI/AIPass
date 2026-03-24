@@ -174,7 +174,6 @@ def track_usage(args: List[str]):
     header("Track API Usage")
     console.print()
 
-    # TODO: Parse args for generation_id, caller, model
     warning("Usage tracking workflow - TODO")
 
 

@@ -98,7 +98,6 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = 30) -> int:
         return len(old_generations)
 
     except Exception as e:
-        # logger.error(f"Cleanup failed: {e}")
         logger.error(f"Cleanup failed: {e}")
         raise
 
@@ -124,47 +123,6 @@ def _identify_old_generations(generation_tracking: Dict, cutoff_date: datetime) 
 
     return old_generations
 
-
-
-def get_cleanup_stats(data_file_path: Path) -> Dict[str, int]:
-    """Get statistics about data that could be cleaned up."""
-    empty_stats = {
-        "total_generations": 0,
-        "total_daily_totals": 0,
-        "cleanable_generations": 0,
-        "cleanable_daily_totals": 0
-    }
-
-    try:
-        data = _read_json(data_file_path)
-        if not data:
-            return empty_stats
-
-        data_content = data.get("data", data)
-        generation_tracking = data_content.get("generation_tracking", {})
-        daily_totals = data_content.get("daily_totals", {})
-
-        # Count cleanable generations (older than 30 days)
-        cutoff_30 = datetime.now() - timedelta(days=30)
-        cleanable_gens = len(_identify_old_generations(generation_tracking, cutoff_30))
-
-        # Count cleanable daily totals (older than 90 days)
-        cutoff_90 = (datetime.now() - timedelta(days=90)).date()
-        cleanable_daily = sum(
-            1 for date_str in daily_totals.keys()
-            if _is_old_date(date_str, cutoff_90)
-        )
-
-        return {
-            "total_generations": len(generation_tracking),
-            "total_daily_totals": len(daily_totals),
-            "cleanable_generations": cleanable_gens,
-            "cleanable_daily_totals": cleanable_daily
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get cleanup stats: {e}")
-        return empty_stats
 
 
 def _is_old_date(date_str: str, cutoff_date) -> bool:
