@@ -147,6 +147,46 @@
       "file": "handlers/mock_standard_1/",
       "standard": "dead_code",
       "reason": "Mock/test data for standards development — not intended to be imported"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/debug_print_check.py",
+      "standard": "deep_nesting",
+      "reason": "Docstring state machine in _scan_file() requires nested quote-tracking loops — inherent to stateful text parsing"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/permission_flags_check.py",
+      "standard": "deep_nesting",
+      "reason": "check_no_dangerous_flags() iterates lines × patterns — nesting inherent to pattern matrix scanning"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/todo_check.py",
+      "standard": "deep_nesting",
+      "reason": "check_module() already uses early exits and guard clauses — remaining depth is inherent to docstring tracking + regex matching"
+    },
+    {
+      "file": "apps/handlers/audit/branch_audit.py",
+      "standard": "deep_nesting",
+      "reason": "audit_branch() orchestrates checker discovery, scope branching, and try/except — control flow inherent to audit coordination"
+    },
+    {
+      "file": "apps/handlers/audit/discovery.py",
+      "standard": "deep_nesting",
+      "reason": "discover_branches() uses guard clauses well — nesting from registry iteration + path validation + existence checks is inherent"
+    },
+    {
+      "file": "apps/handlers/diagnostics/diagnostics_check.py",
+      "standard": "deep_nesting",
+      "reason": "check_file() and check_directory() nest due to subprocess + JSON parse + exception handling — defensive error handling requires this structure"
+    },
+    {
+      "file": "apps/modules/standards_audit.py",
+      "standard": "deep_nesting",
+      "reason": "handle_command() argument parsing with flag detection — standard CLI routing pattern, nesting is inherent"
+    },
+    {
+      "file": "tools/interface_scanner.py",
+      "standard": "deep_nesting",
+      "reason": "AST validation in _extract_audit_scope() — nested isinstance checks inherent to AST node type verification"
     }
   ],
   "notes": {

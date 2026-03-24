@@ -67,6 +67,8 @@ def get_json_structure_standards() -> str:
         "  [dim]})[/dim]",
         "",
         "  [yellow]Both the import AND the log_operation call are required.[/yellow]",
+        "  Config-only handlers log when config is accessed. If it lives in",
+        "  [dim]handlers/[/dim], it logs. No exceptions — use bypass for genuine edge cases.",
         "",
         "─" * 70,
         "",
