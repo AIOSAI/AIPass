@@ -270,6 +270,13 @@ def check_module_error_logging(content: str) -> Dict:
         }
 
 
+def _matches_user_input_pattern(line_lower: str, user_input_patterns: list) -> bool:
+    for pattern in user_input_patterns:
+        if re.search(pattern, line_lower):
+            return True
+    return False
+
+
 def check_error_vs_warning_usage(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check that logger.error() is used for system failures, not user input validation.
@@ -312,12 +319,9 @@ def check_error_vs_warning_usage(lines: List[str], file_path: str, bypass_rules:
         if re.search(r'logger\.error\s*\(', line):
             # Check if the message contains user input patterns
             line_lower = line.lower()
-            for pattern in user_input_patterns:
-                if re.search(pattern, line_lower):
-                    # Check if bypassed
-                    if not is_bypassed(file_path, 'error_handling', i, bypass_rules):
-                        violations.append(i)
-                    break
+            if _matches_user_input_pattern(line_lower, user_input_patterns):
+                if not is_bypassed(file_path, 'error_handling', i, bypass_rules):
+                    violations.append(i)
 
     if violations:
         return {

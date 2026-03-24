@@ -345,6 +345,17 @@ def detect_branch(file_path: Path) -> Optional[str]:
     return None
 
 
+def _resolve_branch_from_registry(registry, registry_dir, branch_name):
+    for branch in registry.get('branches', []):
+        if branch.get('name', '').lower() == branch_name.lower():
+            raw_path = branch.get('path', '')
+            branch_path = Path(raw_path)
+            if not branch_path.is_absolute():
+                branch_path = (registry_dir / branch_path).resolve()
+            return str(branch_path)
+    return None
+
+
 def get_branch_path(branch_name: str) -> Optional[str]:
     """Get actual branch path from AIPASS_REGISTRY.json."""
     registry_path = _find_registry()
@@ -352,14 +363,9 @@ def get_branch_path(branch_name: str) -> Optional[str]:
         try:
             with open(registry_path, 'r', encoding='utf-8') as f:
                 registry = json.load(f)
-            registry_dir = registry_path.parent
-            for branch in registry.get('branches', []):
-                if branch.get('name', '').lower() == branch_name.lower():
-                    raw_path = branch.get('path', '')
-                    branch_path = Path(raw_path)
-                    if not branch_path.is_absolute():
-                        branch_path = (registry_dir / branch_path).resolve()
-                    return str(branch_path)
+            result = _resolve_branch_from_registry(registry, registry_path.parent, branch_name)
+            if result is not None:
+                return result
         except (json.JSONDecodeError, IOError):
             logger.info("Cannot read registry for branch path lookup: %s", registry_path)
 

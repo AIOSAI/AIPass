@@ -417,6 +417,29 @@ def print_help() -> None:
 # COMMAND HANDLER
 # =============================================================================
 
+def _validate_pack(args: List[str]) -> tuple:
+    pack_name: str | None = None
+    json_output = False
+
+    for arg in args:
+        if arg == "--json":
+            json_output = True
+        elif not arg.startswith("-"):
+            if pack_name is None:
+                pack_name = arg
+
+    packs = _discover_proof_packs()
+    if pack_name is None or pack_name not in packs:
+        available = ", ".join(packs.keys()) if packs else "(none)"
+        error(
+            f"Unknown proof pack: '{pack_name}'",
+            suggestion=f"Available packs: {available}. Usage: drone @seedgo proof {next(iter(packs), '<pack>')}"
+        )
+        return None, None, json_output
+
+    return pack_name, packs[pack_name], json_output
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle 'proof' command with pack-aware routing.
 
@@ -434,55 +457,30 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("proof", "seedgo_proof"):
         return False
 
-    # No args -> show proof introspection (available packs)
     if not args:
         print_introspection()
         return True
 
-    # --help -> help
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
-    # Parse pack name and flags
-    pack_name: str | None = None
-    json_output = False
-
-    for arg in args:
-        if arg == "--json":
-            json_output = True
-        elif not arg.startswith("-"):
-            if pack_name is None:
-                pack_name = arg
-
-    # Validate pack name
-    packs = _discover_proof_packs()
-    if pack_name is None or pack_name not in packs:
-        available = ", ".join(packs.keys()) if packs else "(none)"
-        error(
-            f"Unknown proof pack: '{pack_name}'",
-            suggestion=f"Available packs: {available}. Usage: drone @seedgo proof {next(iter(packs), '<pack>')}"
-        )
+    pack_name, pack_dir, json_output = _validate_pack(args)
+    if pack_name is None:
         return True
 
-    pack_dir = packs[pack_name]
-
-    # Log proof start
     json_handler.log_operation(
         "proof_started",
         {"pack": pack_name}
     )
 
-    # Run the proof pack
     results = _run_proof_pack(pack_name, pack_dir)
 
-    # Output
     if json_output:
         console.print_json(json.dumps(results, indent=2, default=str))
     else:
         _display_proof_results(pack_name, results)
 
-    # Log completion
     json_handler.log_operation(
         "proof_completed",
         {

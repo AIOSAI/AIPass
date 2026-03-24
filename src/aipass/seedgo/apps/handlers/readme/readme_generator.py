@@ -311,6 +311,22 @@ def generate_modules_section(branch_path: str) -> str:
     return '\n'.join(lines)
 
 
+def _extract_description_from_content(content: str) -> str:
+    name_match = re.search(r'^# Name:\s*\S+\s*-\s*(.+)$', content, re.MULTILINE)
+    if name_match:
+        return name_match.group(1).strip()
+
+    doc_match = re.search(r'^"""(.*?)"""', content, re.DOTALL | re.MULTILINE)
+    if doc_match:
+        docstring = doc_match.group(1).strip()
+        if docstring:
+            first_line = docstring.split('\n')[0].strip()
+            if first_line:
+                return first_line
+
+    return ""
+
+
 def _extract_module_description(module_path: Path) -> str:
     """
     Extract description from a Python module file.
@@ -328,27 +344,10 @@ def _extract_module_description(module_path: Path) -> str:
     """
     try:
         content = module_path.read_text(encoding='utf-8', errors='ignore')
-
-        # Try META header Name line
-        name_match = re.search(r'^# Name:\s*\S+\s*-\s*(.+)$', content, re.MULTILINE)
-        if name_match:
-            return name_match.group(1).strip()
-
-        # Try module docstring first line
-        # Match triple-quoted docstring at module level
-        doc_match = re.search(r'^"""(.*?)"""', content, re.DOTALL | re.MULTILINE)
-        if doc_match:
-            docstring = doc_match.group(1).strip()
-            if docstring:
-                first_line = docstring.split('\n')[0].strip()
-                if first_line:
-                    return first_line
-
+        return _extract_description_from_content(content)
     except (OSError, UnicodeDecodeError):
         logger.info("Cannot read module for description extraction: %s", module_path)
         return ""
-
-    return ""
 
 
 def generate_commands_section(branch_path: str) -> str:
@@ -405,6 +404,63 @@ def generate_commands_section(branch_path: str) -> str:
         return ""
 
 
+def _parse_commands_line(help_text: str) -> List[str]:
+    commands_line_match = re.search(r'^Commands:\s*(.+)$', help_text, re.MULTILINE)
+    if not commands_line_match:
+        return []
+    commands_str = commands_line_match.group(1).strip()
+    commands = [cmd.strip() for cmd in commands_str.split(',') if cmd.strip()]
+    lines = []
+    for cmd in commands:
+        if cmd.startswith('--'):
+            lines.append(f"- `{cmd}` - Flag")
+        else:
+            lines.append(f"- `{cmd}`")
+    return lines
+
+
+def _parse_commands_section(help_text: str) -> List[str]:
+    available_match = re.search(
+        r'AVAILABLE COMMANDS:\s*\n((?:\s+\S.*\n)*)',
+        help_text,
+        re.MULTILINE
+    )
+    if not available_match:
+        return []
+    lines = []
+    cmd_block = available_match.group(1)
+    for line in cmd_block.strip().split('\n'):
+        stripped = line.strip()
+        if stripped:
+            parts = re.split(r'\s{2,}', stripped, maxsplit=1)
+            if len(parts) == 2:
+                lines.append(f"- `{parts[0]}` - {parts[1]}")
+            else:
+                lines.append(f"- `{stripped}`")
+    return lines
+
+
+def _parse_command_pairs(help_text: str) -> List[str]:
+    lines = []
+    seen_commands = set()
+    cmd_pattern = re.compile(
+        r'^\s{2,}([\w@-]+(?:\s[\w@<>-]+)*)\s{2,}([A-Z].*?)$',
+        re.MULTILINE
+    )
+    for match in cmd_pattern.finditer(help_text):
+        cmd_part = match.group(1).strip()
+        description = match.group(2).strip()
+        if '->' in description or '"' in cmd_part:
+            continue
+        if re.match(r'^\d+\.', cmd_part):
+            continue
+        if cmd_part in seen_commands:
+            continue
+        seen_commands.add(cmd_part)
+        lines.append(f"- `{cmd_part}` - {description}")
+    return lines
+
+
 def _parse_help_output(help_text: str) -> str:
     """
     Parse help output to extract commands information.
@@ -420,61 +476,13 @@ def _parse_help_output(help_text: str) -> str:
     Returns:
         Markdown formatted commands section
     """
-    lines = []
+    lines = _parse_commands_line(help_text)
 
-    # Strategy 1: "Commands:" line (drone-compliant format, usually at end)
-    commands_line_match = re.search(r'^Commands:\s*(.+)$', help_text, re.MULTILINE)
-    if commands_line_match:
-        commands_str = commands_line_match.group(1).strip()
-        commands = [cmd.strip() for cmd in commands_str.split(',') if cmd.strip()]
-        if commands:
-            for cmd in commands:
-                if cmd.startswith('--'):
-                    lines.append(f"- `{cmd}` - Flag")
-                else:
-                    lines.append(f"- `{cmd}`")
-
-    # Strategy 2: "AVAILABLE COMMANDS:" section with indented entries
     if not lines:
-        available_match = re.search(
-            r'AVAILABLE COMMANDS:\s*\n((?:\s+\S.*\n)*)',
-            help_text,
-            re.MULTILINE
-        )
-        if available_match:
-            cmd_block = available_match.group(1)
-            for line in cmd_block.strip().split('\n'):
-                stripped = line.strip()
-                if stripped:
-                    parts = re.split(r'\s{2,}', stripped, maxsplit=1)
-                    if len(parts) == 2:
-                        lines.append(f"- `{parts[0]}` - {parts[1]}")
-                    else:
-                        lines.append(f"- `{stripped}`")
+        lines = _parse_commands_section(help_text)
 
-    # Strategy 3: Extract indented "command  description" pairs
-    # Matches lines like "  drone systems     List all registered branches"
-    # or "  command-name    Description text"
     if not lines:
-        seen_commands = set()
-        # Match: leading whitespace, command words, large gap, description
-        cmd_pattern = re.compile(
-            r'^\s{2,}([\w@-]+(?:\s[\w@<>-]+)*)\s{2,}([A-Z].*?)$',
-            re.MULTILINE
-        )
-        for match in cmd_pattern.finditer(help_text):
-            cmd_part = match.group(1).strip()
-            description = match.group(2).strip()
-            # Skip lines that look like examples (contain ->, quotes, paths)
-            if '->' in description or '"' in cmd_part:
-                continue
-            # Skip numbered list items like "1. drone systems"
-            if re.match(r'^\d+\.', cmd_part):
-                continue
-            if cmd_part in seen_commands:
-                continue
-            seen_commands.add(cmd_part)
-            lines.append(f"- `{cmd_part}` - {description}")
+        lines = _parse_command_pairs(help_text)
 
     if not lines:
         return ""

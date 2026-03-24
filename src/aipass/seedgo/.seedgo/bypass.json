@@ -149,44 +149,24 @@
       "reason": "Mock/test data for standards development — not intended to be imported"
     },
     {
-      "file": "apps/handlers/aipass_standards/debug_print_check.py",
+      "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
-      "reason": "Docstring state machine in _scan_file() requires nested quote-tracking loops — inherent to stateful text parsing"
+      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
-      "file": "apps/handlers/aipass_standards/permission_flags_check.py",
+      "file": "tools/triplet_scanner.py",
       "standard": "deep_nesting",
-      "reason": "check_no_dangerous_flags() iterates lines × patterns — nesting inherent to pattern matrix scanning"
+      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
-      "file": "apps/handlers/aipass_standards/todo_check.py",
+      "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
-      "reason": "check_module() already uses early exits and guard clauses — remaining depth is inherent to docstring tracking + regex matching"
+      "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"
     },
     {
-      "file": "apps/handlers/audit/branch_audit.py",
+      "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
-      "reason": "audit_branch() orchestrates checker discovery, scope branching, and try/except — control flow inherent to audit coordination"
-    },
-    {
-      "file": "apps/handlers/audit/discovery.py",
-      "standard": "deep_nesting",
-      "reason": "discover_branches() uses guard clauses well — nesting from registry iteration + path validation + existence checks is inherent"
-    },
-    {
-      "file": "apps/handlers/diagnostics/diagnostics_check.py",
-      "standard": "deep_nesting",
-      "reason": "check_file() and check_directory() nest due to subprocess + JSON parse + exception handling — defensive error handling requires this structure"
-    },
-    {
-      "file": "apps/modules/standards_audit.py",
-      "standard": "deep_nesting",
-      "reason": "handle_command() argument parsing with flag detection — standard CLI routing pattern, nesting is inherent"
-    },
-    {
-      "file": "tools/interface_scanner.py",
-      "standard": "deep_nesting",
-      "reason": "AST validation in _extract_audit_scope() — nested isinstance checks inherent to AST node type verification"
+      "reason": "print_branch_summary() and print_bypass_audit() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
     }
   ],
   "notes": {

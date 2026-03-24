@@ -162,6 +162,24 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
+def _console_print_in_string(line: str, stripped: str) -> bool:
+    before_pattern = line.split('console.print(')[0]
+    single_quotes = before_pattern.count("'")
+    double_quotes = before_pattern.count('"')
+    if single_quotes % 2 == 1 or double_quotes % 2 == 1:
+        return True
+    if '=' in stripped and 'console.print(' in stripped:
+        before_console = stripped.split('console.print(')[0]
+        last_eq_pos = before_console.rfind('=')
+        if last_eq_pos != -1:
+            after_eq = before_console[last_eq_pos+1:]
+            sq_after = after_eq.count("'")
+            dq_after = after_eq.count('"')
+            if sq_after % 2 == 1 or dq_after % 2 == 1:
+                return True
+    return False
+
+
 def check_handler_separation(content: str) -> Dict:
     """
     Check that handlers don't have console output
@@ -222,28 +240,8 @@ def check_handler_separation(content: str) -> Dict:
         # Look for actual console.print() calls
         # Must be actual code, not in a string
         if 'console.print(' in stripped:
-            # Skip if it's in a string literal
-            # Check if console.print( appears inside quotes
-            before_pattern = line.split('console.print(')[0]
-            # Count quotes before the pattern
-            single_quotes = before_pattern.count("'")
-            double_quotes = before_pattern.count('"')
-            # If odd number of quotes, we're inside a string
-            if single_quotes % 2 == 1 or double_quotes % 2 == 1:
+            if _console_print_in_string(line, stripped):
                 continue
-            # Skip if console.print( appears inside a string assignment
-            if '=' in stripped and 'console.print(' in stripped:
-                # Check if console.print( appears in a string assignment
-                before_console = stripped.split('console.print(')[0]
-                last_eq_pos = before_console.rfind('=')
-                if last_eq_pos != -1:
-                    after_eq = before_console[last_eq_pos+1:]
-                    # Count quotes ONLY after the last =
-                    sq_after = after_eq.count("'")
-                    dq_after = after_eq.count('"')
-                    # If odd quotes after =, console.print( is inside string
-                    if sq_after % 2 == 1 or dq_after % 2 == 1:
-                        continue
             # This is likely an actual call
             console_print_lines.append(i)
 

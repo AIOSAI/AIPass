@@ -139,6 +139,18 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
+def _is_silent_except(lines: List[str], pass_index: int, pass_line: str) -> bool:
+    pass_indent = len(pass_line) - len(pass_line.lstrip())
+    for j in range(pass_index, min(pass_index + 3, len(lines))):
+        next_line = lines[j].strip()
+        is_pass_line = next_line == 'pass' or next_line.startswith('pass ') or next_line.startswith('pass#')
+        if next_line and not is_pass_line:
+            if lines[j].startswith(' ') and len(lines[j]) - len(lines[j].lstrip()) > pass_indent:
+                return False
+            break
+    return True
+
+
 def check_error_handling(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
     """
     Check for proper error handling patterns
@@ -187,20 +199,7 @@ def check_error_handling(content: str, lines: List[str], module_path: str = "") 
         if in_except:
             # Check if line is just 'pass' or 'pass' with a comment
             if stripped == 'pass' or stripped.startswith('pass ') or stripped.startswith('pass#'):
-                # Check if this is the only statement in except block
-                # Look ahead to see if next non-empty line is dedented
-                is_silent = True
-                for j in range(i, min(i + 3, len(lines))):
-                    next_line = lines[j].strip()
-                    # Check if line is not a pass statement (with or without comment)
-                    is_pass_line = next_line == 'pass' or next_line.startswith('pass ') or next_line.startswith('pass#')
-                    if next_line and not is_pass_line:
-                        # Has other statements, not silent
-                        if lines[j].startswith(' ') and len(lines[j]) - len(lines[j].lstrip()) > len(line) - len(line.lstrip()):
-                            is_silent = False
-                        break
-
-                if is_silent:
+                if _is_silent_except(lines, i, line):
                     silent_failures.append(f"line {except_line}")
 
             # Reset except tracking when we leave the block (check original line, not stripped)

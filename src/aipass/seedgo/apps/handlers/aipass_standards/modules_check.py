@@ -153,6 +153,26 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
+def _track_docstring_state(stripped: str, in_docstring: bool) -> tuple:
+    """Returns (skip_line, new_in_docstring) for a stripped line."""
+    if '"""' in stripped or "'''" in stripped:
+        has_triple_double = '"""' in stripped
+        has_triple_single = "'''" in stripped
+
+        if has_triple_double:
+            quote_count = stripped.count('"""')
+            if quote_count % 2 == 1:
+                in_docstring = not in_docstring
+            return True, in_docstring
+        elif has_triple_single:
+            quote_count = stripped.count("'''")
+            if quote_count % 2 == 1:
+                in_docstring = not in_docstring
+            return True, in_docstring
+
+    return False, in_docstring
+
+
 def check_handle_command(content: str) -> Optional[Dict]:
     """
     Check for handle_command pattern (drone routing standard)
@@ -169,25 +189,9 @@ def check_handle_command(content: str) -> Optional[Dict]:
         stripped = line.strip()
 
         # Track docstrings - check for triple quotes anywhere in line
-        if '"""' in stripped or "'''" in stripped:
-            # Determine which delimiter
-            has_triple_double = '"""' in stripped
-            has_triple_single = "'''" in stripped
-
-            if has_triple_double:
-                quote_count = stripped.count('"""')
-                if quote_count % 2 == 1:
-                    # Odd number = toggling docstring state
-                    in_docstring = not in_docstring
-                # Even number = complete docstring on one line, don't change state
-                continue
-            elif has_triple_single:
-                quote_count = stripped.count("'''")
-                if quote_count % 2 == 1:
-                    # Odd number = toggling docstring state
-                    in_docstring = not in_docstring
-                # Even number = complete docstring on one line, don't change state
-                continue
+        skip_line, in_docstring = _track_docstring_state(stripped, in_docstring)
+        if skip_line:
+            continue
 
         # Skip docstrings and comments
         if in_docstring or stripped.startswith('#'):
@@ -334,21 +338,17 @@ def check_no_direct_file_ops(content: str, lines: List[str]) -> Optional[Dict]:
     }
 
 
-def check_no_business_logic(content: str, lines: List[str], module_path: str) -> Optional[Dict]:
-    """
-    Check that module doesn't contain hardcoded business logic data
+def _is_code_reference_structure(value) -> bool:
+    code_ref_types = (ast.Name, ast.Call, ast.Attribute)
+    if isinstance(value, ast.List):
+        return all(isinstance(elt, code_ref_types) for elt in value.elts)
+    if isinstance(value, ast.Dict):
+        return all(isinstance(v, code_ref_types) for v in value.values)
+    return False
 
-    Detects hardcoded lists/dicts that should be in config files.
-    Uses hybrid detection: line scan (fast) + AST verification (accurate).
 
-    Only flags MODULE-LEVEL hardcoded data (function-local is OK for display/temp data).
-    Skips: ALL_CAPS constants, empty structures, code references, function-local vars.
-    """
-    # Phase 1: Quick line scan for candidates (module-level only = no leading whitespace)
-    # Only match assignments at column 0 (module level)
-    list_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\[')
-    dict_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\{')
-
+def _scan_candidates(lines: List[str], list_pattern, dict_pattern) -> dict:
+    """Scan for module-level list/dict assignment candidates."""
     candidates = {}
     for line_num, line in enumerate(lines, start=1):
         # Skip if line starts with whitespace (inside function/class)
@@ -367,6 +367,26 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
         if match:
             var_name = match.group(1)
             candidates[var_name] = line_num
+
+    return candidates
+
+
+def check_no_business_logic(content: str, lines: List[str], module_path: str) -> Optional[Dict]:
+    """
+    Check that module doesn't contain hardcoded business logic data
+
+    Detects hardcoded lists/dicts that should be in config files.
+    Uses hybrid detection: line scan (fast) + AST verification (accurate).
+
+    Only flags MODULE-LEVEL hardcoded data (function-local is OK for display/temp data).
+    Skips: ALL_CAPS constants, empty structures, code references, function-local vars.
+    """
+    # Phase 1: Quick line scan for candidates (module-level only = no leading whitespace)
+    # Only match assignments at column 0 (module level)
+    list_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\[')
+    dict_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\{')
+
+    candidates = _scan_candidates(lines, list_pattern, dict_pattern)
 
     if not candidates:
         return {
@@ -419,17 +439,8 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
                 continue
 
             # Filter: Skip structures containing only code references (not data)
-            # These are structural code (function refs, module refs), not business data
-            if isinstance(value, ast.List):
-                # Check if all elements are code references (Name, Call, Attribute)
-                code_ref_types = (ast.Name, ast.Call, ast.Attribute)
-                if all(isinstance(elt, code_ref_types) for elt in value.elts):
-                    continue
-            elif isinstance(value, ast.Dict):
-                # Check if all values are code references
-                code_ref_types = (ast.Name, ast.Call, ast.Attribute)
-                if all(isinstance(v, code_ref_types) for v in value.values):
-                    continue
+            if _is_code_reference_structure(value):
+                continue
 
             # This is a confirmed violation
             violations.append({

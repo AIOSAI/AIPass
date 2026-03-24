@@ -201,7 +201,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     if len(positional) >= 1:
         pack_name = positional[0]
     if len(positional) >= 2:
-        specific_branch = normalize_branch_arg(positional[1])
+        branch_arg = positional[1]
+        if not branch_arg.startswith('@'):
+            error(
+                f"Branch name must use @ prefix: '@{branch_arg}'",
+                suggestion=f"Usage: drone @seedgo audit {pack_name} @{branch_arg}"
+            )
+            return True
+        specific_branch = normalize_branch_arg(branch_arg)
 
     # Validate pack name
     packs = _discover_packs()

@@ -236,6 +236,50 @@ def check_function_naming(content: str) -> Optional[Dict]:
     }
 
 
+def _iter_module_level_lines(lines: List[str]) -> List[str]:
+    result = []
+    in_function_or_class = False
+    in_multiline_string = False
+    multiline_delimiter = None
+    current_indentation = 0
+
+    for line in lines:
+        stripped = line.strip()
+
+        if '"""' in stripped or "'''" in stripped:
+            delimiter = '"""' if '"""' in stripped else "'''"
+            count = stripped.count(delimiter)
+
+            if count % 2 == 1 and not in_multiline_string:
+                in_multiline_string = True
+                multiline_delimiter = delimiter
+            elif count % 2 == 1 and in_multiline_string and multiline_delimiter == delimiter:
+                in_multiline_string = False
+                multiline_delimiter = None
+
+        if in_multiline_string:
+            continue
+
+        if (stripped.startswith('def ') or
+            stripped.startswith('class ') or
+            stripped.startswith('async def ') or
+            stripped.startswith('if __name__')):
+            in_function_or_class = True
+            current_indentation = len(line) - len(line.lstrip())
+            continue
+
+        if in_function_or_class and not line.startswith(' ') and not line.startswith('\t') and stripped:
+            in_function_or_class = False
+            current_indentation = 0
+
+        if in_function_or_class:
+            continue
+
+        result.append(stripped)
+
+    return result
+
+
 def check_constant_naming(content: str) -> Optional[Dict]:
     """
     Check constant naming conventions
@@ -263,82 +307,42 @@ def check_constant_naming(content: str) -> Optional[Dict]:
                     imported_names.add(item.strip())
 
     # Second pass: find module-level assignments (not inside functions/classes)
-    lines = content.split('\n')
+    module_lines = _iter_module_level_lines(content.split('\n'))
     constants = []
     bad_constants = []
-    in_function_or_class = False
-    in_multiline_string = False
-    multiline_delimiter = None
-    current_indentation = 0
 
-    for line in lines:
-        stripped = line.strip()
-
-        # Track multi-line strings (""" or ''')
-        if '"""' in stripped or "'''" in stripped:
-            delimiter = '"""' if '"""' in stripped else "'''"
-            count = stripped.count(delimiter)
-
-            # If odd number, we're toggling in/out of multi-line string
-            if count % 2 == 1:
-                if not in_multiline_string:
-                    in_multiline_string = True
-                    multiline_delimiter = delimiter
-                elif multiline_delimiter == delimiter:
-                    in_multiline_string = False
-                    multiline_delimiter = None
-
-        # Don't process lines inside multi-line strings
-        if in_multiline_string:
-            continue
-
-        # Track if we're inside function or class or if __name__ block
-        if (stripped.startswith('def ') or
-            stripped.startswith('class ') or
-            stripped.startswith('async def ') or
-            stripped.startswith('if __name__')):
-            in_function_or_class = True
-            # Track indentation level when entering function/class
-            current_indentation = len(line) - len(line.lstrip())
-            continue
-
-        # Reset when we get back to module level (no indentation)
-        # Only reset if we're not inside a multi-line string
-        if in_function_or_class and not line.startswith(' ') and not line.startswith('\t') and stripped:
-            in_function_or_class = False
-            current_indentation = 0
-
-        # Skip if inside function/class
-        if in_function_or_class:
-            continue
-
+    for stripped in module_lines:
         # Find assignments at module level
-        if '=' in stripped and not stripped.startswith('#'):
-            # Extract variable name and assignment value
-            match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', stripped)
-            if match:
-                const_name = match.group(1)
-                assigned_value = match.group(2)
+        if '=' not in stripped or stripped.startswith('#'):
+            continue
 
-                # Skip if this is an imported name (like logger, console)
-                if const_name in imported_names:
-                    continue
+        # Extract variable name and assignment value
+        match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$', stripped)
+        if not match:
+            continue
 
-                # Skip if assignment is a function call or class instantiation (has parentheses)
-                # Examples: logger = logging.getLogger(...), console = Console()
-                if '(' in assigned_value:
-                    continue
+        const_name = match.group(1)
+        assigned_value = match.group(2)
 
-                # Skip if assigning an imported value to a variable
-                # Example: from prax import system_logger; logger = system_logger
-                if assigned_value.strip() in imported_names:
-                    continue
+        # Skip if this is an imported name (like logger, console)
+        if const_name in imported_names:
+            continue
 
-                constants.append(const_name)
+        # Skip if assignment is a function call or class instantiation (has parentheses)
+        # Examples: logger = logging.getLogger(...), console = Console()
+        if '(' in assigned_value:
+            continue
 
-                # Constants should be UPPER_CASE
-                if not const_name.isupper():
-                    bad_constants.append(const_name)
+        # Skip if assigning an imported value to a variable
+        # Example: from prax import system_logger; logger = system_logger
+        if assigned_value.strip() in imported_names:
+            continue
+
+        constants.append(const_name)
+
+        # Constants should be UPPER_CASE
+        if not const_name.isupper():
+            bad_constants.append(const_name)
 
     if not constants:
         return None  # No constants found

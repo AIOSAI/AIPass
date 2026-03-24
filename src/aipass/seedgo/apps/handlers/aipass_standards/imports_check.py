@@ -139,6 +139,22 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
+def _process_docstring_marker(stripped, in_docstring, docstring_marker):
+    marker = '"""' if '"""' in stripped else "'''"
+    marker_count = stripped.count(marker)
+
+    if not in_docstring:
+        if marker_count >= 2:
+            return True, in_docstring, docstring_marker
+        elif marker_count == 1:
+            return True, True, marker
+    else:
+        if marker == docstring_marker and marker_count >= 1:
+            return True, False, None
+
+    return False, in_docstring, docstring_marker
+
+
 def filter_docstrings(lines: List[str]) -> List[str]:
     """Filter out docstrings from lines to prevent false positives."""
     filtered_lines = []
@@ -149,21 +165,11 @@ def filter_docstrings(lines: List[str]) -> List[str]:
         stripped = line.strip()
 
         if '"""' in stripped or "'''" in stripped:
-            marker = '"""' if '"""' in stripped else "'''"
-            marker_count = stripped.count(marker)
-
-            if not in_docstring:
-                if marker_count >= 2:
-                    continue
-                elif marker_count == 1:
-                    in_docstring = True
-                    docstring_marker = marker
-                    continue
-            else:
-                if marker == docstring_marker and marker_count >= 1:
-                    in_docstring = False
-                    docstring_marker = None
-                    continue
+            skip, in_docstring, docstring_marker = _process_docstring_marker(
+                stripped, in_docstring, docstring_marker
+            )
+            if skip:
+                continue
 
         if in_docstring:
             continue

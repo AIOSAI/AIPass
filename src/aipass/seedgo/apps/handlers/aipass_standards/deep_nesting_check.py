@@ -30,7 +30,7 @@ AUDIT_SCOPE = "all_files"
 _NESTING_NODES = (ast.If, ast.For, ast.While, ast.Try, ast.With,
                   ast.ExceptHandler)
 
-DEPTH_LIMIT = 3
+DEPTH_LIMIT = 4
 
 
 # -- Bypass helper -----------------------------------------------------------

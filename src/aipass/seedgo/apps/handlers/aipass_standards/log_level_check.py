@@ -161,6 +161,13 @@ def _get_non_code_lines(lines: List[str]) -> set:
     return skip
 
 
+def _matches_user_input_pattern(line_lower: str, patterns: List[str]) -> bool:
+    for pattern in patterns:
+        if re.search(pattern, line_lower):
+            return True
+    return False
+
+
 def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check that ERROR level is not used for user input validation.
@@ -190,12 +197,9 @@ def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: l
             continue
 
         if re.search(r'logger\.error\s*\(', line):
-            line_lower = line.lower()
-            for pattern in user_input_patterns:
-                if re.search(pattern, line_lower):
-                    if not is_bypassed(file_path, 'log_level', i, bypass_rules):
-                        violations.append(i)
-                    break
+            if _matches_user_input_pattern(line.lower(), user_input_patterns):
+                if not is_bypassed(file_path, 'log_level', i, bypass_rules):
+                    violations.append(i)
 
     if violations:
         return {
