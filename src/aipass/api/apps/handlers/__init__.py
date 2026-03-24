@@ -28,7 +28,7 @@ def _extract_branch_name(filepath: str) -> str:
     """Extract branch name from a file path."""
     parts = Path(filepath).parts
     for i, part in enumerate(parts):
-        if part in ("MEMORY_BANK", "seed", ".vscode"):
+        if part in ("memory", "seedgo", ".vscode"):
             if i + 1 < len(parts):
                 return parts[i + 1]
         if part in ("aipass",) and i + 1 < len(parts) and parts[i + 1] == "apps":

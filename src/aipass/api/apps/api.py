@@ -257,7 +257,7 @@ def main():
         error("No modules found")
         return 1
 
-    # Extract command and remaining args (matching seed pattern)
+    # Extract command and remaining args (matching seedgo pattern)
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
