@@ -54,6 +54,12 @@
       "reason": "Cross-handler import of aggregate_ops — push_central calls aggregate_central_impl after pushing data to central"
     },
     {
+      "file": "apps/handlers/dashboard/push_central.py",
+      "standard": "imports",
+      "category": "architectural",
+      "reason": "Parent module import needed — push_central invokes aggregate_central for dashboard data"
+    },
+    {
       "file": "apps/handlers/registry/monitor_ops.py",
       "standard": "handlers",
       "category": "architectural",

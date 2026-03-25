@@ -201,6 +201,13 @@
       "reason": "Log watcher imports trigger bus to fire error_logged/warning_logged events. Watchdog callback must access event bus to bridge file monitoring to event system."
     },
     {
+      "file": "apps/handlers/events/error_detected.py",
+      "standard": "architecture",
+      "lines": [153, 243],
+      "pattern": "handler importing from parent module",
+      "reason": "error_detected imports error_registry (line 76) and medic_state — core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
+    },
+    {
       "file": "apps/handlers/events/registry.py",
       "standard": "architecture",
       "lines": [34],
