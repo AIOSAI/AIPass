@@ -24,22 +24,22 @@ An operating system for AI agents. Not a chatbot wrapper. Not a prompt chain. A 
 
 ## Current State: Beta
 
-**It works.** All 15 branches operational. 111+ PRs merged. 48 orchestration sessions. 744 tests across the system. 173 drone commands discovered. System-wide compliance at 93% average across 34 automated standards checks.
+**It works.** All 15 branches operational. 130+ PRs merged. 56 orchestration sessions. 1,600+ tests across the system. 173 drone commands discovered. System-wide compliance at 96% average across 34 automated standards checks.
 
 **Recently completed:**
 
-- **System-wide compliance sprint** — all 14 branches audited and dispatched for silent catch fixes in a single session. 13 branches completed autonomously (8 running in parallel). ~600 silent catch violations fixed across 150+ files. System average went from ~88% to 93%. Tracked via DPLAN-0052.
-- **Seedgo 34-standard audit pack** — 10 new checkers integrated from diagnostic tools (silent catch, deep nesting, debug print, commented logger, unused function, dead code, help text, hardcoded key, test coverage, TODO). All auto-discovered via `*_check.py` pattern. Bypass system working with `.seedgo/bypass.json` per branch.
-- **Deep nesting investigation** — spawn (12 functions: 7 justified, 5 refactorable), commons (14 functions: 9 justified, 5 refactorable), API (13 functions), ai_mail (27 functions), backup (6 functions). Justified functions bypassed, refactorable ones queued.
-- **Dispatch UX redesign** — `drone @ai_mail dispatch @target "Subject" "Body"` sends + wakes in one command. `--fresh` flag for clean sessions. `email` command for mail-only (no wake). Fully tested.
-- **PR v2 workflow** — commit-on-main architecture. Changes never leave your working tree. Feature branches are just pointers for GitHub's PR system. No more disappearing files.
-- **Prax monitor** — fully operational with inotify file watching, branch detection, full message display. Used as secondary terminal to work around Claude Code's scroll limitation.
+- **Spawn template overhaul** — regenerate-registry command built with 3-pass ID matching (hash→path→new). Template registry 26→41 files. System-wide push: 12/12 branches updated, 227 additions, 0 errors. READMEs added to all standard directories across 15 branches.
+- **Test quality standard** — expanded from 8 to 48 standard test items across 10 categories (JSON handler, CLI routing, conftest, error resilience, type contracts, exception contracts, data contracts, success/failure paths, init/provisioning, infrastructure mocking). Seedgo checker scans for function coverage, not just file existence.
+- **Persistent citizen branches** — each citizen uses `citizen/{name}` instead of throwaway `feat/` branches. Force-push-with-lease on subsequent PRs. Remote branches cleaned from 74 to 5 (main + 4 citizen).
+- **Git deny rules system-wide** — `.claude/settings.local.json` tracked across all 15 branches. Blocks raw git commit/push in favor of `drone @git pr`. Prevents the divergence, conflicts, and broken PRs that raw git caused.
+- **System-wide compliance sprint** — all 14 branches audited and dispatched for silent catch fixes. 13 branches completed autonomously (8 running in parallel). System average 88%→96%.
+- **Seedgo 34-standard audit pack** — 10 new checkers integrated from diagnostic tools. All auto-discovered via `*_check.py` pattern. Bypass system working with `.seedgo/bypass.json` per branch.
 
 **What we're solving now:**
 
-- **Deep nesting compliance** — 73% average across system. Bypass entries for justified cases, refactoring dispatches for simplifiable ones.
-- **Handler standard** — 83% average. Investigation needed per branch.
-- **Test coverage expansion** — 22% average. Structural gap, needs per-branch test scaffolding.
+- **Test quality across branches** — 10-category checker built, needs validation across all branches
+- **Drone git workflow** — master key concept for system-wide PRs from devpulse. PR review gate for production readiness.
+- **Branch audits** — DPLANs open for api, drone, commons, backup, spawn, ai_mail. Remaining 7 branches need DPLANs.
 - **Cross-platform reliability** — Linux and Windows tested. macOS structurally supported. All paths use `pathlib`, secrets at `~/.secrets/aipass/`.
 - **Agent agnosticism** — currently focused on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (hooks for auto-diagnostics, prompt injection, session recovery). But AIPass is designed to not depend on any single provider. `agents.md` and `gemini.md` can bootstrap the system for Codex and Gemini — you lose hooks but keep the core.
 
