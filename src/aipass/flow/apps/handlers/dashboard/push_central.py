@@ -17,7 +17,7 @@ Features:
 - Extracts only plans where location='flow' (Flow's own plans)
 - Updates branches.flow section in PLANS.central.json
 - Preserves all other branch sections
-- Calls aggregate_central to rebuild top-level active_plans
+- Calls aggregate_central_impl to rebuild top-level active_plans
 - Calculates global statistics across all branches
 - Pure handler - returns boolean for success/failure
 
@@ -38,8 +38,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 _PKG_ROOT = Path(__file__).resolve().parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# Module imports
-from aipass.flow.apps.modules.aggregate_central import aggregate_central
+# Handler imports (aggregate_ops is a sibling handler — avoids handler→module layer violation)
+from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 
 # =============================================
 # CONFIGURATION
@@ -203,7 +203,7 @@ def push_to_plans_central() -> bool:
     6. Update global_statistics (total counts across all branches)
     7. Preserve ALL other branch sections
     8. Write back to PLANS.central.json
-    9. Call aggregate_central to rebuild top-level active_plans with validation
+    9. Call aggregate_central_impl to rebuild top-level active_plans with validation
 
     Returns:
         True on success, False on failure
@@ -252,9 +252,9 @@ def push_to_plans_central() -> bool:
         with open(CENTRAL_FILE, 'w', encoding='utf-8') as f:
             json.dump(central_data, f, indent=2, ensure_ascii=False)
 
-        # Call aggregate_central to rebuild top-level arrays with validation
+        # Call aggregate_central_impl to rebuild top-level arrays with validation
         # This ensures active_plans is built from all branches and validates files exist
-        aggregate_central(heal=True)
+        aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR)
 
         json_handler.log_operation("plans_central_pushed", {
             "active_plans": len(active_plans),

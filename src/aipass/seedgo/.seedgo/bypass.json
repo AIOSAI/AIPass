@@ -89,9 +89,29 @@
       "reason": "Python package init file — __init__.py naming is required by Python convention"
     },
     {
-      "file": "apps/handlers/mock_standard_1/bypass_config/bypass.config.py",
-      "standard": "naming",
-      "reason": "Mock test fixture — bypass.config.py uses dotted naming by design for testing bypass configuration loading"
+      "file": "apps/handlers/diagnostics/diagnostics_check.py",
+      "standard": "unused_function",
+      "reason": "format_summary() is a public API consumed by tests (test_diagnostics.py). Not called in production code path."
+    },
+    {
+      "file": "apps/modules/diagnostics_audit.py",
+      "standard": "unused_function",
+      "reason": "print_branch_diagnostics() is a public API consumed by tests (test_diagnostics_audit.py). Not called in production code path."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "unused_function",
+      "reason": "increment_counter() and update_data_metrics() are public API functions used in self-test block. Not called in production code path."
+    },
+    {
+      "file": "drone_adapter.py",
+      "standard": "unused_function",
+      "reason": "get_help() and get_introspective() are called by drone via getattr() dynamic discovery. Checker can't trace cross-branch getattr calls."
+    },
+    {
+      "file": "apps/handlers/bypass/ignore_handler.py",
+      "standard": "unused_function",
+      "reason": "get_deprecated_patterns() is a public API consumed by tests (test_bypass.py). Not called in production code path."
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
@@ -142,11 +162,6 @@
       "file": "handlers/aipass_proof/",
       "standard": "dead_code",
       "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns"
-    },
-    {
-      "file": "handlers/mock_standard_1/",
-      "standard": "dead_code",
-      "reason": "Mock/test data for standards development — not intended to be imported"
     },
     {
       "file": "apps/handlers/aipass_proof/triplet.py",

@@ -26,7 +26,7 @@ _PKG_ROOT = Path(__file__).resolve().parents[4]
 # Standard imports
 import json
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -52,69 +52,8 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 MEMORY_BANK_PATH = _REPO_ROOT / "MEMORY_BANK" / "plans"
 PROCESSED_PLANS_DIR = _PKG_ROOT / "backup" / "processed_plans"
-PRIVATE_BRANCH_REGISTRY = _REPO_ROOT / "PRIVATE_BRANCH_REGISTRY.json"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 CONFIG_FILE = FLOW_JSON_DIR / "flow_mbank_config.json"
-TRL_REGISTRY_FILE = FLOW_JSON_DIR / "flow_mbank_registry.json"
-API_CONFIG_FILE = FLOW_ROOT / "apps" / "handlers" / "json_templates" / "custom" / "api_config.json"
-
-# =============================================
-# PRIVATE BRANCH HELPERS
-# =============================================
-
-def _is_branch_private(branch_name: str) -> bool:
-    """Check if branch is in the private registry."""
-    if not PRIVATE_BRANCH_REGISTRY.exists():
-        return False
-    try:
-        with open(PRIVATE_BRANCH_REGISTRY, 'r', encoding='utf-8') as f:
-            registry = json.load(f)
-        for branch in registry.get("branches", []):
-            if branch.get("name", "").upper() == branch_name.upper():
-                return True
-    except (json.JSONDecodeError, IOError) as exc:
-        logger.warning("[mbank] Failed to read private branch registry for '%s': %s", branch_name, exc)
-    return False
-
-
-def _get_private_branch_path(branch_name: str) -> Optional[str]:
-    """Get the path of a private branch."""
-    if not PRIVATE_BRANCH_REGISTRY.exists():
-        return None
-    try:
-        with open(PRIVATE_BRANCH_REGISTRY, 'r', encoding='utf-8') as f:
-            registry = json.load(f)
-        for branch in registry.get("branches", []):
-            if branch.get("name", "").upper() == branch_name.upper():
-                return branch.get("path")
-    except (json.JSONDecodeError, IOError) as exc:
-        logger.warning("[mbank] Failed to read private branch path for '%s': %s", branch_name, exc)
-    return None
-
-
-def _get_private_branch_for_path(plan_path: Path) -> Optional[Dict[str, str]]:
-    """Check if a plan path falls under a private branch.
-
-    Args:
-        plan_path: Absolute path to plan file
-
-    Returns:
-        Dict with 'name' and 'path' if private, None otherwise
-    """
-    if not PRIVATE_BRANCH_REGISTRY.exists():
-        return None
-    try:
-        with open(PRIVATE_BRANCH_REGISTRY, 'r', encoding='utf-8') as f:
-            registry = json.load(f)
-        plan_str = str(plan_path.resolve())
-        for branch in registry.get("branches", []):
-            branch_path = branch.get("path", "")
-            if branch_path and plan_str.startswith(branch_path):
-                return {"name": branch.get("name", ""), "path": branch_path}
-    except (json.JSONDecodeError, IOError) as exc:
-        logger.warning("[mbank] Failed to check private branch for path '%s': %s", plan_path, exc)
-    return None
-
 
 # =============================================
 # CONFIGURATION
@@ -142,84 +81,6 @@ def load_config() -> Dict[str, Any]:
             return json.load(f)
     except Exception as e:
         raise Exception(f"Failed to load config: {e}")
-
-def load_trl_registry() -> Dict[str, Any]:
-    """Load TRL mapping registry"""
-    default_registry = {
-        "module_name": "flow_mbank",
-        "description": "TRL (Type-Category-Action) classification registry for memory bank processing",
-        "version": "1.0.0",
-        "trl_mapping": {
-            "types": {
-                "SEEDGO": "Seedgo AI System",
-                "NEXUS": "Nexus AI System",
-                "SKILL": "Skills Modules",
-                "PRAX": "Prax Infrastructure",
-                "FLOW": "Flow Workflow System",
-                "BACKUP": "Backup System",
-                "DRONE": "Drone Commands",
-                "HELP": "Help System",
-                "MCP": "MCP Servers",
-                "TOOLS": "Tools & Scripts"
-            },
-            "categories": {
-                "API": "API & External Services",
-                "MEM": "Memory & Storage",
-                "DB": "Database & Data",
-                "UI": "User Interface",
-                "CFG": "Configuration",
-                "DOC": "Documentation",
-                "TEST": "Testing & QA",
-                "SEC": "Security",
-                "NET": "Networking",
-                "FILE": "File Operations",
-                "LOG": "Logging & Monitoring",
-                "DEV": "Development"
-            },
-            "actions": {
-                "IMP": "Implementation",
-                "FIX": "Bug Fixes",
-                "UPD": "Updates & Improvements",
-                "NEW": "New Features",
-                "REF": "Refactoring",
-                "DOC": "Documentation",
-                "TEST": "Testing",
-                "CFG": "Configuration",
-                "MIGR": "Migration",
-                "OPT": "Optimization"
-            }
-        },
-        "excluded_paths": [
-            "admin", "archive", "backups", "tests", "trash", "__pycache__",
-            ".git", ".venv", "venv", "node_modules", "mcp_servers"
-        ]
-    }
-
-    if not TRL_REGISTRY_FILE.exists():
-        TRL_REGISTRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(TRL_REGISTRY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(default_registry, f, indent=2, ensure_ascii=False)
-        return default_registry
-
-    try:
-        with open(TRL_REGISTRY_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        raise Exception(f"Failed to load TRL registry: {e}")
-
-def get_ai_model() -> Optional[str]:
-    """Get AI model from custom API config"""
-    try:
-        if API_CONFIG_FILE.exists():
-            with open(API_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                api_config = json.load(f)
-                return api_config.get("api_settings", {}).get("model")
-
-        return None
-
-    except Exception as exc:
-        logger.warning("[mbank] Failed to read AI model from API config: %s", exc)
-        return None
 
 # =============================================
 # PLAN TYPE HELPERS

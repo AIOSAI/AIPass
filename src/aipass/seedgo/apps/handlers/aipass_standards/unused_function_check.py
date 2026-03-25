@@ -24,7 +24,9 @@ Excluded from flagging:
 """
 
 import ast
+import io
 import re
+import tokenize
 from pathlib import Path
 
 from aipass.prax import logger
@@ -48,15 +50,6 @@ EXCLUDED_NAMES = {
 }
 
 # -- Regex helpers for corpus stripping ---------------------------------------
-
-# Matches triple-quoted string literals (both ''' and """), including content.
-_TRIPLE_QUOTED_RE = re.compile(
-    r'""".*?"""|\'\'\'.*?\'\'\'',
-    re.DOTALL,
-)
-
-# Matches single-line comments.
-_COMMENT_RE = re.compile(r"#[^\n]*")
 
 # Matches `if __name__ == "__main__":` through end of file.
 _MAIN_BLOCK_RE = re.compile(
@@ -107,15 +100,37 @@ def _collect_python_files(branch_path: Path) -> list[Path]:
 
 def _strip_non_code(source: str) -> str:
     """
-    Remove triple-quoted strings, comments, and __main__ blocks.
+    Remove string literals, comments, and __main__ blocks from source.
 
-    Prevents doctest lines, commented-out code, and demo invocations
-    from inflating reference counts.
+    Uses Python's tokenizer for accurate string/comment detection.
+    The old regex approach misidentified triple-quote characters inside
+    code (e.g. ``line.count('\"\"\"')``) as string delimiters, eating
+    surrounding code and causing false-positive unused-function reports.
     """
-    source = _TRIPLE_QUOTED_RE.sub("", source)
-    source = _COMMENT_RE.sub("", source)
-    source = _MAIN_BLOCK_RE.sub("", source)
-    return source
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except tokenize.TokenError as exc:
+        logger.info("Tokenizer failed, falling back to raw corpus: %s", exc)
+        return _MAIN_BLOCK_RE.sub("", source)
+
+    lines = source.split('\n')
+    chars = [list(line) for line in lines]
+
+    for tok in tokens:
+        if tok.type not in (tokenize.STRING, tokenize.COMMENT):
+            continue
+        sr, sc = tok.start[0] - 1, tok.start[1]
+        er, ec = tok.end[0] - 1, tok.end[1]
+        for row in range(sr, er + 1):
+            if row >= len(chars):
+                break
+            col_start = sc if row == sr else 0
+            col_end = ec if row == er else len(chars[row])
+            for col in range(col_start, min(col_end, len(chars[row]))):
+                chars[row][col] = ' '
+
+    result = '\n'.join(''.join(line) for line in chars)
+    return _MAIN_BLOCK_RE.sub("", result)
 
 
 # -- AST function extraction --------------------------------------------------

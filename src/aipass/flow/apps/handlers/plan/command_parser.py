@@ -71,38 +71,6 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     return location, subject, plan_type_key
 
 
-def parse_delete_command_args(args: List[str]) -> Tuple[str | None, bool, str | None]:
-    """
-    Parse arguments for delete command (DEPRECATED - use parse_close_command_args)
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Tuple of (plan_num, confirm, error_message)
-        - plan_num: Plan number from first arg, or None if missing
-        - confirm: False if --yes or -y flag present, True otherwise
-        - error_message: None if valid, error string if plan_num missing
-
-    Examples:
-        >>> parse_delete_command_args(["42"])
-        ("42", True, None)
-
-        >>> parse_delete_command_args(["42", "--yes"])
-        ("42", False, None)
-
-        >>> parse_delete_command_args([])
-        (None, True, "Plan number required")
-    """
-    if len(args) < 1:
-        return None, True, "Plan number required"
-
-    plan_num = args[0]
-    confirm = '--yes' not in args and '-y' not in args
-
-    return plan_num, confirm, None
-
-
 def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, bool, str | None]:
     """
     Parse arguments for close command

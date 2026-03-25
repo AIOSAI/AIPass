@@ -31,7 +31,7 @@ def tmp_agent(tmp_path):
 @pytest.fixture
 def tmp_registry(tmp_path):
     """Provide a temp registry path."""
-    return tmp_path / "BRANCH_REGISTRY.json"
+    return tmp_path / "AIPASS_REGISTRY.json"
 
 
 class TestMetadata:

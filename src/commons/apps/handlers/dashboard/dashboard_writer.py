@@ -35,9 +35,18 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from commons.apps.handlers.database.db import get_db, close_db
 from commons.apps.handlers.json import json_handler
 
-# Constants
-AIPASS_ROOT = os.environ.get("AIPASS_ROOT", os.path.expanduser("~"))
-BRANCH_REGISTRY_PATH = os.path.join(AIPASS_ROOT, "BRANCH_REGISTRY.json")
+# Constants — walk up from __file__ to find project root (AIPASS_REGISTRY.json marker)
+def _find_registry_path() -> str:
+    """Walk up from __file__ to find AIPASS_REGISTRY.json at project root."""
+    current = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(10):
+        candidate = os.path.join(current, "AIPASS_REGISTRY.json")
+        if os.path.exists(candidate):
+            return candidate
+        current = os.path.dirname(current)
+    return os.path.join(os.path.expanduser("~"), "AIPASS_REGISTRY.json")
+
+BRANCH_REGISTRY_PATH = _find_registry_path()
 
 # Lazy-loaded write_section reference
 _write_section_fn: Optional[Callable[..., Any]] = None

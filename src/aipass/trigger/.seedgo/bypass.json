@@ -187,11 +187,18 @@
       "reason": "Log watcher at 782 lines — watchdog event handler with position tracking, dedup, and medic integration. Splitting would break the file monitoring pipeline."
     },
     {
-      "file": "apps/handlers/events/error_detected.py",
+      "file": "apps/handlers/error_reporter.py",
       "standard": "architecture",
-      "lines": [153, 243],
+      "lines": [153],
       "pattern": "handler importing from parent module",
-      "reason": "error_detected imports error_registry (line 76) and medic_state — core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
+      "reason": "error_reporter imports trigger bus to fire error_detected events after reporting. Handler must access event bus to complete the error pipeline."
+    },
+    {
+      "file": "apps/handlers/watchers/log_watcher.py",
+      "standard": "architecture",
+      "lines": [244],
+      "pattern": "handler importing from parent module",
+      "reason": "Log watcher imports trigger bus to fire error_logged/warning_logged events. Watchdog callback must access event bus to bridge file monitoring to event system."
     },
     {
       "file": "apps/handlers/events/registry.py",

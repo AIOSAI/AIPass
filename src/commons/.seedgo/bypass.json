@@ -95,7 +95,37 @@
     {"file": "apps/handlers/artifacts/artifact_ops.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"},
     {"file": "apps/handlers/social/leaderboard_ops.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"},
     {"file": "apps/handlers/rooms/space_ops.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"},
-    {"file": "apps/handlers/rooms/explore_ops.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"}
+    {"file": "apps/handlers/rooms/explore_ops.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_ops.py pattern for consistency across 19 handler domains"},
+
+    {"file": "apps/handlers/rooms/explore_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+    {"file": "apps/handlers/rooms/room_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+    {"file": "apps/handlers/notifications/notification_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+    {"file": "apps/handlers/posts/post_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for mentions/caller detection (architectural)"},
+    {"file": "apps/handlers/comments/comment_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for mentions/caller detection (architectural)"},
+    {"file": "apps/handlers/curation/curation_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+    {"file": "apps/handlers/catchup/catchup_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+    {"file": "apps/handlers/profiles/profile_ops.py", "standard": "architecture", "reason": "Commons shared database architecture — handler imports commons_identity for caller detection (architectural)"},
+
+    {"file": "apps/handlers/rooms/room_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+    {"file": "apps/handlers/rooms/explore_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+    {"file": "apps/handlers/notifications/notification_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+    {"file": "apps/handlers/posts/post_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for mentions/caller detection"},
+    {"file": "apps/handlers/comments/comment_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for mentions/caller detection"},
+    {"file": "apps/handlers/curation/curation_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+    {"file": "apps/handlers/catchup/catchup_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+    {"file": "apps/handlers/profiles/profile_ops.py", "standard": "imports", "reason": "Commons shared database architecture — handler imports commons_identity module for caller detection"},
+
+    {"file": "apps/handlers/welcome/welcome_handler.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"},
+    {"file": "apps/handlers/search/search_queries.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"},
+    {"file": "apps/handlers/curation/reaction_queries.py", "standard": "naming", "reason": "Local variable, not module-level constant — reaction, parts, emoji are function-scoped variables"},
+    {"file": "apps/handlers/curation/trending_queries.py", "standard": "naming", "reason": "Local variable, not module-level constant — hours_offset is a function-scoped variable"},
+    {"file": "apps/handlers/search/log_export.py", "standard": "naming", "reason": "Local variable, not module-level constant — lines, date_str are function-scoped variables"},
+    {"file": "apps/handlers/dashboard/dashboard_writer.py", "standard": "naming", "reason": "Local variable, not module-level constant — _write_section_loaded is module-level state flag, not a constant"},
+
+    {"file": "apps/handlers/profiles/profile_queries.py", "standard": "deep_nesting", "reason": "format_time_ago() depth 5 — tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."},
+
+    {"file": "apps/handlers/database/catchup_queries.py", "standard": "naming", "reason": "Local variable, not module-level constant — karma_from_posts, karma_from_comments are function-scoped SQL query results"},
+    {"file": "apps/handlers/central/central_writer.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"}
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",

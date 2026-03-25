@@ -6,6 +6,12 @@
 # Modified: 2026-03-17
 # =============================================
 
+"""JSON auto-creating handler for drone data files.
+
+Provides log_operation() for structured operation logging and
+ensure_json_file() for auto-creating branch-scoped JSON files.
+"""
+
 from __future__ import annotations
 
 import inspect

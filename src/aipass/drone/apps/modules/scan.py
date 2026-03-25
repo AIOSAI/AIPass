@@ -129,9 +129,8 @@ def scan(target: str) -> list[dict] | None:
         try:
             from aipass.cli.apps.modules import err_console
             err_console.print(f"scan: could not resolve '{target}': {exc}")
-        except ImportError:
-            logger.warning("CLI err_console not available, skipping user-facing error")
-            pass
+        except ImportError as exc:
+            logger.warning("CLI err_console not available, skipping user-facing error: %s", exc)
         return None
 
     commands = scan_branch(branch_path, branch_name)

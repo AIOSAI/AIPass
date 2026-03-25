@@ -70,6 +70,12 @@ def load_dashboard(branch_path: Path, template: Dict) -> Dict:
             new_dashboard = template.copy()
             new_dashboard["branch"] = branch_path.name.upper()
             return new_dashboard
+        # Guard against valid JSON that is not a dict (e.g. a list)
+        if not isinstance(data, dict):
+            logger.warning("Dashboard JSON for %s is not a dict, recreating from template", branch_path.name)
+            new_dashboard = template.copy()
+            new_dashboard["branch"] = branch_path.name.upper()
+            return new_dashboard
         # Ensure sections exist
         if "sections" not in data:
             data["sections"] = template["sections"].copy()

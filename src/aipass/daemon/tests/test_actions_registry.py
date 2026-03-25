@@ -141,6 +141,7 @@ class TestToggle:
         create_action(name="toggleme", action_type="schedule", schedule_type="daily")
         assert toggle_action("0001", False) is True
         action = get_action("0001")
+        assert action is not None
         assert action["enabled"] is False
 
     def test_toggle_on(self, clean_registry):
@@ -149,6 +150,7 @@ class TestToggle:
                        enabled=False)
         assert toggle_action("0001", True) is True
         action = get_action("0001")
+        assert action is not None
         assert action["enabled"] is True
 
     def test_toggle_missing(self, clean_registry):
@@ -186,12 +188,16 @@ class TestIsDue:
         assert is_action_due(action) is True
 
     def test_daily_not_due_wrong_time(self, clean_registry):
-        """Daily action is not due at wrong time."""
+        """Daily action is not due at wrong time (12 hours away from now)."""
+        from datetime import datetime
+        now = datetime.now()
+        # Pick a time 12 hours away — always outside the 15-min fuzzy window
+        far_hour = (now.hour + 12) % 24
         action = {
             "enabled": True,
             "completed": None,
             "schedule_type": "daily",
-            "time": "99:99",  # impossible time
+            "time": f"{far_hour:02d}:00",
             "last_run": None,
         }
         assert is_action_due(action) is False
@@ -336,6 +342,7 @@ class TestUpdateLastRun:
         ts = "2026-03-02T12:00:00"
         assert update_last_run("0001", ts) is True
         action = get_action("0001")
+        assert action is not None
         assert action["last_run"] == ts
         assert action["next_run"] is not None
 
@@ -347,5 +354,6 @@ class TestMarkCompleted:
                        due_date="2026-03-01")
         assert mark_reminder_completed("0001") is True
         action = get_action("0001")
+        assert action is not None
         assert action["completed"] is not None
         assert action["enabled"] is False

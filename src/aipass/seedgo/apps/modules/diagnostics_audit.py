@@ -38,7 +38,10 @@ from aipass.seedgo.apps.handlers.diagnostics.discovery import discover_branches
 
 
 def print_branch_diagnostics(result: Dict):
-    """Print diagnostics for a single branch"""
+    """Print diagnostics for a single branch.
+
+    Note: Used by tests/test_diagnostics_audit.py — not called in production audit pipeline.
+    """
     branch = result['branch']
     errors = result.get('total_errors', 0)
     warnings = result.get('total_warnings', 0)

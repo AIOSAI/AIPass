@@ -37,10 +37,19 @@ from commons.apps.handlers.json import json_handler
 # CONSTANTS
 # =============================================================================
 
-AIPASS_ROOT = os.environ.get("AIPASS_ROOT", os.path.expanduser("~"))
-AI_CENTRAL_DIR = os.path.join(AIPASS_ROOT, "aipass_os", "AI_CENTRAL")
+def _find_project_root() -> str:
+    """Walk up from __file__ to find project root (AIPASS_REGISTRY.json marker)."""
+    current = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(10):
+        if os.path.exists(os.path.join(current, "AIPASS_REGISTRY.json")):
+            return current
+        current = os.path.dirname(current)
+    return os.path.expanduser("~")
+
+_PROJECT_ROOT = _find_project_root()
+AI_CENTRAL_DIR = os.path.join(_PROJECT_ROOT, "aipass_os", "AI_CENTRAL")
 CENTRAL_FILE = os.path.join(AI_CENTRAL_DIR, "COMMONS.central.json")
-BRANCH_REGISTRY_PATH = os.path.join(AIPASS_ROOT, "BRANCH_REGISTRY.json")
+BRANCH_REGISTRY_PATH = os.path.join(_PROJECT_ROOT, "AIPASS_REGISTRY.json")
 
 
 # =============================================================================

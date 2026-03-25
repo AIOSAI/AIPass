@@ -138,10 +138,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         if domain_check:
             checks.append(domain_check)
 
-    # Check 5: Template baseline verification (for entry points, check entire branch structure)
+    # Check 5: Template baseline verification (primary entry point only — {branch}.py)
+    # Secondary entry points (e.g. daemon_wakeup.py, scheduler_cron.py) skip this
+    # to avoid duplicate branch-level template checks.
     if is_entry_point:
-        baseline_checks = check_template_baseline(module_path, bypass_rules=bypass_rules)
-        checks.extend(baseline_checks)
+        branch_dir = path.parent.parent  # apps/ -> branch/
+        if path.stem == branch_dir.name:
+            baseline_checks = check_template_baseline(module_path, bypass_rules=bypass_rules)
+            checks.extend(baseline_checks)
 
     # Calculate score
     passed_checks = sum(1 for check in checks if check['passed'])
@@ -542,7 +546,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                 checks.append({
                     'name': f'Dir: {expected}/',
                     'passed': False,
-                    'message': f'Template directory missing (template: {citizen_class})'
+                    'message': f'Missing dir: {expected}/ (template: {citizen_class})'
                 })
 
     # Check files
@@ -568,7 +572,7 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
                 checks.append({
                     'name': f'File: {expected}',
                     'passed': False,
-                    'message': f'Template file missing (template: {citizen_class})'
+                    'message': f'Missing file: {expected} (template: {citizen_class})'
                 })
 
     # Summary check

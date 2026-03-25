@@ -25,6 +25,97 @@
       "file": "apps/modules/git_module.py",
       "standard": "modules",
       "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
+    },
+    {
+      "file": "apps/handlers/discovery_handler.py",
+      "standard": "handlers",
+      "lines": [190],
+      "reason": "Discovery handler needs registry_handler.load_registry() to resolve branch paths for help lookups. Justified cross-handler dependency — discovery is the only consumer."
+    },
+    {
+      "file": "apps/handlers/scanning/scanner.py",
+      "standard": "handlers",
+      "lines": [29],
+      "reason": "Scanner needs discovery_handler's get_entry_point() and parse_help_for_commands() to discover commands from branch help output. Justified — scanner's core function depends on discovery's parsing."
+    },
+    {
+      "file": "apps/modules/router.py",
+      "standard": "naming",
+      "reason": "branch_path, branch_name, command are local variables inside route_command(), not module-level constants. False positive from naming checker."
+    },
+    {
+      "file": "apps/modules/scan.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/modules/commands.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/modules/config.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/modules/module_registry.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/modules/registry.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/modules/__init__.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/handlers/json/json_handler.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/handlers/scanning/__init__.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "__init__.py",
+      "standard": "naming",
+      "pattern": "__all__",
+      "reason": "__all__ is a standard Python convention (PEP 8) — lowercase dunder is correct."
+    },
+    {
+      "file": "apps/handlers/router_handler.py",
+      "standard": "naming",
+      "reason": "cmd_args, executable, args are local variables inside execute_branch_command(), not module-level constants. False positive."
+    },
+    {
+      "file": "apps/handlers/executor.py",
+      "standard": "naming",
+      "reason": "run_env, cwd, shell are local variables inside run_command(), not module-level constants. False positive."
+    },
+    {
+      "file": "apps/handlers/registry_handler.py",
+      "standard": "naming",
+      "reason": "filtered is a local variable inside get_all_branches(), not a module-level constant. False positive."
+    },
+    {
+      "file": "apps/handlers/command_registry/ops.py",
+      "standard": "naming",
+      "reason": "module_name is a local variable, not a module-level constant. False positive."
     }
   ],
   "notes": {

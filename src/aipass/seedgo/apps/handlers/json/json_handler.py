@@ -210,7 +210,10 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
 
 
 def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
-    """Increment a counter in data JSON"""
+    """Increment a counter in data JSON.
+
+    Note: Public API — used in self-test block below. Not called in production code path.
+    """
     ensure_module_jsons(module_name)
     
     data = load_json(module_name, "data")
@@ -226,7 +229,10 @@ def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> b
 
 
 def update_data_metrics(module_name: str, **metrics) -> bool:
-    """Update data metrics"""
+    """Update data metrics.
+
+    Note: Public API — used in self-test block below. Not called in production code path.
+    """
     ensure_module_jsons(module_name)
     
     data = load_json(module_name, "data")

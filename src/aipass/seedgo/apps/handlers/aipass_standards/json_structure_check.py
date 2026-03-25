@@ -22,9 +22,8 @@ Entry points and other files outside modules/handlers are skipped.
 """
 
 import re
-import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from aipass.prax import logger
 
@@ -287,86 +286,3 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
     })
 
     return checks
-
-
-# ------------------------------------------------------------------
-# Utility functions (used by other code in the audit system)
-# ------------------------------------------------------------------
-
-def _find_registry() -> Path:
-    """Find AIPASS_REGISTRY.json by walking up from this file's location."""
-    current = Path(__file__).resolve().parent
-    for parent in [current, *list(current.parents)]:
-        candidate = parent / "AIPASS_REGISTRY.json"
-        if candidate.exists():
-            return candidate
-    return Path.cwd() / "AIPASS_REGISTRY.json"
-
-
-def detect_branch(file_path: Path) -> Optional[str]:
-    """
-    Detect which branch a file belongs to from its path.
-
-    Checks AIPASS_REGISTRY.json as source of truth.
-    Falls back to path heuristics if not available.
-    """
-    file_path_str = str(file_path.resolve())
-
-    registry_path = _find_registry()
-    if registry_path.exists():
-        try:
-            with open(registry_path, 'r', encoding='utf-8') as f:
-                registry = json.load(f)
-            registry_dir = registry_path.parent
-            branches = sorted(
-                registry.get('branches', []),
-                key=lambda b: len(b.get('path', '')),
-                reverse=True
-            )
-            for branch in branches:
-                raw_path = branch.get('path', '')
-                branch_path = Path(raw_path)
-                if not branch_path.is_absolute():
-                    branch_path = (registry_dir / branch_path).resolve()
-                if file_path_str.startswith(str(branch_path)):
-                    return branch.get('name', '').lower()
-        except (json.JSONDecodeError, IOError):
-            logger.info("Cannot read registry for branch detection: %s", registry_path)
-
-    # Fallback: path heuristics
-    path_parts = file_path.parts
-    if 'seedgo' in path_parts:
-        return 'seedgo'
-    if 'aipass' in path_parts:
-        idx = path_parts.index('aipass')
-        if idx + 1 < len(path_parts):
-            return path_parts[idx + 1]
-
-    return None
-
-
-def _resolve_branch_from_registry(registry, registry_dir, branch_name):
-    for branch in registry.get('branches', []):
-        if branch.get('name', '').lower() == branch_name.lower():
-            raw_path = branch.get('path', '')
-            branch_path = Path(raw_path)
-            if not branch_path.is_absolute():
-                branch_path = (registry_dir / branch_path).resolve()
-            return str(branch_path)
-    return None
-
-
-def get_branch_path(branch_name: str) -> Optional[str]:
-    """Get actual branch path from AIPASS_REGISTRY.json."""
-    registry_path = _find_registry()
-    if registry_path.exists():
-        try:
-            with open(registry_path, 'r', encoding='utf-8') as f:
-                registry = json.load(f)
-            result = _resolve_branch_from_registry(registry, registry_path.parent, branch_name)
-            if result is not None:
-                return result
-        except (json.JSONDecodeError, IOError):
-            logger.info("Cannot read registry for branch path lookup: %s", registry_path)
-
-    return None

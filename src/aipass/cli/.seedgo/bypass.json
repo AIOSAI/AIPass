@@ -61,6 +61,11 @@
       "file": "apps/modules/templates.py",
       "standard": "imports",
       "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
+    },
+    {
+      "file": "system_logs",
+      "standard": "log_structure",
+      "reason": "Prax branch detection bug — CLI logs land as unknown_branch. Prax confirmed known limitation (2026-03-23), fix pending on prax side."
     }
   ],
   "notes": {

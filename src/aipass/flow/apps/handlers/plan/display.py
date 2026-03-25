@@ -158,20 +158,6 @@ def format_plan_deletion_success(plan_key: str, prefix: str = "FPLAN") -> str:
     return f"\n[SUCCESS] {prefix}-{plan_key} closed successfully\n"
 
 
-def format_registry_removal_status(plan_key: str, prefix: str = "FPLAN") -> str:
-    """
-    Format status message for registry removal
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0001")
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted status message
-    """
-    return f"[OK] Removed {prefix}-{plan_key} from registry"
-
-
 def format_deletion_cancelled() -> str:
     """
     Format cancellation message

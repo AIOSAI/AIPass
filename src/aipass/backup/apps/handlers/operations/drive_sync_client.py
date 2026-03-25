@@ -159,6 +159,7 @@ class GoogleDriveSync:
 
     @drive_service.setter
     def drive_service(self, value):
+        """Set the main Drive API service instance."""
         self._drive_service = value
 
     def authenticate(self) -> bool:

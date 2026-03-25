@@ -34,6 +34,119 @@
       "file": "apps/handlers/operations/drive_sync_client.py",
       "standard": "deep_nesting",
       "reason": "SKIP — file is being rewritten. 6 functions flagged (depth 4-5)."
+    },
+
+    {
+      "file": "apps/handlers/operations/file_operations.py",
+      "standard": "architecture",
+      "reason": "operations/ is a business domain for backup — groups all file manipulation handlers (copy, scan, cleanup, path building). Renaming to files/ would break 6+ import chains across modules and handlers."
+    },
+    {
+      "file": "apps/handlers/operations/file_scanner.py",
+      "standard": "architecture",
+      "reason": "operations/ is a business domain for backup — groups all file manipulation handlers. Renaming would break import chains."
+    },
+    {
+      "file": "apps/handlers/operations/file_cleanup.py",
+      "standard": "architecture",
+      "reason": "operations/ is a business domain for backup — groups all file manipulation handlers. Renaming would break import chains."
+    },
+    {
+      "file": "apps/handlers/operations/path_builder.py",
+      "standard": "architecture",
+      "reason": "operations/ is a business domain for backup — groups all file manipulation handlers. Renaming would break import chains."
+    },
+    {
+      "file": "apps/handlers/operations/drive_sync_ops.py",
+      "standard": "architecture",
+      "reason": "operations/ groups both local file ops and Drive sync ops — two business domains sharing a common operational layer. Splitting would duplicate shared patterns."
+    },
+    {
+      "file": "apps/handlers/operations/drive_sync_client.py",
+      "standard": "architecture",
+      "reason": "929 lines: single Google Drive API client class — auth, folder management, upload, file tracking, sync orchestration. All methods are tightly coupled to the Drive service instance. Splitting the class would break the shared state (auth tokens, tracker cache, thread-local services). Also: operations/ directory naming is architectural."
+    },
+    {
+      "file": "apps/handlers/operations/sync_test_ops.py",
+      "standard": "architecture",
+      "reason": "operations/ groups Drive test ops alongside other operational handlers. Renaming would break imports."
+    },
+    {
+      "file": "apps/handlers/utils/system_utils.py",
+      "standard": "architecture",
+      "reason": "utils/ contains cross-cutting utilities (safe_print, temporarily_writable, ensure_backup_directory) used by 5+ files across multiple handler domains. Genuinely cross-domain — no single business domain owns these."
+    },
+    {
+      "file": "apps/handlers/utils/backup_timestamps.py",
+      "standard": "architecture",
+      "reason": "utils/ contains cross-cutting utilities. backup_timestamps is used by both backup_core and google_drive_sync — belongs to no single domain."
+    },
+
+    {
+      "file": "apps/handlers/json/statistics_handler.py",
+      "standard": "handlers",
+      "reason": "Imports BackupResult model from models/ — handlers legitimately share data models. Models are the shared contract between handlers."
+    },
+    {
+      "file": "apps/handlers/json/backup_metadata_builder.py",
+      "standard": "handlers",
+      "reason": "Imports BackupResult model from models/ — handlers legitimately share data models."
+    },
+    {
+      "file": "apps/handlers/diff/diff_generator.py",
+      "standard": "handlers",
+      "reason": "Imports safe_print from utils/ — cross-cutting utility needed for console output. utils/ exists to serve all handler domains."
+    },
+    {
+      "file": "apps/handlers/operations/file_operations.py",
+      "standard": "handlers",
+      "reason": "Imports temporarily_writable and safe_print from utils/ — cross-cutting utilities for file permission management and console output."
+    },
+    {
+      "file": "apps/handlers/operations/drive_sync_ops.py",
+      "standard": "handlers",
+      "reason": "Imports from json/drive_sync_json — Drive ops handler needs Drive JSON persistence. These are tightly coupled by business domain (Google Drive sync)."
+    },
+    {
+      "file": "apps/handlers/operations/file_cleanup.py",
+      "standard": "handlers",
+      "reason": "Imports temporarily_writable and safe_print from utils/ — cross-cutting utilities for permission management and console output."
+    },
+    {
+      "file": "apps/handlers/operations/drive_sync_client.py",
+      "standard": "handlers",
+      "reason": "Imports from json/drive_sync_json — Drive client needs JSON persistence for config, data, and log files. Tightly coupled by business domain."
+    },
+    {
+      "file": "apps/handlers/reporting/report_formatter.py",
+      "standard": "handlers",
+      "reason": "Imports BackupResult model from models/ — report formatting needs the result data model. Models are the shared contract between handlers."
+    },
+
+    {
+      "file": "apps/modules/google_drive_sync.py",
+      "standard": "naming",
+      "reason": "GoogleDriveSync is a class name (PascalCase correct). _clear_file_tracker_handler and get_file_tracker_stats are functions, not constants — seedgo false positive on module-level function references."
+    },
+    {
+      "file": "apps/handlers/json/drive_sync_json.py",
+      "standard": "naming",
+      "reason": "log_entry is a local variable inside log_operation(), not a module-level constant. PEP 8: local vars use snake_case."
+    },
+    {
+      "file": "apps/handlers/diff/diff_generator.py",
+      "standard": "naming",
+      "reason": "Renaming diff_generator.py → generator.py would make the file name ambiguous across the codebase. The diff_ prefix clarifies the file's domain when referenced in imports and logs."
+    },
+    {
+      "file": "apps/handlers/config/config_handler.py",
+      "standard": "naming",
+      "reason": "Renaming config_handler.py → handler.py would make the file name ambiguous. The config_ prefix clarifies domain in imports (from ...config.config_handler)."
+    },
+    {
+      "file": "apps/handlers/operations/drive_sync_client.py",
+      "standard": "naming",
+      "reason": "build, MediaFileUpload, Request are third-party imports from Google API libraries. Cannot rename external library symbols."
     }
   ],
   "notes": {

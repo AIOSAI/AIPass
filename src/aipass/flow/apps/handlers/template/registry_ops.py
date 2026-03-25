@@ -360,19 +360,6 @@ def remove_type(dir_name: str) -> bool:
 # Lookup helpers
 # ---------------------------------------------------------------------------
 
-def type_exists(dir_name: str) -> bool:
-    """Check whether a plan type is registered.
-
-    Args:
-        dir_name: The type directory name to check.
-
-    Returns:
-        True if the type exists in the registry.
-    """
-    registry = load_registry()
-    return dir_name in registry["types"]
-
-
 def prefix_exists(prefix: str) -> bool:
     """Check whether any registered type uses *prefix* (case-insensitive).
 

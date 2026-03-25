@@ -1,42 +1,72 @@
-
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.0.0
-# Category: cortex/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
-#
-# CODE STANDARDS:
-#   - Error handling: Use error handler system (apps/handlers/error/)
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for prax tests
+# Version: 2.0.0
+# Created: 2025-11-08
+# Modified: 2026-03-24
 # =============================================
 
-"""Shared pytest fixtures for cortex tests"""
+"""Shared pytest fixtures for prax tests.
+
+Provides infrastructure mocking so test modules can import prax code
+without triggering real logging, file watching, or CLI dependencies.
+"""
+
+import sys
 import pytest
-import shutil
-import tempfile
-from pathlib import Path
-from typing import Generator
+from unittest.mock import MagicMock
 
 
-@pytest.fixture
-def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
-    test_dir = Path(tempfile.mkdtemp())
-    yield test_dir
-    if test_dir.exists():
-        shutil.rmtree(test_dir)
+# =============================================
+# INFRASTRUCTURE MOCKS
+# =============================================
 
+@pytest.fixture(autouse=True)
+def mock_prax_infrastructure(monkeypatch):
+    """Mock heavy prax infrastructure before any prax imports.
 
-@pytest.fixture
-def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
+    Patches sys.modules so that importing prax modules doesn't trigger
+    real logging setup, CLI initialization, or json_handler file I/O.
     """
-    return {
-        "test_key": "test_value",
-        "sample_data": "example"
-    }
+    # Mock prax logger module
+    mock_logger_mod = MagicMock()
+    mock_logger = MagicMock()
+    mock_logger.info = MagicMock()
+    mock_logger.warning = MagicMock()
+    mock_logger.error = MagicMock()
+    mock_logger.debug = MagicMock()
+    mock_logger_mod.system_logger = mock_logger
+    mock_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
+    mock_logger_mod.get_system_logger = MagicMock(return_value=mock_logger)
+    mock_logger_mod.DirectLogger = MagicMock
+    mock_logger_mod.SystemLogger = MagicMock
+
+    # Mock json_handler
+    mock_json_handler = MagicMock()
+    mock_json_handler.log_operation = MagicMock(return_value=True)
+    mock_json_mod = MagicMock()
+    mock_json_mod.json_handler = mock_json_handler
+
+    # Mock CLI modules
+    mock_cli = MagicMock()
+    mock_console = MagicMock()
+    mock_console.print = MagicMock()
+    mock_cli.console = mock_console
+    mock_cli.header = MagicMock()
+    mock_cli.error = MagicMock()
+    mock_cli.warning = MagicMock()
+
+    # Inject mocks into sys.modules
+    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", mock_logger_mod)
+    monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json", mock_json_mod)
+    monkeypatch.setitem(sys.modules, "aipass.prax.apps.handlers.json.json_handler", mock_json_handler)
+    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", mock_cli)
+
+    # Store mocks for test access
+    class Mocks:
+        logger = mock_logger
+        json_handler = mock_json_handler
+        console = mock_console
+        cli = mock_cli
+
+    return Mocks

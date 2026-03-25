@@ -214,14 +214,3 @@ def is_bypassed(file_path: str, branch_path: str, standard: str,
     return False
 
 
-def get_bypass_file_path(branch_path: str) -> str:
-    """
-    Return the path to bypass.json for display purposes.
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        String path to .seedgo/bypass.json
-    """
-    return str(Path(branch_path) / ".seedgo" / "bypass.json")

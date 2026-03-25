@@ -518,7 +518,10 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
 
 
 def format_summary(results: Dict) -> str:
-    """Format results as a summary string"""
+    """Format results as a summary string.
+
+    Note: Used by tests/test_diagnostics.py — not called in production audit pipeline.
+    """
     if 'error' in results and results['error']:
         return f"Error: {results['error']}"
 

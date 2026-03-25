@@ -10,7 +10,9 @@
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
-# =============================================
+# ============================================= 
+#  
+#@Meta header not seedgo standards
 
 """Shared pytest fixtures for assistant tests"""
 import pytest

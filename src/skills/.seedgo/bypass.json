@@ -4,7 +4,29 @@
     "created": "2026-03-07T23:23:56.244569",
     "description": "Standards bypass configuration for this branch"
   },
-  "bypass": [],
+  "bypass": [
+    {
+      "file": "apps/handlers/loader_handler.py",
+      "standard": "handlers",
+      "lines": [25],
+      "pattern": "from skills.apps.handlers.discovery_handler import parse_frontmatter",
+      "reason": "Same-branch handler utility import — parse_frontmatter is a shared parsing function needed by both discovery and loader handlers"
+    },
+    {
+      "file": "apps/handlers/creator_handler.py",
+      "standard": "handlers",
+      "lines": [24],
+      "pattern": "from skills.apps.handlers.template import copy_template, get_template",
+      "reason": "Same-branch handler utility import — template.py provides copy/get functions used only by creator_handler"
+    },
+    {
+      "file": "apps/handlers/discovery_handler.py",
+      "standard": "naming",
+      "lines": [26],
+      "pattern": "yaml = None",
+      "reason": "Conditional import holder — yaml is assigned via 'import yaml' on success or stays None. Not a constant, just a module reference variable"
+    }
+  ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
     "example": {

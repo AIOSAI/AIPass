@@ -82,26 +82,6 @@ def _has_raise(nodes: list[ast.stmt]) -> bool:
     return False
 
 
-def _is_noop_body(nodes: list[ast.stmt]) -> bool:
-    """
-    Return True if the except body is effectively a no-op: just ``pass``,
-    just ``...`` (Ellipsis), or just a bare string constant (docstring).
-    """
-    if len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if isinstance(node, ast.Pass):
-        return True
-    # Ellipsis literal: ...
-    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
-        if node.value.value is ...:
-            return True
-        # Bare string constant (docstring-style)
-        if isinstance(node.value.value, str):
-            return True
-    return False
-
-
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     Check a Python file for silent exception catches.

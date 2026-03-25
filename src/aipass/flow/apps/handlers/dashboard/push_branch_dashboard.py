@@ -145,7 +145,7 @@ def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
             "memory_bank": {"managed_by": "memory_bank", "vectors_stored": 0, "notes": {}, "last_updated": ""},
             "devpulse": {"managed_by": "devpulse", "summary": {}, "last_updated": ""},
-            "commons_activity": {"managed_by": "the_commons", "mentions": 0, "last_updated": ""}
+            "commons_activity": {"managed_by": "commons", "mentions": 0, "last_updated": ""}
         }
     }
 

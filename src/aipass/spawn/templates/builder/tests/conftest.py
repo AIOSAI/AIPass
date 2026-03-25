@@ -4,7 +4,7 @@
 # Name: tests/conftest.py
 # Date: 2025-11-08
 # Version: 1.0.0
-# Category: cortex/tests
+# Category: spawn/tests
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -13,7 +13,7 @@
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 
-"""Shared pytest fixtures for cortex tests"""
+"""Shared pytest fixtures for spawn tests"""
 import pytest
 import shutil
 import tempfile

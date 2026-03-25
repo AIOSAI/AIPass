@@ -117,7 +117,6 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
                 return True
         except (json.JSONDecodeError, OSError):
             logger.warning(f"[json_handler] Corrupt or unreadable JSON file: {json_path}")
-            pass
 
     template = _get_default(json_type, module_name)
 

@@ -46,9 +46,8 @@ def find_repo_root() -> Path:
         )
         if result.returncode == 0 and result.stdout.strip():
             return Path(result.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
-        logger.warning("find_repo_root: git rev-parse fallback failed, using CWD")
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("find_repo_root: git rev-parse fallback failed, using CWD: %s", exc)
 
     return cwd
 
@@ -177,9 +176,8 @@ def check_lock_status() -> dict:
             start_time = datetime.fromisoformat(started)
             age_seconds = (datetime.now(timezone.utc) - start_time).total_seconds()
             stale = age_seconds > _STALE_THRESHOLD_SECONDS
-        except (ValueError, TypeError):
-            logger.warning("check_lock_status: could not parse lock start time: %s", started)
-            pass
+        except (ValueError, TypeError) as exc:
+            logger.warning("check_lock_status: could not parse lock start time '%s': %s", started, exc)
 
     # Check if PID is still alive (orphan detection)
     orphaned = False
@@ -189,10 +187,9 @@ def check_lock_status() -> dict:
         except ProcessLookupError:
             logger.info("check_lock_status: PID %d not found — lock is orphaned", pid)
             orphaned = True
-        except PermissionError:
+        except PermissionError as exc:
             # Process exists but we can't signal it — not orphaned
-            logger.warning("check_lock_status: PID %d exists but permission denied for signal check", pid)
-            pass
+            logger.warning("check_lock_status: PID %d exists but permission denied for signal check: %s", pid, exc)
 
     status = "active"
     if orphaned:
