@@ -1,6 +1,8 @@
 {
   "permissions": {
-    "allow": [],
+    "allow": [
+      "Bash(gh pr create*)"
+    ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git push -f *)",
@@ -13,7 +15,6 @@
       "Bash(git checkout -b*)",
       "Bash(git commit*)",
       "Bash(git push*)",
-      "Bash(gh pr create*)",
       "Bash(gh pr close*)"
     ],
     "ask": []
