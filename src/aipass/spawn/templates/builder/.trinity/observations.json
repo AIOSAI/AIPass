@@ -1,0 +1,36 @@
+{
+  "document_metadata": {
+    "document_type": "collaboration_patterns",
+    "document_name": "{{BRANCHNAME}}.OBSERVATIONS",
+    "version": "1.0.0",
+    "schema_version": "1.0.0",
+    "created": "{{DATE}}",
+    "last_updated": "{{DATE}}",
+    "managed_by": "{{BRANCHNAME}}",
+    "tags": [
+      "collaboration",
+      "patterns",
+      "{{BRANCHNAME}}"
+    ],
+    "limits": {
+      "max_lines": 600,
+      "note": "Auto-rollover when max_lines exceeded"
+    },
+    "status": {
+      "health": "healthy",
+      "current_lines": 0,
+      "last_health_check": "{{DATE}}"
+    }
+  },
+  "guidelines": {
+    "purpose": "Capture collaboration patterns and experiential insights over time",
+    "chronological_order": "Newest entries at TOP, oldest at BOTTOM - NEVER reorder"
+  },
+  "observations": [
+    {
+      "date": "{{DATE}}",
+      "pattern": "Branch initialized. Ready to begin capturing collaboration patterns.",
+      "source": "initialization"
+    }
+  ]
+}
