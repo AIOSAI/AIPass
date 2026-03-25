@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Bash(git reset*)",
+      "Bash(git rebase*)",
+      "Bash(git merge*)",
+      "Bash(git config*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git checkout -- *)",
+      "Bash(git checkout .*)",
+      "Bash(git restore --staged*)",
+      "Bash(git restore .*)",
+      "Bash(git clean*)",
+      "Bash(git branch -D*)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(rm -rf*)",
+      "Bash(rm -r *)",
+      "Bash(git checkout -b*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git add*)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr close*)"
+    ],
+    "ask": []
+  },
+  "enabledMcpjsonServers": [],
+  "prefersReducedMotion": true
+}
