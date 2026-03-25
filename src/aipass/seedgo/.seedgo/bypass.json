@@ -37,25 +37,33 @@
     {
       "file": "apps/handlers/__init__.py",
       "standard": "handlers",
-      "lines": [101],
+      "lines": [
+        101
+      ],
       "reason": "Line 101 is inside an f-string error message showing the correct import pattern to users. Not an actual module import. False positive from text-matching checker."
     },
     {
       "file": "apps/handlers/audit/branch_audit.py",
       "standard": "handlers",
-      "lines": [14],
+      "lines": [
+        14
+      ],
       "reason": "Same-branch cross-handler import (allowed per architecture standard). Audit handler imports bypass/ignore_handler for file filtering during audits."
     },
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "handlers",
-      "lines": [22],
+      "lines": [
+        22
+      ],
       "reason": "Same-branch cross-handler import (allowed per architecture standard). Architecture checker imports bypass/ignore_handler for template ignore patterns."
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
       "standard": "handlers",
-      "lines": [32],
+      "lines": [
+        32
+      ],
       "reason": "Same-branch cross-handler import (allowed per architecture standard). Diagnostics handler imports bypass/ignore_handler for audit ignore patterns."
     },
     {
@@ -203,12 +211,12 @@
     "example": {
       "file": "apps/modules/logger.py",
       "standard": "cli",
+      "reason": "Circular dependency - logger cannot import CLI",
       "lines": [
         146,
         177
       ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
+      "pattern": "if __name__ == '__main__'"
     },
     "fields": {
       "file": "Relative path from branch root (required)",

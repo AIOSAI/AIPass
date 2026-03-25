@@ -2,14 +2,21 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
-    "last_updated": "2026-03-24",
-    "description": "Standards bypass configuration for prax branch"
+    "description": "Standards bypass configuration for prax branch",
+    "last_updated": "2026-03-24"
   },
   "bypass": [
     {
       "file": "apps/modules/logger.py",
       "standard": "cli",
-      "lines": [149, 180, 190, 199, 210, 231],
+      "lines": [
+        149,
+        180,
+        190,
+        199,
+        210,
+        231
+      ],
       "pattern": "print(",
       "reason": "Bootstrap/lifecycle logging - print() is used before the logging system is initialized and during shutdown. Logger cannot use itself for initialization messages (circular dependency)."
     },
@@ -25,7 +32,6 @@
       "pattern": "console.print(",
       "reason": "Display handler for file change reporting. reporter.py formats and renders file change events to terminal using Rich markup. console.print() is its designated purpose."
     },
-
     {
       "file": "apps/handlers/logging/log_watchdog.py",
       "standard": "error_handling",
@@ -92,7 +98,6 @@
       "pattern": "logging.getLogger(",
       "reason": "Prax import chain — imported by discovery/watcher.py which is in logger.py's dependency graph. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
     },
-
     {
       "file": "apps/handlers/config/load.py",
       "standard": "log_visibility",
@@ -135,7 +140,6 @@
       "pattern": "logging.getLogger(",
       "reason": "Prax import chain — imported via discovery/watcher.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
     },
-
     {
       "file": "apps/handlers/discovery/scanner.py",
       "standard": "handlers",
@@ -252,26 +256,22 @@
       "standard": "handlers",
       "reason": "Architectural — imports PRAX_JSON_DIR from config.load (shared infrastructure). Uses module_name parameter for explicit filter context from callers."
     },
-
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "json_structure",
       "reason": "json_handler.py IS the JSON template management system for prax. load_template() and json_templates/ are its core functionality, not a violation of the template-free standard. This file provides the template infrastructure that other files consume."
     },
-
     {
       "file": "apps/modules/monitor.py",
       "standard": "modules",
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery — routing through json_handler would add unnecessary dependency for a simple registry read."
     },
-
     {
       "file": "apps/handlers/dashboard/agent_status_writer.py",
       "standard": "debug_print",
       "pattern": "print(ok)",
       "reason": "False positive — print(ok) is inside a subprocess script string passed to python -c, not a bare print() call in this module's execution context."
     },
-
     {
       "file": "apps/modules/logger.py",
       "standard": "imports",
@@ -287,7 +287,6 @@
       "standard": "imports",
       "reason": "False positive — stdlib imports (lines 49-55) are correctly before aipass imports (lines 58+). Checker misidentifies docstring content as import lines."
     },
-
     {
       "file": "apps/modules/dashboard.py",
       "standard": "documentation",
@@ -313,7 +312,6 @@
       "standard": "documentation",
       "reason": "False positive — multiline function signature causes docstring checker to miss existing docstring."
     },
-
     {
       "file": "apps/modules/dashboard.py",
       "standard": "naming",
@@ -364,7 +362,6 @@
       "standard": "naming",
       "reason": "False positive — _terminal_output_enabled and _terminal_module_available are mutable flags set conditionally, not constants."
     },
-
     {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "unused_function",
@@ -390,7 +387,6 @@
       "standard": "unused_function",
       "reason": "format() is a logging.Formatter.format() override — called by the Python logging framework when formatting log records, not by name in branch code."
     },
-
     {
       "file": "apps/",
       "standard": "architecture",
@@ -399,6 +395,11 @@
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, error_handling, log_visibility, handlers, etc. (required)",

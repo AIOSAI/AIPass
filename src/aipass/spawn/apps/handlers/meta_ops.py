@@ -188,6 +188,7 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
     """
     branch_dir = Path(branch_dir)
     branch_name = branch_dir.name
+    branch_lower = branch_name.lower().replace("-", "_")
 
     # Build reverse lookups from template registry
     # path -> (file_id, file_info) for matching by path
@@ -198,6 +199,11 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
     for file_id, file_info in template_registry.get("files", {}).items():
         path = file_info.get("path", file_info.get("current_name", ""))
         template_path_to_id[path] = (file_id, file_info)
+
+        # Also index the placeholder-resolved path so branch files match
+        if "{{BRANCH}}" in path:
+            resolved_path = path.replace("{{BRANCH}}", branch_lower)
+            template_path_to_id[resolved_path] = (file_id, file_info)
 
         content_hash = file_info.get("content_hash", "")
         # Don't index empty-file hashes (too many collisions)
@@ -210,59 +216,103 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
         path = dir_info.get("path", dir_info.get("current_name", ""))
         template_dir_path_to_id[path] = (dir_id, dir_info)
 
+        # Also index the placeholder-resolved path
+        if "{{BRANCH}}" in path:
+            resolved_path = path.replace("{{BRANCH}}", branch_lower)
+            template_dir_path_to_id[resolved_path] = (dir_id, dir_info)
+
     # Scan the branch filesystem and build tracking
+    # Two-pass approach: path matching first (pass 1), then hash matching (pass 2).
+    # This prevents hash collisions from stealing IDs that should be path-matched.
     file_tracking: dict[str, dict[str, Any]] = {}
     directory_tracking: dict[str, dict[str, str]] = {}
     matched_file_ids: set[str] = set()
     matched_dir_ids: set[str] = set()
 
-    for item in sorted(branch_dir.rglob("*")):
-        rel = str(item.relative_to(branch_dir))
+    # Collect branch items using targeted scan (only template-known paths)
+    # instead of rglob("*") which is catastrophically slow on large branches
+    # like backup (22k+ files, 388GB).
+    branch_files: list[tuple[Path, str]] = []  # (item, rel_path)
+    branch_dirs: list[tuple[Path, str]] = []
 
-        # Skip .spawn internals and __pycache__
-        if _BRANCH_META_DIR in Path(rel).parts or "__pycache__" in Path(rel).parts:
+    # Build set of directories to scan from template registry
+    _scan_dirs: set[str] = {""}  # "" = root directory
+    for _dir_info in template_registry.get("directories", {}).values():
+        _d_path = _dir_info.get("path", _dir_info.get("current_name", ""))
+        if _d_path:
+            resolved = _d_path.replace("{{BRANCH}}", branch_lower)
+            _scan_dirs.add(resolved)
+
+    # Also add parent dirs of all template files
+    for _file_info in template_registry.get("files", {}).values():
+        _f_path = _file_info.get("path", _file_info.get("current_name", ""))
+        if _f_path:
+            resolved = _f_path.replace("{{BRANCH}}", branch_lower)
+            parent = str(Path(resolved).parent)
+            if parent != ".":
+                _scan_dirs.add(parent)
+
+    # Scan only template-relevant directories (shallow iterdir, not rglob)
+    for scan_rel in sorted(_scan_dirs):
+        scan_path = branch_dir / scan_rel if scan_rel else branch_dir
+        if not scan_path.is_dir():
             continue
 
-        if item.is_dir():
-            # Try to match directory by path
-            if rel in template_dir_path_to_id:
-                dir_id, dir_info = template_dir_path_to_id[rel]
-                if dir_id not in matched_dir_ids:
-                    directory_tracking[dir_id] = {
-                        "template_name": dir_info.get("path", dir_info.get("current_name", "")),
-                        "current_name": item.name,
-                        "current_path": rel,
-                    }
-                    matched_dir_ids.add(dir_id)
+        for item in sorted(scan_path.iterdir()):
+            rel = str(item.relative_to(branch_dir))
 
-        elif item.is_file():
-            content_hash = compute_file_hash(item)
+            # Skip .spawn internals and __pycache__
+            if _BRANCH_META_DIR in Path(rel).parts or "__pycache__" in Path(rel).parts:
+                continue
 
-            # Try to match by path first
-            matched = False
-            if rel in template_path_to_id:
-                file_id, file_info = template_path_to_id[rel]
-                if file_id not in matched_file_ids:
-                    file_tracking[file_id] = {
-                        "template_name": file_info.get("path", file_info.get("current_name", "")),
-                        "current_name": item.name,
-                        "current_path": rel,
-                        "content_hash": content_hash,
-                    }
-                    matched_file_ids.add(file_id)
-                    matched = True
+            if item.is_dir():
+                branch_dirs.append((item, rel))
+            elif item.is_file():
+                branch_files.append((item, rel))
 
-            # Fall back to hash matching if path didn't match
-            if not matched and content_hash and content_hash in template_hash_to_id:
-                file_id, file_info = template_hash_to_id[content_hash]
-                if file_id not in matched_file_ids:
-                    file_tracking[file_id] = {
-                        "template_name": file_info.get("path", file_info.get("current_name", "")),
-                        "current_name": item.name,
-                        "current_path": rel,
-                        "content_hash": content_hash,
-                    }
-                    matched_file_ids.add(file_id)
+    # --- Pass 1: PATH MATCHING (directories) ---
+    for item, rel in branch_dirs:
+        if rel in template_dir_path_to_id:
+            dir_id, dir_info = template_dir_path_to_id[rel]
+            if dir_id not in matched_dir_ids:
+                directory_tracking[dir_id] = {
+                    "template_name": dir_info.get("path", dir_info.get("current_name", "")),
+                    "current_name": item.name,
+                    "current_path": rel,
+                }
+                matched_dir_ids.add(dir_id)
+
+    # --- Pass 1: PATH MATCHING (files) ---
+    for item, rel in branch_files:
+        if rel in template_path_to_id:
+            file_id, file_info = template_path_to_id[rel]
+            if file_id not in matched_file_ids:
+                content_hash = compute_file_hash(item)
+                file_tracking[file_id] = {
+                    "template_name": file_info.get("path", file_info.get("current_name", "")),
+                    "current_name": item.name,
+                    "current_path": rel,
+                    "content_hash": content_hash,
+                }
+                matched_file_ids.add(file_id)
+
+    # --- Pass 2: HASH MATCHING (files not matched by path) ---
+    for item, rel in branch_files:
+        # Skip if already matched in pass 1
+        if any(ft.get("current_path") == rel for ft in file_tracking.values()):
+            continue
+
+        content_hash = compute_file_hash(item)
+        if content_hash and content_hash in template_hash_to_id:
+            file_id, file_info = template_hash_to_id[content_hash]
+            if file_id not in matched_file_ids:
+                file_tracking[file_id] = {
+                    "template_name": file_info.get("path", file_info.get("current_name", "")),
+                    "current_name": item.name,
+                    "current_path": rel,
+                    "content_hash": content_hash,
+                }
+                matched_file_ids.add(file_id)
 
     # Build the metadata structure
     template_version = template_registry.get("metadata", {}).get("version", "1.0.0")

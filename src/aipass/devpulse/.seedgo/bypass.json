@@ -1,1 +1,23 @@
-{}
+{
+  "metadata": {
+    "version": "1.0.0",
+    "created": "2026-03-25",
+    "description": "Standards bypass configuration for this branch"
+  },
+  "bypass": [],
+  "notes": {
+    "usage": "Add entries to bypass specific seedgo standard violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
+    "fields": {
+      "file": "Relative path to the file",
+      "standard": "Which standard to bypass (imports, cli, naming, etc.)",
+      "lines": "Optional array of line numbers",
+      "pattern": "Optional regex pattern to match",
+      "reason": "Why this bypass exists"
+    }
+  }
+}

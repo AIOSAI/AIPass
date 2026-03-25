@@ -2,8 +2,8 @@
   "metadata": {
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
-    "last_updated": "2026-03-24",
-    "description": "Standards bypass configuration for this branch"
+    "description": "Standards bypass configuration for this branch",
+    "last_updated": "2026-03-24"
   },
   "bypass": [
     {
@@ -71,7 +71,6 @@
       "standard": "modules",
       "reason": "process_plans_command is a thin CLI wrapper that delegates to plans_processor handler. Orchestration, not implementation."
     },
-
     {
       "file": "apps/handlers/templates/pusher.py",
       "standard": "handlers",
@@ -122,19 +121,16 @@
       "standard": "handlers",
       "reason": "Architectural: imports storage.chroma for ChromaDB client access during vector search."
     },
-
     {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "error_handling",
       "reason": "stdlib logging.getLogger() used at import-time before prax is available. Immediately replaced by get_system_logger() 3 lines below."
     },
-
     {
       "file": "apps/handlers/dashboard_push.py",
       "standard": "debug_print",
       "reason": "print(ok) is inside a subprocess script string — IPC output to stdout, not debug output."
     },
-
     {
       "file": "apps/handlers/learnings/manager.py",
       "standard": "dead_code",
@@ -150,7 +146,6 @@
       "standard": "dead_code",
       "reason": "Legacy search handler — query_executor.py is the active path. Retained for direct-import fallback."
     },
-
     {
       "file": "apps/modules/symbolic.py",
       "standard": "naming",
@@ -226,7 +221,6 @@
       "standard": "naming",
       "reason": "Module-level variables (SESSION_STATE, DEFAULT_CONFIG) are mutable state and config dicts."
     },
-
     {
       "file": "apps/modules/symbolic.py",
       "standard": "documentation",
@@ -277,7 +271,6 @@
       "standard": "documentation",
       "reason": "Multiline function signatures cause false-positive missing docstring detection."
     },
-
     {
       "file": "apps/modules/symbolic.py",
       "standard": "architecture",
@@ -298,7 +291,6 @@
       "standard": "architecture",
       "reason": "724 lines — symbolic storage with ChromaDB operations. Splitting would fragment cohesive vector storage logic."
     },
-
     {
       "file": "apps/handlers/rollover/extractor.py",
       "standard": "naming",
@@ -364,13 +356,11 @@
       "standard": "naming",
       "reason": "Module-level mutable state, not constants."
     },
-
     {
       "file": "apps/handlers/templates/spawn_pusher.py",
       "standard": "architecture",
       "reason": "Memory doesn't use all builder templates — branch has custom structure."
     },
-
     {
       "file": "handlers/learnings/manager.py",
       "standard": "dead_code",
@@ -386,7 +376,6 @@
       "standard": "dead_code",
       "reason": "Legacy search handler — query_executor.py is the active path. Retained for direct-import fallback."
     },
-
     {
       "file": "apps/handlers/learnings/manager.py",
       "standard": "architecture",
@@ -402,7 +391,6 @@
       "standard": "architecture",
       "reason": "Legacy search handler — query_executor.py is active path. Retained for fallback."
     },
-
     {
       "file": "apps/handlers/intake/pool_processor.py",
       "standard": "unused_function",
@@ -438,7 +426,6 @@
       "standard": "unused_function",
       "reason": "is_plan_vectorized is a public API function for external callers."
     },
-
     {
       "file": "apps/modules/templates.py",
       "standard": "deep_nesting",
@@ -532,6 +519,11 @@
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, imports, naming, etc. (required)",

@@ -14,7 +14,9 @@
     {
       "file": "apps/modules/core.py",
       "standard": "silent_catch",
-      "lines": [160],
+      "lines": [
+        160
+      ],
       "pattern": "except Exception: pass",
       "reason": "Intentional: handler callback runs inside event bus fire(). Logging here would cause infinite recursion (logger fires events via trigger)."
     },
@@ -75,105 +77,134 @@
     {
       "file": "apps/handlers/log_watcher.py",
       "standard": "handlers",
-      "lines": [75],
+      "lines": [
+        75
+      ],
       "reason": "log_watcher imports error_registry.report() for Medic v2 dedup. This is a deliberate handler-to-handler dependency — the registry IS the dedup backend."
     },
     {
       "file": "apps/handlers/error_reporter.py",
       "standard": "handlers",
-      "lines": [25, 45],
+      "lines": [
+        25,
+        45
+      ],
       "reason": "error_reporter imports error_registry for tracking and ai_mail for email delivery. These are its core dependencies — it's the dispatch endpoint of the error pipeline."
     },
     {
       "file": "apps/handlers/watchers/log_watcher.py",
       "standard": "handlers",
-      "lines": [242],
+      "lines": [
+        242
+      ],
       "reason": "Watcher imports trigger module to fire events. Handler→module import needed because watcher operates as standalone watchdog callback."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "handlers",
-      "lines": [76],
+      "lines": [
+        76
+      ],
       "reason": "error_detected handler imports error_registry to query error details during dispatch. Core integration point for the error pipeline."
     },
     {
       "file": "apps/handlers/events/startup.py",
       "standard": "handlers",
-      "lines": [371],
+      "lines": [
+        371
+      ],
       "reason": "Startup handler imports memory rollover module to trigger memory checks on startup events. Cross-branch integration via modules layer public API."
     },
-
     {
       "file": "apps/config.py",
       "standard": "testing",
-      "lines": [31],
+      "lines": [
+        31
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/modules/core.py",
       "standard": "testing",
-      "lines": [160],
+      "lines": [
+        160
+      ],
       "pattern": "except Exception: pass",
       "reason": "Deferred event queue handler execution — logging would cause infinite recursion (logger fires events via trigger). Same as silent_catch bypass."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "testing",
-      "lines": [24],
+      "lines": [
+        24
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/plan_file.py",
       "standard": "testing",
-      "lines": [58],
+      "lines": [
+        58
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_error() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/memory_threshold_exceeded.py",
       "standard": "testing",
-      "lines": [46],
+      "lines": [
+        46
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/error_logged.py",
       "standard": "testing",
-      "lines": [48],
+      "lines": [
+        48
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/bulletin_created.py",
       "standard": "testing",
-      "lines": [55],
+      "lines": [
+        55
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "testing",
-      "lines": [54],
+      "lines": [
+        54
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/startup.py",
       "standard": "testing",
-      "lines": [51],
+      "lines": [
+        51
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "testing",
-      "lines": [28],
+      "lines": [
+        28
+      ],
       "pattern": "except Exception: pass",
       "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
     },
-
     {
       "file": "apps/handlers/error_registry.py",
       "standard": "architecture",
@@ -189,32 +220,40 @@
     {
       "file": "apps/handlers/error_reporter.py",
       "standard": "architecture",
-      "lines": [153],
+      "lines": [
+        153
+      ],
       "pattern": "handler importing from parent module",
       "reason": "error_reporter imports trigger bus to fire error_detected events after reporting. Handler must access event bus to complete the error pipeline."
     },
     {
       "file": "apps/handlers/watchers/log_watcher.py",
       "standard": "architecture",
-      "lines": [244],
+      "lines": [
+        244
+      ],
       "pattern": "handler importing from parent module",
       "reason": "Log watcher imports trigger bus to fire error_logged/warning_logged events. Watchdog callback must access event bus to bridge file monitoring to event system."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "architecture",
-      "lines": [153, 243],
+      "lines": [
+        153,
+        243
+      ],
       "pattern": "handler importing from parent module",
       "reason": "error_detected imports error_registry (line 76) and medic_state — core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
     },
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "architecture",
-      "lines": [34],
+      "lines": [
+        34
+      ],
       "pattern": "handler importing from parent module",
       "reason": "Registry handler imports trigger module to wire event handlers via trigger.on(). The wiring function must reference the event bus."
     },
-
     {
       "file": "apps/handlers/events/warning_logged.py",
       "standard": "handlers",
@@ -230,11 +269,12 @@
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "handlers",
-      "lines": [34],
+      "lines": [
+        34
+      ],
       "pattern": "handler imports modules",
       "reason": "Registry wiring function imports trigger module to call trigger.on(). Must access the event bus to register handlers — this IS its purpose."
     },
-
     {
       "file": "apps/handlers/error_registry.py",
       "standard": "naming",
@@ -271,14 +311,12 @@
       "pattern": "local variable naming",
       "reason": "Local variables inside startup handler functions, not module-level constants. Checker false positive on function-scoped assignments."
     },
-
     {
       "file": "apps/config.py",
       "standard": "imports",
       "pattern": "prax logger import",
       "reason": "config.py cannot import prax logger — circular dependency. Uses _log_warning() file-based pattern instead. Comment on line 26 documents this."
     },
-
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "unused_function",
@@ -291,12 +329,12 @@
     "example": {
       "file": "apps/modules/logger.py",
       "standard": "cli",
+      "reason": "Circular dependency - logger cannot import CLI",
       "lines": [
         146,
         177
       ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
+      "pattern": "if __name__ == '__main__'"
     },
     "fields": {
       "file": "Relative path from branch root (required)",

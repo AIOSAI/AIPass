@@ -13,6 +13,7 @@ additions, JSON updates, pruned file archival, and coordinating the full
 update workflow for single and all-branch modes.
 """
 
+import copy
 import json
 import shutil
 from datetime import datetime
@@ -109,6 +110,12 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     branch_meta = load_branch_meta(branch_dir)
     first_time = branch_meta is None
 
+    # Phase 0: Snapshot old tracking BEFORE any metadata generation/sync
+    # This preserves the old template_name values for rename detection
+    old_branch_tracking: dict | None = None
+    if branch_meta is not None:
+        old_branch_tracking = copy.deepcopy(branch_meta.get("file_tracking", {}))
+
     if first_time:
         if trace:
             logger.info(f"[update] No branch_meta found — generating initial metadata (adoption)")
@@ -133,7 +140,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     # ------------------------------------------------------------------
     # 5. Change detection
     # ------------------------------------------------------------------
-    changes = detect_changes(template_registry, branch_meta, branch_dir)
+    changes = detect_changes(template_registry, branch_meta, branch_dir, old_branch_tracking=old_branch_tracking)
 
     additions = changes.get("additions", [])
     updates_list = changes.get("updates", [])
@@ -313,15 +320,24 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
 def _read_citizen_class(branch_dir: Path) -> str:
     """Read citizen_class from a branch's passport.json.
 
-    Falls back to "builder" if passport doesn't exist or doesn't have
-    the citizen_class field (backward compatibility for pre-class branches).
+    Falls back to "builder" if passport doesn't exist, doesn't have
+    the citizen_class field, or has an unknown class (e.g. "manager").
     """
+    from aipass.spawn.apps.handlers.class_registry import validate_class
+
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
         return "builder"
     try:
         data = json.loads(passport_path.read_text(encoding="utf-8"))
-        return data.get("identity", {}).get("citizen_class", "builder")
+        citizen_class = data.get("identity", {}).get("citizen_class", "builder")
+        if not validate_class(citizen_class):
+            logger.warning(
+                f"[update] Unknown citizen_class '{citizen_class}' in {passport_path}, "
+                "falling back to 'builder'"
+            )
+            return "builder"
+        return citizen_class
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"[update] Failed to read citizen_class from passport {passport_path}: {e}")
         return "builder"

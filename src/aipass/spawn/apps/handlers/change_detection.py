@@ -25,6 +25,7 @@ def detect_changes(
     template_registry: dict,
     branch_meta: dict,
     branch_dir: Path,
+    old_branch_tracking: dict | None = None,
 ) -> dict:
     """Detect changes between template registry and branch metadata.
 
@@ -37,6 +38,9 @@ def detect_changes(
         template_registry: Template registry dict (from .template_registry.json).
         branch_meta: Branch metadata dict (from .branch_meta.json).
         branch_dir: Path to the branch directory (for existence checks).
+        old_branch_tracking: Snapshot of file_tracking from BEFORE metadata
+            regeneration (Phase 0 pattern). Used for accurate rename detection.
+            When None, falls back to current branch_meta tracking.
 
     Returns:
         Dict with change categories::
@@ -125,16 +129,29 @@ def detect_changes(
         branch_path = b_info.get("current_path", "")
 
         # Check for RENAME: same ID but path changed in template
-        # Compare the template-side path against the template_name stored in branch meta
-        branch_template_name = b_info.get("template_name", "")
-        if branch_template_name and template_path != branch_template_name:
-            renames.append({
-                "file_id": file_id,
-                "template_path": template_path,
-                "branch_path": branch_path,
-                "old_name": branch_template_name,
-                "new_name": template_path,
-            })
+        # Use old tracking snapshot for comparison if available (Phase 0 pattern)
+        if old_branch_tracking and file_id in old_branch_tracking:
+            old_info = old_branch_tracking[file_id]
+            old_template_name = old_info.get("template_name", "")
+            if old_template_name and template_path != old_template_name:
+                renames.append({
+                    "file_id": file_id,
+                    "template_path": template_path,
+                    "branch_path": branch_path,
+                    "old_name": old_template_name,
+                    "new_name": template_path,
+                })
+        else:
+            # Fallback: compare against current branch meta
+            branch_template_name = b_info.get("template_name", "")
+            if branch_template_name and template_path != branch_template_name:
+                renames.append({
+                    "file_id": file_id,
+                    "template_path": template_path,
+                    "branch_path": branch_path,
+                    "old_name": branch_template_name,
+                    "new_name": template_path,
+                })
 
         # Check for UPDATE: same ID, same location, content hash changed
         # Only applies to files (directories don't have content hashes)

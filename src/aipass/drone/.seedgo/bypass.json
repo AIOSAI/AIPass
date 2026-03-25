@@ -8,7 +8,10 @@
     {
       "file": "apps/drone.py",
       "standard": "cli",
-      "lines": [166, 168],
+      "lines": [
+        166,
+        168
+      ],
       "reason": "Raw passthrough of module subprocess stdout/stderr — console.print() breaks routed output"
     },
     {
@@ -29,13 +32,17 @@
     {
       "file": "apps/handlers/discovery_handler.py",
       "standard": "handlers",
-      "lines": [190],
+      "lines": [
+        190
+      ],
       "reason": "Discovery handler needs registry_handler.load_registry() to resolve branch paths for help lookups. Justified cross-handler dependency — discovery is the only consumer."
     },
     {
       "file": "apps/handlers/scanning/scanner.py",
       "standard": "handlers",
-      "lines": [29],
+      "lines": [
+        29
+      ],
       "reason": "Scanner needs discovery_handler's get_entry_point() and parse_help_for_commands() to discover commands from branch help output. Justified — scanner's core function depends on discovery's parsing."
     },
     {
@@ -120,6 +127,11 @@
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",
+    "example": {
+      "file": "apps/example.py",
+      "standard": "imports",
+      "reason": "Legacy import required for compatibility"
+    },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, imports, naming, etc. (required)",

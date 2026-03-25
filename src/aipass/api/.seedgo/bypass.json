@@ -86,12 +86,12 @@
     "example": {
       "file": "apps/modules/logger.py",
       "standard": "cli",
+      "reason": "Circular dependency - logger cannot import CLI",
       "lines": [
         146,
         177
       ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
+      "pattern": "if __name__ == '__main__'"
     },
     "fields": {
       "file": "Relative path from branch root (required)",
