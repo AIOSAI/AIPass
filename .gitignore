@@ -52,6 +52,32 @@ docs.local/
 # Disabled files (AIPass convention: rename with (disabled) instead of delete)
 *(disabled)
 
+# Spawn template exceptions (template files must be tracked for public repo)
+!src/aipass/spawn/templates/builder/.trinity/
+!src/aipass/spawn/templates/builder/.trinity/**
+!src/aipass/spawn/templates/builder/.ai_mail.local/
+!src/aipass/spawn/templates/builder/.ai_mail.local/**
+!src/aipass/spawn/templates/builder/.archive/
+!src/aipass/spawn/templates/builder/.archive/**
+!src/aipass/spawn/templates/builder/.spawn/
+!src/aipass/spawn/templates/builder/.spawn/**
+!src/aipass/spawn/templates/builder/.claude/
+!src/aipass/spawn/templates/builder/.claude/**
+!src/aipass/spawn/templates/builder/*_json/
+!src/aipass/spawn/templates/builder/*_json/**
+!src/aipass/spawn/templates/builder/logs/
+!src/aipass/spawn/templates/builder/logs/**
+!src/aipass/spawn/templates/builder/artifacts/
+!src/aipass/spawn/templates/builder/artifacts/**
+!src/aipass/spawn/templates/builder/dropbox/
+!src/aipass/spawn/templates/builder/dropbox/**
+!src/aipass/spawn/templates/builder/tools/
+!src/aipass/spawn/templates/builder/tools/**
+!src/aipass/spawn/templates/builder/docs.local/
+!src/aipass/spawn/templates/builder/docs.local/**
+!src/aipass/spawn/templates/builder/DASHBOARD.local.json
+!src/aipass/spawn/templates/builder/STATUS.local.md
+
 # OS
 .DS_Store
 

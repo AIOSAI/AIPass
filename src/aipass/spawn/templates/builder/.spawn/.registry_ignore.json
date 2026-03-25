@@ -1,0 +1,43 @@
+{
+  "metadata": {
+    "version": "1.1.0",
+    "description": "Files and patterns to exclude when updating branches from template",
+    "last_updated": "2025-11-09"
+  },
+  "ignore_files": [
+    ".template_registry.json",
+    ".registry_ignore.json"
+  ],
+  "ignore_patterns": [
+    "__pycache__",
+    "*.pyc",
+    "#@comments.txt",
+    ".backup_*"
+  ],
+  "notes": {
+    "how_it_works": "Two types of exclusions during branch updates:",
+    "ignore_files": {
+      "description": "Exact filename matches (no wildcards)",
+      "purpose": "Template-internal management files that branches don't need",
+      "examples": [
+        ".template_registry.json (template's file tracking list)",
+        ".registry_ignore.json (this config file)"
+      ]
+    },
+    "ignore_patterns": {
+      "description": "Glob patterns - matches filenames AND directory names",
+      "purpose": "Exclude generated files, caches, and user content markers",
+      "examples": [
+        "__pycache__ (Python cache directories)",
+        "*.pyc (Python compiled bytecode files)",
+        "#@comments.txt (user comment files)",
+        ".backup_* (timestamped backup files like .backup_20251109, NOT .backup directory)"
+      ],
+      "how_matching_works": [
+        "Step 1: Check if filename matches pattern (e.g., file.pyc matches *.pyc)",
+        "Step 2: Check if any parent directory matches (e.g., files inside __pycache__/ dir)"
+      ]
+    },
+    "what_gets_ignored": "These files never copy to branches during updates - they stay template-only"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "_warning": "AUTO-GENERATED FILE - DO NOT MANUALLY EDIT. This file is 100% automated and will be overwritten. Services update their own sections.",
+  "branch": "{{BRANCHNAME}}",
+  "last_updated": "{{DATE}}",
+  "quick_status": {
+    "new_mail": 0,
+    "opened_mail": 0,
+    "active_plans": 0,
+    "commons_mentions": 0,
+    "action_required": false,
+    "summary": ""
+  },
+  "sections": {
+    "ai_mail": {
+      "managed_by": "ai_mail",
+      "new": 0,
+      "opened": 0,
+      "total": 0,
+      "oldest_unread_age": null,
+      "last_dispatch_received": null,
+      "last_updated": "{{DATE}}"
+    },
+    "flow": {
+      "managed_by": "flow",
+      "active_plans": 0,
+      "recently_closed": [],
+      "last_updated": "{{DATE}}"
+    },
+    "memory_bank": {
+      "managed_by": "memory_bank",
+      "vectors_stored": 0,
+      "notes": {},
+      "last_updated": "{{DATE}}"
+    },
+    "devpulse": {
+      "managed_by": "devpulse",
+      "summary": {
+        "issues": 0,
+        "todos": 0
+      },
+      "dplan_counts": {},
+      "recent_activity": "",
+      "last_updated": "{{DATE}}"
+    },
+    "commons_activity": {
+      "managed_by": "the_commons",
+      "new_posts_since_last_visit": 0,
+      "new_comments_since_last_visit": 0,
+      "mentions": 0,
+      "trending": "None",
+      "last_checked": null,
+      "last_updated": "{{DATE}}"
+    },
+    "agent_status": {
+      "managed_by": "prax",
+      "active_agents": [],
+      "agent_count": 0,
+      "stale_agents": [],
+      "last_updated": "{{DATE}}"
+    }
+  }
+}

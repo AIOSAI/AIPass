@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass import ignore_handler
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
 def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     """Auto-discover all *_check.py modules from a pack directory.
@@ -155,10 +156,17 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
         deprecated.append({"type": "directory", "old": "DOCUMENTS/", "new": "docs/",
                            "path": str(branch_path / "DOCUMENTS"), "message": "Rename DOCUMENTS/ to docs/"})
 
+    # Custom function coverage scan (informational, not scored)
+    try:
+        test_map_result = scan_branch(str(branch_path))
+    except Exception:
+        test_map_result = None
+
     diag_result = results.get("diagnostics", {})
     output = {"branch": branch, "results": results, "scores": scores, "average": avg,
               "deprecated_patterns": deprecated, "files_checked": len(all_files),
-              "type_errors": diag_result.get("total_errors", 0), "type_error_files": diag_result.get("results", [])}
+              "type_errors": diag_result.get("total_errors", 0), "type_error_files": diag_result.get("results", []),
+              "test_map": test_map_result}
     for name in checkers:
         output[f"{name}_violations"] = all_violations.get(name, [])
     return output

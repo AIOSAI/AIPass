@@ -157,6 +157,20 @@ def _render_type_errors(audit_result: dict, console_obj) -> None:
         console_obj.print(f"  [green]✓[/green] No type errors")
 
 
+def _render_test_map(audit_result: dict, console_obj) -> None:
+    """Show custom function test coverage summary (informational, not scored)."""
+    test_map = audit_result.get('test_map')
+    if not test_map:
+        return
+    total = test_map.get('total_functions', 0)
+    if total == 0:
+        return
+    tested = test_map.get('tested_functions', 0)
+    branch_name = test_map.get('branch', '')
+    console_obj.print(f"  [dim]Custom Test Opportunities: {total} public functions, {tested} tested."
+                      f" Run: drone @seedgo test_map @{branch_name}[/dim]")
+
+
 def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
     """Special renderer for deprecated patterns — different structure."""
     deprecated_patterns = audit_result.get('deprecated_patterns', [])
@@ -228,10 +242,8 @@ def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | N
             if failed_checks:
                 formatted = _format_standard_name(standard_name)
                 console.print(f"    [red]└─ {formatted} issues:[/red]")
-                for check in failed_checks[:5]:
+                for check in failed_checks:
                     console.print(f"       [dim]• {check.get('message', '')}[/dim]")
-                if len(failed_checks) > 5:
-                    console.print(f"       [dim]... and {len(failed_checks) - 5} more[/dim]")
                 rendered_standards.add(standard_name)
 
     # Catch any violation lists not represented in scores (defensive)
@@ -247,6 +259,9 @@ def print_branch_summary(audit_result: Dict, system_averages: Dict[str, int] | N
 
     # Type errors (separate from standards)
     _render_type_errors(audit_result, console)
+
+    # Custom function test coverage (informational)
+    _render_test_map(audit_result, console)
 
     # Deprecated patterns
     _render_deprecated_patterns(audit_result, console)

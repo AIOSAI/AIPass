@@ -1,0 +1,238 @@
+{
+  "metadata": {
+    "description": "Template registry for tracking files",
+    "generated": true
+  },
+  "files": {
+    "f001": {
+      "path": ".ai_mail.local/inbox.json",
+      "name": "inbox.json",
+      "content_hash": "c9702fe2cc21b748",
+      "has_branch_placeholder": false
+    },
+    "f002": {
+      "path": ".ai_mail.local/sent/README.md",
+      "name": "README.md",
+      "content_hash": "49299c242a018d73",
+      "has_branch_placeholder": true
+    },
+    "f003": {
+      "path": ".aipass/aipass_local_prompt.md",
+      "name": "aipass_local_prompt.md",
+      "content_hash": "5f8e2a3859a99906",
+      "has_branch_placeholder": true
+    },
+    "f004": {
+      "path": ".archive/README.md",
+      "name": "README.md",
+      "content_hash": "93d3fcb74f234b1d",
+      "has_branch_placeholder": true
+    },
+    "f005": {
+      "path": ".claude/settings.local.json",
+      "name": "settings.local.json",
+      "content_hash": "eacf065629cd9c03",
+      "has_branch_placeholder": false
+    },
+    "f006": {
+      "path": ".gitignore",
+      "name": ".gitignore",
+      "content_hash": "841dedb922da7ddb",
+      "has_branch_placeholder": false
+    },
+    "f007": {
+      "path": ".seedgo/bypass.json",
+      "name": "bypass.json",
+      "content_hash": "0ac90a35515b35c2",
+      "has_branch_placeholder": true
+    },
+    "f008": {
+      "path": ".trinity/local.json",
+      "name": "local.json",
+      "content_hash": "f4e62d2d12bada2e",
+      "has_branch_placeholder": true
+    },
+    "f009": {
+      "path": ".trinity/observations.json",
+      "name": "observations.json",
+      "content_hash": "25b957960a5939a3",
+      "has_branch_placeholder": true
+    },
+    "f010": {
+      "path": ".trinity/passport.json",
+      "name": "passport.json",
+      "content_hash": "04c2ead2a4284027",
+      "has_branch_placeholder": true
+    },
+    "f011": {
+      "path": "DASHBOARD.local.json",
+      "name": "DASHBOARD.local.json",
+      "content_hash": "88360d943d4bacb6",
+      "has_branch_placeholder": true
+    },
+    "f012": {
+      "path": "README.md",
+      "name": "README.md",
+      "content_hash": "ad99517a50f96ba7",
+      "has_branch_placeholder": true
+    },
+    "f013": {
+      "path": "STATUS.local.md",
+      "name": "STATUS.local.md",
+      "content_hash": "059295ad4d4e62eb",
+      "has_branch_placeholder": true
+    },
+    "f014": {
+      "path": "apps/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "41b011f487af14dc",
+      "has_branch_placeholder": true
+    },
+    "f015": {
+      "path": "apps/handlers/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "e3b0c44298fc1c14",
+      "has_branch_placeholder": false
+    },
+    "f016": {
+      "path": "apps/modules/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "e3b0c44298fc1c14",
+      "has_branch_placeholder": false
+    },
+    "f017": {
+      "path": "apps/plugins/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "e3b0c44298fc1c14",
+      "has_branch_placeholder": false
+    },
+    "f018": {
+      "path": "apps/{{BRANCH}}.py",
+      "name": "{{BRANCH}}.py",
+      "content_hash": "fc71b424c10bb172",
+      "has_branch_placeholder": true
+    },
+    "f019": {
+      "path": "artifacts/birth_certificate.json",
+      "name": "birth_certificate.json",
+      "content_hash": "1ec401f4e397eec7",
+      "has_branch_placeholder": true
+    },
+    "f020": {
+      "path": "docs/README.md",
+      "name": "README.md",
+      "content_hash": "2434da568727499d",
+      "has_branch_placeholder": true
+    },
+    "f021": {
+      "path": "dropbox/README.md",
+      "name": "README.md",
+      "content_hash": "9e1e9b71f93b4cde",
+      "has_branch_placeholder": true
+    },
+    "f022": {
+      "path": "pytest.ini",
+      "name": "pytest.ini",
+      "content_hash": "7b39ba7bca4025c5",
+      "has_branch_placeholder": false
+    },
+    "f023": {
+      "path": "tests/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "881f06bb6574d2f7",
+      "has_branch_placeholder": true
+    },
+    "f024": {
+      "path": "tests/conftest.py",
+      "name": "conftest.py",
+      "content_hash": "df147b2015e4b789",
+      "has_branch_placeholder": false
+    },
+    "f025": {
+      "path": "tools/verify_branch.py",
+      "name": "verify_branch.py",
+      "content_hash": "3a7aa5d9b479fe92",
+      "has_branch_placeholder": false
+    },
+    "f026": {
+      "path": "{{BRANCH}}_json/README.md",
+      "name": "README.md",
+      "content_hash": "e64fa555e7b8e20f",
+      "has_branch_placeholder": true
+    }
+  },
+  "directories": {
+    "d001": {
+      "path": ".ai_mail.local",
+      "name": ".ai_mail.local"
+    },
+    "d002": {
+      "path": ".ai_mail.local/sent",
+      "name": "sent"
+    },
+    "d003": {
+      "path": ".aipass",
+      "name": ".aipass"
+    },
+    "d004": {
+      "path": ".archive",
+      "name": ".archive"
+    },
+    "d005": {
+      "path": ".claude",
+      "name": ".claude"
+    },
+    "d006": {
+      "path": ".seedgo",
+      "name": ".seedgo"
+    },
+    "d007": {
+      "path": ".trinity",
+      "name": ".trinity"
+    },
+    "d008": {
+      "path": "apps",
+      "name": "apps"
+    },
+    "d009": {
+      "path": "apps/handlers",
+      "name": "handlers"
+    },
+    "d010": {
+      "path": "apps/modules",
+      "name": "modules"
+    },
+    "d011": {
+      "path": "apps/plugins",
+      "name": "plugins"
+    },
+    "d012": {
+      "path": "artifacts",
+      "name": "artifacts"
+    },
+    "d013": {
+      "path": "docs",
+      "name": "docs"
+    },
+    "d014": {
+      "path": "dropbox",
+      "name": "dropbox"
+    },
+    "d015": {
+      "path": "templates",
+      "name": "templates"
+    },
+    "d016": {
+      "path": "tests",
+      "name": "tests"
+    },
+    "d017": {
+      "path": "tools",
+      "name": "tools"
+    },
+    "d018": {
+      "path": "{{BRANCH}}_json",
+      "name": "{{BRANCH}}_json"
+    }
+  }
+}

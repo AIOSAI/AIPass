@@ -79,6 +79,15 @@
       "reason": "Checker file for the test_coverage standard — not a test file despite 'test' in name"
     },
     {
+      "file": "test_quality_check.py",
+      "standard": "testing",
+      "reason": "Checker file for the test_quality standard — not a test file despite 'test' in name"
+    },
+    {
+      "file": "tests/test_json_handler.py",
+      "reason": "Universal JSON handler test template (DPLAN-0059). Canonical source at seedgo/templates/. Test files contain string patterns that trigger code-quality checkers."
+    },
+    {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
       "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
@@ -157,6 +166,11 @@
       "file": "apps/handlers/aipass_standards/dead_code_check.py",
       "standard": "naming",
       "reason": "Checker false positive — these are local function variables, not module-level constants"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/test_quality_check.py",
+      "standard": "naming",
+      "reason": "Checker false positive — 'points' is a local variable inside _calculate_score(), not a module-level constant"
     },
     {
       "file": "handlers/aipass_proof/",
