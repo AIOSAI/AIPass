@@ -27,4 +27,4 @@ USER 1000
 ENV PATH="/opt/venv/bin:$PATH"
 
 EXPOSE 8080
-ENTRYPOINT ["/usr/bin/entrypoint.sh", "--bind-addr", "0.0.0.0:8080", "--auth", "none", "/home/coder/workspace"]
+ENTRYPOINT ["/usr/bin/entrypoint.sh", "--bind-addr", "0.0.0.0:8080", "--auth", "password", "/home/coder/workspace"]
