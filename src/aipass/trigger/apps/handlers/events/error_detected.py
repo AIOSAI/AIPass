@@ -345,6 +345,31 @@ REPORT TO @devpulse:
 """
 
 
+def _write_suppression_log(reason: str, branch: str, module: str, message: str) -> None:
+    """Write a line to the medic suppression log."""
+    try:
+        suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
+        suppressed_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(suppressed_log, 'a') as f:
+            f.write(
+                f"{datetime.now().isoformat()} | "
+                f"{reason} - {branch}: {module} - {message[:100]}\n"
+            )
+    except Exception as exc:
+        _log_warning(f"suppression log write failed ({reason}): {exc}")
+
+
+def _write_rate_log(reason: str, detail: str) -> None:
+    """Write a line to the rate-limited log."""
+    try:
+        rate_log = TRIGGER_ROOT / "logs" / "rate_limited.log"
+        rate_log.parent.mkdir(parents=True, exist_ok=True)
+        with open(rate_log, 'a') as f:
+            f.write(f"{datetime.now().isoformat()} | {reason}: {detail}\n")
+    except Exception as exc:
+        _log_warning(f"rate log write failed ({reason}): {exc}")
+
+
 def handle_error_detected(
     branch: str | None = None,
     module: str | None = None,
@@ -406,51 +431,18 @@ def handle_error_detected(
 
         # Medic toggle - if disabled, log but do NOT dispatch
         if not _is_medic_enabled():
-            try:
-                suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
-                suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-                with open(suppressed_log, 'a') as f:
-                    f.write(
-                        f"{datetime.now().isoformat()} | "
-                        f"Medic OFF - suppressed dispatch for {branch}: "
-                        f"{module} - {message[:100]}\n"
-                    )
-            except Exception as exc:
-                _log_warning(f"medic OFF suppression log write failed: {exc}")
-                return  # Can't log suppression, but still skip dispatch
+            _write_suppression_log("Medic OFF - suppressed dispatch for", branch, module, message)
             return
 
         # Per-branch mute check - muted branches have errors logged but NOT dispatched
         if _is_branch_muted(branch):
-            try:
-                suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
-                suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-                with open(suppressed_log, 'a') as f:
-                    f.write(
-                        f"{datetime.now().isoformat()} | "
-                        f"Branch muted - suppressed dispatch for {branch}: "
-                        f"{module} - {message[:100]}\n"
-                    )
-            except Exception as exc:
-                _log_warning(f"branch muted suppression log write failed: {exc}")
-                return  # Can't log suppression, but still skip dispatch
+            _write_suppression_log("Branch muted - suppressed dispatch for", branch, module, message)
             return
 
         # Dispatch threshold: count >= 2 required. First occurrence could
         # be transient - only dispatch when the error recurs.
         if count < 2:
-            try:
-                suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
-                suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-                with open(suppressed_log, 'a') as f:
-                    f.write(
-                        f"{datetime.now().isoformat()} | "
-                        f"First occurrence (count={count}) - waiting for pattern: "
-                        f"{branch}: {module} - {message[:100]}\n"
-                    )
-            except Exception as exc:
-                _log_warning(f"first occurrence suppression log write failed: {exc}")
-                return  # Can't log, but still skip dispatch
+            _write_suppression_log(f"First occurrence (count={count}) - waiting for pattern", branch, module, message)
             return
 
         # Callback must be set by module layer before events fire
@@ -467,50 +459,18 @@ def handle_error_detected(
         # Validate target branch exists in registry before attempting delivery
         registered_emails = _get_registered_emails()
         if recipient not in registered_emails:
-            # Unknown branch - log and skip (do NOT route to devpulse)
-            try:
-                suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
-                suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-                with open(suppressed_log, 'a') as f:
-                    f.write(
-                        f"{datetime.now().isoformat()} | "
-                        f"Unknown branch skipped: {recipient} - "
-                        f"{module}: {message[:100]}\n"
-                    )
-            except Exception as exc:
-                _log_warning(f"unknown branch suppression log write failed: {exc}")
-                return  # Can't log skip, still don't dispatch
+            _write_suppression_log(f"Unknown branch skipped: {recipient}", branch, module, message)
             return
 
         # --- Dispatch gating ---
         if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
             # Medic v2: Circuit breaker (global) + per-fingerprint backoff
             if not circuit_breaker_allows():
-                try:
-                    suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
-                    suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-                    with open(suppressed_log, 'a') as f:
-                        f.write(
-                            f"{datetime.now().isoformat()} | "
-                            f"Circuit breaker OPEN - suppressed dispatch for {branch}: "
-                            f"{module} - {message[:100]}\n"
-                        )
-                except Exception as exc:
-                    _log_warning(f"circuit breaker suppression log write failed: {exc}")
+                _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
                 return
 
             if not registry_should_dispatch(fingerprint):
-                try:
-                    rate_log = TRIGGER_ROOT / "logs" / "rate_limited.log"
-                    rate_log.parent.mkdir(parents=True, exist_ok=True)
-                    with open(rate_log, 'a') as f:
-                        f.write(
-                            f"{datetime.now().isoformat()} | "
-                            f"Backoff active for fingerprint {fingerprint[:12]}: "
-                            f"{recipient} - {module}, skipping\n"
-                        )
-                except Exception as exc:
-                    _log_warning(f"backoff rate log write failed: {exc}")
+                _write_rate_log("Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping")
                 return
         else:
             # Legacy fallback: per-branch rate limiting (Medic v1)
@@ -519,17 +479,7 @@ def handle_error_detected(
                 if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS
             ])
             if _is_rate_limited(recipient):
-                try:
-                    rate_log = TRIGGER_ROOT / "logs" / "rate_limited.log"
-                    rate_log.parent.mkdir(parents=True, exist_ok=True)
-                    with open(rate_log, 'a') as f:
-                        f.write(
-                            f"{datetime.now().isoformat()} | "
-                            f"Rate limited: {recipient} has {recent_count} "
-                            f"recent dispatches, skipping\n"
-                        )
-                except Exception as exc:
-                    _log_warning(f"legacy rate limit log write failed: {exc}")
+                _write_rate_log("Rate limited", f"{recipient} has {recent_count} recent dispatches, skipping")
                 return
 
         # Default timestamp to now if not provided

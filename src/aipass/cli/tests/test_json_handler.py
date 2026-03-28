@@ -55,6 +55,11 @@ class TestCreateDefault:
         with pytest.raises(ValueError, match="Unknown json_type"):
             _create_default("banana", "mymod")
 
+    def test_invalid_type_raises_value_error(self):
+        """Passing an invalid_type raises ValueError — exception contract."""
+        with pytest.raises(ValueError, match="Unknown json_type"):
+            _create_default("invalid_type", "mymod")
+
 
 # =============================================================================
 # validate_json_structure tests
@@ -191,6 +196,39 @@ class TestEnsureJsonExists:
         assert data["module_name"] == "cli"
         assert data["version"] == "1.0.0"
         assert "config" in data
+
+    def test_handles_missing_file(self, tmp_path):
+        """Missing file is auto-created with valid defaults."""
+        target = tmp_path / "missing_mod_config.json"
+        assert not target.exists()
+
+        with patch.object(json_handler, "JSON_DIR", tmp_path):
+            result = json_handler.ensure_json_exists("missing_mod", "config")
+
+        assert result is True
+        assert target.exists()
+
+    def test_handles_empty_file(self, tmp_path):
+        """Empty file is treated as corrupted and regenerated."""
+        target = tmp_path / "cli_config.json"
+        target.write_text("", encoding="utf-8")
+
+        with patch.object(json_handler, "JSON_DIR", tmp_path):
+            json_handler.ensure_json_exists("cli", "config")
+
+        data = json.loads(target.read_text(encoding="utf-8"))
+        assert data["module_name"] == "cli"
+
+    def test_nonexistent_dir_auto_created(self, tmp_path):
+        """JSON_DIR is auto-created when it does not exist."""
+        nonexistent = tmp_path / "nonexistent_subdir"
+        assert not nonexistent.exists()
+
+        with patch.object(json_handler, "JSON_DIR", nonexistent):
+            result = json_handler.ensure_json_exists("cli", "config")
+
+        assert result is True
+        assert nonexistent.exists()
 
 
 # =============================================================================

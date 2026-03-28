@@ -17,6 +17,7 @@ from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, get_available_classes
+from aipass.spawn.apps.handlers.json import json_handler
 
 
 def print_introspection():
@@ -105,6 +106,8 @@ def handle_regenerate_registry(args: list[str]) -> int:
         for result in all_results:
             _print_summary(result)
 
+        if not had_error:
+            json_handler.log_operation("regenerate_registry_all", data={"classes": list(classes)})
         return 1 if had_error else 0
 
     # Single class — default to builder
@@ -132,6 +135,7 @@ def handle_regenerate_registry(args: list[str]) -> int:
         return 1
 
     _print_summary(result)
+    json_handler.log_operation("regenerate_registry", data={"class": class_name})
     return 0
 
 

@@ -119,7 +119,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     from aipass.prax.apps.handlers.logging.log_watchdog import (
         scan_log_files,
-        enforce_log_limits,
         log_health_summary,
     )
 
@@ -131,28 +130,37 @@ def handle_command(command: str, args: List[str]) -> bool:
         summary = log_health_summary()
         _display_audit(files, summary)
         return True
-    elif subcmd == 'enforce':
-        console.print("\n[bold cyan]Enforcing log limits...[/bold cyan]")
-        actions = enforce_log_limits()
 
-        if not actions:
-            console.print("[green]All logs within limits — nothing to truncate[/green]\n")
+    if subcmd == 'enforce':
+        _run_enforce()
+        return True
+
+    error(f"Unknown log-audit subcommand: {subcmd}")
+    print_help()
+    return True
+
+
+def _run_enforce():
+    """Execute log enforcement and display results."""
+    from aipass.prax.apps.handlers.logging.log_watchdog import enforce_log_limits
+
+    console.print("\n[bold cyan]Enforcing log limits...[/bold cyan]")
+    actions = enforce_log_limits()
+
+    if not actions:
+        console.print("[green]All logs within limits — nothing to truncate[/green]\n")
+        return
+
+    for action in actions:
+        if action["truncated"]:
+            console.print(
+                f"  [yellow]TRUNCATED[/yellow] {action['name']}: "
+                f"{action['original_lines']:,} → {action['new_lines']:,} lines"
+            )
         else:
-            for action in actions:
-                if action["truncated"]:
-                    console.print(
-                        f"  [yellow]TRUNCATED[/yellow] {action['name']}: "
-                        f"{action['original_lines']:,} → {action['new_lines']:,} lines"
-                    )
-                else:
-                    console.print(f"  [green]OK[/green] {action['name']}: within limits")
-            console.print()
-            logger.info("[log-audit] Enforced limits on %d files", len(actions))
-        return True
-    else:
-        error(f"Unknown log-audit subcommand: {subcmd}")
-        print_help()
-        return True
+            console.print(f"  [green]OK[/green] {action['name']}: within limits")
+    console.print()
+    logger.info("[log-audit] Enforced limits on %d files", len(actions))
 
 
 if __name__ == "__main__":

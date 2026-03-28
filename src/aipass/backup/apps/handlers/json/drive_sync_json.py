@@ -131,6 +131,16 @@ def save_data(data_file: Path, data: Dict[str, Any]) -> None:
     atomic_json_write(data_file, snapshot)
 
 
+def _read_json_locked(file_path: Path) -> Any:
+    """Read and parse JSON from a file with shared lock."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        fcntl.flock(f, fcntl.LOCK_SH)
+        try:
+            return json.load(f)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def load_log(log_file: Path, max_retries: int = 3) -> Dict[str, Any]:
     """Load operation log from JSON file with cross-process locking and retry.
 
@@ -148,12 +158,7 @@ def load_log(log_file: Path, max_retries: int = 3) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             if log_file.exists() and log_file.stat().st_size > 0:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    fcntl.flock(f, fcntl.LOCK_SH)
-                    try:
-                        return json.load(f)
-                    finally:
-                        fcntl.flock(f, fcntl.LOCK_UN)
+                return _read_json_locked(log_file)
             else:
                 save_log(log_file, default_log)
                 return default_log

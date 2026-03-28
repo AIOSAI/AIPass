@@ -418,6 +418,41 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         self._position_save_counter: int = 0
         self._POSITION_SAVE_INTERVAL: int = 10  # Save positions every N file events
 
+    def _should_process(self, file_path: str) -> bool:
+        """Check if a log file should be processed."""
+        if not file_path.endswith('.log'):
+            return False
+        filename = Path(file_path).name
+        if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
+            return False
+        is_branch_log = '/aipass/' in file_path and '/logs/' in file_path
+        is_system_log = '/system_logs/' in file_path
+        return is_branch_log or is_system_log
+
+    def _read_new_lines(self, file_path: str) -> None:
+        """Read new content from a log file and process lines."""
+        current_size = Path(file_path).stat().st_size
+        last_pos = self.log_positions.get(file_path, 0)
+
+        if current_size < last_pos:
+            last_pos = 0
+        if current_size <= last_pos:
+            return
+
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(last_pos)
+            new_lines = f.read()
+            if new_lines.strip():
+                for line in new_lines.strip().split('\n'):
+                    if line.strip():
+                        self._process_log_line(line, file_path)
+            self.log_positions[file_path] = f.tell()
+
+        self._position_save_counter += 1
+        if self._position_save_counter >= self._POSITION_SAVE_INTERVAL:
+            _save_log_positions(self.log_positions)
+            self._position_save_counter = 0
+
     def on_modified(self, event) -> None:
         """
         Handle log file modification events.
@@ -429,48 +464,11 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             return
 
         file_path = str(event.src_path)
-
-        if not file_path.endswith('.log'):
-            return
-
-        # Skip self-referential logs that could create feedback loops
-        # Case-insensitive check: Path.name preserves original casing
-        filename = Path(file_path).name
-        if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
-            return
-
-        # Only process branch logs (aipass/*/logs/) or system_logs/
-        is_branch_log = '/aipass/' in file_path and '/logs/' in file_path
-        is_system_log = '/system_logs/' in file_path
-        if not is_branch_log and not is_system_log:
+        if not self._should_process(file_path):
             return
 
         try:
-            current_size = Path(file_path).stat().st_size
-            last_pos = self.log_positions.get(file_path, 0)
-
-            # Handle log rotation (file got smaller)
-            if current_size < last_pos:
-                last_pos = 0
-
-            if current_size > last_pos:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(last_pos)
-                    new_lines = f.read()
-
-                    if new_lines.strip():
-                        for line in new_lines.strip().split('\n'):
-                            if line.strip():
-                                self._process_log_line(line, file_path)
-
-                    self.log_positions[file_path] = f.tell()
-
-                # Periodically persist positions to disk
-                self._position_save_counter += 1
-                if self._position_save_counter >= self._POSITION_SAVE_INTERVAL:
-                    _save_log_positions(self.log_positions)
-                    self._position_save_counter = 0
-
+            self._read_new_lines(file_path)
         except Exception as exc:
             logger.warning("Failed to read log file '%s': %s", file_path, exc)
             return  # Read failure on this event - skip without raising
@@ -667,7 +665,7 @@ def start_branch_log_watcher() -> Any:
     watcher = BranchLogWatcher()
     watcher.initialize_positions()
     _active_watcher = watcher
-
+    _callback = watcher.on_modified  # watchdog dispatches FileSystemEvents here
     observer = WatchdogObserver()
 
     # Schedule watcher for each branch's logs directory

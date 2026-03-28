@@ -98,70 +98,62 @@ class LogFileWatcher(FileSystemEventHandler):
         # Track command per branch to avoid duplicate command separators
         self.last_command_per_branch: Dict[str, str] = {}
 
-    def on_modified(self, event):
-        """
-        Watch for log file modifications and push events to queue.
+    def _process_log_line(self, branch: str, line: str, file_path: str) -> None:
+        """Process a single log line: detect commands or emit as log event."""
+        if not line.strip():
+            return
+        command_info = self._extract_command_info(line)
+        if command_info:
+            self._emit_command_separator(branch, command_info)
+            return
+        if self._should_display_log(line):
+            level = self._detect_log_level(line)
+            self._emit_log_event(branch, line, level, file_path)
 
-        Adapted from discovery/watcher.py with these changes:
-        1. Pushes to event_queue instead of console.print
-        2. Detects branch from log file name/path
-        3. Preserves color coding info in event level field
-        4. Emits command separator events when command detected
+    def _read_new_content(self, file_path: str) -> Optional[str]:
+        """Read new content from a log file since last position.
+
+        Returns the new content string, or None if nothing new.
         """
+        current_size = Path(file_path).stat().st_size
+        last_pos = self.log_positions.get(file_path, 0)
+
+        if current_size < last_pos:
+            last_pos = 0
+
+        if current_size <= last_pos:
+            return None
+
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(last_pos)
+            new_lines = f.read()
+            self.log_positions[file_path] = f.tell()
+
+        return new_lines if new_lines.strip() else None
+
+    def on_modified(self, event):
+        """Watch for log file modifications and push events to queue."""
         if event.is_directory:
             return
 
         file_path = str(event.src_path)
 
-        # Only watch .log files
         if not file_path.endswith('.log'):
             return
 
-        # Only watch files in system_logs directory
         if str(get_system_logs_dir()) not in file_path:
             return
 
         try:
-            # Get current file size
-            current_size = Path(file_path).stat().st_size
+            new_content = self._read_new_content(file_path)
+            if not new_content:
+                return
 
-            # Get last known position
-            last_pos = self.log_positions.get(file_path, 0)
-
-            # If file shrunk (rotated), reset position
-            if current_size < last_pos:
-                last_pos = 0
-
-            # Read new content
-            if current_size > last_pos:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(last_pos)
-                    new_lines = f.read()
-
-                    if new_lines.strip():
-                        # Extract branch from log file path
-                        branch = detect_branch_from_log(file_path)
-
-                        # Process new log lines
-                        for line in new_lines.strip().split('\n'):
-                            if line.strip():
-                                # Check if this is a new command execution
-                                command_info = self._extract_command_info(line)
-                                if command_info:
-                                    self._emit_command_separator(branch, command_info)
-                                    continue  # Skip regular log output - separator IS the display
-
-                                # Filter out initialization noise
-                                if self._should_display_log(line):
-                                    # Detect log level and create event
-                                    level = self._detect_log_level(line)
-                                    self._emit_log_event(branch, line, level, file_path)
-
-                    # Update position
-                    self.log_positions[file_path] = f.tell()
+            branch = detect_branch_from_log(file_path)
+            for line in new_content.strip().split('\n'):
+                self._process_log_line(branch, line, file_path)
 
         except Exception as e:
-            # Log error but don't crash watcher
             logger.info(f"Error reading log file {file_path}: {e}")
 
     def _should_display_log(self, _log_line: str) -> bool:
@@ -169,34 +161,32 @@ class LogFileWatcher(FileSystemEventHandler):
         return True
 
     def _detect_log_level(self, log_line: str) -> str:
-        """
-        Detect log level from log line.
+        """Detect log level from log line. Returns 'error', 'warning', 'info', or 'debug'."""
+        _LEVEL_MARKERS = {
+            'error': (' - ERROR - ', ' ERROR ', '[ERROR]', ' - CRITICAL - ', ' CRITICAL ', '[CRITICAL]'),
+            'warning': (' - WARNING - ', ' WARNING ', '[WARNING]'),
+            'debug': (' - DEBUG - ', ' DEBUG ', '[DEBUG]'),
+        }
+        for level, markers in _LEVEL_MARKERS.items():
+            if any(m in log_line for m in markers):
+                return level
+        return 'info'
 
-        Adapted from discovery/watcher.py _format_log_with_color()
-        Returns level string instead of formatting with color codes.
-
-        Returns:
-            'error', 'warning', 'info', or 'debug'
-        """
-        # Check for error markers
-        if ' - ERROR - ' in log_line or ' ERROR ' in log_line or '[ERROR]' in log_line:
-            return 'error'
-
-        # Check for warning markers
-        elif ' - WARNING - ' in log_line or ' WARNING ' in log_line or '[WARNING]' in log_line:
-            return 'warning'
-
-        # Check for critical markers
-        elif ' - CRITICAL - ' in log_line or ' CRITICAL ' in log_line or '[CRITICAL]' in log_line:
-            return 'error'  # Map critical to error for priority
-
-        # Check for debug markers
-        elif ' - DEBUG - ' in log_line or ' DEBUG ' in log_line or '[DEBUG]' in log_line:
-            return 'debug'
-
-        # Default to info
-        else:
-            return 'info'
+    def _match_flow_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
+        """Match flow plan commands from log line."""
+        if "Creating" in log_line:
+            return {'command': "flow create plan", 'caller': None, 'target': None}
+        if "Closing" in log_line:
+            match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
+            plan_id = match.group(1) if match else ""
+            return {'command': f"flow close plan {plan_id}".strip(), 'caller': None, 'target': None}
+        if "Opening" in log_line:
+            match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
+            plan_id = match.group(1) if match else ""
+            return {'command': f"flow open plan {plan_id}".strip(), 'caller': None, 'target': None}
+        if "Loaded module:" in log_line and not self.last_command_per_branch.get('FLOW', '').startswith('FLOW:flow'):
+            return {'command': "flow command", 'caller': None, 'target': None}
+        return None
 
     def _extract_command_info(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
         """
@@ -214,18 +204,9 @@ class LogFileWatcher(FileSystemEventHandler):
 
         # Pattern 2: Flow plan commands
         if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:
-            if "Creating" in log_line:
-                return {'command': "flow create plan", 'caller': None, 'target': None}
-            elif "Closing" in log_line:
-                match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
-                plan_id = match.group(1) if match else ""
-                return {'command': f"flow close plan {plan_id}".strip(), 'caller': None, 'target': None}
-            elif "Opening" in log_line:
-                match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
-                plan_id = match.group(1) if match else ""
-                return {'command': f"flow open plan {plan_id}".strip(), 'caller': None, 'target': None}
-            elif "Loaded module:" in log_line and not self.last_command_per_branch.get('FLOW', '').startswith('FLOW:flow'):
-                return {'command': "flow command", 'caller': None, 'target': None}
+            result = self._match_flow_command(log_line)
+            if result:
+                return result
 
         # Pattern 3: Seed audit commands - extract target branch
         if "[seed]" in log_line.lower() and "audit" in log_line.lower():
@@ -303,32 +284,37 @@ class LogFileWatcher(FileSystemEventHandler):
         # Pattern 7: ALL drone command executions - HIGH PRIORITY
         # Format: "Executing command [CALLER:PRAX]: seed.py audit @prax"
         if "Executing" in log_line and "command" in log_line:
-            caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
-            caller = caller_match.group(1) if caller_match else None
+            return self._match_executing_command(log_line)
 
-            cmd_match = re.search(r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line)
-            if cmd_match:
-                cmd = cmd_match.group(1).strip()
-                # Extract target from command (e.g., "seed.py audit @prax" -> PRAX)
-                # Or "seed.py audit /path/to/src/aipass/prax" -> PRAX
-                target = None
-                target_match = re.search(r'@(\w+)', cmd)
-                if target_match:
-                    target = target_match.group(1).upper()
-                else:
-                    # Check for full path target (src/aipass/{module} structure)
-                    path_match = re.search(r'/aipass/(\w+)', cmd)
-                    if path_match:
-                        target = path_match.group(1).upper()
+        return None
 
-                # Clean up command display - simplify paths
-                display_cmd = cmd
-                # Replace full paths with @branch notation
-                display_cmd = re.sub(r'[^\s]*/aipass/(\w+)/apps/\w+\.py', lambda m: f"@{m.group(1)}", display_cmd)
-                display_cmd = re.sub(r'[^\s]*/aipass/(\w+)', lambda m: f"@{m.group(1)}", display_cmd)
+    def _match_executing_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
+        """Match 'Executing command' log lines and extract caller/target info."""
+        caller_match = re.search(r"\[CALLER:(\w+)\]", log_line)
+        caller = caller_match.group(1) if caller_match else None
 
-                return {'command': display_cmd, 'caller': caller, 'target': target}
+        cmd_match = re.search(r"Executing(?:\s+activated)?\s+command(?:\s*\[CALLER:\w+\])?:\s*(.+)", log_line)
+        if not cmd_match:
+            return None
 
+        cmd = cmd_match.group(1).strip()
+        target = self._extract_target_from_cmd(cmd)
+
+        # Clean up command display - simplify paths
+        display_cmd = re.sub(r'[^\s]*/aipass/(\w+)/apps/\w+\.py', lambda m: f"@{m.group(1)}", cmd)
+        display_cmd = re.sub(r'[^\s]*/aipass/(\w+)', lambda m: f"@{m.group(1)}", display_cmd)
+
+        return {'command': display_cmd, 'caller': caller, 'target': target}
+
+    @staticmethod
+    def _extract_target_from_cmd(cmd: str) -> Optional[str]:
+        """Extract target branch from a command string."""
+        target_match = re.search(r'@(\w+)', cmd)
+        if target_match:
+            return target_match.group(1).upper()
+        path_match = re.search(r'/aipass/(\w+)', cmd)
+        if path_match:
+            return path_match.group(1).upper()
         return None
 
     def _emit_command_separator(self, branch: str, command_info) -> None:

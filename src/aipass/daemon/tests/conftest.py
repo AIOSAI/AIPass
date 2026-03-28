@@ -14,12 +14,13 @@
 #  
 #@Meta header not seedgo standards
 
-"""Shared pytest fixtures for assistant tests"""
+"""Shared pytest fixtures for daemon tests"""
 import pytest
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
+from unittest.mock import MagicMock
 
 
 @pytest.fixture
@@ -41,3 +42,17 @@ def sample_test_data() -> dict:
         "test_key": "test_value",
         "sample_data": "example"
     }
+
+
+@pytest.fixture()
+def mock_json_handler() -> MagicMock:
+    """Standalone mock json_handler for isolation tests."""
+    handler = MagicMock()
+    handler.load_json = MagicMock(return_value={})
+    handler.save_json = MagicMock(return_value=True)
+    handler.ensure_json_exists = MagicMock(return_value=True)
+    handler.ensure_module_jsons = MagicMock(return_value=True)
+    handler.get_json_path = MagicMock(return_value=Path("/tmp/mock.json"))
+    handler.validate_json_structure = MagicMock(return_value=True)
+    handler.log_operation = MagicMock(return_value=True)
+    return handler

@@ -169,6 +169,131 @@ def print_help() -> None:
     console.print()
 
 
+def _handle_mute(console, args: list) -> None:
+    """Handle 'medic mute @branch'."""
+    if not args:
+        console.print("[red]Missing branch name[/red] - usage: medic mute @branch")
+        return
+    branch_name = _extract_branch_name(args[0])
+    if not branch_name:
+        console.print("[red]Missing branch name[/red] - usage: medic mute @branch")
+        return
+    if mute_branch(branch_name):
+        logger.info(f"[MEDIC] Muted branch: {branch_name}")
+        console.print(f"  [yellow]Muted[/yellow] @{branch_name} — errors logged but not dispatched")
+    else:
+        console.print(f"  [red]Failed to mute[/red] @{branch_name} — check trigger_config.json")
+
+
+def _handle_unmute(console, args: list) -> None:
+    """Handle 'medic unmute @branch'."""
+    if not args:
+        console.print("[red]Missing branch name[/red] - usage: medic unmute @branch")
+        return
+    branch_name = _extract_branch_name(args[0])
+    if not branch_name:
+        console.print("[red]Missing branch name[/red] - usage: medic unmute @branch")
+        return
+    if unmute_branch(branch_name):
+        logger.info(f"[MEDIC] Unmuted branch: {branch_name}")
+        console.print(f"  [green]Unmuted[/green] @{branch_name} — dispatch resumed")
+    else:
+        console.print(f"  [red]Failed to unmute[/red] @{branch_name} — check trigger_config.json")
+
+
+def _handle_status(console) -> None:
+    """Handle 'medic status' — display current medic state."""
+    enabled = is_enabled()
+    watcher_active = _is_service_active()
+
+    suppression = get_suppression_stats()
+    rate_limits = get_rate_limit_stats()
+    muted = get_muted_branches()
+
+    state_color = "green" if enabled else "yellow"
+    state_text = "ENABLED" if enabled else "DISABLED"
+    if watcher_active:
+        watcher_text = "[green]running[/green] (systemd)"
+    elif enabled:
+        watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
+    else:
+        watcher_text = "stopped"
+    muted_text = ", ".join(f"@{b}" for b in muted) if muted else "none"
+
+    console.print("Medic Status")
+    console.print(f"  State:           [{state_color}]{state_text}[/{state_color}]")
+    console.print(f"  Log watcher:     {watcher_text}")
+    console.print(f"  Muted branches:  {muted_text}")
+    console.print(f"  Suppressed:      {suppression['suppressed_count']}")
+    console.print(f"  Last suppressed: {suppression['last_suppressed']}")
+    console.print(f"  Rate limited:    {rate_limits['rate_limited_count']}")
+    console.print(f"  Last rate limit: {rate_limits['last_rate_limited']}")
+    console.print()
+    if not enabled:
+        console.print("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.log[/dim]")
+
+
+def _handle_on(console) -> None:
+    """Handle 'medic on' — enable dispatch and start watcher."""
+    from rich.panel import Panel
+
+    if not set_enabled(True):
+        console.print("[red]Failed to enable Medic[/red] - check trigger_config.json")
+        return
+
+    logger.info("[MEDIC] Medic ENABLED - error dispatch active")
+    if not _is_service_active():
+        started = _systemctl("start")
+        if started:
+            logger.info("[MEDIC] Log watcher service started")
+        else:
+            logger.warning("[MEDIC] Could not start log watcher service")
+
+    watcher_status = 'running' if _is_service_active() else 'failed to start'
+    console.print(Panel(
+        "[bold green]Medic ENABLED[/bold green]\n\n"
+        "Error dispatch is [green]active[/green]. Errors detected in branch logs\n"
+        "will be dispatched to affected branches automatically.\n"
+        f"Log watcher: [green]{watcher_status}[/green]",
+        title="Medic",
+        border_style="green",
+    ))
+
+
+def _handle_off(console) -> None:
+    """Handle 'medic off' — disable dispatch and stop watcher."""
+    from rich.panel import Panel
+
+    if not set_enabled(False):
+        console.print("[red]Failed to disable Medic[/red] - check trigger_config.json")
+        return
+
+    logger.info("[MEDIC] Medic DISABLED - error dispatch suppressed")
+    if _is_service_active():
+        _systemctl("stop")
+        logger.info("[MEDIC] Log watcher service stopped")
+
+    console.print(Panel(
+        "[bold yellow]Medic DISABLED[/bold yellow]\n\n"
+        "Error dispatch is [yellow]suppressed[/yellow]. Errors are still detected\n"
+        "and logged to [dim]medic_suppressed.log[/dim] for review.\n"
+        "Log watcher: [yellow]stopped[/yellow]",
+        title="Medic",
+        border_style="yellow",
+    ))
+
+
+def _route_medic_module(args: list) -> bool:
+    """Route 'drone @trigger medic <subcmd>' to handle_command."""
+    if not args:
+        print_introspection()
+        return True
+    if args[0] in ['--help', '-h', 'help']:
+        print_help()
+        return True
+    return handle_command(args[0], args[1:])
+
+
 def handle_command(command: str, args: list) -> bool:
     """
     Handle medic commands - orchestrate toggle operations.
@@ -185,17 +310,12 @@ def handle_command(command: str, args: list) -> bool:
     """
     from aipass.cli.apps.modules import console
 
-    # Handle module-name routing (drone @trigger medic <subcmd>)
+    # Module-name routing (drone @trigger medic <subcmd>)
     if command == "medic":
         if not args:
             print_introspection()
             return True
-        if args[0] in ['--help', '-h', 'help']:
-            print_help()
-            return True
-        subcommand = args[0]
-        remaining = args[1:]
-        return handle_command(subcommand, remaining)
+        return _route_medic_module(args)
 
     if command not in ["on", "off", "status", "mute", "unmute"]:
         return False
@@ -204,107 +324,16 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    if command == "mute":
-        if not args:
-            console.print("[red]Missing branch name[/red] - usage: medic mute @branch")
-            return True
-        branch_name = _extract_branch_name(args[0])
-        if not branch_name:
-            console.print("[red]Missing branch name[/red] - usage: medic mute @branch")
-            return True
-        if mute_branch(branch_name):
-            logger.info(f"[MEDIC] Muted branch: {branch_name}")
-            console.print(f"  [yellow]Muted[/yellow] @{branch_name} — errors logged but not dispatched")
-        else:
-            console.print(f"  [red]Failed to mute[/red] @{branch_name} — check trigger_config.json")
-        return True
-
-    if command == "unmute":
-        if not args:
-            console.print("[red]Missing branch name[/red] - usage: medic unmute @branch")
-            return True
-        branch_name = _extract_branch_name(args[0])
-        if not branch_name:
-            console.print("[red]Missing branch name[/red] - usage: medic unmute @branch")
-            return True
-        if unmute_branch(branch_name):
-            logger.info(f"[MEDIC] Unmuted branch: {branch_name}")
-            console.print(f"  [green]Unmuted[/green] @{branch_name} — dispatch resumed")
-        else:
-            console.print(f"  [red]Failed to unmute[/red] @{branch_name} — check trigger_config.json")
-        return True
-
-    if command == "on":
-        from rich.panel import Panel
-
-        if set_enabled(True):
-            logger.info("[MEDIC] Medic ENABLED - error dispatch active")
-            # Start log watcher via systemd service (persistent)
-            if not _is_service_active():
-                if _systemctl("start"):
-                    logger.info("[MEDIC] Log watcher service started")
-                else:
-                    logger.warning("[MEDIC] Could not start log watcher service")
-            console.print(Panel(
-                "[bold green]Medic ENABLED[/bold green]\n\n"
-                "Error dispatch is [green]active[/green]. Errors detected in branch logs\n"
-                "will be dispatched to affected branches automatically.\n"
-                f"Log watcher: [green]{'running' if _is_service_active() else 'failed to start'}[/green]",
-                title="Medic",
-                border_style="green",
-            ))
-        else:
-            console.print("[red]Failed to enable Medic[/red] - check trigger_config.json")
-
-    elif command == "off":
-        from rich.panel import Panel
-
-        if set_enabled(False):
-            logger.info("[MEDIC] Medic DISABLED - error dispatch suppressed")
-            # Stop log watcher service
-            if _is_service_active():
-                _systemctl("stop")
-                logger.info("[MEDIC] Log watcher service stopped")
-            console.print(Panel(
-                "[bold yellow]Medic DISABLED[/bold yellow]\n\n"
-                "Error dispatch is [yellow]suppressed[/yellow]. Errors are still detected\n"
-                "and logged to [dim]medic_suppressed.log[/dim] for review.\n"
-                "Log watcher: [yellow]stopped[/yellow]",
-                title="Medic",
-                border_style="yellow",
-            ))
-        else:
-            console.print("[red]Failed to disable Medic[/red] - check trigger_config.json")
-
-    elif command == "status":
-        enabled = is_enabled()
-        watcher_active = _is_service_active()
-
-        suppression = get_suppression_stats()
-        rate_limits = get_rate_limit_stats()
-        muted = get_muted_branches()
-
-        state_color = "green" if enabled else "yellow"
-        state_text = "ENABLED" if enabled else "DISABLED"
-        if watcher_active:
-            watcher_text = "[green]running[/green] (systemd)"
-        elif enabled:
-            watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
-        else:
-            watcher_text = "stopped"
-        muted_text = ", ".join(f"@{b}" for b in muted) if muted else "none"
-
-        console.print("Medic Status")
-        console.print(f"  State:           [{state_color}]{state_text}[/{state_color}]")
-        console.print(f"  Log watcher:     {watcher_text}")
-        console.print(f"  Muted branches:  {muted_text}")
-        console.print(f"  Suppressed:      {suppression['suppressed_count']}")
-        console.print(f"  Last suppressed: {suppression['last_suppressed']}")
-        console.print(f"  Rate limited:    {rate_limits['rate_limited_count']}")
-        console.print(f"  Last rate limit: {rate_limits['last_rate_limited']}")
-        console.print()
-        if not enabled:
-            console.print("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.log[/dim]")
+    handlers = {
+        "mute": lambda: _handle_mute(console, args),
+        "unmute": lambda: _handle_unmute(console, args),
+        "on": lambda: _handle_on(console),
+        "off": lambda: _handle_off(console),
+        "status": lambda: _handle_status(console),
+    }
+    handler = handlers.get(command)
+    if handler:
+        handler()
 
     json_handler.log_operation("medic_toggled", {"command": command})
     return True

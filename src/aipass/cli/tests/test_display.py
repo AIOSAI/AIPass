@@ -1,5 +1,7 @@
 """Unit tests for CLI display module -- Rich-formatted terminal output."""
 
+import importlib
+import sys
 from io import StringIO
 from unittest.mock import patch, MagicMock
 
@@ -89,6 +91,11 @@ class TestHandleCommandRouting:
     def test_display_unknown_subcommand_returns_false(self):
         result = display.handle_command("display", ["unknown_sub"])
         assert result is False
+
+    def test_handle_command_returns_bool(self):
+        """handle_command always returns a bool — return type contract."""
+        result = display.handle_command("nonexistent", [])
+        assert isinstance(result, bool)
 
 
 # =============================================================================
@@ -303,3 +310,27 @@ class TestFatal:
                 display.fatal("Crash")
         output = get_output()
         assert "Try:" not in output
+
+
+# =============================================================================
+# Infrastructure mocking tests
+# =============================================================================
+
+class TestInfrastructureMocking:
+    """Verify display module can be safely reloaded after sys.modules mocking."""
+
+    def test_reimport_after_mock(self):
+        """Module remains functional after importlib.reload."""
+        importlib.reload(display)
+
+        assert hasattr(display, "handle_command")
+        assert callable(display.handle_command)
+
+        result = display.handle_command("nonexistent", [])
+        assert result is False
+
+    def test_sys_modules_contains_display(self):
+        """Display module is properly registered in sys.modules."""
+        module_key = "aipass.cli.apps.modules.display"
+        assert module_key in sys.modules
+        assert sys.modules[module_key] is display

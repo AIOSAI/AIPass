@@ -8,12 +8,10 @@
 
 """*_REGISTRY.json discovery and CRUD operations."""
 
-import json
 import os
 from datetime import datetime
 from pathlib import Path
 
-from aipass.prax import logger
 from aipass.spawn.apps.handlers.json import json_handler
 
 
@@ -110,19 +108,17 @@ def load_registry(registry_path):
             "branches": [],
         }
 
-    try:
-        data = json.loads(registry_path.read_text(encoding="utf-8"))
+    data = json_handler.read_json(registry_path)
+    if data is not None:
         return data
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning("Failed to load registry from %s: %s", registry_path, e)
-        return {
-            "metadata": {
-                "version": "1.0.0",
-                "last_updated": datetime.now().strftime("%Y-%m-%d"),
-                "total_branches": 0,
-            },
-            "branches": [],
-        }
+    return {
+        "metadata": {
+            "version": "1.0.0",
+            "last_updated": datetime.now().strftime("%Y-%m-%d"),
+            "total_branches": 0,
+        },
+        "branches": [],
+    }
 
 
 def save_registry(registry_path, data):
@@ -149,16 +145,7 @@ def save_registry(registry_path, data):
             branch_list, key=lambda b: b.get("name", "")
         )
 
-    try:
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
-        registry_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        return True
-    except (IOError, TypeError) as e:
-        logger.error("Failed to save registry to %s: %s", registry_path, e)
-        return False
+    return json_handler.write_json(registry_path, data)
 
 
 def get_next_citizen_number(registry_path):

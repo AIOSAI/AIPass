@@ -20,7 +20,7 @@ import time
 import importlib
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Callable
 import os
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -35,21 +35,21 @@ WAKE_SCRIPT = Path(os.environ.get('AIPASS_WAKE_SCRIPT', ''))
 AI_MAIL_AVAILABLE = True
 
 # ---------------------------------------------------------------------------
-# Optional scheduler_ops imports (action registry helpers)
+# Optional actions_registry imports (sibling handler)
 # ---------------------------------------------------------------------------
 
 try:
-    from aipass.daemon.apps.modules.scheduler_ops import (
+    from aipass.daemon.apps.handlers.actions.actions_registry import (
         load_registry,
         is_action_due,
         update_last_run,
         mark_reminder_completed,
         migrate_plugins,
         next_due_str,
-        ACTION_REGISTRY_AVAILABLE,
     )
+    ACTION_REGISTRY_AVAILABLE = True
 except ImportError as e:
-    logger.info(f"Optional dependency not available: scheduler_ops action registry ({e})")
+    logger.info(f"Optional dependency not available: actions_registry ({e})")
     ACTION_REGISTRY_AVAILABLE = False
     load_registry = None
     is_action_due = None
@@ -62,6 +62,27 @@ except ImportError as e:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _run_normal_plugin(module, name: str, target: str, log_fn: Callable | None = None) -> dict | None:
+    """Run a normal (non-self-dispatch) plugin. Returns result dict or None to continue."""
+    try:
+        run_result = module.run()
+        run_status = run_result.get("status", "unknown")
+        if run_status in ("ready",):
+            return None
+        _log(f"ACTION: {name} - plugin run() returned: {run_status}", log_fn)
+        if run_status in ("resolved", "waiting"):
+            return {"status": "ok", "branch": target}
+        return {
+            "status": "failed",
+            "branch": target,
+            "error": f"run() returned {run_status}",
+        }
+    except Exception as e:
+        logger.warning(f"Action {name} plugin run() error: {e}")
+        _log(f"ACTION: {name} - plugin run() error: {e}", log_fn)
+    return None
+
 
 def _log(msg: str, log_fn: Callable | None = None) -> None:
     """Route a message through the caller-supplied log function or logger.info."""
@@ -139,21 +160,9 @@ def _dispatch_action(
 
         # Normal plugin run()
         if hasattr(module, "run"):
-            try:
-                run_result = module.run()
-                run_status = run_result.get("status", "unknown")
-                if run_status not in ("ready",):
-                    _log(f"ACTION: {name} - plugin run() returned: {run_status}", log_fn)
-                    if run_status in ("resolved", "waiting"):
-                        return {"status": "ok", "branch": target}
-                    return {
-                        "status": "failed",
-                        "branch": target,
-                        "error": f"run() returned {run_status}",
-                    }
-            except Exception as e:
-                logger.warning(f"Action {name} plugin run() error: {e}")
-                _log(f"ACTION: {name} - plugin run() error: {e}", log_fn)
+            result = _run_normal_plugin(module, name, target, log_fn)
+            if result is not None:
+                return result
 
     # ---- reminder actions ----
     if action_type == "reminder":

@@ -13,8 +13,6 @@ Branches fire events, Trigger handles reactions.
 Pattern: Like Prax logger but for events.
 """
 
-import inspect
-from pathlib import Path
 from typing import Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -38,23 +36,6 @@ def print_introspection():
     console.print("    - registry.py (setup_handlers — auto-register all event handlers on first use)")
     console.print()
 
-
-def _get_caller() -> str:
-    """Get the calling module/file name"""
-    stack = inspect.stack()
-    for frame in stack[2:]:  # Skip _get_caller and fire
-        filepath = frame.filename
-        if 'trigger/apps/modules/core.py' not in filepath:
-            # Extract meaningful name from path
-            path = Path(filepath)
-            # Try to get branch/module name
-            parts = path.parts
-            for i, part in enumerate(parts):
-                if part == 'aipass':
-                    if i + 1 < len(parts):
-                        return parts[i + 1]  # Return branch name
-            return path.stem  # Fallback to filename
-    return 'unknown'
 
 
 class Trigger:
@@ -112,6 +93,34 @@ class Trigger:
             cls._handlers[event].remove(handler)
 
     @classmethod
+    def _fire_to_handlers(cls, event: str, data: dict) -> None:
+        """Fire a single event to its registered handlers."""
+        handlers = cls._handlers.get(event, [])
+        data['fire_event'] = cls.fire
+        for handler in handlers:
+            try:
+                handler(**data)
+            except Exception as e:
+                logger.error(f"[TRIGGER] Handler error for {event}: {e}")
+
+    @classmethod
+    def _drain_deferred(cls) -> None:
+        """Process queued events from nested fire() calls."""
+        if cls._draining_deferred:
+            return
+        cls._draining_deferred = True
+        try:
+            while cls._deferred_queue:
+                deferred_event, deferred_data = cls._deferred_queue.pop(0)
+                cls._firing = True
+                try:
+                    cls._fire_to_handlers(deferred_event, dict(deferred_data))
+                finally:
+                    cls._firing = False
+        finally:
+            cls._draining_deferred = False
+
+    @classmethod
     def fire(cls, event: str, **data):
         """Fire event to all registered handlers
 
@@ -127,40 +136,10 @@ class Trigger:
         try:
             cls._ensure_initialized()
             cls._ensure_log_watcher()
-            handlers = cls._handlers.get(event, [])
-
-            # Provide fire_event callback so handlers can fire events without importing
-            data['fire_event'] = cls.fire
-
-            for handler in handlers:
-                try:
-                    handler(**data)
-                except Exception as e:
-                    logger.error(f"[TRIGGER] Handler error for {event}: {e}")
+            cls._fire_to_handlers(event, data)
         finally:
             cls._firing = False
-
-            # Process deferred events iteratively (NOT recursively)
-            # Each fire() during drain just appends to queue, loop picks it up
-            if not cls._draining_deferred:
-                cls._draining_deferred = True
-                try:
-                    while cls._deferred_queue:
-                        deferred_event, deferred_data = cls._deferred_queue.pop(0)
-                        cls._firing = True
-                        try:
-                            handlers = cls._handlers.get(deferred_event, [])
-                            data_copy = dict(deferred_data)
-                            data_copy['fire_event'] = cls.fire
-                            for handler in handlers:
-                                try:
-                                    handler(**data_copy)
-                                except Exception:
-                                    pass  # Silent - avoid logger recursion
-                        finally:
-                            cls._firing = False
-                finally:
-                    cls._draining_deferred = False
+            cls._drain_deferred()
 
     @classmethod
     def status(cls) -> dict:

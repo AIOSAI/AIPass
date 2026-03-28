@@ -318,6 +318,17 @@ def _find_all_test_files(branch_path: Path) -> list[Path]:
 # ANALYSIS
 # =============================================
 
+def _find_covering_file(
+    patterns: list[str], file_sources: list[tuple[str, str]],
+) -> str | None:
+    """Find the first file that contains any of the given patterns."""
+    for filename, source in file_sources:
+        for pattern in patterns:
+            if pattern in source:
+                return filename
+    return None
+
+
 def _detect_all_coverage(
     file_sources: list[tuple[str, str]],
 ) -> dict[str, dict[str, str | None]]:
@@ -337,15 +348,7 @@ def _detect_all_coverage(
     for category, items in STANDARD_CATEGORIES.items():
         coverage[category] = {}
         for item_name, patterns in items.items():
-            covering_file: str | None = None
-            for filename, source in file_sources:
-                for pattern in patterns:
-                    if pattern in source:
-                        covering_file = filename
-                        break
-                if covering_file is not None:
-                    break
-            coverage[category][item_name] = covering_file
+            coverage[category][item_name] = _find_covering_file(patterns, file_sources)
 
     return coverage
 

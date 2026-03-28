@@ -19,8 +19,6 @@ Usage:
     from aipass.flow.apps.handlers.template.plan_type_loader import (
         discover_plan_types,
         get_plan_type,
-        get_template_path,
-        list_available_types,
     )
 
     # Discover all installed plan types
@@ -30,19 +28,12 @@ Usage:
     config = get_plan_type("FPLAN")
     config = get_plan_type("flow_plans")
     config = get_plan_type("master")  # resolves to flow_plans with template override
-
-    # Get the path to a template file
-    path = get_template_path("FPLAN")              # default template
-    path = get_template_path("FPLAN", "master")    # specific template
-
-    # List all available types for --help / introspection
-    all_types = list_available_types()
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -267,49 +258,3 @@ def get_plan_type(type_key: str) -> Dict:
         config = {**config, "default_template": template_override}
 
     return config
-
-
-def get_template_path(
-    type_key: str,
-    template_name: str | None = None,
-) -> Path:
-    """Return the resolved :class:`Path` to a template file.
-
-    Parameters:
-        type_key: Anything accepted by :func:`get_plan_type`.
-        template_name: Template name (without ``.md``).  Defaults to the
-            ``default_template`` value from the plan-type config.
-
-    Raises:
-        ValueError: If the plan type cannot be resolved.
-        FileNotFoundError: If the resolved template file does not exist.
-    """
-    config = get_plan_type(type_key)
-    template = template_name or config.get("default_template", "default")
-    templates_dir: Path = config["_directory"]
-    template_path = templates_dir / f"{template}.md"
-
-    if not template_path.is_file():
-        available = [
-            p.stem
-            for p in templates_dir.iterdir()
-            if p.suffix == ".md"
-        ] if templates_dir.is_dir() else []
-        raise FileNotFoundError(
-            f"Template '{template}' not found for plan type "
-            f"'{config.get('name', type_key)}'. "
-            f"Looked at: {template_path}. "
-            f"Available templates: {available}"
-        )
-
-    return template_path
-
-
-def list_available_types() -> List[Dict]:
-    """Return a list of all discovered plan-type configs.
-
-    Each entry is a filesystem-derived config dict that includes an
-    ``_directory`` key.  Useful for ``--help`` output and introspection.
-    """
-    cache = _get_cache()
-    return list(cache.values())

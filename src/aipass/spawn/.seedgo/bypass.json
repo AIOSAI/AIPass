@@ -6,6 +6,11 @@
   },
   "bypass": [
     {
+      "file": "apps/handlers/json_ops.py",
+      "standard": "json_structure",
+      "reason": "Pure utility — deep_merge and backup_json only. No operational side effects to log. Migrations archived."
+    },
+    {
       "file": "apps/handlers/class_registry.py",
       "standard": "json_structure",
       "reason": "Pure data registry — dict lookup only, no operations to log"
@@ -69,11 +74,6 @@
       "file": "apps/handlers/sync_registry_ops.py",
       "standard": "deep_nesting",
       "reason": "sync_registry() depth 6 — iterates branches, checks passport, loads template registry, generates branch_meta. Nesting inherent to multi-step registry rebuild."
-    },
-    {
-      "file": "apps/handlers/json_ops.py",
-      "standard": "deep_nesting",
-      "reason": "apply_migrations() depth 6 — iterates migration defs, reads each JSON file, applies transforms, writes back. Nested structure reflects migration pipeline."
     },
     {
       "file": "apps/modules/update.py",
@@ -179,6 +179,16 @@
       "file": "apps/handlers/regenerate_registry_ops.py",
       "standard": "documentation",
       "reason": "_scan_template_directory() has docstring — multi-line function signature confuses checker."
+    },
+    {
+      "file": "apps/handlers/regenerate_registry_ops.py",
+      "standard": "naming",
+      "reason": "candidate is a local variable inside _scan_template_directory() and _next_id(), not a module-level constant. Used for ID matching during registry rebuild."
+    },
+    {
+      "file": "apps/modules/regenerate_registry.py",
+      "standard": "json_structure",
+      "reason": "Thin CLI layer — delegates all work to regenerate_registry_ops handler. json_handler imported for log_operation only."
     }
   ],
   "notes": {
@@ -186,12 +196,12 @@
     "example": {
       "file": "apps/modules/logger.py",
       "standard": "cli",
+      "reason": "Circular dependency - logger cannot import CLI",
       "lines": [
         146,
         177
       ],
-      "pattern": "if __name__ == '__main__'",
-      "reason": "Circular dependency - logger cannot import CLI"
+      "pattern": "if __name__ == '__main__'"
     },
     "fields": {
       "file": "Relative path from branch root (required)",

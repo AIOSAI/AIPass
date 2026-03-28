@@ -216,42 +216,46 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Handle 'branch-health' command - requires branch name arg
     if command == "branch-health":
-        if not args:
-            print_introspection()
-            return True
-        if args[0] in ('--help', '-h', 'help'):
-            _print_branch_health_help()
-            return True
-
-        # Extract branch name (first non-flag argument)
-        branch_name = None
-        filtered_args = []
-        i = 0
-        while i < len(args):
-            if args[i] in ('--hours', '-t') and i + 1 < len(args):
-                filtered_args.extend([args[i], args[i + 1]])
-                i += 2
-            elif args[i].startswith('-'):
-                i += 1
-            else:
-                if branch_name is None:
-                    branch_name = args[i]
-                i += 1
-
-        if not branch_name:
-            error("branch-health requires a branch name")
-            console.print()
-            console.print("Usage: branch-health <branch_name> [--hours N]")
-            console.print("Example: branch-health DRONE")
-            return True
-
-        hours = _parse_hours_arg(args)
-        report = generate_branch_report(branch_name, since_hours=hours)
-        console.print(report)
-        return True
+        return _handle_branch_health(args)
 
     # Not our command
     return False
+
+
+def _extract_branch_name(args: List[str]) -> str | None:
+    """Extract the first non-flag argument as the branch name."""
+    i = 0
+    while i < len(args):
+        if args[i] in ('--hours', '-t') and i + 1 < len(args):
+            i += 2
+        elif args[i].startswith('-'):
+            i += 1
+        else:
+            return args[i]
+    return None
+
+
+def _handle_branch_health(args: List[str]) -> bool:
+    """Handle 'branch-health <branch>' command."""
+    if not args:
+        print_introspection()
+        return True
+    if args[0] in ('--help', '-h', 'help'):
+        _print_branch_health_help()
+        return True
+
+    branch_name = _extract_branch_name(args)
+    if not branch_name:
+        error("branch-health requires a branch name")
+        console.print()
+        console.print("Usage: branch-health <branch_name> [--hours N]")
+        console.print("Example: branch-health DRONE")
+        return True
+
+    hours = _parse_hours_arg(args)
+    report = generate_branch_report(branch_name, since_hours=hours)
+    console.print(report)
+    return True
 
 
 # =============================================

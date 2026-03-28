@@ -10,10 +10,6 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
-
 skills_root = Path(__file__).resolve().parent.parent.parent
 if str(skills_root) not in sys.path:
     sys.path.insert(0, str(skills_root))
@@ -104,3 +100,79 @@ class TestHandleCommand:
     def test_create_missing_args_returns_false(self):
         result = handle_command("create")
         assert result is False
+
+
+# ===================================================================
+# Missing coverage: no_args, print_help, print_introspection, output_capture
+# ===================================================================
+
+class TestNoArgs:
+    """Test no_args behavior -- None command triggers introspection."""
+
+    def test_no_args_returns_true(self):
+        """no_args: handle_command(None) returns True."""
+        result = handle_command(None)
+        assert result is True
+
+    def test_no_args_triggers_introspection(self, capsys):
+        """no_args_triggers: calling with None produces introspection output."""
+        handle_command(None)
+        captured = capsys.readouterr()
+        assert "skills" in captured.out.lower() or "Entry Point" in captured.out
+
+
+class TestPrintHelp:
+    """Tests for print_help output."""
+
+    def test_print_help_produces_output(self, capsys):
+        """print_help: calling --help produces help text."""
+        from skills.apps.skills import print_help
+        print_help()
+        captured = capsys.readouterr()
+        assert "Usage" in captured.out or "Commands" in captured.out
+
+    def test_print_help_via_command(self, capsys):
+        """print_help: handle_command('--help') produces output."""
+        handle_command("--help")
+        captured = capsys.readouterr()
+        assert len(captured.out) > 0
+
+
+class TestPrintIntrospection:
+    """Tests for print_introspection output."""
+
+    def test_print_introspection_produces_output(self, capsys):
+        """print_introspection: shows module info."""
+        from skills.apps.skills import print_introspection
+        print_introspection()
+        captured = capsys.readouterr()
+        assert "Entry Point" in captured.out or "skills" in captured.out.lower()
+
+    def test_print_introspection_lists_modules(self, capsys):
+        """print_introspection: lists connected modules."""
+        from skills.apps.skills import print_introspection
+        print_introspection()
+        captured = capsys.readouterr()
+        assert "modules/" in captured.out or "discovery" in captured.out.lower()
+
+
+class TestOutputCapture:
+    """Tests using capsys for output_capture verification."""
+
+    def test_output_capture_help_command(self, capsys):
+        """output_capture: --help produces non-empty stdout."""
+        handle_command("--help")
+        captured = capsys.readouterr()
+        assert captured.out != ""
+
+    def test_output_capture_version_command(self, capsys):
+        """output_capture: --version produces version string."""
+        handle_command("--version")
+        captured = capsys.readouterr()
+        assert "SKILLS" in captured.out or "1.0.0" in captured.out
+
+    def test_output_capture_unknown_command(self, capsys):
+        """output_capture: unknown command produces output."""
+        handle_command("bogus_xyz")
+        captured = capsys.readouterr()
+        assert "Unknown command" in captured.out or "unknown" in captured.out.lower() or len(captured.out) > 0

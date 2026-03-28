@@ -91,6 +91,24 @@ _pid_cache_last_refresh: float = 0.0
 _PID_CACHE_TTL = 30.0  # Refresh every 30 seconds
 
 
+def _parse_lock_pid(branch_entry: dict, new_cache: dict[str, int]) -> None:
+    """Parse a single dispatch lock file and add to cache if PID is live."""
+    branch_path = Path(branch_entry.get("path", ""))
+    lock_path = branch_path / "ai_mail.local" / ".dispatch.lock"
+    if not lock_path.exists():
+        return
+    try:
+        lock_data = _json.loads(lock_path.read_text(encoding="utf-8"))
+        pid = lock_data.get("pid", 0)
+        if not pid or not (sys.platform == "linux" and Path(f"/proc/{pid}").exists()):
+            return
+        name = branch_entry.get("name", "").upper()
+        if name:
+            new_cache[name] = pid
+    except (ValueError, OSError) as e:
+        logger.info("[monitor] Skipping dispatch lock %s: %s", lock_path, e)
+
+
 def _refresh_pid_cache() -> None:
     """Scan dispatch lock files to build branch→PID mapping."""
     global _pid_cache_last_refresh
@@ -108,20 +126,7 @@ def _refresh_pid_cache() -> None:
         data = _json.loads(registry_path.read_text(encoding="utf-8"))
         new_cache: dict[str, int] = {}
         for branch in data.get("branches", []):
-            branch_path = Path(branch.get("path", ""))
-            lock_path = branch_path / "ai_mail.local" / ".dispatch.lock"
-            if not lock_path.exists():
-                continue
-            try:
-                lock_data = _json.loads(lock_path.read_text(encoding="utf-8"))
-                pid = lock_data.get("pid", 0)
-                if pid and (sys.platform == "linux" and Path(f"/proc/{pid}").exists()):
-                    name = branch.get("name", "").upper()
-                    if name:
-                        new_cache[name] = pid
-            except (ValueError, OSError) as e:
-                logger.info("[monitor] Skipping dispatch lock %s: %s", lock_path, e)
-                continue
+            _parse_lock_pid(branch, new_cache)
         with _pid_cache_lock:
             _pid_cache.clear()
             _pid_cache.update(new_cache)
@@ -264,6 +269,22 @@ def _stop_threads():
     logger.info("All monitoring threads stopped")
 
 
+def _render_event(event) -> None:
+    """Render a single monitoring event to the console."""
+    branch_pid = _get_pid_for_branch(event.branch)
+
+    if event.event_type == 'command':
+        caller = getattr(event, 'caller', None)
+        target = None
+        if hasattr(event, 'action') and event.action and ':' in event.action:
+            parts = event.action.split(':', 1)
+            if len(parts) == 2 and parts[1]:
+                target = parts[1]
+        print_command_separator(event.branch, event.message, caller, target)
+    else:
+        print_event(event.event_type, event.branch, event.message, event.level, pid=branch_pid)
+
+
 def _display_worker():
     """Display thread - pulls events from queue and displays them. No filtering."""
     global _monitoring_active, _event_queue
@@ -274,22 +295,8 @@ def _display_worker():
             continue
 
         event = _event_queue.dequeue(timeout=0.1)
-
         if event:
-            # Resolve PID for this branch
-            branch_pid = _get_pid_for_branch(event.branch)
-
-            # Display the event
-            if event.event_type == 'command':
-                caller = getattr(event, 'caller', None)
-                target = None
-                if hasattr(event, 'action') and event.action and ':' in event.action:
-                    parts = event.action.split(':', 1)
-                    if len(parts) == 2 and parts[1]:
-                        target = parts[1]
-                print_command_separator(event.branch, event.message, caller, target)
-            else:
-                print_event(event.event_type, event.branch, event.message, event.level, pid=branch_pid)
+            _render_event(event)
 
 
 def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -333,11 +340,56 @@ def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
     return dirs
 
 
+def _emit_watcher_event(level: str, message: str) -> None:
+    """Push a monitoring event about watcher status to the queue."""
+    if not _event_queue:
+        return
+    priority = 1 if level == 'error' else 2
+    _event_queue.enqueue(MonitoringEvent(
+        priority=priority, event_type='log', branch='PRAX',
+        action=level, level=level, timestamp=datetime.now(),
+        message=message,
+    ))
+
+
+def _start_observer_with_fallback(handler, watch_dirs):
+    """Start watchdog observer, falling back to polling on inotify failure.
+
+    Returns the started observer, or None if both methods fail.
+    """
+    from watchdog.observers import Observer
+
+    observer = Observer()
+    for watch_dir, recursive in watch_dirs:
+        observer.schedule(handler, str(watch_dir), recursive=recursive)
+
+    try:
+        observer.start()
+        return observer
+    except OSError as e:
+        logger.warning(f"[monitor] inotify unavailable: {e} — switching to polling")
+        _emit_watcher_event('warning',
+            "File watcher: inotify watch limit reached (VSCode/editors consume most of the 65K default). "
+            "Using polling fallback (slower). Fix: sudo sysctl -w fs.inotify.max_user_watches=524288")
+
+    try:
+        from watchdog.observers.polling import PollingObserver
+        observer = PollingObserver(timeout=2)
+        for watch_dir, recursive in watch_dirs:
+            observer.schedule(handler, str(watch_dir), recursive=recursive)
+        observer.start()
+        logger.info("[monitor] File watcher: polling fallback active")
+        return observer
+    except Exception as e2:
+        logger.error(f"[monitor] Polling fallback also failed: {e2}")
+        _emit_watcher_event('error', "File watcher: completely unavailable — no file events")
+        return None
+
+
 def _file_watcher_worker():
     """File watcher thread - watches filesystem changes and pushes to queue"""
     global _monitoring_active, _event_queue
 
-    from watchdog.observers import Observer
     from aipass.prax.apps.handlers.monitoring.filesystem_handler import MonitoringFileHandler
 
     COMMAND_INDICATOR_FILES = {
@@ -356,48 +408,13 @@ def _file_watcher_worker():
 
     if not watch_dirs:
         logger.error("[monitor] No watch directories found — file watcher disabled")
-        if _event_queue:
-            _event_queue.enqueue(MonitoringEvent(
-                priority=2, event_type='log', branch='PRAX',
-                action='warning', level='warning', timestamp=datetime.now(),
-                message="File watcher: no watch directories found — file events disabled"
-            ))
+        _emit_watcher_event('warning', "File watcher: no watch directories found — file events disabled")
         return
 
-    observer = Observer()
-    for watch_dir, recursive in watch_dirs:
-        observer.schedule(handler, str(watch_dir), recursive=recursive)
-
     logger.info(f"[monitor] File watcher: {len(watch_dirs)} watches scheduled")
-
-    try:
-        observer.start()
-    except OSError as e:
-        logger.warning(f"[monitor] inotify unavailable: {e} — switching to polling")
-        if _event_queue:
-            _event_queue.enqueue(MonitoringEvent(
-                priority=2, event_type='log', branch='PRAX',
-                action='warning', level='warning', timestamp=datetime.now(),
-                message="File watcher: inotify watch limit reached (VSCode/editors consume most of the 65K default). Using polling fallback (slower). Fix: sudo sysctl -w fs.inotify.max_user_watches=524288"
-            ))
-
-        # Fallback to PollingObserver
-        try:
-            from watchdog.observers.polling import PollingObserver
-            observer = PollingObserver(timeout=2)
-            for watch_dir, recursive in watch_dirs:
-                observer.schedule(handler, str(watch_dir), recursive=recursive)
-            observer.start()
-            logger.info("[monitor] File watcher: polling fallback active")
-        except Exception as e2:
-            logger.error(f"[monitor] Polling fallback also failed: {e2}")
-            if _event_queue:
-                _event_queue.enqueue(MonitoringEvent(
-                    priority=1, event_type='log', branch='PRAX',
-                    action='error', level='error', timestamp=datetime.now(),
-                    message="File watcher: completely unavailable — no file events"
-                ))
-            return
+    observer = _start_observer_with_fallback(handler, watch_dirs)
+    if not observer:
+        return
 
     try:
         while _monitoring_active:
@@ -407,43 +424,61 @@ def _file_watcher_worker():
         observer.join()
 
 
+def _start_log_watcher_with_fallback(event_queue) -> bool:
+    """Start log watcher, falling back to polling on inotify failure.
+
+    Returns True if started successfully, False otherwise.
+    """
+    from aipass.prax.apps.handlers.monitoring.log_watcher import start_log_watcher
+
+    try:
+        start_log_watcher(event_queue)
+        return True
+    except OSError as e:
+        logger.warning(f"[monitor] Log watcher inotify failed: {e} — switching to polling")
+        _emit_watcher_event('warning',
+            "Log watcher: inotify watch limit reached (VSCode/editors consume most of the 65K default). "
+            "Using polling fallback (slower). Fix: sudo sysctl -w fs.inotify.max_user_watches=524288")
+
+    try:
+        start_log_watcher(event_queue, use_polling=True)
+        return True
+    except Exception as e2:
+        logger.error(f"[monitor] Log watcher polling fallback failed: {e2}")
+        _emit_watcher_event('error', "Log watcher: completely unavailable — no log events")
+        return False
+
+
 def _log_watcher_worker():
     """Log watcher thread - uses proper log_watcher.py with all improvements"""
     global _monitoring_active, _event_queue
 
-    from aipass.prax.apps.handlers.monitoring.log_watcher import start_log_watcher, stop_log_watcher
+    from aipass.prax.apps.handlers.monitoring.log_watcher import stop_log_watcher
 
     if _event_queue is None:
         logger.error("[monitor] Event queue not initialized for log watcher")
         return
 
-    try:
-        start_log_watcher(_event_queue)
-    except OSError as e:
-        logger.warning(f"[monitor] Log watcher inotify failed: {e} — switching to polling")
-        if _event_queue:
-            _event_queue.enqueue(MonitoringEvent(
-                priority=2, event_type='log', branch='PRAX',
-                action='warning', level='warning', timestamp=datetime.now(),
-                message="Log watcher: inotify watch limit reached (VSCode/editors consume most of the 65K default). Using polling fallback (slower). Fix: sudo sysctl -w fs.inotify.max_user_watches=524288"
-            ))
-        try:
-            start_log_watcher(_event_queue, use_polling=True)
-        except Exception as e2:
-            logger.error(f"[monitor] Log watcher polling fallback failed: {e2}")
-            if _event_queue:
-                _event_queue.enqueue(MonitoringEvent(
-                    priority=1, event_type='log', branch='PRAX',
-                    action='error', level='error', timestamp=datetime.now(),
-                    message="Log watcher: completely unavailable — no log events"
-                ))
-            return
+    if not _start_log_watcher_with_fallback(_event_queue):
+        return
 
     try:
         while _monitoring_active:
             time.sleep(0.1)
     finally:
         stop_log_watcher()
+
+
+def _handle_interactive_cmd(cmd: str, get_help_text) -> None:
+    """Dispatch an interactive monitor command."""
+    if cmd == 'help':
+        console.print(get_help_text())
+        return
+    if cmd == 'status':
+        _print_status()
+        return
+    error(f"Unknown command: {cmd}")
+    console.print("[dim]Type 'help' for available commands[/dim]")
 
 
 def _interactive_loop():
@@ -479,13 +514,8 @@ def _interactive_loop():
             if cmd in ['quit', 'exit', 'q']:
                 console.print("[yellow]Stopping monitoring...[/yellow]")
                 break
-            elif cmd == 'help':
-                console.print(get_help_text())
-            elif cmd == 'status':
-                _print_status()
-            else:
-                error(f"Unknown command: {cmd}")
-                console.print("[dim]Type 'help' for available commands[/dim]")
+
+            _handle_interactive_cmd(cmd, get_help_text)
 
         except KeyboardInterrupt:
             logger.info("[monitor] Stopped by user")

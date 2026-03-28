@@ -35,7 +35,7 @@ from aipass.trigger.apps.modules.core import trigger
 from aipass.ai_mail.apps.handlers.email.dashboard_sync import push_dashboard_update
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
 from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
-from aipass.ai_mail.apps.handlers.email.format import format_email_list_item
+from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
 from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox
 from aipass.ai_mail.apps.handlers.email.inbox_cleanup import (
     mark_read_and_archive, mark_all_read_and_archive,
@@ -297,11 +297,9 @@ def handle_view(args: List[str]) -> bool:
         if not success or email_data is None:
             error(message)
             return False
-        console.print(f"\n{'='*60}")
-        console.print(f"From: {email_data.get('from', 'unknown')} ({email_data.get('from_name', '')})")
-        console.print(f"Subject: {email_data.get('subject', 'No subject')}")
-        console.print(f"{email_data.get('timestamp', '')}")
-        console.print(f"{'='*60}\n{email_data.get('message', '')}\n{'='*60}")
+        header = format_email_header(email_data)
+        console.print(f"\n{header}")
+        console.print(f"\n{email_data.get('message', '')}\n{'='*70}")
         console.print(f"[dim]Status: opened | ID: {args[0]}[/dim]")
         console.print(f"[dim]To reply: drone @ai_mail reply {args[0]} \"your message\"[/dim]")
         console.print(f"[dim]To close: drone @ai_mail close {args[0]}[/dim]")
@@ -345,12 +343,12 @@ def handle_close(args: List[str]) -> bool:
 
         if len(args) > 1 and closed > 0:
             try:
-                from aipass.ai_mail.apps.handlers.email.purge import purge_deleted_folder
+                from aipass.ai_mail.apps.handlers.email.purge import run_purge
             except ImportError as e:
                 logger.warning("[email] purge import unavailable: %s", e)
-                purge_deleted_folder = None
+                run_purge = None
             batch_close_post_ops(branch_path, push_dashboard_update, update_central,
-                                 purge_deleted_folder)
+                                 run_purge)
             console.print(f"\nClosed {closed}, failed {failed}")
         return failed == 0
     except Exception as e:

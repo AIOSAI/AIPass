@@ -183,6 +183,81 @@ def _calculate_quick_status(sections: Dict) -> Dict:
 
 
 # =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _create_from_template(template: dict, branch_name: str) -> dict:
+    """Create a new dashboard from template with placeholders replaced."""
+    return _replace_placeholders(template, branch_name)
+
+
+def _safe_write_dashboard(
+    dashboard_path: Path, data: Any, branch_name: str, dry_run: bool, result: Dict[str, Any]
+) -> bool:
+    """Write dashboard JSON to disk. Returns True on success, False on error."""
+    if dry_run:
+        return True
+    try:
+        content = data if isinstance(data, str) else json.dumps(data, indent=2) + "\n"
+        dashboard_path.write_text(content)
+        return True
+    except OSError as e:
+        logger.error("Failed to write dashboard for %s: %s", branch_name, e)
+        result["errors"].append(f"{branch_name}: write failed: {e}")
+        result["branches_skipped"] += 1
+        return False
+
+
+def _apply_structural_updates(
+    data: dict, template: dict, branch_actions: List[str]
+) -> tuple:
+    """Apply structural updates from template to existing dashboard data.
+
+    Returns (changed: bool, branch_actions: list).
+    """
+    changed = False
+
+    # Remove deprecated sections
+    for section in DEPRECATED_SECTIONS:
+        if section in data.get("sections", {}):
+            del data["sections"][section]
+            branch_actions.append(f"removed deprecated section: {section}")
+            changed = True
+
+    # Remove deprecated quick_status keys
+    qs = data.get("quick_status", {})
+    for key in DEPRECATED_QUICK_STATUS_KEYS:
+        if key in qs:
+            del qs[key]
+            branch_actions.append(f"removed deprecated quick_status key: {key}")
+            changed = True
+
+    # Add missing required sections with defaults
+    sections = data.setdefault("sections", {})
+    for section_name, defaults in REQUIRED_SECTIONS.items():
+        if section_name not in sections:
+            sections[section_name] = copy.deepcopy(defaults)
+            branch_actions.append(f"added missing section: {section_name}")
+            changed = True
+
+    # Update _warning header from template
+    template_warning = template.get("_warning")
+    if template_warning and data.get("_warning") != template_warning:
+        data["_warning"] = template_warning
+        branch_actions.append("updated _warning header")
+        changed = True
+
+    # Recalculate quick_status from live data
+    if "sections" in data:
+        new_qs = _calculate_quick_status(data["sections"])
+        if data.get("quick_status") != new_qs:
+            data["quick_status"] = new_qs
+            changed = True
+
+    return changed, branch_actions
+
+
+# =============================================================================
 # MAIN PUSH FUNCTION
 # =============================================================================
 
@@ -260,59 +335,18 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         dashboard_path = branch_path / "DASHBOARD.local.json"
         branch_actions: List[str] = []
 
-        if not dashboard_path.exists():
-            # Create from template
-            new_dashboard = _replace_placeholders(template, branch_name)
-            new_dashboard["last_updated"] = datetime.now().isoformat()
-            # Recalculate quick_status for the new dashboard
-            new_dashboard["quick_status"] = _calculate_quick_status(
-                new_dashboard.get("sections", {})
-            )
-
-            if not dry_run:
-                try:
-                    tmp_path = dashboard_path.with_suffix(".tmp")
-                    tmp_path.write_text(json.dumps(new_dashboard, indent=2))
-                    tmp_path.rename(dashboard_path)
-                except OSError as e:
-                    logger.warning("Failed to create dashboard for %s: %s", branch_name, e)
-                    result["errors"].append(f"{branch_name}: failed to create dashboard: {e}")
-                    result["branches_skipped"] += 1
-                    continue
-
-            branch_actions.append("created from template")
+        if not dashboard_path.exists() or not dashboard_path.read_text().strip():
+            label = "created from template" if not dashboard_path.exists() else "created from template (was empty)"
+            new_dashboard = _create_from_template(template, branch_name)
+            if not _safe_write_dashboard(dashboard_path, new_dashboard, branch_name, dry_run, result):
+                continue
+            branch_actions.append(label)
             result["branches_created"] += 1
             branches_updated_list.append(branch_name)
             result["changes"].append({"branch": branch_name, "actions": branch_actions})
             continue
 
-        # File exists -- load and update
         content = dashboard_path.read_text().strip()
-        if not content:
-            # Empty file -- treat as new
-            new_dashboard = _replace_placeholders(template, branch_name)
-            new_dashboard["last_updated"] = datetime.now().isoformat()
-            new_dashboard["quick_status"] = _calculate_quick_status(
-                new_dashboard.get("sections", {})
-            )
-
-            if not dry_run:
-                try:
-                    tmp_path = dashboard_path.with_suffix(".tmp")
-                    tmp_path.write_text(json.dumps(new_dashboard, indent=2))
-                    tmp_path.rename(dashboard_path)
-                except OSError as e:
-                    logger.warning("Failed to write dashboard for %s: %s", branch_name, e)
-                    result["errors"].append(f"{branch_name}: failed to write dashboard: {e}")
-                    result["branches_skipped"] += 1
-                    continue
-
-            branch_actions.append("created from template (was empty)")
-            result["branches_created"] += 1
-            branches_updated_list.append(branch_name)
-            result["changes"].append({"branch": branch_name, "actions": branch_actions})
-            continue
-
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:
@@ -321,74 +355,12 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
             result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
             continue
 
-        # --- Structural updates (preserve existing data) ---
-        changed = False
-
-        # Ensure _warning header exists
-        if "_warning" not in data:
-            data["_warning"] = template.get("_warning", "")
-            branch_actions.append("added _warning header")
-            changed = True
-
-        # Ensure sections dict exists
-        if "sections" not in data:
-            data["sections"] = {}
-            branch_actions.append("added sections dict")
-            changed = True
-
-        # Add missing required sections (with defaults)
-        for section_name, section_defaults in REQUIRED_SECTIONS.items():
-            if section_name not in data["sections"]:
-                data["sections"][section_name] = copy.deepcopy(section_defaults)
-                branch_actions.append(f"added {section_name} section")
-                changed = True
-
-        # Remove deprecated sections
-        for deprecated in DEPRECATED_SECTIONS:
-            if deprecated in data.get("sections", {}):
-                del data["sections"][deprecated]
-                branch_actions.append(f"removed {deprecated} section")
-                changed = True
-
-        # Ensure last_updated field on every section
-        for section_name, section_data in data.get("sections", {}).items():
-            if isinstance(section_data, dict) and "last_updated" not in section_data:
-                section_data["last_updated"] = ""
-                branch_actions.append(f"added last_updated to {section_name}")
-                changed = True
-
-        # Remove deprecated quick_status keys
-        quick_status = data.get("quick_status", {})
-        if isinstance(quick_status, dict):
-            for dep_key in DEPRECATED_QUICK_STATUS_KEYS:
-                if dep_key in quick_status:
-                    del quick_status[dep_key]
-                    branch_actions.append(f"removed quick_status.{dep_key}")
-                    changed = True
-
-        # Recalculate quick_status from live section data
-        new_quick_status = _calculate_quick_status(data.get("sections", {}))
-        if data.get("quick_status") != new_quick_status:
-            data["quick_status"] = new_quick_status
-            if not changed:
-                # Only note if no other changes triggered this
-                branch_actions.append("recalculated quick_status")
-            changed = True
+        changed, branch_actions = _apply_structural_updates(data, template, branch_actions)
 
         if changed:
             data["last_updated"] = datetime.now().isoformat()
-
-            if not dry_run:
-                try:
-                    tmp_path = dashboard_path.with_suffix(".tmp")
-                    tmp_path.write_text(json.dumps(data, indent=2))
-                    tmp_path.rename(dashboard_path)
-                except OSError as e:
-                    logger.warning("Failed to write updated dashboard for %s: %s", branch_name, e)
-                    result["errors"].append(f"{branch_name}: failed to write dashboard: {e}")
-                    result["branches_skipped"] += 1
-                    continue
-
+            if not _safe_write_dashboard(dashboard_path, data, branch_name, dry_run, result):
+                continue
             result["branches_updated"] += 1
             branches_updated_list.append(branch_name)
             result["changes"].append({"branch": branch_name, "actions": branch_actions})

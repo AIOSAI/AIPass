@@ -7,15 +7,10 @@ MY_BRANCH = "aipass.spawn"
 
 
 def _find_real_caller():
-    """
-    Walk the stack to find the actual file that triggered this import.
+    """Walk the stack to find the actual file that triggered this import.
 
-    Skips:
-    - This file (handlers/__init__.py)
-    - Python's importlib internals
-    - Frozen modules
-
-    Returns tuple: (file_path, import_line) or (None, None)
+    Skips this file, importlib internals, and frozen modules.
+    Returns tuple: (file_path, import_line) or (None, None).
     """
     stack = inspect.stack()
     this_file = str(Path(__file__).resolve())
@@ -23,15 +18,12 @@ def _find_real_caller():
     for frame_info in stack:
         filename = frame_info.filename
 
-        # Skip this file
         if this_file in str(Path(filename).resolve()):
             continue
 
-        # Skip Python internals
         if filename.startswith("<") or "importlib" in filename:
             continue
 
-        # Found a real file - try to get the import line
         import_line = None
         if frame_info.code_context:
             import_line = frame_info.code_context[0].strip()
@@ -52,38 +44,24 @@ def _extract_branch_name(filepath: str) -> str:
 
 
 def _guard_branch_access():
-    """
-    Block cross-branch handler imports.
+    """Block cross-branch handler imports.
 
     Only code from within the 'spawn' branch can import these handlers.
     External branches must use aipass.spawn.apps.modules instead.
     """
     caller_file, import_line = _find_real_caller()
 
-    # DEBUG: Print what we found
-    import os
-    if os.environ.get("AIPASS_DEBUG_GUARD"):
-        import sys
-        print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
-        print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
-
     if caller_file is None:
-        # Can't determine caller from real files
-        # Check if we're being run from command line (external)
-        # by looking at the raw stack for <string> or <stdin>
         stack = inspect.stack()
         for frame in stack:
             if frame.filename in ("<string>", "<stdin>"):
-                return  # Allow command-line Python through
-        return  # Allow if truly can't determine
+                return
+        return
 
-    # Check if caller is from our branch
-    # MY_BRANCH is "aipass.spawn" (dotted), but filesystem uses "/aipass/spawn/"
     branch_path = "/" + MY_BRANCH.replace(".", "/") + "/"
     if branch_path in caller_file:
-        return  # Same branch, allowed
+        return
 
-    # External caller - block access
     caller_branch = _extract_branch_name(caller_file)
     caller_filename = Path(caller_file).name
     blocked_import = import_line if import_line else "unknown"
@@ -99,9 +77,6 @@ def _guard_branch_access():
         f"  Handlers are internal to their branch.\n"
         f"  Use the module API instead:\n"
         f"    from {MY_BRANCH}.apps.modules.<module> import <function>\n"
-        f"\n"
-        f"  Example:\n"
-        f"    from {MY_BRANCH}.apps.modules.logger import logger\n"
         f"\n"
         f"  For full standards guide:\n"
         f"    drone @seedgo handlers\n"

@@ -326,3 +326,17 @@ def test_init_project_returns_dict(tmp_path):
     result = init_project(target, project_name="rtype")
 
     assert isinstance(result, dict)
+
+
+def test_init_project_no_overwrite_local_json(tmp_path):
+    """Existing local.json content is preserved — no_overwrite contract."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    trinity = target / ".trinity"
+    trinity.mkdir()
+    (trinity / "local.json").write_text('{"custom": true}\n', encoding="utf-8")
+
+    init_project(target, project_name="keep")
+
+    content = (trinity / "local.json").read_text(encoding="utf-8")
+    assert '"custom": true' in content

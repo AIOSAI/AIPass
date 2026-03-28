@@ -66,9 +66,14 @@ def _fresh_memory_files(monkeypatch):
         if saved is not None:
             sys.modules["aipass.memory.apps.handlers.json"] = saved
 
-    # Now force-reimport memory_files
-    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
-    import aipass.memory.apps.handlers.json.memory_files  # noqa: F811
+    # Now force-reimport memory_files via importlib.reload or fresh import
+    mem_files_key = "aipass.memory.apps.handlers.json.memory_files"
+    existing = sys.modules.get(mem_files_key)
+    if existing is not None:
+        importlib.reload(existing)
+    else:
+        sys.modules.pop(mem_files_key, None)
+        import aipass.memory.apps.handlers.json.memory_files  # noqa: F811
 
     yield
 

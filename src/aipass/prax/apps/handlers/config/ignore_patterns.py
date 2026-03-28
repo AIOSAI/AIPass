@@ -72,15 +72,17 @@ def load_ignore_patterns_from_config() -> Set[str]:
         >>>     print("Will skip .git directories")
     """
     try:
-        if PRAX_LOGGER_CONFIG_FILE.exists():
-            with open(PRAX_LOGGER_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                patterns = config.get('config', {}).get('ignore_patterns', [])
-                if patterns:
-                    json_handler.log_operation("ignore_patterns_loaded", {"pattern_count": len(patterns)})
-                    return set(patterns)
+        if not PRAX_LOGGER_CONFIG_FILE.exists():
+            return DEFAULT_IGNORE_FOLDERS
+
+        with open(PRAX_LOGGER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+        patterns = config.get('config', {}).get('ignore_patterns', [])
+        if patterns:
+            json_handler.log_operation("ignore_patterns_loaded", {"pattern_count": len(patterns)})
+            return set(patterns)
     except Exception as e:
         logger.warning("ignore_patterns: failed to load config from '%s', using defaults: %s", PRAX_LOGGER_CONFIG_FILE, e)
 
-    # Fallback to hardcoded if config missing/invalid
     return DEFAULT_IGNORE_FOLDERS

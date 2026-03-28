@@ -60,14 +60,19 @@ class BranchDetector:
         self._repo_root = Path.cwd()
         return self._repo_root
 
-    def _load_registry(self):
-        """
-        Load BRANCH_REGISTRY.json and build lookup tables.
+    def _register_branch(self, branch: dict) -> None:
+        """Register a single branch entry into the lookup tables."""
+        branch_name = branch.get('name', '').upper()
+        branch_path = branch.get('path', '')
+        if not branch_name or not branch_path:
+            return
+        path = Path(branch_path).resolve()
+        self.branch_map[str(path)] = branch_name
+        self.known_branches.add(branch_name)
+        self.branch_map[str(path) + '/'] = branch_name
 
-        Builds:
-        - branch_map: Full path to branch name mapping
-        - known_branches: Set of all branch names for pattern matching
-        """
+    def _load_registry(self):
+        """Load BRANCH_REGISTRY.json and build lookup tables."""
         try:
             registry_path = self._find_repo_root() / "AIPASS_REGISTRY.json"
 
@@ -79,28 +84,16 @@ class BranchDetector:
             with open(registry_path, encoding='utf-8') as f:
                 data = json.load(f)
 
-                branches = data.get('branches', [])
-                if not branches:
-                    logger.warning("No branches found in registry")
-                    self._load_fallback_branches()
-                    return
+            branches = data.get('branches', [])
+            if not branches:
+                logger.warning("No branches found in registry")
+                self._load_fallback_branches()
+                return
 
-                for branch in branches:
-                    branch_name = branch.get('name', '').upper()
-                    branch_path = branch.get('path', '')
+            for branch in branches:
+                self._register_branch(branch)
 
-                    if not branch_name or not branch_path:
-                        continue
-
-                    # Store normalized path
-                    path = Path(branch_path).resolve()
-                    self.branch_map[str(path)] = branch_name
-                    self.known_branches.add(branch_name)
-
-                    # Also store with trailing slash for matching
-                    self.branch_map[str(path) + '/'] = branch_name
-
-                logger.info(f"Loaded {len(self.known_branches)} branches from registry")
+            logger.info(f"Loaded {len(self.known_branches)} branches from registry")
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in registry: {e}")
@@ -115,6 +108,53 @@ class BranchDetector:
                    'BACKUP_SYSTEM', 'SECURITY', 'AIPASS']
         self.known_branches.update(fallback)
         logger.info(f"Using fallback branches: {fallback}")
+
+    def _detect_from_claude_project(self, path_str: str) -> Optional[str]:
+        """Detect branch from Claude Code project path encoding."""
+        projects_idx = path_str.index('.claude/projects/') + len('.claude/projects/')
+        remaining = path_str[projects_idx:]
+        project_folder = remaining.split('/')[0]
+        project_path = '/' + project_folder.replace('-', '/')
+
+        for registered_path, branch_name in self.branch_map.items():
+            registered_normalized = registered_path.replace('_', '/')
+            project_normalized = project_path.replace('_', '/')
+            if registered_normalized == project_normalized or registered_path == project_path:
+                return branch_name
+
+        segments = [s for s in project_folder.split('-') if s]
+        if not segments:
+            return None
+        for i in range(len(segments) - 1, 0, -1):
+            candidate = '_'.join(segments[i:]).upper()
+            if candidate in self.known_branches:
+                return candidate
+        last = segments[-1].upper()
+        if last in self.known_branches:
+            return last
+        return None
+
+    def _detect_from_compound_parts(self, path_parts: list) -> Optional[str]:
+        """Check compound path parts for known branch names."""
+        for part in path_parts:
+            if '_' in part:
+                for subpart in part.split('_'):
+                    branch_upper = subpart.upper()
+                    if branch_upper in self.known_branches:
+                        return branch_upper
+        return None
+
+    def _extract_branch_from_central(self, path_str: str, path: Path) -> Optional[str]:
+        """Extract branch name from AI_CENTRAL filename patterns."""
+        if not ('AI_CENTRAL' in path_str or '.ai_central' in path_str or 'ai_central' in path_str.lower()):
+            return None
+
+        name = path.name
+        if '.central.json' in name:
+            return name.replace('.central.json', '').upper()
+        if '_central.json' in name:
+            return name.replace('_central.json', '').upper()
+        return None
 
     def detect_from_path(self, file_path: str) -> str:
         """
@@ -155,51 +195,17 @@ class BranchDetector:
                     return result
 
             # Strategy 3: Claude Code project files
-            # Path: ~/.claude/projects/-home-aipass-aipass-core-trigger/session.jsonl
-            # Folder name encodes the project path with - replacing /
             if '.claude/projects/' in path_str:
-                projects_idx = path_str.index('.claude/projects/') + len('.claude/projects/')
-                remaining = path_str[projects_idx:]
-                # Get the project folder name (first path segment after projects/)
-                project_folder = remaining.split('/')[0]
-                # Convert folder name back to path: -home-user-src-aipass-trigger -> /home/user/src/aipass/trigger
-                project_path = '/' + project_folder.replace('-', '/')
-                # Check against branch_map (registered branch paths)
-                for registered_path, branch_name in self.branch_map.items():
-                    # Normalize for comparison: underscores vs hyphens
-                    registered_normalized = registered_path.replace('_', '/')
-                    project_normalized = project_path.replace('_', '/')
-                    if registered_normalized == project_normalized or registered_path == project_path:
-                        self.log_map[path_str] = branch_name
-                        return branch_name
-                # Fallback: extract last segment as branch name
-                segments = [s for s in project_folder.split('-') if s]
-                # Try matching from end (last meaningful segment)
-                if segments:
-                    last = segments[-1].upper()
-                    # Check for compound names by trying progressively longer matches from end
-                    for i in range(len(segments) - 1, 0, -1):
-                        candidate = '_'.join(segments[i:]).upper()
-                        if candidate in self.known_branches:
-                            self.log_map[path_str] = candidate
-                            return candidate
-                    if last in self.known_branches:
-                        self.log_map[path_str] = last
-                        return last
+                result = self._detect_from_claude_project(path_str)
+                if result:
+                    self.log_map[path_str] = result
+                    return result
 
             # Strategy 4: AI_CENTRAL files - {BRANCH}.central.json or {BRANCH}_central.json
-            # Path: .../AI_CENTRAL/AI_MAIL.central.json -> AI_MAIL
-            if 'AI_CENTRAL' in path_str or '.ai_central' in path_str or 'ai_central' in path_str.lower():
-                name = path.name
-                # Extract branch from filename patterns
-                branch_candidate = None
-                if '.central.json' in name:
-                    branch_candidate = name.replace('.central.json', '').upper()
-                elif '_central.json' in name:
-                    branch_candidate = name.replace('_central.json', '').upper()
-                if branch_candidate:
-                    self.log_map[path_str] = branch_candidate
-                    return branch_candidate
+            result = self._extract_branch_from_central(path_str, path)
+            if result:
+                self.log_map[path_str] = result
+                return result
 
             # Strategy 5: Root-level system files (repo root or .claude under it)
             repo_root = self._find_repo_root()
@@ -216,14 +222,10 @@ class BranchDetector:
                     return branch_upper
 
             # Strategy 6: Check for compound names (e.g., ai_mail -> check for AI_MAIL patterns)
-            for part in path_parts:
-                if '_' in part:
-                    subparts = part.split('_')
-                    for subpart in subparts:
-                        branch_upper = subpart.upper()
-                        if branch_upper in self.known_branches:
-                            self.log_map[path_str] = branch_upper
-                            return branch_upper
+            result = self._detect_from_compound_parts(path_parts)
+            if result:
+                self.log_map[path_str] = result
+                return result
 
             # No match found
             logger.info(f"Could not detect branch for path: {file_path}")

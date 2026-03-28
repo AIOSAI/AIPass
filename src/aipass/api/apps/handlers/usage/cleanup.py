@@ -15,7 +15,6 @@ Removes old generation tracking data based on retention rules.
 
 # Infrastructure
 from pathlib import Path
-import sys
 
 # Standard library
 import json
@@ -122,14 +121,3 @@ def _identify_old_generations(generation_tracking: Dict, cutoff_date: datetime) 
             old_generations.append(gen_id)
 
     return old_generations
-
-
-
-def _is_old_date(date_str: str, cutoff_date) -> bool:
-    """Check if date string is older than cutoff."""
-    try:
-        date_obj = datetime.fromisoformat(date_str).date()
-        return date_obj < cutoff_date
-    except (ValueError, TypeError) as e:
-        logger.warning(f"Invalid date format '{date_str}' in _is_old_date: {e}")
-        return True

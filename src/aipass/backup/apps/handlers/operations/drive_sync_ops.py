@@ -19,7 +19,6 @@ from typing import Any, Dict
 from aipass.prax import logger
 
 from aipass.backup.apps.handlers.json.drive_sync_json import (
-    load_config,
     load_data,
     save_data,
     log_operation,
@@ -30,30 +29,8 @@ from aipass.backup.apps.handlers.json import json_handler
 _BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 _JSON_DIR = _BACKUP_ROOT / "backup_json"
 _MODULE_NAME = "google_drive_sync"
-_CONFIG_FILE = _JSON_DIR / f"{_MODULE_NAME}_config.json"
 _DATA_FILE = _JSON_DIR / f"{_MODULE_NAME}_data.json"
 _LOG_FILE = _JSON_DIR / f"{_MODULE_NAME}_log.json"
-
-
-def get_status() -> Dict[str, Any]:
-    """Get current module status for monitoring.
-
-    Returns:
-        Dict with module status fields
-    """
-    json_handler.log_operation("drive_sync_status_checked")
-
-    data = load_data(_DATA_FILE)
-    config = load_config(_CONFIG_FILE)
-
-    return {
-        "name": _MODULE_NAME,
-        "category": "backup_system",
-        "enabled": config.get("config", {}).get("enabled", False),
-        "authenticated": data.get("runtime_state", {}).get("authenticated", False),
-        "last_sync": data.get("runtime_state", {}).get("last_sync"),
-        "statistics": data.get("statistics", {})
-    }
 
 
 def clear_file_tracker() -> bool:
@@ -62,6 +39,7 @@ def clear_file_tracker() -> bool:
     Returns:
         bool: True if cleared successfully, False on error
     """
+    json_handler.log_operation("drive_sync_clear_tracker")
     try:
         data = load_data(_DATA_FILE)
         if "runtime_state" in data and "file_tracker" in data["runtime_state"]:

@@ -53,34 +53,6 @@ _REPO_ROOT = _find_repo_root()
 MEMORY_BANK_PATH = _REPO_ROOT / "MEMORY_BANK" / "plans"
 PROCESSED_PLANS_DIR = _PKG_ROOT / "backup" / "processed_plans"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
-CONFIG_FILE = FLOW_JSON_DIR / "flow_mbank_config.json"
-
-# =============================================
-# CONFIGURATION
-# =============================================
-
-def load_config() -> Dict[str, Any]:
-    """Load flow_mbank configuration"""
-    default_config = {
-        "module_name": "flow_mbank",
-        "version": "1.0.0",
-        "config": {
-            "enabled": True,
-            "archive_processed": True
-        }
-    }
-
-    if not CONFIG_FILE.exists():
-        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(default_config, f, indent=2, ensure_ascii=False)
-        return default_config
-
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        raise Exception(f"Failed to load config: {e}")
 
 # =============================================
 # PLAN TYPE HELPERS

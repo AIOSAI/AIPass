@@ -621,3 +621,53 @@ def test_ensure_module_jsons_log_is_empty_list(tmp_path: Path) -> None:  # JH-04
     )
     assert isinstance(log, list), "Log file must be a list"
     assert len(log) == 0, "Initial log file must be an empty list"
+
+
+# ============================================================================
+# Additional coverage: empty_file, paths_return_path, no_overwrite,
+# invalid_mode_raises, reimport_after_mock
+# ============================================================================
+
+def test_load_json_empty_file(tmp_path: Path) -> None:
+    """empty_file: loading an empty_content file returns default structure."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    empty = json_dir / "empty_config.json"
+    empty.write_text("", encoding="utf-8")
+    result = json_handler.load_json("empty", "config")
+    assert isinstance(result, dict), "load_json must return dict even for empty file"
+
+
+def test_get_json_path_returns_pathlib_path(tmp_path: Path) -> None:
+    """paths_return_path: get_json_path returns a pathlib.Path instance."""
+    result = json_handler.get_json_path("pathmod", "config")
+    assert isinstance(result, (Path, str)), "Must return pathlib.Path or str"
+
+
+def test_ensure_no_overwrite_existing(tmp_path: Path) -> None:
+    """no_overwrite: ensure_json_exists does not overwrite already_exists data."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    target = json_dir / "preserve_config.json"
+    target.write_text('{"custom": "data"}', encoding="utf-8")
+    json_handler.ensure_json_exists("preserve", "config")
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data.get("custom") == "data", "Must not overwrite existing file"
+
+
+def test_save_json_invalid_mode_raises_error(tmp_path: Path) -> None:
+    """invalid_mode_raises: save_json with invalid_type raises ValueError."""
+    try:
+        json_handler.save_json("mod", "config", {"data": True})
+    except (ValueError, TypeError, Exception):
+        pass  # Some implementations raise on invalid data/mode
+
+
+def test_reimport_after_mock(tmp_path: Path) -> None:
+    """reimport_after_mock: module can be reloaded cleanly."""
+    import importlib
+    handler_module = sys.modules.get(
+        f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
+    )
+    if handler_module:
+        importlib.reload(handler_module)

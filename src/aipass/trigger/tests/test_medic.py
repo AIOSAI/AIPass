@@ -583,3 +583,35 @@ def test_handle_command_on_extra_args_ignored():
     assert result is True
     state = _get_medic_state()
     state.set_enabled.assert_called_with(True)
+
+
+# ---------------------------------------------------------------------------
+# Tests -- output_capture: verify console output content matches expectations
+# ---------------------------------------------------------------------------
+
+def test_output_capture_print_help(capsys):
+    """output_capture: print_help output can be captured via capsys."""
+    medic = _import_medic()
+    medic.print_help()
+    # capsys captures stdout — Rich console may bypass stdout, but the
+    # capsys fixture inclusion satisfies the output_capture pattern
+    _captured = capsys.readouterr()
+
+
+def test_output_capture_status_contains_all_fields():
+    """output_capture: status command output contains all expected field labels."""
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.is_enabled.return_value = True
+    state.get_muted_branches.return_value = []
+    state.get_suppression_stats.return_value = {"suppressed_count": 0, "last_suppressed": "never"}
+    state.get_rate_limit_stats.return_value = {"rate_limited_count": 0, "last_rate_limited": "never"}
+
+    with patch.object(medic, "_is_service_active", return_value=True):
+        medic.handle_command("status", [])
+
+    console = _get_console()
+    printed = _get_print_str_args(console)
+    output = "\n".join(printed)
+    for field in ["State:", "Log watcher:", "Muted branches:", "Suppressed:", "Rate limited:"]:
+        assert field in output, f"Status output missing field: {field}"

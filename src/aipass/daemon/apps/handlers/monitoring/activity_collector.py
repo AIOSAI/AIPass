@@ -156,6 +156,32 @@ def _scan_directory_files(
     if not directory.exists() or not directory.is_dir():
         return {"code_files": code_files, "memory_files": memory_files}
 
+    def _should_skip_dir(item: Path) -> bool:
+        """Check if a directory should be skipped during scanning."""
+        if item.name == '__pycache__':
+            return True
+        return item.name.startswith('.') and item.name != '.trinity'
+
+    def _process_file(item: Path) -> None:
+        """Categorize a single file into code_files or memory_files."""
+        mtime = _get_file_mtime(item)
+        if mtime is None:
+            return
+        if since and mtime < since:
+            return
+
+        file_info = {
+            "path": str(item),
+            "name": item.name,
+            "mtime": mtime.isoformat(),
+            "mtime_datetime": mtime,
+        }
+
+        if _is_memory_file(item, branch_name):
+            memory_files.append(file_info)
+        elif item.suffix == CODE_FILE_EXTENSION:
+            code_files.append(file_info)
+
     def scan_recursive(path: Path, depth: int = 0) -> None:
         """Recursively collect code and memory files up to max_depth."""
         if depth > max_depth:
@@ -163,34 +189,11 @@ def _scan_directory_files(
 
         try:
             for item in path.iterdir():
-                # Skip hidden directories and __pycache__ (but allow .trinity)
                 if item.is_dir():
-                    if item.name == '__pycache__':
-                        continue
-                    if item.name.startswith('.') and item.name != '.trinity':
-                        continue
-                    scan_recursive(item, depth + 1)
+                    if not _should_skip_dir(item):
+                        scan_recursive(item, depth + 1)
                 elif item.is_file():
-                    mtime = _get_file_mtime(item)
-                    if mtime is None:
-                        continue
-
-                    # Apply time filter if specified
-                    if since and mtime < since:
-                        continue
-
-                    file_info = {
-                        "path": str(item),
-                        "name": item.name,
-                        "mtime": mtime.isoformat(),
-                        "mtime_datetime": mtime,
-                    }
-
-                    # Categorize file
-                    if _is_memory_file(item, branch_name):
-                        memory_files.append(file_info)
-                    elif item.suffix == CODE_FILE_EXTENSION:
-                        code_files.append(file_info)
+                    _process_file(item)
         except PermissionError as e:
             logger.warning("Permission denied scanning %s: %s", path, e)
         except OSError as e:

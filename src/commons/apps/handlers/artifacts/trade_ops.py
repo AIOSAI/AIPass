@@ -91,11 +91,11 @@ def sweep_expired() -> int:
         count = 0
         for row in expired:
             conn.execute(
-                "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
-                "VALUES (?, 'expired', ?, NULL, ?)",
-                (row["id"], row["owner"], f"Ephemeral item '{row['name']}' expired"),
+                "DELETE FROM artifact_history WHERE artifact_id = ?",
+                (row["id"],),
             )
             conn.execute("DELETE FROM artifacts WHERE id = ?", (row["id"],))
+            logger.info(f"[trade_ops] Swept expired item '{row['name']}' (id={row['id']}, owner={row['owner']})")
             count += 1
 
         conn.commit()

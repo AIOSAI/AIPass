@@ -286,3 +286,59 @@ def test_save_json_log_accepts_list(tmp_path):
     assert isinstance(loaded, list)
     assert len(loaded) == 1
     assert loaded[0]["operation"] == "test"
+
+
+# ===========================================================================
+# log_operation
+# ===========================================================================
+
+def test_log_operation_appends_entry(tmp_path):
+    """log_operation appends an entry with timestamp and operation to the log."""
+    from commons.apps.handlers.json.json_handler import log_operation
+
+    result = log_operation("test_op", data={"key": "val"}, module_name="testmod")
+    assert result is True
+
+    log = load_json("testmod", "log")
+    assert isinstance(log, list)
+    assert len(log) >= 1
+    last = log[-1]
+    assert last["operation"] == "test_op"
+    assert last["data"]["key"] == "val"
+
+
+def test_log_operation_rotates_entries(tmp_path):
+    """log_operation trims log to max_entries when it exceeds the limit."""
+    from commons.apps.handlers.json.json_handler import log_operation
+
+    ensure_json_exists("rotmod", "config")
+    config = load_json("rotmod", "config")
+    assert config is not None
+    config["config"]["max_log_entries"] = 3
+    save_json("rotmod", "config", config)
+
+    for i in range(5):
+        log_operation(f"op_{i}", module_name="rotmod")
+
+    log = load_json("rotmod", "log")
+    assert isinstance(log, list)
+    assert len(log) <= 3
+
+
+# ===========================================================================
+# ensure_module_jsons
+# ===========================================================================
+
+def test_ensure_module_jsons_creates_all_three(tmp_path):
+    """ensure_module_jsons creates config, data, and log files for a module."""
+    from commons.apps.handlers.json.json_handler import ensure_module_jsons
+
+    result = ensure_module_jsons("allmod")
+    assert result is True
+
+    config_path = Path(get_json_path("allmod", "config"))
+    data_path = Path(get_json_path("allmod", "data"))
+    log_path = Path(get_json_path("allmod", "log"))
+    assert config_path.exists()
+    assert data_path.exists()
+    assert log_path.exists()

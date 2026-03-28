@@ -111,6 +111,16 @@ def temporarily_writable(path):
 # FILESYSTEM OPERATIONS
 # =============================================
 
+def _mkdir_writable(target: Path) -> None:
+    """Create directory, temporarily making parents writable if needed."""
+    if target.exists():
+        with temporarily_writable(target.parent):
+            with temporarily_writable(target):
+                target.mkdir(parents=True, exist_ok=True)
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+
+
 def ensure_backup_directory(backup_dest: Path, backup_path: Path, is_dynamic: bool) -> tuple[bool, str | None]:
     """Create backup directory if needed with proper permission handling.
 
@@ -125,23 +135,9 @@ def ensure_backup_directory(backup_dest: Path, backup_path: Path, is_dynamic: bo
     json_handler.log_operation("backup_directory_ensured")
 
     try:
-        # Check if backup_dest exists and might be read-only
-        if backup_dest.exists():
-            # Use context manager to temporarily make parent writable
-            with temporarily_writable(backup_dest.parent):
-                with temporarily_writable(backup_dest):
-                    backup_dest.mkdir(parents=True, exist_ok=True)
-        else:
-            # Create normally if it doesn't exist
-            backup_dest.mkdir(parents=True, exist_ok=True)
-
+        _mkdir_writable(backup_dest)
         if is_dynamic:
-            if backup_path.exists():
-                with temporarily_writable(backup_path.parent):
-                    with temporarily_writable(backup_path):
-                        backup_path.mkdir(parents=True, exist_ok=True)
-            else:
-                backup_path.mkdir(parents=True, exist_ok=True)
+            _mkdir_writable(backup_path)
         return True, None
     except PermissionError as e:
         logger.warning(f"[system_utils] Permission denied creating backup directory {backup_dest}: {e}")
@@ -154,6 +150,14 @@ def ensure_backup_directory(backup_dest: Path, backup_path: Path, is_dynamic: bo
         return False, f"Unexpected error creating backup directory {backup_dest}: {e}"
 
 
+def _try_rmdir(item: Path) -> None:
+    """Attempt to remove an empty directory, logging on failure."""
+    try:
+        item.rmdir()
+    except OSError as e:
+        logger.info(f"[system_utils] Could not remove directory {item}: {e}")
+
+
 def remove_empty_dirs(path: Path):
     """Remove empty directories recursively.
 
@@ -164,10 +168,7 @@ def remove_empty_dirs(path: Path):
         for item in path.iterdir():
             if item.is_dir():
                 remove_empty_dirs(item)
-                try:
-                    item.rmdir()
-                except OSError as e:
-                    logger.info(f"[system_utils] Could not remove directory {item}: {e}")
+                _try_rmdir(item)
     except Exception as e:
         logger.warning(f"[system_utils] Failed to remove empty dirs under {path}: {e}")
 

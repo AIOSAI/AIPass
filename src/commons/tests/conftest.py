@@ -63,3 +63,30 @@ def initialized_db(tmp_db_path):
     conn = init_db(db_path=tmp_db_path)
     yield conn
     close_db(conn)
+
+
+@pytest.fixture
+def sample_data():
+    """
+    Provide sample_data for tests that need representative data structures.
+
+    Returns a dict with sample post, comment, and agent data
+    that mirrors the commons database schema.
+    """
+    return {
+        "post": {
+            "title": "Test Post",
+            "content": "This is a test post body.",
+            "room": "general",
+            "author": "TEST_AGENT",
+        },
+        "comment": {
+            "content": "This is a test comment.",
+            "post_id": 1,
+            "author": "TEST_AGENT",
+        },
+        "agent": {
+            "branch_name": "TEST_AGENT",
+            "display_name": "Test Agent",
+        },
+    }

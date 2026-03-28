@@ -240,6 +240,20 @@ def _calculate_quick_status_standalone(sections: Dict) -> Dict:
     }
 
 
+def _load_or_create_dashboard(dashboard_path: Path, branch_path: Path) -> Dict:
+    """Load existing dashboard JSON or create from template."""
+    if not dashboard_path.exists():
+        return create_fresh_dashboard(branch_path)
+    content = dashboard_path.read_text().strip()
+    if not content:
+        return create_fresh_dashboard(branch_path)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.warning("Corrupted dashboard JSON at %s, creating fresh: %s", dashboard_path, e)
+        return create_fresh_dashboard(branch_path)
+
+
 def write_section(branch_path: Path, section_name: str, section_data: Dict) -> bool:
     """
     Write-through API: update a single section in a branch's dashboard.
@@ -273,19 +287,7 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         branch_path = Path(branch_path)
         dashboard_path = get_dashboard_path(branch_path)
 
-        # Load existing or create from fresh template
-        if dashboard_path.exists():
-            content = dashboard_path.read_text().strip()
-            if content:
-                try:
-                    dashboard = json.loads(content)
-                except json.JSONDecodeError as e:
-                    logger.warning("Corrupted dashboard JSON at %s, creating fresh: %s", dashboard_path, e)
-                    dashboard = create_fresh_dashboard(branch_path)
-            else:
-                dashboard = create_fresh_dashboard(branch_path)
-        else:
-            dashboard = create_fresh_dashboard(branch_path)
+        dashboard = _load_or_create_dashboard(dashboard_path, branch_path)
 
         # Ensure sections dict exists
         if "sections" not in dashboard:

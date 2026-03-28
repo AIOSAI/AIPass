@@ -1,9 +1,8 @@
 """Tests for config_handler and ignore_patterns — backup configuration and filtering."""
 
-import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def _import_config_handler(monkeypatch):
@@ -233,27 +232,3 @@ class TestShouldIgnoreReturnTypeContract:
         assert type(result) is bool
 
 
-class TestGetBackupDestinationContract:
-    """get_backup_destination returns str and falls back correctly."""
-
-    def test_returns_str(self, monkeypatch):
-        """Return value is always a str."""
-        ch = _import_config_handler(monkeypatch)
-        # Mock json_handler.log_operation to avoid real I/O
-        with patch.object(ch, "json_handler"):
-            result = ch.get_backup_destination("system_snapshot")
-        assert isinstance(result, str)
-
-    def test_known_system_returns_destination(self, monkeypatch):
-        """Known system name returns matching destination."""
-        ch = _import_config_handler(monkeypatch)
-        with patch.object(ch, "json_handler"):
-            result = ch.get_backup_destination("system_snapshot")
-        assert result == ch.BACKUP_DESTINATIONS["system_snapshot"]
-
-    def test_unknown_system_falls_back_to_base(self, monkeypatch):
-        """Unknown system name falls back to BASE_BACKUP_DIR."""
-        ch = _import_config_handler(monkeypatch)
-        with patch.object(ch, "json_handler"):
-            result = ch.get_backup_destination("nonexistent_system")
-        assert result == ch.BASE_BACKUP_DIR

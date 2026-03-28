@@ -18,7 +18,7 @@ from aipass.drone.apps.handlers.git.lock_handler import (
 )
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers.git.sync_handler import sync_main
-from aipass.drone.apps.handlers.git.pr_handler import _slugify, create_pr
+from aipass.drone.apps.handlers.git.pr_handler import create_pr
 from aipass.drone.apps.modules.git_module import (
     DRONE_MODULE,
     _detect_branch_dir,
@@ -366,27 +366,6 @@ class TestSyncHandler:
 # ===========================================================================
 # 4. pr_handler — error paths (no actual git)
 # ===========================================================================
-
-
-class TestPRSlugify:
-    """Slugify utility tests."""
-
-    def test_basic_slug(self) -> None:
-        """Basic text slugifies correctly."""
-        assert _slugify("Add user auth") == "add-user-auth"
-
-    def test_special_chars_stripped(self) -> None:
-        """Special characters are removed."""
-        assert _slugify("fix: the bug!") == "fix-the-bug"
-
-    def test_truncation(self) -> None:
-        """Long slugs are truncated to 40 chars."""
-        long_text = "a" * 60
-        assert len(_slugify(long_text)) == 40
-
-    def test_collapse_hyphens(self) -> None:
-        """Multiple hyphens collapse to one."""
-        assert _slugify("fix  --  things") == "fix-things"
 
 
 class TestPRHandler:

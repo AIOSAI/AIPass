@@ -46,6 +46,22 @@ def get_template(template_type):
     return {"success": True, "path": template_path, "error": None}
 
 
+def _replace_placeholder_in_file(file_path, skill_name):
+    """Replace {{SKILL_NAME}} placeholder in a single file.
+
+    Args:
+        file_path: Path to the file to process.
+        skill_name: Name to substitute for the placeholder.
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        if "{{SKILL_NAME}}" in content:
+            content = content.replace("{{SKILL_NAME}}", skill_name)
+            file_path.write_text(content, encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning(f"Skipping binary file during template copy: {file_path}")
+
+
 def copy_template(template_path, target_path, skill_name):
     """Copy a template directory to a target location, replacing placeholders.
 
@@ -73,15 +89,10 @@ def copy_template(template_path, target_path, skill_name):
         # Replace placeholders in all files
         created_files = []
         for file_path in target.rglob("*"):
-            if file_path.is_file():
-                created_files.append(str(file_path.relative_to(target)))
-                try:
-                    content = file_path.read_text(encoding="utf-8")
-                    if "{{SKILL_NAME}}" in content:
-                        content = content.replace("{{SKILL_NAME}}", skill_name)
-                        file_path.write_text(content, encoding="utf-8")
-                except UnicodeDecodeError:
-                    logger.warning(f"Skipping binary file during template copy: {file_path}")
+            if not file_path.is_file():
+                continue
+            created_files.append(str(file_path.relative_to(target)))
+            _replace_placeholder_in_file(file_path, skill_name)
 
         json_handler.log_operation("template_copied", {
             "template": str(template_path.name),

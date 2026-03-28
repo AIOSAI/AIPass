@@ -317,43 +317,47 @@ def should_monitor(path: Path) -> bool:
     if '.claude.json.backup' in name or '.claude.json.tmp' in name:
         return False
 
-    # Check ALWAYS patterns first (exceptions that override ignores)
+    if _matches_always_patterns(path_str, parts, name):
+        return True
+
+    if _matches_ignore_patterns(path_str, parts, name):
+        return False
+
+    return True
+
+
+_PARTS_ONLY_IGNORE = {"backups", ".cache", ".git", "node_modules",
+                       ".local", ".config", ".var", ".backup"}
+
+
+def _matches_always_patterns(path_str: str, parts: set, name: str) -> bool:
+    """Check if path matches any ALWAYS (force-monitor) pattern."""
     for pattern in MONITOR_ALWAYS_PATTERNS:
-        # Template wildcard patterns
         if "**" in pattern:
             exception_parts = pattern.split("/**")[0]
             if exception_parts in path_str or exception_parts in "/".join(parts):
-                return True  # Force monitoring
-        # Wildcard patterns (*.py, *.json, etc)
-        elif pattern.startswith('*') and name.endswith(pattern[1:]):
+                return True
+        if pattern.startswith('*') and name.endswith(pattern[1:]):
             return True
-        # Exact name match
-        elif pattern == name:
+        if pattern == name or pattern in path_str:
             return True
-        # Pattern in full path
-        elif pattern in path_str:
-            return True
+    return False
 
-    # Check IGNORE patterns
+
+def _matches_ignore_patterns(path_str: str, parts: set, name: str) -> bool:
+    """Check if path matches any IGNORE pattern."""
     for pattern in MONITOR_IGNORE_PATTERNS:
-        # Directory name matching (must be exact path part, not substring)
-        # e.g. ".local" should match ~/.local/ but NOT .ai_mail.local/
-        if pattern in ["backups", ".cache", ".git", "node_modules",
-                        ".local", ".config", ".var", ".backup"]:
+        if pattern in _PARTS_ONLY_IGNORE:
             if pattern in parts:
-                return False
-        # Exact name match
-        elif pattern == name:
-            return False
-        # Wildcard patterns
-        elif pattern.startswith('*') and name.endswith(pattern[1:]):
-            return False
-        # Pattern in path
-        elif pattern in parts or pattern in path_str:
-            return False
-
-    # Default: monitor it (inclusive approach)
-    return True
+                return True
+            continue
+        if pattern == name:
+            return True
+        if pattern.startswith('*') and name.endswith(pattern[1:]):
+            return True
+        if pattern in parts or pattern in path_str:
+            return True
+    return False
 
 
 def get_priority(path: Path, event_type: str) -> str:
@@ -377,32 +381,25 @@ def get_priority(path: Path, event_type: str) -> str:
     name = path.name
     path_str = str(path)
 
-    # Check each priority level
     for level, patterns in HIGHLIGHT_PATTERNS.items():
         for pattern in patterns:
-            # Pattern with event type (e.g., "*.py deletion")
-            if " " in pattern:
-                pattern_base, pattern_event = pattern.split(" ", 1)
-                if event_type == pattern_event:
-                    # Check if path matches pattern
-                    if pattern_base.startswith('*') and name.endswith(pattern_base[1:]):
-                        return level
-                    elif pattern_base == name:
-                        return level
-            # Pattern without event type (all events)
-            else:
-                # Wildcard patterns
-                if pattern.startswith('*') and name.endswith(pattern[1:]):
-                    return level
-                # Exact name match
-                elif pattern == name:
-                    return level
-                # Pattern in path
-                elif pattern in path_str:
-                    return level
+            if _pattern_matches_event(pattern, name, path_str, event_type):
+                return level
 
-    # Default: low priority
     return "low"
+
+
+def _pattern_matches_event(pattern: str, name: str, path_str: str, event_type: str) -> bool:
+    """Check if a single highlight pattern matches the given event."""
+    if " " in pattern:
+        pattern_base, pattern_event = pattern.split(" ", 1)
+        if event_type != pattern_event:
+            return False
+        return (pattern_base.startswith('*') and name.endswith(pattern_base[1:])) or pattern_base == name
+
+    if pattern.startswith('*') and name.endswith(pattern[1:]):
+        return True
+    return pattern == name or pattern in path_str
 
 
 def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
@@ -424,14 +421,10 @@ def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
 
     # Check content filter patterns
     for pattern, config in CONTENT_FILTER_PATTERNS.items():
-        # Wildcard patterns
+        bare = pattern.replace('*', '')
         if pattern.startswith('*') and name.endswith(pattern[1:]):
             return config
-        # Exact match
-        elif pattern == name:
-            return config
-        # Pattern in name
-        elif pattern.replace('*', '') in name:
+        if pattern == name or bare in name:
             return config
 
     return None

@@ -288,6 +288,26 @@ def _handle_run_due(_args: List[str]) -> bool:
         return True
 
 
+def _display_task_result(task_result: dict) -> None:
+    """Display a single processed task result."""
+    task_id = task_result.get("id", "")[:8]
+    recipient = task_result.get("recipient", "")
+    task_desc = task_result.get("task", "")[:40]
+    status = task_result.get("status", "")
+
+    if status == "sent":
+        _success(f"Sent to {recipient}: {task_desc}")
+        logger.info(f"[DAEMON] Scheduled email sent: {task_id} -> {recipient}")
+    elif status == "skipped":
+        _error(f"ai_mail not available, cannot send to {recipient}")
+    elif status == "failed":
+        _error(f"Failed to send to {recipient}: {task_desc}")
+        logger.error(f"[DAEMON] Scheduled email failed: {task_id} -> {recipient}")
+    elif status == "error":
+        _error(f"Error sending to {recipient}: {task_result.get('error', '')}")
+        logger.error(f"[DAEMON] Scheduled email error: {task_id} -> {recipient}: {task_result.get('error', '')}")
+
+
 def _process_due_tasks() -> bool:
     """Process due tasks -- delegates to handler, formats output."""
     try:
@@ -308,22 +328,7 @@ def _process_due_tasks() -> bool:
         console.print()
 
         for task_result in results.get("processed_tasks", []):
-            task_id = task_result.get("id", "")[:8]
-            recipient = task_result.get("recipient", "")
-            task_desc = task_result.get("task", "")[:40]
-            status = task_result.get("status", "")
-
-            if status == "sent":
-                _success(f"Sent to {recipient}: {task_desc}")
-                logger.info(f"[DAEMON] Scheduled email sent: {task_id} -> {recipient}")
-            elif status == "skipped":
-                _error(f"ai_mail not available, cannot send to {recipient}")
-            elif status == "failed":
-                _error(f"Failed to send to {recipient}: {task_desc}")
-                logger.error(f"[DAEMON] Scheduled email failed: {task_id} -> {recipient}")
-            elif status == "error":
-                _error(f"Error sending to {recipient}: {task_result.get('error', '')}")
-                logger.error(f"[DAEMON] Scheduled email error: {task_id} -> {recipient}: {task_result.get('error', '')}")
+            _display_task_result(task_result)
 
         console.print()
         console.print(f"[bold]Results:[/bold] {results['success']} sent, {results['failed']} failed")
@@ -374,16 +379,16 @@ def handle_command(command: str, args: List[str]) -> bool:
         # Route to subcommand handlers
         if subcommand == "create":
             return _handle_create(subargs)
-        elif subcommand == "list":
+        if subcommand == "list":
             return _handle_list(subargs)
-        elif subcommand == "delete":
+        if subcommand == "delete":
             return _handle_delete(subargs)
-        elif subcommand == "run-due":
+        if subcommand == "run-due":
             return _handle_run_due(subargs)
-        else:
-            _error(f"Unknown subcommand: {subcommand}")
-            console.print("[dim]Run 'schedule --help' for available commands[/dim]")
-            return False
+
+        _error(f"Unknown subcommand: {subcommand}")
+        console.print("[dim]Run 'schedule --help' for available commands[/dim]")
+        return False
 
     except Exception as e:
         logger.error(f"[DAEMON] Error in schedule command: {e}", exc_info=True)

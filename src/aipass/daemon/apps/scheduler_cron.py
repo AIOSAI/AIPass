@@ -182,71 +182,75 @@ def process_due_tasks() -> dict:
 
     # Process each due task
     for task in due_tasks:
-        task_id = task.get("id", "")
-        recipient = task.get("recipient", "")
-        task_desc = task.get("task", "")
-        message = task.get("message", "")
-
-        log(f"Processing: {task_id[:8]} -> {recipient}: {task_desc[:50]}")
-
-        # Mark as dispatching (prevents re-dispatch)
-        try:
-            mark_dispatching(task_id)  # type: ignore[misc]
-        except Exception as e:
-            logger.warning(f"Failed to mark dispatching {task_id[:8]}: {e}")
-            log(f"WARNING: Failed to mark dispatching {task_id[:8]}: {e}")
-            results["errors"].append(f"Mark dispatching {task_id[:8]}: {e}")
-            results["failed"] += 1
-            continue
-
-        # Build email body
-        email_body = f"{task_desc}"
-        if message:
-            email_body += f"\n\nDetails:\n{message}"
-
-        # Send the email
-        if not AI_MAIL_AVAILABLE:
-            log(f"SKIP: ai_mail not available, cannot send to {recipient}")
-            mark_pending(task_id)  # type: ignore[misc]
-            results["failed"] += 1
-            results["errors"].append(f"ai_mail unavailable for {task_id[:8]}")
-            continue
-
-        try:
-            email_sent = send_email_direct(
-                to_branch=recipient,
-                subject=f"[SCHEDULED] {task_desc}",
-                message=email_body,
-                from_branch='@daemon',
-                auto_execute=True,
-                reply_to='@dev_central',
-            )
-
-            if email_sent:
-                mark_completed(task_id)  # type: ignore[misc]
-                log(f"OK: Sent to {recipient}: {task_desc[:40]}")
-                results["success"] += 1
-            else:
-                mark_pending(task_id)  # type: ignore[misc]
-                log(f"FAIL: Email returned False for {recipient}: {task_desc[:40]}")
-                results["failed"] += 1
-                results["errors"].append(f"Email failed: {task_id[:8]} -> {recipient}")
-
-        except Exception as e:
-            # Reset to pending for retry on next run
-            try:
-                mark_pending(task_id)  # type: ignore[misc]
-            except Exception as reset_err:
-                logger.warning(f"Best-effort reset to pending failed for {task_id[:8]}: {reset_err}")
-            logger.error(f"Exception sending to {recipient}: {e}")
-            log(f"ERROR: Exception sending to {recipient}: {e}")
-            results["failed"] += 1
-            results["errors"].append(f"Email error {task_id[:8]}: {e}")
-
+        _process_single_task(task, results)
         # Small delay between dispatches (prevents thundering herd)
         time.sleep(1.0)
 
     return results
+
+
+def _process_single_task(task: dict, results: dict) -> None:
+    """Process a single due task: mark dispatching, send email, update results."""
+    task_id = task.get("id", "")
+    recipient = task.get("recipient", "")
+    task_desc = task.get("task", "")
+    message = task.get("message", "")
+
+    log(f"Processing: {task_id[:8]} -> {recipient}: {task_desc[:50]}")
+
+    # Mark as dispatching (prevents re-dispatch)
+    try:
+        mark_dispatching(task_id)  # type: ignore[misc]
+    except Exception as e:
+        logger.warning(f"Failed to mark dispatching {task_id[:8]}: {e}")
+        log(f"WARNING: Failed to mark dispatching {task_id[:8]}: {e}")
+        results["errors"].append(f"Mark dispatching {task_id[:8]}: {e}")
+        results["failed"] += 1
+        return
+
+    # Build email body
+    email_body = f"{task_desc}"
+    if message:
+        email_body += f"\n\nDetails:\n{message}"
+
+    # Send the email
+    if not AI_MAIL_AVAILABLE:
+        log(f"SKIP: ai_mail not available, cannot send to {recipient}")
+        mark_pending(task_id)  # type: ignore[misc]
+        results["failed"] += 1
+        results["errors"].append(f"ai_mail unavailable for {task_id[:8]}")
+        return
+
+    try:
+        email_sent = send_email_direct(
+            to_branch=recipient,
+            subject=f"[SCHEDULED] {task_desc}",
+            message=email_body,
+            from_branch='@daemon',
+            auto_execute=True,
+            reply_to='@dev_central',
+        )
+
+        if email_sent:
+            mark_completed(task_id)  # type: ignore[misc]
+            log(f"OK: Sent to {recipient}: {task_desc[:40]}")
+            results["success"] += 1
+        else:
+            mark_pending(task_id)  # type: ignore[misc]
+            log(f"FAIL: Email returned False for {recipient}: {task_desc[:40]}")
+            results["failed"] += 1
+            results["errors"].append(f"Email failed: {task_id[:8]} -> {recipient}")
+
+    except Exception as e:
+        # Reset to pending for retry on next run
+        try:
+            mark_pending(task_id)  # type: ignore[misc]
+        except Exception as reset_err:
+            logger.warning(f"Best-effort reset to pending failed for {task_id[:8]}: {reset_err}")
+        logger.error(f"Exception sending to {recipient}: {e}")
+        log(f"ERROR: Exception sending to {recipient}: {e}")
+        results["failed"] += 1
+        results["errors"].append(f"Email error {task_id[:8]}: {e}")
 
 
 

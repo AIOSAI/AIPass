@@ -62,6 +62,23 @@ def temp_test_dir() -> Generator[Path, None, None]:
 
 
 @pytest.fixture
+def sample_test_data() -> dict:
+    """Provides reusable sample data for general test assertions."""
+    return {
+        "created": "2026-01-01",
+        "last_updated": "2026-01-15",
+        "entries": [
+            {"id": 1, "name": "alpha", "status": "active"},
+            {"id": 2, "name": "beta", "status": "pending"},
+        ],
+        "metadata": {
+            "source": "test_fixture",
+            "version": "1.0.0",
+        },
+    }
+
+
+@pytest.fixture
 def sample_memory_data() -> dict:
     """Provides sample memory file data (v2 schema)."""
     return {

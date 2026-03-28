@@ -296,6 +296,16 @@ def mark_pending(task_id: str) -> bool:
     return False
 
 
+def _is_stale_dispatch(started: str, cutoff: datetime) -> bool:
+    """Check if a dispatch_started timestamp is older than the cutoff."""
+    try:
+        start_time = datetime.fromisoformat(started)
+        return start_time < cutoff
+    except ValueError as e:
+        logger.warning("[task_registry] Invalid dispatch_started timestamp, resetting task: %s", e)
+        return True
+
+
 def recover_stale_dispatches(max_age_minutes: int = 5) -> int:
     """
     Reset tasks stuck in 'dispatching' status for too long.
@@ -313,21 +323,15 @@ def recover_stale_dispatches(max_age_minutes: int = 5) -> int:
     cutoff = datetime.now() - timedelta(minutes=max_age_minutes)
 
     for task in tasks:
-        if task.get("status") == "dispatching":
-            started = task.get("dispatch_started")
-            if started:
-                try:
-                    start_time = datetime.fromisoformat(started)
-                    if start_time < cutoff:
-                        task["status"] = "pending"
-                        task.pop("dispatch_started", None)
-                        recovered += 1
-                except ValueError as e:
-                    # Invalid timestamp, reset anyway
-                    logger.warning("[task_registry] Invalid dispatch_started timestamp, resetting task: %s", e)
-                    task["status"] = "pending"
-                    task.pop("dispatch_started", None)
-                    recovered += 1
+        if task.get("status") != "dispatching":
+            continue
+        started = task.get("dispatch_started")
+        if not started:
+            continue
+        if _is_stale_dispatch(started, cutoff):
+            task["status"] = "pending"
+            task.pop("dispatch_started", None)
+            recovered += 1
 
     if recovered:
         save_tasks(tasks)
@@ -390,6 +394,14 @@ def get_pending_tasks() -> List[Dict[str, Any]]:
 # =============================================
 # BATCH PROCESSING
 # =============================================
+
+def _safe_mark_pending(task_id: str) -> None:
+    """Best-effort reset a task to pending, logging on failure."""
+    try:
+        mark_pending(task_id)
+    except Exception as pending_err:
+        logger.error("[task_registry] Failed to reset task %s to pending: %s", task_id[:8], pending_err)
+
 
 def process_due_tasks_batch(
     send_email_fn=None,
@@ -505,10 +517,7 @@ def process_due_tasks_batch(
 
         except Exception as e:
             logger.error("[task_registry] Email dispatch error for task %s: %s", task_id[:8], e)
-            try:
-                mark_pending(task_id)
-            except Exception as pending_err:
-                logger.error("[task_registry] Failed to reset task %s to pending: %s", task_id[:8], pending_err)
+            _safe_mark_pending(task_id)
             results["failed"] += 1
             task_result["status"] = "error"
             task_result["error"] = str(e)

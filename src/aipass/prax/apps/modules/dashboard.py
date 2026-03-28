@@ -474,27 +474,20 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcmd = args[0]
     json_handler.log_operation("dashboard_command", {"subcommand": subcmd})
 
-    if subcmd == "status":
-        print_status()
-        return True
-    elif subcmd == "template":
-        print_template()
-        return True
-    elif subcmd == "refresh":
-        _handle_refresh(args[1:])
-        return True
-    elif subcmd == "push-template":
-        _handle_push_template(args[1:])
-        return True
-    elif subcmd == "diff-template":
-        _handle_diff_template(args[1:])
-        return True
-    elif subcmd == "template-status":
-        _handle_template_status()
-        return True
+    dispatch = {
+        "status": lambda: print_status(),
+        "template": lambda: print_template(),
+        "refresh": lambda: _handle_refresh(args[1:]),
+        "push-template": lambda: _handle_push_template(args[1:]),
+        "diff-template": lambda: _handle_diff_template(args[1:]),
+        "template-status": lambda: _handle_template_status(),
+    }
+    handler = dispatch.get(subcmd)
+    if handler:
+        handler()
     else:
         print_help()
-        return True
+    return True
 
 
 def main():

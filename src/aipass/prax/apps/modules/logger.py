@@ -29,7 +29,6 @@ __all__ = [
     "DirectLogger",
     "initialize_logging_system",
     "shutdown_logging_system",
-    "start_continuous_logging",
     "get_system_status",
     "enable_terminal_output",
     "disable_terminal_output",
@@ -57,7 +56,7 @@ from aipass.prax.apps.handlers.logging.setup import (
     enable_terminal_output as _enable_terminal,
     disable_terminal_output as _disable_terminal,
 )
-from aipass.prax.apps.handlers.logging.introspection import get_calling_module
+from aipass.prax.apps.handlers.logging.introspection import get_calling_module, get_caller_info
 from aipass.prax.apps.handlers.logging.override import (
     is_override_active
 )
@@ -83,9 +82,14 @@ DATA_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_data.json"
 # =============================================
 
 def get_system_logger():
-    """Get logger that automatically routes to correct module log file"""
-    module_name = get_calling_module()
-    return setup_individual_logger(module_name)
+    """Get logger that automatically routes to correct module log file.
+
+    Uses a single stack walk to detect module name, path, and branch
+    together, avoiding the double-walk problem where separate calls
+    could resolve different external callers at different stack depths.
+    """
+    module_name, caller_path, branch = get_caller_info()
+    return setup_individual_logger(module_name, caller_path=caller_path, caller_branch=branch)
 
 class SystemLogger:
     """Auto-routing logger that writes to calling module's log file"""
@@ -180,41 +184,6 @@ def shutdown_logging_system():
     run_shutdown(MODULE_NAME)
 
     console.print(f"[{MODULE_NAME}] Shutdown complete")
-
-def start_continuous_logging():
-    """Start continuous logging in background mode with live terminal output
-
-    Enables terminal output and runs until Ctrl+C.
-    Displays status updates every 5 minutes.
-
-    MODULE orchestration pattern: Thin wrapper that delegates to handler.
-    """
-    from aipass.prax.apps.handlers.logging.monitoring import run_monitoring_loop
-
-    from aipass.cli.apps.modules import console
-    console.print(f"[{MODULE_NAME}] Starting continuous logging mode with terminal output...")
-    sys.stdout.flush()
-
-    # Enable terminal output for live debugging
-    enable_terminal_output()
-
-    # Initialize the logging system
-    initialize_logging_system()
-
-    # Delegate to handler for monitoring loop
-    try:
-        run_monitoring_loop(
-            status_callback=get_system_status,
-            interval=5,
-            status_interval=300
-        )
-    except KeyboardInterrupt:
-        # Handler re-raises KeyboardInterrupt, we handle cleanup here
-        logger.info("Logger capture stopped by user")
-        disable_terminal_output()
-        shutdown_logging_system()
-        console.print(f"[{MODULE_NAME}] Logger capture stopped.")
-        sys.stdout.flush()
 
 # =============================================
 # STATUS AND CONTROL

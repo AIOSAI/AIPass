@@ -199,6 +199,16 @@
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "deep_nesting",
       "reason": "print_branch_summary() and print_bypass_audit() depth 6 — full rewrite planned in DPLAN-0047, refactoring now would be throwaway work"
+    },
+    {
+      "file": "_content.py",
+      "standard": "unused_function",
+      "reason": "Content functions (get_*_standards, get_*_proof) are discovered and called dynamically by standards_query.py via naming convention. The checker cannot trace convention-based dynamic dispatch."
+    },
+    {
+      "file": "templates/",
+      "standard": "unused_function",
+      "reason": "Template files are reference implementations for other branches to copy. They contain function definitions that are not called within seedgo itself."
     }
   ],
   "notes": {

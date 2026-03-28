@@ -18,6 +18,7 @@ import ast
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.json import json_handler
 
 
 # -- Standard functions to exclude (already covered by test_quality checker) --
@@ -58,7 +59,8 @@ def _read_file_safe(path: Path) -> str:
     """Read file contents, returning empty string on error."""
     try:
         return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError) as e:
+        logger.info("Failed to read file %s: %s", path, e)
         return ""
 
 
@@ -97,6 +99,22 @@ def _extract_public_functions(file_path: Path) -> list[dict]:
     return functions
 
 
+def _should_skip_file(py_file: Path) -> bool:
+    """Check if file should be skipped based on naming/path rules."""
+    if py_file.name.startswith("_"):
+        return True
+    return any(part.startswith(".") for part in py_file.parts)
+
+
+def _get_relative_path(file_path: Path, branch_path: Path) -> str:
+    """Get relative path, falling back to absolute if not under branch."""
+    try:
+        return str(file_path.relative_to(branch_path))
+    except ValueError:
+        logger.info("File %s is not under branch path %s, using absolute path", file_path, branch_path)
+        return str(file_path)
+
+
 def _scan_source_files(branch_path: Path) -> list[dict]:
     """Scan apps/modules/ and apps/handlers/ for public functions.
 
@@ -114,50 +132,16 @@ def _scan_source_files(branch_path: Path) -> list[dict]:
         if not scan_dir.is_dir():
             continue
         for py_file in sorted(scan_dir.rglob("*.py")):
-            if py_file.name.startswith("_"):
+            if _should_skip_file(py_file):
                 continue
-            # Skip .archive, .sorting_unprocessed
-            if any(part.startswith(".") for part in py_file.parts):
-                continue
-
             funcs = _extract_public_functions(py_file)
+            rel = _get_relative_path(py_file, branch_path)
             for func in funcs:
-                # Build relative path from branch root
-                try:
-                    rel = py_file.relative_to(branch_path)
-                except ValueError:
-                    rel = py_file
-                func["relative_path"] = str(rel)
+                func["relative_path"] = rel
             all_functions.extend(funcs)
 
     return all_functions
 
-
-def _scan_test_references(branch_path: Path) -> set[str]:
-    """Scan all test files for function name references.
-
-    Returns set of function names found in any test file.
-    Uses text matching — if the function name appears anywhere in the test
-    source, it counts as referenced.
-    """
-    tests_dir = branch_path / "tests"
-    if not tests_dir.is_dir():
-        return set()
-
-    referenced = set()
-    for test_file in sorted(tests_dir.rglob("test_*.py")):
-        source = _read_file_safe(test_file)
-        if not source:
-            continue
-        # Collect all referenced names — simple text match
-        for line in source.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            referenced.add(line)  # Store full lines for matching
-
-    # Return just the raw source blob for matching
-    return referenced
 
 
 def _test_files_source(branch_path: Path) -> str:
@@ -241,6 +225,13 @@ def scan_branch(branch_path: str) -> dict:
         "test_map scan: %s — %d/%d custom functions tested (%d%%)",
         branch_name, tested_count, total, pct,
     )
+
+    json_handler.log_operation("test_map_scan", {
+        "branch": branch_name,
+        "total_functions": total,
+        "tested_functions": tested_count,
+        "coverage_pct": pct,
+    })
 
     return {
         "branch": branch_name,

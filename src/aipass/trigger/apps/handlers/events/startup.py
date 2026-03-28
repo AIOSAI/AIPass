@@ -199,6 +199,65 @@ def _detect_branch_from_log(log_file: str) -> str:
         return 'UNKNOWN'
 
 
+def _scan_single_log_file(
+    log_file: Path,
+    cutoff: datetime,
+    processed_hashes: Set[str],
+    errors: List[Dict[str, Any]],
+    scan_start: float,
+) -> bool:
+    """Scan a single log file for ERROR entries.
+
+    Returns:
+        True if scanning should continue, False if a limit was hit.
+    """
+    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            if len(errors) >= MAX_ERRORS_PER_SCAN:
+                _log_suppression(
+                    f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached. "
+                    f"Stopping scan to prevent event storm."
+                )
+                return False
+
+            elapsed = time.monotonic() - scan_start
+            if elapsed >= SCAN_TIME_BUDGET_SECONDS:
+                return False
+
+            line = line.strip()
+            if not line:
+                continue
+
+            parsed = _parse_log_line(line)
+            if not parsed:
+                continue
+
+            line_ts = _extract_timestamp(parsed['timestamp'])
+            if line_ts and line_ts < cutoff:
+                continue
+
+            module = parsed['module']
+            message = parsed['message']
+            error_hash = _generate_error_hash(module, message)
+
+            if error_hash in processed_hashes:
+                continue
+
+            branch = _detect_branch_from_log(str(log_file))
+            errors.append({
+                'branch': branch,
+                'module': module,
+                'message': message,
+                'log_file': str(log_file),
+                'error_hash': error_hash,
+                'timestamp': line_ts.isoformat() if line_ts else datetime.now().isoformat(),
+                'level': parsed['level'].lower()
+            })
+            processed_hashes.add(error_hash)
+
+    return True
+
+
 def _scan_system_logs_for_errors(
     since_timestamp: Optional[datetime],
     processed_hashes: Set[str]
@@ -226,7 +285,6 @@ def _scan_system_logs_for_errors(
     files_skipped_size = 0
 
     for log_file in SYSTEM_LOGS_DIR.glob("*.log"):
-        # Time budget check — abort entire scan
         elapsed = time.monotonic() - scan_start
         if elapsed >= SCAN_TIME_BUDGET_SECONDS:
             _log_suppression(
@@ -235,7 +293,6 @@ def _scan_system_logs_for_errors(
             )
             break
 
-        # File size check — skip oversized files
         try:
             file_size = log_file.stat().st_size
             if file_size > MAX_FILE_SIZE_BYTES:
@@ -246,58 +303,11 @@ def _scan_system_logs_for_errors(
             continue
 
         try:
-            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    # Error cap check
-                    if len(errors) >= MAX_ERRORS_PER_SCAN:
-                        _log_suppression(
-                            f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached. "
-                            f"Stopping scan to prevent event storm."
-                        )
-                        break
-
-                    # Time budget check (inside file loop)
-                    elapsed = time.monotonic() - scan_start
-                    if elapsed >= SCAN_TIME_BUDGET_SECONDS:
-                        break
-
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    parsed = _parse_log_line(line)
-                    if not parsed:
-                        continue
-
-                    line_ts = _extract_timestamp(parsed['timestamp'])
-                    if line_ts and line_ts < cutoff:
-                        continue
-
-                    module = parsed['module']
-                    message = parsed['message']
-                    error_hash = _generate_error_hash(module, message)
-
-                    if error_hash in processed_hashes:
-                        continue
-
-                    branch = _detect_branch_from_log(str(log_file))
-
-                    errors.append({
-                        'branch': branch,
-                        'module': module,
-                        'message': message,
-                        'log_file': str(log_file),
-                        'error_hash': error_hash,
-                        'timestamp': line_ts.isoformat() if line_ts else datetime.now().isoformat(),
-                        'level': parsed['level'].lower()
-                    })
-
-                    processed_hashes.add(error_hash)
-
-                # Break outer loop if error cap reached
-                if len(errors) >= MAX_ERRORS_PER_SCAN:
-                    break
-
+            should_continue = _scan_single_log_file(
+                log_file, cutoff, processed_hashes, errors, scan_start
+            )
+            if not should_continue:
+                break
         except Exception as exc:
             _log_warning(f"scan log file {log_file}: {exc}")
             continue

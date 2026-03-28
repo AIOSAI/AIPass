@@ -25,6 +25,13 @@
       "lines": [26],
       "pattern": "yaml = None",
       "reason": "Conditional import holder — yaml is assigned via 'import yaml' on success or stays None. Not a constant, just a module reference variable"
+    },
+    {
+      "file": "apps/handlers/registry.py",
+      "standard": "unused_function",
+      "lines": [49, 65],
+      "pattern": "def get_skill|def get_skill_names",
+      "reason": "Public API functions — used by test_registry.py and available for external callers; part of the registry module's contract"
     }
   ],
   "notes": {

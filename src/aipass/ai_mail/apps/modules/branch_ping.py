@@ -25,7 +25,7 @@ from aipass.cli.apps.modules import console, error
 from rich.panel import Panel
 
 # Import handlers
-from aipass.ai_mail.apps.handlers.monitoring.memory import count_file_lines, get_status_from_count
+from aipass.ai_mail.apps.handlers.monitoring.memory import count_file_lines, get_status_from_count, get_health_info
 from aipass.ai_mail.apps.handlers.registry.update import (
     ping_registry,
     get_branch_context,
@@ -76,15 +76,13 @@ def handle_status() -> bool:
         local_file = cwd / ".trinity" / "local.json"
         obs_file = cwd / ".trinity" / "observations.json"
 
-        local_count = count_file_lines(local_file)
-        obs_count = count_file_lines(obs_file)
-        local_status = get_status_from_count(local_count)
-        obs_status = get_status_from_count(obs_count)
+        local_health = get_health_info(local_file)
+        obs_health = get_health_info(obs_file)
 
         console.print(f"\nBranch: {branch_name}\nDirectory: {cwd}")
         console.print(f"\nMemory Health Status:")
-        console.print(f"  .trinity/local.json:        {local_count} lines ({local_status})")
-        console.print(f"  .trinity/observations.json: {obs_count} lines ({obs_status})\n")
+        console.print(f"  .trinity/local.json:        {local_health['line_count']} lines ({local_health['status']})")
+        console.print(f"  .trinity/observations.json: {obs_health['line_count']} lines ({obs_health['status']})\n")
         return True
     except Exception as e:
         logger.error(f"Status check failed: {e}")

@@ -377,7 +377,7 @@ def main() -> int:
     # No args -> introspection
     if not args:
         try:
-            show_introspection()
+            print_introspection()
         except RegistryError as exc:
             logger.warning("Registry error during introspection: %s", exc)
             err_console.print(f"drone: {exc}")
@@ -391,7 +391,7 @@ def main() -> int:
 
     # --help
     if args[0] in ["--help", "-h", "help"]:
-        show_help()
+        print_help()
         return 0
 
     command = args[0]

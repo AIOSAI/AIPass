@@ -21,11 +21,6 @@
       "reason": "api_call_with_retry() depth 5 — standard retry-with-backoff pattern, nesting is inherent to retry loops"
     },
     {
-      "file": "apps/handlers/openrouter/models.py",
-      "standard": "deep_nesting",
-      "reason": "filter_by_pricing() depth 4 — inner try-except needed to skip unparseable pricing without breaking iteration"
-    },
-    {
       "file": "apps/handlers/openrouter/caller.py",
       "standard": "deep_nesting",
       "reason": "3 functions: get_caller_info() depth 5 (stack inspection), get_json_folder_path() depth 5 (caller pattern matching), detect_caller_category() depth 4 (path-to-category mapping) — all inherent complexity"
@@ -44,11 +39,6 @@
       "file": "apps/handlers/openrouter/client.py",
       "standard": "handlers",
       "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for API key retrieval before making requests"
-    },
-    {
-      "file": "apps/handlers/openrouter/models.py",
-      "standard": "handlers",
-      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for API key retrieval before listing models"
     },
     {
       "file": "apps/handlers/usage/tracking.py",
@@ -79,6 +69,11 @@
       "file": "apps/handlers/google/retry.py",
       "standard": "naming",
       "reason": "False positive — wait is a local variable inside api_call_with_retry() loop body, not a module-level constant"
+    },
+    {
+      "file": "apps/modules/google_client.py",
+      "standard": "unused_function",
+      "reason": "Public API exports for cross-branch consumption (get_drive_service, authenticate_google, validate_google, reauth_google). Tested in test_google_client.py. Backup migration pending."
     }
   ],
   "notes": {

@@ -406,6 +406,27 @@
       "standard": "test_quality",
       "category": "deferred",
       "reason": "Deferred per devpulse dispatch \u2014 test infrastructure not yet in place for flow branch"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "unused_function",
+      "category": "false_positive",
+      "lines": [82],
+      "reason": "on_created is a watchdog FileSystemEventHandler callback invoked by the filesystem monitoring framework, not called directly by our code"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "unused_function",
+      "category": "false_positive",
+      "lines": [92],
+      "reason": "on_deleted is a watchdog FileSystemEventHandler callback invoked by the filesystem monitoring framework, not called directly by our code"
+    },
+    {
+      "file": "apps/handlers/registry/monitor_ops.py",
+      "standard": "unused_function",
+      "category": "false_positive",
+      "lines": [102],
+      "reason": "on_moved is a watchdog FileSystemEventHandler callback invoked by the filesystem monitoring framework, not called directly by our code"
     }
   ],
   "notes": {

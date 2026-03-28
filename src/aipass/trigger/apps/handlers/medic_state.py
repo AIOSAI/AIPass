@@ -130,19 +130,6 @@ def get_muted_branches() -> List[str]:
     return [_normalize_branch_name(b) for b in raw]
 
 
-def is_branch_muted(branch_name: str) -> bool:
-    """
-    Check if a specific branch is muted.
-
-    Args:
-        branch_name: Branch name (case-insensitive, with or without @)
-
-    Returns:
-        True if branch is in the muted list
-    """
-    clean = _normalize_branch_name(branch_name)
-    return clean in get_muted_branches()
-
 
 def mute_branch(branch_name: str) -> bool:
     """

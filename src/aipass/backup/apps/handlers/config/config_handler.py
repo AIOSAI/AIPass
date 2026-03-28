@@ -22,10 +22,10 @@ compatibility.
 # =============================================
 
 from pathlib import Path
-from typing import Dict, Set, List, Optional
+
+from aipass.backup.apps.handlers.json import json_handler
 
 # Re-export from ignore_patterns for backwards compatibility
-from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.config.ignore_patterns import (
     GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, should_ignore,
     filter_tracked_items, get_ignore_patterns, get_cli_tracking_patterns,
@@ -71,23 +71,7 @@ BACKUP_MODES = {
 }
 
 # =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-def get_backup_destination(system_name: str) -> str:
-    """Get backup destination for a specific backup system
-
-    Args:
-        system_name: Name of the backup system
-
-    Returns:
-        Path to backup destination, or base directory if not found
-    """
-    json_handler.log_operation("config_loaded")
-    return BACKUP_DESTINATIONS.get(system_name, BASE_BACKUP_DIR)
-
-# =============================================
 # MODULE INITIALIZATION
 # =============================================
 
-# No initialization needed - pure configuration
+json_handler.log_operation("config_handler_loaded")

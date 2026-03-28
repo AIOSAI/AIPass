@@ -106,6 +106,56 @@ def _section_header(title: str) -> str:
 # DATA AGGREGATION
 # =============================================
 
+def _format_branch_status_lines(
+    branch_status: Dict[str, Any],
+    health_data: Dict[str, Any],
+    verbosity: str,
+    lines: List[str],
+) -> None:
+    """Append formatted status lines for a single branch."""
+    name = branch_status.get("branch_name", "UNKNOWN")
+    status = branch_status.get("status", "UNKNOWN")
+    reason = branch_status.get("reason", "")
+
+    branch_health = health_data.get(name, {})
+    mem_status = branch_health.get("overall_status", "UNKNOWN")
+
+    if status == "NO_ACTIVITY":
+        lines.append(f"  {SYMBOL_INACTIVE} {name} - inactive (no changes)")
+    elif status == "RED_FLAG":
+        lines.append(f"  {SYMBOL_RED} {name} - RED FLAG: {reason}")
+    elif status == "ERROR":
+        lines.append(f"  {SYMBOL_RED} {name} - ERROR: {reason}")
+    else:
+        mem_update = branch_status.get("memory_last_update")
+        time_ago = _format_time_ago(mem_update)
+        if mem_status == "OK":
+            lines.append(f"  {SYMBOL_OK} {name} - OK (memory updated {time_ago})")
+        else:
+            lines.append(f"  {SYMBOL_WARNING} {name} - {mem_status} (memory updated {time_ago})")
+
+    if verbosity == "detailed" and status != "NO_ACTIVITY":
+        _format_branch_detail_lines(branch_status, lines)
+
+
+def _format_branch_detail_lines(branch_status: Dict[str, Any], lines: List[str]) -> None:
+    """Append detailed file-change lines for a single branch."""
+    code_changes = branch_status.get("code_changes", [])
+    memory_modified = branch_status.get("memory_files_modified", [])
+
+    if code_changes:
+        lines.append(f"      Code files: {len(code_changes)}")
+        for cf in code_changes[:5]:
+            lines.append(f"        - {cf.get('file', 'unknown')}")
+        if len(code_changes) > 5:
+            lines.append(f"        ... and {len(code_changes) - 5} more")
+
+    if memory_modified:
+        lines.append(f"      Memory files: {len(memory_modified)}")
+        for mf in memory_modified[:3]:
+            lines.append(f"        - {mf.get('file', 'unknown')}")
+
+
 def _aggregate_data(since_hours: float = 24) -> Dict[str, Any]:
     """
     Aggregate data from all monitoring handlers.
@@ -216,55 +266,9 @@ def generate_activity_report(
 
     all_branches = red_flags.get("all_branches", [])
 
-    if verbosity == "brief":
-        # Just counts, no individual branches
-        pass
-    else:
+    if verbosity != "brief":
         for branch_status in all_branches:
-            name = branch_status.get("branch_name", "UNKNOWN")
-            status = branch_status.get("status", "UNKNOWN")
-            reason = branch_status.get("reason", "")
-
-            # Get memory health for this branch
-            branch_health = health_data.get(name, {})
-            mem_status = branch_health.get("overall_status", "UNKNOWN")
-
-            symbol = _get_status_symbol(status)
-
-            # Format status line
-            if status == "NO_ACTIVITY":
-                lines.append(f"  {SYMBOL_INACTIVE} {name} - inactive (no changes)")
-            elif status == "RED_FLAG":
-                lines.append(f"  {SYMBOL_RED} {name} - RED FLAG: {reason}")
-            elif status == "ERROR":
-                lines.append(f"  {SYMBOL_RED} {name} - ERROR: {reason}")
-            else:
-                # Get memory update time
-                mem_update = branch_status.get("memory_last_update")
-                time_ago = _format_time_ago(mem_update)
-
-                mem_symbol = _get_status_symbol(mem_status)
-                if mem_status == "OK":
-                    lines.append(f"  {SYMBOL_OK} {name} - OK (memory updated {time_ago})")
-                else:
-                    lines.append(f"  {SYMBOL_WARNING} {name} - {mem_status} (memory updated {time_ago})")
-
-            # Detailed mode: show file changes
-            if verbosity == "detailed" and status != "NO_ACTIVITY":
-                code_changes = branch_status.get("code_changes", [])
-                memory_modified = branch_status.get("memory_files_modified", [])
-
-                if code_changes:
-                    lines.append(f"      Code files: {len(code_changes)}")
-                    for cf in code_changes[:5]:
-                        lines.append(f"        - {cf.get('file', 'unknown')}")
-                    if len(code_changes) > 5:
-                        lines.append(f"        ... and {len(code_changes) - 5} more")
-
-                if memory_modified:
-                    lines.append(f"      Memory files: {len(memory_modified)}")
-                    for mf in memory_modified[:3]:
-                        lines.append(f"        - {mf.get('file', 'unknown')}")
+            _format_branch_status_lines(branch_status, health_data, verbosity, lines)
 
     # Recommendations section
     lines.append(_section_header("RECOMMENDATIONS"))

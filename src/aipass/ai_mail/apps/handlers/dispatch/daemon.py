@@ -33,6 +33,7 @@ from urllib.error import URLError
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
 
 
 def _find_repo_root() -> Path:
@@ -470,11 +471,13 @@ def spawn_agent(
             logger.info(f"Desktop notification unavailable for {branch_email}")
 
         logger.info(f"SPAWN {branch_email} PID={monitor_pid} (monitor) sender={sender} subject=\"{subject[:60]}\"")
+        log_dispatch(branch_email, monitor_pid, "spawned")
         _notify_telegram(f"[Dispatch] {branch_email} woke\nTask from {sender}: {subject[:80]}")
         return True
 
     except Exception as e:
         logger.info(f"SPAWN FAILED {branch_email}: {e}")
+        log_dispatch(branch_email, None, "failed", error_msg=str(e))
         _notify_telegram(f"[Dispatch FAILED] {branch_email}\n{type(e).__name__}: {e}")
         return False
 

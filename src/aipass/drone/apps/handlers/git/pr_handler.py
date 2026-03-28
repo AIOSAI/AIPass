@@ -17,7 +17,6 @@ and cleanup (checkout main + release lock) in a finally block.
 from __future__ import annotations
 
 import json as _json
-import re
 import subprocess
 from pathlib import Path
 
@@ -28,20 +27,6 @@ from aipass.drone.apps.handlers.git.lock_handler import (
     find_repo_root,
     release_lock,
 )
-
-
-def _slugify(text: str, max_length: int = 40) -> str:
-    """Convert text to a URL-safe slug for branch names.
-
-    Lowercase, replace spaces with hyphens, strip non-alphanumeric
-    (keeping hyphens), truncate to max_length.
-    """
-    slug = text.lower().strip()
-    slug = slug.replace(" ", "-")
-    slug = re.sub(r"[^a-z0-9-]", "", slug)
-    slug = re.sub(r"-+", "-", slug)  # collapse multiple hyphens
-    slug = slug.strip("-")
-    return slug[:max_length]
 
 
 def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:

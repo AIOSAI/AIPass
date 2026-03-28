@@ -48,6 +48,34 @@ def _collect_py_files(branch_path: Path) -> List[Dict[str, str]]:
     return [{"file": str(f), "name": f.name} for f in apps_dir.rglob("*.py")
             if f.name != "__init__.py" and not any(p in str(f).lower() for p in ign)]
 
+def _extract_branch_level_violations(result: dict) -> list:
+    """Extract per-file violations from a branch-level checker result.
+
+    Branch-level checkers return checks with violation lists (e.g. 'unused',
+    'dead_functions') containing {name, file, line} dicts. This groups them
+    by file into the standard violation format for audit_display rendering.
+    """
+    standard_keys = {"name", "passed", "message", "score"}
+    file_violations: dict[str, list[str]] = {}
+
+    for check in result.get("checks", []):
+        # Find any list-type key that holds violation items
+        for key, val in check.items():
+            if key in standard_keys or not isinstance(val, list):
+                continue
+            for item in val:
+                if not isinstance(item, dict) or "file" not in item:
+                    continue
+                fpath = item["file"]
+                msg = f"{item.get('name', 'unknown')}() line {item.get('line', '?')}"
+                file_violations.setdefault(fpath, []).append(msg)
+
+    return [
+        {"file": fpath, "path": fpath, "score": 0, "issues": issues, "message": "; ".join(issues)}
+        for fpath, issues in file_violations.items()
+    ]
+
+
 def _run_all_files(checker, name: str, files: List[Dict], bypass_rules: list) -> tuple:
     """Run checker on every file. Returns (violations, scores)."""
     violations, scores, ff = [], [], getattr(checker, "FILE_FILTER", None)
@@ -111,6 +139,7 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
             try:
                 r = checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
                 results[name], scores[name] = r, r.get("score", 0)
+                all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
                 logger.info("Branch-level checker %s failed: %s", name, e)
                 results[name], scores[name] = {"passed": False, "score": 0, "error": str(e)}, 0
@@ -159,7 +188,8 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
     # Custom function coverage scan (informational, not scored)
     try:
         test_map_result = scan_branch(str(branch_path))
-    except Exception:
+    except Exception as e:
+        logger.warning("Test map scan failed for %s: %s", branch["name"], e)
         test_map_result = None
 
     diag_result = results.get("diagnostics", {})

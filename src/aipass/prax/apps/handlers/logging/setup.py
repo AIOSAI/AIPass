@@ -67,7 +67,11 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
         return logging.NullHandler()
 
 
-def setup_individual_logger(module_name: str) -> logging.Logger:
+def setup_individual_logger(
+    module_name: str,
+    caller_path: Optional[str] = None,
+    caller_branch: Optional[str] = None,
+) -> logging.Logger:
     """Setup individual logger for a specific module with dual logging support
 
     Creates:
@@ -77,6 +81,8 @@ def setup_individual_logger(module_name: str) -> logging.Logger:
 
     Args:
         module_name: Name of the module requesting a logger
+        caller_path: Pre-resolved caller file path (avoids redundant stack walk)
+        caller_branch: Pre-resolved branch name (avoids redundant stack walk)
 
     Returns:
         Configured logger instance
@@ -96,17 +102,17 @@ def setup_individual_logger(module_name: str) -> logging.Logger:
     # Load config-driven limits
     log_config = load_log_config()
 
-    # Detect calling branch FIRST (needed for both system and branch logs)
-    module_path = get_calling_module_path()
-    branch_path = detect_branch_from_path(module_path) if module_path else None
+    # Use pre-resolved branch if provided, otherwise detect from stack
+    import os
+    branch_name: Optional[str] = caller_branch
+    if not branch_name:
+        module_path = caller_path or get_calling_module_path()
+        branch_path = detect_branch_from_path(module_path) if module_path else None
+        branch_name = Path(branch_path).name if branch_path else None
 
-    # Extract branch name from path
-    # "prax" → "prax"
-    # "flow" → "flow"
-    if branch_path:
-        branch_name = Path(branch_path).name
-    else:
-        branch_name = "unknown_branch"  # Visible fallback — never silently route to prax
+    # Environment variable fallback (set by drone for dispatched commands)
+    if not branch_name:
+        branch_name = os.environ.get("AIPASS_BRANCH_NAME") or "unknown_branch"
 
     # Create formatter (shared by all handlers)
     formatter = logging.Formatter(

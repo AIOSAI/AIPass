@@ -70,6 +70,24 @@ def print_introspection():
 # OUTPUT FORMATTING
 # =============================================
 
+def _format_schedule(action: dict) -> str:
+    """Build schedule display string for an action."""
+    schedule_type = action.get("schedule_type", "")
+    if schedule_type == "daily":
+        return f"daily @ {action.get('time', '??:??')}"
+    if schedule_type == "hourly":
+        m = action.get("time", "0")
+        return f"hourly @ :{int(m):02d}"
+    if schedule_type == "interval":
+        mins = action.get("interval_minutes", 0)
+        if mins >= 60:
+            return f"every {mins // 60}h"
+        return f"every {mins}m"
+    if schedule_type == "once":
+        return f"once: {action.get('due_date', '?')}"
+    return schedule_type
+
+
 def _print_actions_table(actions: list) -> None:
     """Display formatted action list as a table."""
     console.print()
@@ -94,25 +112,8 @@ def _print_actions_table(actions: list) -> None:
         name = action.get("name", "")[:22]
         action_type = action.get("type", "")[:8]
         target = action.get("target_branch", "")[:14]
-        schedule_type = action.get("schedule_type", "")
 
-        # Build schedule display
-        if schedule_type == "daily":
-            schedule_str = f"daily @ {action.get('time', '??:??')}"
-        elif schedule_type == "hourly":
-            m = action.get("time", "0")
-            schedule_str = f"hourly @ :{int(m):02d}"
-        elif schedule_type == "interval":
-            mins = action.get("interval_minutes", 0)
-            if mins >= 60:
-                schedule_str = f"every {mins // 60}h"
-            else:
-                schedule_str = f"every {mins}m"
-        elif schedule_type == "once":
-            schedule_str = f"once: {action.get('due_date', '?')}"
-        else:
-            schedule_str = schedule_type
-
+        schedule_str = _format_schedule(action)
         next_due = next_due_str(action)
 
         console.print(
@@ -311,30 +312,24 @@ def _handle_set_schedule(args: List[str]) -> bool:
     time_val = None
     interval_minutes = None
 
-    if schedule_type == "daily":
-        if len(args) < 4:
-            _error("Daily schedule requires time: actions set schedule @branch \"prompt\" daily HH:MM")
-            return False
+    if schedule_type not in ("daily", "hourly", "interval"):
+        _error(f"Unknown schedule type: {schedule_type}")
+        console.print("[dim]Valid types: daily, hourly, interval[/dim]")
+        return False
+
+    if len(args) < 4:
+        _error(f"{schedule_type.title()} schedule requires a time/value argument")
+        return False
+
+    if schedule_type in ("daily", "hourly"):
         time_val = args[3]
-    elif schedule_type == "hourly":
-        if len(args) < 4:
-            _error("Hourly schedule requires minute: actions set schedule @branch \"prompt\" hourly MM")
-            return False
-        time_val = args[3]
-    elif schedule_type == "interval":
-        if len(args) < 4:
-            _error("Interval schedule requires minutes: actions set schedule @branch \"prompt\" interval MINUTES")
-            return False
+    else:
         try:
             interval_minutes = int(args[3])
         except ValueError:
             logger.warning("Invalid interval minutes value: %s", args[3])
             _error(f"Invalid interval minutes: {args[3]}")
             return False
-    else:
-        _error(f"Unknown schedule type: {schedule_type}")
-        console.print("[dim]Valid types: daily, hourly, interval[/dim]")
-        return False
 
     # Generate a name from the prompt
     name = prompt[:50].replace(" ", "_").lower()
@@ -445,6 +440,35 @@ def _parse_date(date_str: str) -> str:
 # ORCHESTRATION
 # =============================================
 
+def _route_set_subcommand(args: List[str]) -> bool:
+    """Route 'actions set reminder ...' / 'actions set schedule ...'."""
+    if len(args) < 2:
+        _error("Usage: actions set <reminder|schedule> ...")
+        return False
+    set_type = args[1]
+    if set_type == "reminder":
+        return _handle_set_reminder(args[2:])
+    if set_type == "schedule":
+        return _handle_set_schedule(args[2:])
+    _error(f"Unknown set type: {set_type}. Use 'reminder' or 'schedule'.")
+    return False
+
+
+def _route_action_id(action_id: str, args: List[str]) -> bool:
+    """Route 'actions <4-digit-id> [on|off|info]'."""
+    if len(args) < 2:
+        return _handle_info(action_id)
+    sub_action = args[1]
+    if sub_action == "on":
+        return _handle_toggle(action_id, True)
+    if sub_action == "off":
+        return _handle_toggle(action_id, False)
+    if sub_action == "info":
+        return _handle_info(action_id)
+    _error(f"Unknown action command: {sub_action}. Use 'on', 'off', or 'info'.")
+    return False
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'actions' command and route to subcommands.
@@ -477,40 +501,16 @@ def handle_command(command: str, args: List[str]) -> bool:
         # Named subcommands
         if subcommand == "list":
             return _handle_list(args[1:])
-        elif subcommand == "migrate":
+        if subcommand == "migrate":
             return _handle_migrate(args[1:])
-        elif subcommand == "delete":
+        if subcommand == "delete":
             return _handle_delete(args[1:])
-        elif subcommand == "set":
-            # actions set reminder ... / actions set schedule ...
-            if len(args) < 2:
-                _error("Usage: actions set <reminder|schedule> ...")
-                return False
-            set_type = args[1]
-            if set_type == "reminder":
-                return _handle_set_reminder(args[2:])
-            elif set_type == "schedule":
-                return _handle_set_schedule(args[2:])
-            else:
-                _error(f"Unknown set type: {set_type}. Use 'reminder' or 'schedule'.")
-                return False
+        if subcommand == "set":
+            return _route_set_subcommand(args)
 
         # Check if first arg is an action ID (4-digit numeric)
         if subcommand.isdigit() and len(subcommand) == 4:
-            action_id = subcommand
-            if len(args) < 2:
-                # Default to info
-                return _handle_info(action_id)
-            sub_action = args[1]
-            if sub_action == "on":
-                return _handle_toggle(action_id, True)
-            elif sub_action == "off":
-                return _handle_toggle(action_id, False)
-            elif sub_action == "info":
-                return _handle_info(action_id)
-            else:
-                _error(f"Unknown action command: {sub_action}. Use 'on', 'off', or 'info'.")
-                return False
+            return _route_action_id(subcommand, args)
 
         _error(f"Unknown subcommand: {subcommand}")
         console.print("[dim]Run 'actions --help' for available commands[/dim]")

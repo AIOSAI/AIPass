@@ -546,3 +546,24 @@ class TestEnsureModuleJsonsContract:
         with open(json_dir / "valid_mod_config.json", "r", encoding="utf-8") as f:
             data = json.load(f)
         assert jh.validate_json_structure(data, "config") is True
+
+
+class TestErrorResilience:
+    """Error resilience: empty_file and corrupt data handling."""
+
+    def test_empty_file_handled_gracefully(self, tmp_path, monkeypatch):
+        """An empty file (0 bytes) is handled by ensure_json_exists."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "bj"
+        json_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        target = json_dir / "empty_log.json"
+        target.write_text("", encoding="utf-8")
+
+        result = jh.ensure_json_exists("empty", "log")
+        assert result is True
+        raw = target.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        assert isinstance(data, list)

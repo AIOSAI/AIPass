@@ -7,12 +7,22 @@ Auto-discovery architecture:
 - No manual imports or routing needed
 """
 
+# META
+# module: devpulse
+# description: Orchestration hub — coordinates via dispatch + agents
+# citizen_class: manager
+# END META
+
 import sys
 import importlib
 from pathlib import Path
 from typing import List, Any
 
 from aipass.prax import logger
+
+from rich.console import Console
+
+console = Console(stderr=True)
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -44,6 +54,17 @@ def discover_modules() -> List[Any]:
     return modules
 
 
+def print_introspection():
+    """Print branch introspection — discovered modules and capabilities."""
+    modules = discover_modules()
+    console.print("[bold cyan]DEVPULSE[/bold cyan] — Orchestration Hub")
+    console.print(f"  Modules discovered: {len(modules)}")
+    for module in modules:
+        name = module.__name__.split(".")[-1]
+        desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
+        console.print(f"  {name:20} {desc}")
+
+
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """Route command to appropriate module."""
     for module in modules:
@@ -56,30 +77,48 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 # =============================================================================
+# HANDLER SECURITY GUARD
+# =============================================================================
+
+def handle_command(command: str, args: list) -> bool:
+    """Entry point for drone routing. Guards against cross-branch misuse."""
+    caller = Path.cwd().name
+    if caller != "devpulse" and not any(
+        p.name == "devpulse" for p in Path.cwd().parents
+    ):
+        logger.warning(f"[DEVPULSE] Cross-branch call from {caller} — use ai_mail instead")
+
+    return _handle_command(command, args)
+
+
+def _handle_command(command: str, args: list) -> bool:
+    """Internal command handler."""
+    modules = discover_modules()
+
+    if command in ["--help", "-h", "help"]:
+        print_introspection()
+        return True
+
+    if command in ["--version", "-V"]:
+        console.print("devpulse 1.0.0")
+        return True
+
+    return route_command(command, args, modules)
+
+
+# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
 def main():
     """Main entry point - routes commands or shows help."""
-    modules = discover_modules()
     args = sys.argv[1:]
 
-    if len(args) == 0 or args[0] in ["--help", "-h", "help"]:
-        print(f"DEVPULSE - {len(modules)} modules discovered")
-        for module in modules:
-            name = module.__name__.split(".")[-1]
-            desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
-            print(f"  {name:20} {desc}")
+    if len(args) == 0:
+        print_introspection()
         return 0
 
-    command = args[0]
-    remaining = args[1:] if len(args) > 1 else []
-
-    if route_command(command, remaining, modules):
-        return 0
-
-    print(f"Unknown command: {command}")
-    return 1
+    return 0 if _handle_command(args[0], args[1:]) else 1
 
 
 if __name__ == "__main__":

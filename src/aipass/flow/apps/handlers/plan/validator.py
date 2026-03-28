@@ -22,21 +22,6 @@ from aipass.flow.apps.handlers.json import json_handler
 _PREFIX_RE = re.compile(r'^([A-Z]+PLAN)-', re.IGNORECASE)
 
 
-def extract_prefix(plan_num: str) -> str | None:
-    """Extract the plan-type prefix from a plan identifier.
-
-    Args:
-        plan_num: Raw input like ``"DPLAN-0004"`` or ``"42"``.
-
-    Returns:
-        Uppercase prefix (e.g. ``"DPLAN"``) or ``None`` if no prefix found.
-    """
-    if not isinstance(plan_num, str):
-        return None
-    m = _PREFIX_RE.match(plan_num.strip())
-    return m.group(1).upper() if m else None
-
-
 def normalize_plan_number(plan_num: str) -> str:
     """
     Normalize plan number to 4-digit format

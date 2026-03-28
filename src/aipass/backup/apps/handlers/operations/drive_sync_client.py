@@ -19,18 +19,13 @@ Called exclusively by the google_drive_sync module orchestrator.
 # =============================================
 
 import sys
-import copy
-import fcntl
-import json
-import os
 import ssl
-import tempfile
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any
 
 from aipass.prax import logger
 
@@ -57,8 +52,6 @@ from aipass.backup.apps.handlers.json.drive_sync_json import (
     save_config as _save_config_fn,
     load_data as _load_data_fn,
     save_data as _save_data_fn,
-    load_log as _load_log_fn,
-    save_log as _save_log_fn,
     log_operation as _log_operation_fn,
 )
 from aipass.backup.apps.handlers.json import json_handler
@@ -75,7 +68,6 @@ MODULE_NAME = "google_drive_sync"
 CONFIG_FILE = JSON_DIR / f"{MODULE_NAME}_config.json"
 DATA_FILE = JSON_DIR / f"{MODULE_NAME}_data.json"
 LOG_FILE = JSON_DIR / f"{MODULE_NAME}_log.json"
-_log_lock = threading.Lock()
 
 # Convenience wrappers that use this module's JSON file paths
 def _load_config():
@@ -94,33 +86,9 @@ def _save_data(data):
     """Save data using module constants."""
     _save_data_fn(DATA_FILE, data)
 
-def _load_log(max_retries=3):
-    """Load log using module constants."""
-    return _load_log_fn(LOG_FILE, max_retries)
-
-def _save_log(log):
-    """Save log using module constants."""
-    _save_log_fn(LOG_FILE, log)
-
 def _log_operation(operation, details, success=True, correlation_id=None):
     """Log operation using module constants."""
     _log_operation_fn(LOG_FILE, operation, details, success, correlation_id)
-
-
-def _atomic_json_write(file_path: Path, data: Any):
-    """Write JSON atomically via temp file + rename to prevent corruption."""
-    fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=str(file_path.parent))
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, str(file_path))
-    except Exception as e:
-        logger.warning(f"Atomic JSON write failed for {file_path}: {e}")
-        try:
-            os.unlink(tmp_path)
-        except OSError as e:
-            logger.info(f"Failed to clean up temp file {tmp_path}: {e}")
-        raise
 
 
 class GoogleDriveSync:
@@ -245,34 +213,6 @@ class GoogleDriveSync:
             logger.warning(f"Failed to build Drive service: {e}")
             _log_operation("authenticate", {"message": f"Failed to build Drive service: {e}", "error_details": {"exception_type": type(e).__name__, "stack_trace": str(e)}}, success=False)
             return False
-
-    def get_storage_quota(self) -> Optional[Dict[str, Any]]:
-        """Get Google Drive storage quota information"""
-        try:
-            if not self.drive_service:
-                return None
-
-            about = self.drive_service.about().get(fields="storageQuota").execute()
-            quota = about.get('storageQuota', {})
-
-            # Convert bytes to GB for readability
-            limit = int(quota.get('limit', 0))
-            usage = int(quota.get('usage', 0))
-
-            limit_gb = limit / (1024**3)
-            usage_gb = usage / (1024**3)
-            free_gb = (limit - usage) / (1024**3)
-            percent_used = (usage / limit * 100) if limit > 0 else 0
-
-            return {
-                'limit_gb': limit_gb,
-                'usage_gb': usage_gb,
-                'free_gb': free_gb,
-                'percent_used': percent_used
-            }
-        except Exception as e:
-            logger.warning(f"Failed to get storage quota: {e}")
-            return None
 
     def _verify_folder_id(self, folder_id: str) -> bool:
         """Verify a cached folder ID exists and is NOT trashed."""
@@ -799,26 +739,6 @@ class GoogleDriveSync:
             self._clean_file_tracker(existing_files)
 
         return files_to_upload, skipped_count, total_count
-
-    def _file_needs_upload(self, local_file: Path, drive_file: Optional[Dict[str, Any]]) -> bool:
-        """Check if a file needs to be uploaded based on size comparison"""
-        if not drive_file:
-            return True  # File doesn't exist in Drive, needs upload
-
-        try:
-            local_size = local_file.stat().st_size
-            drive_size = int(drive_file.get('size', 0))
-
-            # If sizes are different, file has changed
-            if local_size != drive_size:
-                return True
-
-            # If sizes are same, assume file is unchanged
-            return False
-
-        except Exception as e:
-            logger.warning(f"Failed to check if file needs upload for {local_file}: {e}")
-            return True  # Upload on error to be safe
 
     def sync_backup_files(self, backup_dir: Path, project_name: str, note: str = "", force_sync: bool = False,
                           prepared_files=None, skipped_count=0, total_count=0, progress_fn=None) -> dict:

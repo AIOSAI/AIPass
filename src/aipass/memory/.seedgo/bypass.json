@@ -515,6 +515,36 @@
       "file": "apps/handlers/symbolic/extractor.py",
       "standard": "deep_nesting",
       "reason": "extract_fragments_llm() has nested JSON parsing with multiple fallback strategies."
+    },
+    {
+      "file": "apps/handlers/learnings/manager.py",
+      "standard": "unused_function",
+      "lines": [764],
+      "reason": "Public API for learning extraction pipeline — called dynamically by symbolic extraction."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "unused_function",
+      "lines": [259],
+      "reason": "Public API surface for vector search — legacy handler retained for direct-import consumers."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "unused_function",
+      "lines": [337],
+      "reason": "Public API surface for vector search — legacy handler retained for direct-import consumers."
+    },
+    {
+      "file": "apps/handlers/search/vector_search.py",
+      "standard": "unused_function",
+      "lines": [420],
+      "reason": "Public API surface for vector search — legacy handler retained for direct-import consumers."
+    },
+    {
+      "file": "apps/handlers/symbolic/extractor.py",
+      "standard": "unused_function",
+      "lines": [437],
+      "reason": "LLM-based extraction function — called conditionally when API key is available."
     }
   ],
   "notes": {

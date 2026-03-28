@@ -136,6 +136,31 @@ def filter_tracked_items(skipped_items: Dict[str, Set[str]]) -> Dict[str, Set[st
     return filtered_items
 
 
+def _matches_exception(path_str: str, name: str, parts: set, exception: str) -> bool:
+    """Check if a path matches a single exception pattern."""
+    if "**" in exception:
+        exception_parts = exception.split("/**")[0]
+        return exception_parts in path_str or exception_parts in "/".join(parts)
+    if exception.startswith('*') and name.endswith(exception[1:]):
+        return True
+    if exception == name:
+        return True
+    if exception in path_str:
+        return True
+    return False
+
+
+def _matches_ignore_pattern(name: str, parts: set, path_str: str, pattern: str) -> bool:
+    """Check if a path matches a single ignore pattern."""
+    if pattern == "backups":
+        return "backups" in parts
+    if pattern == name:
+        return True
+    if pattern.startswith('*') and name.endswith(pattern[1:]):
+        return True
+    return pattern in parts or pattern in path_str
+
+
 def should_ignore(path: Path, ignore_patterns: Optional[List[str]] = None,
                   exceptions: Optional[List[str]] = None,
                   backup_dest: Optional[Path] = None) -> bool:
@@ -158,7 +183,6 @@ def should_ignore(path: Path, ignore_patterns: Optional[List[str]] = None,
         should_ignore(Path("/home/user/file.pyc"))  # True
         should_ignore(Path("/home/user/.gitignore"))  # False (exception)
     """
-    # Use defaults if not provided
     if ignore_patterns is None:
         ignore_patterns = GLOBAL_IGNORE_PATTERNS
     if exceptions is None:
@@ -168,40 +192,18 @@ def should_ignore(path: Path, ignore_patterns: Optional[List[str]] = None,
     parts = set(path_str.split(os.sep))
     name = path.name
 
-    # Always ignore backup destination if provided
     if backup_dest and str(backup_dest) in path_str:
         return True
 
-    # Ignore paths containing 'Backups'
     if 'Backups' in parts:
         return True
 
-    # Check exceptions first - files that should NOT be ignored
     for exception in exceptions:
-        # Full path matching for template exceptions
-        if "**" in exception:
-            # Convert glob pattern to regex-like check
-            exception_parts = exception.split("/**")[0]  # Get everything before /**
-            if exception_parts in path_str or exception_parts in "/".join(parts):
-                return False  # Matches exception pattern - don't ignore
-        elif exception.startswith('*') and name.endswith(exception[1:]):
-            return False  # Matches wildcard exception pattern
-        elif exception == name:
-            return False  # Exact match
-        elif exception in path_str:
-            return False  # Exception pattern is in the full path
+        if _matches_exception(path_str, name, parts, exception):
+            return False
 
-    # Check ignore patterns
     for pattern in ignore_patterns:
-        # Special case: "backups" should only match directory names, not filenames
-        if pattern == "backups":
-            if "backups" in parts:  # Only ignore if "backups" is a directory in the path
-                return True
-        elif pattern == name:
-            return True
-        elif pattern.startswith('*') and name.endswith(pattern[1:]):
-            return True
-        elif pattern in parts or pattern in path_str:
+        if _matches_ignore_pattern(name, parts, path_str, pattern):
             return True
 
     return False

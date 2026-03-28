@@ -364,57 +364,6 @@ def deliver_email_to_branch(
     return True, ""
 
 
-def _update_summary_file(summary_file: Path, message: Dict, total: int, unread: int) -> None:
-    """
-    Update branch summary file with new email data.
-
-    Updates:
-    - summary.inbox.total
-    - summary.inbox.unread
-    - summary.inbox.recent_preview (adds message preview)
-
-    Args:
-        summary_file: Path to summary JSON file
-        message: Message dict to add to preview
-        total: Total inbox message count
-        unread: Unread message count
-    """
-    try:
-        with open(summary_file, 'r', encoding='utf-8') as f:
-            summary_data = json.load(f)
-
-        if "summary" not in summary_data:
-            summary_data["summary"] = {}
-        if "inbox" not in summary_data["summary"]:
-            summary_data["summary"]["inbox"] = {}
-
-        summary_data["summary"]["inbox"]["total"] = total
-        summary_data["summary"]["inbox"]["unread"] = unread
-
-        if "recent_preview" not in summary_data["summary"]["inbox"]:
-            summary_data["summary"]["inbox"]["recent_preview"] = []
-
-        message_words = message["message"].split()[:15]
-        preview = {
-            "from": message["from"],
-            "subject": message["subject"],
-            "summary": " ".join(message_words) + ("..." if len(message["message"].split()) > 15 else ""),
-            "timestamp": message["timestamp"],
-            "status": "new",
-            "message_id": message["id"]
-        }
-
-        summary_data["summary"]["inbox"]["recent_preview"].insert(0, preview)
-        summary_data["summary"]["inbox"]["recent_preview"] = summary_data["summary"]["inbox"]["recent_preview"][:5]
-
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(summary_data, f, indent=2, ensure_ascii=False)
-
-    except Exception as e:
-        logger.warning("[delivery] _update_summary_file(%s) failed: %s", summary_file, e)
-        return
-
-
 _NOTIFICATION_TIMESTAMPS: Dict[str, List[float]] = {}
 
 # Rate limit: max notifications per recipient within time window

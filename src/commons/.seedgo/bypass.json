@@ -32,9 +32,9 @@
     {"file": "apps/commons.py", "standard": "deep_nesting", "reason": "main() depth 5 — app initialization flow: ensure_database, discover_modules, route_command. Legitimate entry point control flow."},
     {"file": "apps/handlers/feed/feed_ops.py", "standard": "deep_nesting", "reason": "format_time_ago() depth 5, display_feed() depth 8 — tight utilities for feed rendering. Feed display requires nested iteration over posts with conditional formatting."},
     {"file": "apps/handlers/feed/activity_ops.py", "standard": "deep_nesting", "reason": "_relative_time() depth 4 — utility for timestamp formatting. Tightly scoped."},
-    {"file": "apps/handlers/rooms/notification_ops.py", "standard": "deep_nesting", "reason": "_set_notification_level() depth 5 — shared notification logic (watch/mute/track). Private helper, tight coupling justified."},
+    {"file": "apps/handlers/notifications/notification_ops.py", "standard": "deep_nesting", "reason": "_set_notification_level() depth 5 — shared notification logic (watch/mute/track). Private helper, tight coupling justified."},
     {"file": "apps/handlers/posts/post_ops.py", "standard": "deep_nesting", "reason": "create_post() depth 4 — multi-step workflow (parse args, validate room, insert, mentions, sync FTS, increment count). High cohesion."},
-    {"file": "apps/handlers/posts/search_ops.py", "standard": "deep_nesting", "reason": "_parse_search_args() depth 5 — tightly scoped flag parsing loop. Private utility correctly extracted from run_search."},
+    {"file": "apps/handlers/search/search_ops.py", "standard": "deep_nesting", "reason": "_parse_search_args() depth 5 — tightly scoped flag parsing loop. Private utility correctly extracted from run_search."},
     {"file": "apps/handlers/posts/comment_ops.py", "standard": "deep_nesting", "reason": "add_comment() depth 4 — multi-step workflow (parse, validate, dedup, insert, update counts, mentions, FTS). High cohesion."},
     {"file": "apps/handlers/database/db.py", "standard": "deep_nesting", "reason": "retry_on_locked() depth 4 — resilient retry pattern for SQLite locking. Correct module location, well-encapsulated."},
     {"file": "apps/handlers/database/central_writer.py", "standard": "deep_nesting", "reason": "aggregate_branch_stats() depth 4 — aggregation loop over branches with per-branch error handling. Appropriate structure."},
@@ -125,7 +125,19 @@
     {"file": "apps/handlers/profiles/profile_queries.py", "standard": "deep_nesting", "reason": "format_time_ago() depth 5 — tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."},
 
     {"file": "apps/handlers/database/catchup_queries.py", "standard": "naming", "reason": "Local variable, not module-level constant — karma_from_posts, karma_from_comments are function-scoped SQL query results"},
-    {"file": "apps/handlers/central/central_writer.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"}
+    {"file": "apps/handlers/central/central_writer.py", "standard": "naming", "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"},
+
+    {"file": "apps/handlers/curation/reaction_queries.py", "standard": "unused_function", "reason": "get_reaction_summary() — social utility called by other branches via drone @commons for displaying reaction summaries on posts/comments"},
+    {"file": "apps/handlers/dashboard/dashboard_writer.py", "standard": "unused_function", "reason": "write_commons_activity() — low-level dashboard write API used by notification pipeline and external branches pushing activity data"},
+    {"file": "apps/handlers/json/json_handler.py", "standard": "unused_function", "reason": "increment_counter() and update_data_metrics() — JSON data utilities available to all commons handler modules for metric tracking"},
+    {"file": "apps/handlers/notifications/dashboard_pipeline.py", "standard": "unused_function", "reason": "update_dashboards_for_event() — event-driven pipeline entry point called by post_ops and comment_ops after new content creation"},
+    {"file": "apps/handlers/notifications/preferences.py", "standard": "unused_function", "reason": "should_notify() and get_watchers() — notification decision functions used by the dashboard pipeline to determine which branches to notify"},
+
+    {"standard": "architecture", "reason": "Commons is a social gathering space, not a builder branch. Template items for builder-specific directories and READMEs do not apply to commons' social module architecture."},
+
+    {"file": "apps/handlers/profiles/profile_queries.py", "standard": "unused_function", "reason": "get_activity_stats() — profile enrichment query used by other branches to display activity stats on social profiles"},
+    {"file": "apps/handlers/rooms/room_state_ops.py", "standard": "unused_function", "reason": "get_room_state(), set_mood(), set_flavor(), set_entrance() — spatial room state API used by space module and external branch visitors"},
+    {"file": "apps/handlers/search/search_queries.py", "standard": "unused_function", "reason": "backfill_fts_index() — maintenance utility for rebuilding the FTS search index after database migrations or corruption recovery"}
   ],
   "notes": {
     "usage": "Add entries to 'bypass' list to exclude specific violations",

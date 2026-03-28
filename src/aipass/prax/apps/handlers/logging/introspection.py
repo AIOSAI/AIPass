@@ -20,35 +20,53 @@ from typing import Optional
 
 from aipass.prax.apps.handlers.json import json_handler
 
+_PRAX_INTERNAL_MARKERS = (
+    '/prax/apps/modules/logger.py',
+    '/prax/apps/handlers/',
+    'prax_logger.py',
+    'prax_handlers.py',
+)
+
+
+def _is_prax_internal(module_path: str) -> bool:
+    """Check if a module path belongs to prax internals."""
+    return any(marker in module_path for marker in _PRAX_INTERNAL_MARKERS)
+
+
+def _find_external_caller_path() -> Optional[str]:
+    """Walk the stack and return the first non-prax module path, or None."""
+    import inspect
+
+    frame = inspect.currentframe()
+    try:
+        current_frame = frame
+        frame_count = 0
+        while current_frame and frame_count < 10:
+            current_frame = current_frame.f_back
+            frame_count += 1
+            if not current_frame:
+                break
+            module_path = current_frame.f_globals.get('__file__', '')
+            if not module_path or module_path == __file__:
+                continue
+            if not _is_prax_internal(module_path):
+                return module_path
+        return None
+    finally:
+        del frame
+
+
 def get_calling_module() -> str:
     """Detect calling module from stack trace
 
     Returns:
         Module name (e.g., 'drone', 'flow', 'cortex') or 'unknown_module'
     """
-    import inspect
+    caller_path = _find_external_caller_path()
+    if caller_path:
+        return Path(caller_path).stem
+    return 'unknown_module'
 
-    frame = inspect.currentframe()
-    try:
-        # Walk up the stack to find the calling module
-        current_frame = frame
-        frame_count = 0
-        while current_frame and frame_count < 10:  # Limit to prevent infinite loop
-            current_frame = current_frame.f_back
-            frame_count += 1
-            if current_frame:
-                module_path = current_frame.f_globals.get('__file__', '')
-                if module_path and module_path != __file__:
-                    # Skip any frame that's from prax internal files
-                    if ('/prax/apps/modules/logger.py' not in module_path and
-                        '/prax/apps/handlers/' not in module_path and
-                        'prax_logger.py' not in module_path and
-                        'prax_handlers.py' not in module_path):
-                        module_name = Path(module_path).stem
-                        return module_name
-        return 'unknown_module'
-    finally:
-        del frame
 
 def get_calling_module_path() -> Optional[str]:
     """Detect calling module path from stack trace
@@ -56,28 +74,25 @@ def get_calling_module_path() -> Optional[str]:
     Returns:
         Full path to calling module file or None
     """
-    import inspect
+    return _find_external_caller_path()
 
-    frame = inspect.currentframe()
-    try:
-        # Walk up the stack to find the calling module
-        current_frame = frame
-        frame_count = 0
-        while current_frame and frame_count < 10:
-            current_frame = current_frame.f_back
-            frame_count += 1
-            if current_frame:
-                module_path = current_frame.f_globals.get('__file__', '')
-                if module_path and module_path != __file__:
-                    # Skip any frame that's from prax internal files
-                    if ('/prax/apps/modules/logger.py' not in module_path and
-                        '/prax/apps/handlers/' not in module_path and
-                        'prax_logger.py' not in module_path and
-                        'prax_handlers.py' not in module_path):
-                        return module_path
-        return None
-    finally:
-        del frame
+
+def get_caller_info() -> tuple:
+    """Detect calling module name, path, and branch from a single stack walk.
+
+    Avoids the double-walk problem where get_calling_module() and
+    get_calling_module_path() are called separately from different
+    stack depths, potentially finding different external callers.
+
+    Returns:
+        (module_name, module_path, branch_name) — branch_name may be None
+    """
+    caller_path = _find_external_caller_path()
+    if not caller_path:
+        return ('unknown_module', None, None)
+    module_name = Path(caller_path).stem
+    branch = detect_branch_from_path(caller_path)
+    return (module_name, caller_path, branch)
 
 _AIPASS_PKG_ROOT = Path(__file__).resolve().parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
 _SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)

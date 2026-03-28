@@ -53,6 +53,8 @@ drone @spawn update --dry-run @branch_name    # Preview changes
 drone @spawn delete @branch_name              # Archive + deregister
 drone @spawn sync-registry                    # Repair registry vs filesystem
 drone @spawn sync-templates                   # Pull managed files from sources
+drone @spawn regenerate-registry              # Regenerate builder template registry
+drone @spawn regenerate-registry --all        # Regenerate all template class registries
 ```
 
 **Python API:**
@@ -83,7 +85,8 @@ spawn/
 │   │   ├── update.py        # Update CLI — parses args, delegates to handler
 │   │   ├── delete.py        # Delete CLI — parses args, delegates to handler
 │   │   ├── sync_registry.py # Sync registry CLI — report and repair
-│   │   └── sync_templates.py # Sync templates CLI — pull from sources
+│   │   ├── sync_templates.py # Sync templates CLI — pull from sources
+│   │   └── regenerate_registry.py # Regenerate template registries CLI
 │   └── handlers/
 │       ├── class_registry.py     # Citizen class registry — maps classes to templates
 │       ├── passport_ops.py       # Passport grant implementation
@@ -100,7 +103,8 @@ spawn/
 │       ├── update_ops.py         # Update implementation (class-aware)
 │       ├── delete_ops.py         # Delete implementation logic
 │       ├── sync_registry_ops.py  # Registry sync implementation
-│       └── sync_templates_ops.py # Template sync implementation
+│       ├── sync_templates_ops.py # Template sync implementation
+│       └── regenerate_registry_ops.py # Template registry regeneration
 ├── templates/
 │   ├── builder/             # Full scaffold template (apps/, modules/, handlers/)
 │   ├── birthright/          # Minimal template (.trinity/, .aipass/, README.md)
@@ -151,4 +155,4 @@ spawn/
 
 ---
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-27*

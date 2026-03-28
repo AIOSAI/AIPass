@@ -60,7 +60,8 @@ seedgo/
 │   │   ├── checklist.py             # Per-file standards checklist (hook consumption)
 │   │   ├── seedgo_proof.py          # Proof orchestrator
 │   │   ├── proof_query.py           # Proof content query
-│   │   └── readme_update.py         # README generation
+│   │   ├── readme_update.py         # README generation
+│   │   └── test_map.py              # Custom function test coverage mapping
 │   └── handlers/
 │       ├── aipass_standards/        # Built-in checker pack (33 standards)
 │       │   ├── *_check.py           # Checker implementations (score 0-100)
@@ -77,7 +78,8 @@ seedgo/
 │       ├── config/                  # Configuration handlers
 │       ├── diagnostics/             # Pyright integration
 │       ├── file/                    # File operations
-│       └── json/                    # JSON tracking
+│       ├── json/                    # JSON tracking
+│       └── test_map/                # Function test coverage scanner
 ├── drone_adapter.py                 # Drone routing bridge
 ├── .trinity/                        # Memory files
 └── README.md

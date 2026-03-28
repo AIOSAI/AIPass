@@ -177,51 +177,6 @@ def print_command_separator(branch: str, command: str, caller: Optional[str] = N
         console.print(f"[bold {branch_color}]{'─' * 60}[/bold {branch_color}]")
 
 
-def get_file_category(filename: str) -> str:
-    """Categorize a file by its type for display context.
-
-    Args:
-        filename: Just the filename (not full path)
-
-    Returns:
-        Short category tag like 'code', 'memory', 'config', etc.
-    """
-    name_lower = filename.lower()
-
-    # Dashboard (check before general memory)
-    if name_lower == 'dashboard.local.json':
-        return 'dashboard'
-
-    # Memory files
-    if name_lower.endswith('.local.json') or name_lower.endswith('.id.json') or name_lower.endswith('.observations.json'):
-        return 'memory'
-
-    # Dev notes
-    if name_lower == 'dev.local.md':
-        return 'devnotes'
-
-    # Config
-    if name_lower.endswith('_config.json') or name_lower.endswith('config.json'):
-        return 'config'
-
-    # Documentation
-    if name_lower.endswith('.md'):
-        return 'docs'
-
-    # Code
-    if name_lower.endswith('.py'):
-        return 'code'
-
-    # Data/JSON
-    if name_lower.endswith('.json'):
-        return 'data'
-
-    # Mail
-    if 'ai_mail' in name_lower or 'mail' in name_lower:
-        return 'mail'
-
-    return ''
-
 
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):
     """

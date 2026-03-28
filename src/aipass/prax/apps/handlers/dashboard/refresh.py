@@ -232,6 +232,38 @@ def _calculate_quick_status(sections: Dict) -> Dict:
     }
 
 
+def _preserve_commons_section(dashboard: Dict, branch_path: Path, branch_name: str, centrals: Dict) -> None:
+    """Populate commons section from centrals or preserve existing write-through data."""
+    commons_section = _extract_commons_section(centrals, branch_name)
+    if commons_section is not None:
+        dashboard["sections"]["commons_activity"] = commons_section
+        return
+    existing_path = branch_path / "DASHBOARD.local.json"
+    if not existing_path.exists():
+        return
+    try:
+        existing = json.loads(existing_path.read_text())
+        existing_commons = existing.get("sections", {}).get("commons_activity")
+        if existing_commons:
+            dashboard["sections"]["commons_activity"] = existing_commons
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to read existing commons data for %s: %s", branch_name, e)
+
+
+def _preserve_write_through_sections(dashboard: Dict, branch_path: Path, branch_name: str) -> None:
+    """Preserve write-through sections not managed by refresh."""
+    existing_path = branch_path / "DASHBOARD.local.json"
+    if not existing_path.exists():
+        return
+    try:
+        existing = json.loads(existing_path.read_text())
+        for key, value in existing.get("sections", {}).items():
+            if key not in REFRESH_MANAGED_SECTIONS and key not in dashboard["sections"]:
+                dashboard["sections"][key] = value
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to preserve write-through sections for %s: %s", branch_name, e)
+
+
 def refresh_all_dashboards() -> Dict:
     """
     Refresh all branch dashboards from central files.
@@ -274,31 +306,8 @@ def refresh_all_dashboards() -> Dict:
             dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
             dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
 
-            # Commons: preserve existing write-through data if no central file
-            commons_section = _extract_commons_section(centrals, branch_name)
-            if commons_section is not None:
-                dashboard["sections"]["commons_activity"] = commons_section
-            else:
-                existing_path = branch_path / "DASHBOARD.local.json"
-                if existing_path.exists():
-                    try:
-                        existing = json.loads(existing_path.read_text())
-                        existing_commons = existing.get("sections", {}).get("commons_activity")
-                        if existing_commons:
-                            dashboard["sections"]["commons_activity"] = existing_commons
-                    except (json.JSONDecodeError, OSError) as e:
-                        logger.warning("Failed to read existing commons data for %s: %s", branch_name, e)
-
-            # Preserve write-through sections not managed by refresh (e.g. agent_status)
-            existing_path = branch_path / "DASHBOARD.local.json"
-            if existing_path.exists():
-                try:
-                    existing = json.loads(existing_path.read_text())
-                    for key, value in existing.get("sections", {}).items():
-                        if key not in REFRESH_MANAGED_SECTIONS and key not in dashboard["sections"]:
-                            dashboard["sections"][key] = value
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning("Failed to preserve write-through sections for %s: %s", branch_name, e)
+            _preserve_commons_section(dashboard, branch_path, branch_name, centrals)
+            _preserve_write_through_sections(dashboard, branch_path, branch_name)
 
             # Calculate quick status
             dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"])
@@ -354,31 +363,8 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
         dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
         dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
 
-        # Commons: preserve existing write-through data if no central file
-        commons_section = _extract_commons_section(centrals, branch_name)
-        if commons_section is not None:
-            dashboard["sections"]["commons_activity"] = commons_section
-        else:
-            existing_path = branch_path / "DASHBOARD.local.json"
-            if existing_path.exists():
-                try:
-                    existing = json.loads(existing_path.read_text())
-                    existing_commons = existing.get("sections", {}).get("commons_activity")
-                    if existing_commons:
-                        dashboard["sections"]["commons_activity"] = existing_commons
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning("Failed to read existing commons data for %s: %s", branch_name, e)
-
-        # Preserve write-through sections not managed by refresh (e.g. agent_status)
-        existing_path = branch_path / "DASHBOARD.local.json"
-        if existing_path.exists():
-            try:
-                existing = json.loads(existing_path.read_text())
-                for key, value in existing.get("sections", {}).items():
-                    if key not in REFRESH_MANAGED_SECTIONS and key not in dashboard["sections"]:
-                        dashboard["sections"][key] = value
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to preserve write-through sections for %s: %s", branch_name, e)
+        _preserve_commons_section(dashboard, branch_path, branch_name, centrals)
+        _preserve_write_through_sections(dashboard, branch_path, branch_name)
 
         dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"])
 

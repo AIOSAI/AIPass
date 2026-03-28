@@ -3,7 +3,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-03-28
 
 ---
 
@@ -161,4 +161,4 @@ src/skills/
 
 ---
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-28*

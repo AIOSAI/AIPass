@@ -133,6 +133,56 @@ class MonitoringFileHandler(FileSystemEventHandler):
     # AGENT ACTIVITY PARSING (Claude Code JSONL sessions)
     # =========================================================================
 
+    @staticmethod
+    def _format_tool_action(item: dict) -> Optional[str]:
+        """Format a tool_use JSONL item into a display string."""
+        tool_name = item.get('name', '')
+        inp = item.get('input', {})
+        if tool_name in ('Read', 'Edit', 'Write'):
+            fp = inp.get('file_path', '')
+            short = fp.split('/')[-1] if '/' in fp else fp
+            return f"🔧 {tool_name}: {short}"
+        if tool_name == 'Bash':
+            desc = inp.get('description', '') or inp.get('command', '')[:120]
+            return f"⚡ Bash: {desc[:120]}"
+        if tool_name in ('Grep', 'Glob'):
+            return f"🔍 {tool_name}: {inp.get('pattern', '')[:80]}"
+        if tool_name == 'Task':
+            return f"🚀 Agent: {inp.get('description', '')[:80]}"
+        return f"🔧 {tool_name}"
+
+    @staticmethod
+    def _extract_action_from_entry(entry: dict) -> Optional[str]:
+        """Extract a display action string from a JSONL entry."""
+        entry_type = entry.get('type', '')
+        msg = entry.get('message', {}) if isinstance(entry.get('message'), dict) else {}
+        content = msg.get('content', [])
+
+        if entry_type in ('progress', 'system', 'file-history-snapshot', 'queue-operation'):
+            return None
+
+        if entry_type == 'assistant' and isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get('type', '')
+                if item_type == 'thinking':
+                    return '💭 Thinking'
+                if item_type == 'tool_use':
+                    return MonitoringFileHandler._format_tool_action(item)
+                if item_type == 'text':
+                    text = item.get('text', '').strip()
+                    return f"💬 {text}" if text else None
+
+        if entry_type == 'user':
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'tool_result':
+                        return None
+            return '📩 User message'
+
+        return None
+
     def _parse_agent_activity(self, file_path, branch):
         """Parse Claude Code session JSONL to show agent actions.
 
@@ -143,22 +193,19 @@ class MonitoringFileHandler(FileSystemEventHandler):
             current_size = file_path.stat().st_size
             last_pos = self._jsonl_positions.get(path_key, 0)
 
-            # File shrunk or new - reset
             if current_size < last_pos:
                 last_pos = 0
-
             if current_size <= last_pos:
-                return True  # No new data, but not an error
+                return True
 
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 f.seek(last_pos)
                 new_data = f.read()
                 self._jsonl_positions[path_key] = f.tell()
 
-            # Parse last meaningful line
             lines = [l for l in new_data.strip().split('\n') if l.strip()]
             if not lines:
-                return True  # Empty, not an error
+                return True
 
             for line in reversed(lines):
                 try:
@@ -167,84 +214,22 @@ class MonitoringFileHandler(FileSystemEventHandler):
                     logger.info(f"[monitor] Skipping malformed JSONL line: {e}")
                     continue
 
-                entry_type = entry.get('type', '')
-                msg = entry.get('message', {}) if isinstance(entry.get('message'), dict) else {}
-                content = msg.get('content', [])
-
-                # Skip noise entries - look for next meaningful one
-                if entry_type in ('progress', 'system', 'file-history-snapshot', 'queue-operation'):
+                action_text = self._extract_action_from_entry(entry)
+                if not action_text:
                     continue
 
-                action_text = None
-
-                if entry_type == 'assistant' and isinstance(content, list):
-                    for item in content:
-                        if not isinstance(item, dict):
-                            continue
-                        item_type = item.get('type', '')
-
-                        if item_type == 'thinking':
-                            action_text = '💭 Thinking'
-                            break
-                        elif item_type == 'tool_use':
-                            tool_name = item.get('name', '')
-                            inp = item.get('input', {})
-                            if tool_name in ('Read', 'Edit', 'Write'):
-                                fp = inp.get('file_path', '')
-                                short = fp.split('/')[-1] if '/' in fp else fp
-                                action_text = f"🔧 {tool_name}: {short}"
-                            elif tool_name == 'Bash':
-                                desc = inp.get('description', '')
-                                if not desc:
-                                    cmd = inp.get('command', '')[:120]
-                                    desc = cmd
-                                action_text = f"⚡ Bash: {desc[:120]}"
-                            elif tool_name in ('Grep', 'Glob'):
-                                pat = inp.get('pattern', '')[:80]
-                                action_text = f"🔍 {tool_name}: {pat}"
-                            elif tool_name == 'Task':
-                                desc = inp.get('description', '')[:80]
-                                action_text = f"🚀 Agent: {desc}"
-                            else:
-                                action_text = f"🔧 {tool_name}"
-                            break
-                        elif item_type == 'text':
-                            text = item.get('text', '').strip()
-                            if text:
-                                action_text = f"💬 {text}"
-                            break
-
-                elif entry_type == 'user':
-                    # Skip tool_result entries (noise - every tool call produces one)
-                    # Only show actual user messages (new prompts)
-                    is_tool_result = False
-                    if isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict) and item.get('type') == 'tool_result':
-                                is_tool_result = True
-                                break
-                    if not is_tool_result:
-                        action_text = '📩 User message'
-
-                if action_text:
-                    # Dedup: skip if same action for same session
-                    if self._last_agent_action.get(path_key) == action_text:
-                        return True  # Deduped, not an error
-                    self._last_agent_action[path_key] = action_text
-
-                    evt = MonitoringEvent(
-                        priority=1,
-                        event_type='agent',
-                        branch=branch,
-                        action='activity',
-                        message=action_text,
-                        level='info'
-                    )
-                    if self._event_queue:
-                        self._event_queue.enqueue(evt)
+                if self._last_agent_action.get(path_key) == action_text:
                     return True
+                self._last_agent_action[path_key] = action_text
 
-            # All lines were progress/system - that's fine
+                evt = MonitoringEvent(
+                    priority=1, event_type='agent', branch=branch,
+                    action='activity', message=action_text, level='info',
+                )
+                if self._event_queue:
+                    self._event_queue.enqueue(evt)
+                return True
+
             return True
 
         except Exception as e:
@@ -255,73 +240,59 @@ class MonitoringFileHandler(FileSystemEventHandler):
     # INTERNAL EVENT PROCESSING
     # =========================================================================
 
+    def _check_command_indicator(self, action, file_path, branch):
+        """Check if file event indicates a command and emit separator if so."""
+        if action != 'modified' or file_path.name not in self._command_indicator_files:
+            return
+        cmd = self._command_indicator_files[file_path.name]
+        dedup_key = f"{branch}:{cmd}"
+        if self._last_file_command.get(file_path.name) == dedup_key:
+            return
+        self._last_file_command[file_path.name] = dedup_key
+        cmd_event = MonitoringEvent(
+            priority=2, event_type='command', branch=branch,
+            action='executed', message=cmd, level='info',
+        )
+        if self._event_queue:
+            self._event_queue.enqueue(cmd_event)
+
     def _handle_event(self, action, path_str):
         """Process file event and push to queue."""
         try:
             file_path = Path(path_str)
 
-            # Check if should monitor this path
             if not should_monitor(file_path):
                 return
 
-            # Detect branch from path
             branch = detect_branch_from_path(str(file_path))
 
-            # Claude Code JSONL files: parse agent activity instead of raw modification
+            # Claude Code JSONL files: parse agent activity
             if file_path.suffix == '.jsonl' and '.claude/projects/' in path_str:
-                # Distinguish subagents from main sessions
-                # Main: ~/.claude/projects/{hash}/{uuid}.jsonl
-                # Sub:  ~/.claude/projects/{hash}/{uuid}/subagents/agent-{id}.jsonl
                 if '/subagents/' in path_str:
                     branch = branch + ' agent'
                 if self._parse_agent_activity(file_path, branch):
-                    return  # Parsed successfully, don't show raw event
-                # Parsing failed - fall through to show raw file event
+                    return
 
-            # Check if this file indicates a command (python3 direct calls)
-            if action == 'modified' and file_path.name in self._command_indicator_files:
-                cmd = self._command_indicator_files[file_path.name]
-                dedup_key = f"{branch}:{cmd}"
-                if self._last_file_command.get(file_path.name) != dedup_key:
-                    self._last_file_command[file_path.name] = dedup_key
-                    cmd_event = MonitoringEvent(
-                        priority=2,
-                        event_type='command',
-                        branch=branch,
-                        action='executed',
-                        message=cmd,
-                        level='info'
-                    )
-                    if self._event_queue:
-                        self._event_queue.enqueue(cmd_event)
-                # Still show the file event too (don't return)
+            self._check_command_indicator(action, file_path, branch)
 
-            # Get priority
             priority_level = get_priority(file_path, action)
+            display_name = self._build_display_name(file_path)
 
-            # Build display name with context (branch-relative path or short path)
-            display_name = file_path.name
-            # Show parent dir for context when file is deep in a branch
-            parts = file_path.parts
-            # Find branch root and show relative path from there
-            for i, part in enumerate(parts):
-                if part in ('apps', 'handlers', 'modules', 'docs', 'templates'):
-                    display_name = '/'.join(parts[i:])
-                    break
-
-            # Create event
             evt = MonitoringEvent(
-                priority=0,  # Will be set based on level
-                event_type='file',
-                branch=branch,
-                action=action,
+                priority=0, event_type='file', branch=branch, action=action,
                 message=f"{action.upper()}: {display_name}",
-                level=priority_level if priority_level in ['error', 'warning', 'info'] else 'info'
+                level=priority_level if priority_level in ['error', 'warning', 'info'] else 'info',
             )
-
-            # Push to queue
             if self._event_queue:
                 self._event_queue.enqueue(evt)
         except Exception as e:
-            # Log error but don't crash the watcher
             logger.error(f"[monitor] Error handling {action} event for {path_str}: {e}")
+
+    @staticmethod
+    def _build_display_name(file_path: Path) -> str:
+        """Build branch-relative display name for a file path."""
+        parts = file_path.parts
+        for i, part in enumerate(parts):
+            if part in ('apps', 'handlers', 'modules', 'docs', 'templates'):
+                return '/'.join(parts[i:])
+        return file_path.name

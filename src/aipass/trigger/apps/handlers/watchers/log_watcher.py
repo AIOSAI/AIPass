@@ -190,6 +190,26 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         super().__init__()
         self.log_positions: Dict[str, int] = {}
 
+    def _read_new_lines(self, file_path: str) -> None:
+        """Read new content from a log file and process lines."""
+        current_size = Path(file_path).stat().st_size
+        last_pos = self.log_positions.get(file_path, 0)
+
+        if current_size < last_pos:
+            last_pos = 0
+        if current_size <= last_pos:
+            return
+
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(last_pos)
+            new_lines = f.read()
+            if new_lines.strip():
+                branch = _detect_branch_from_log(file_path)
+                for line in new_lines.strip().split('\n'):
+                    if line.strip() and not _should_skip_log(line):
+                        self._process_log_line(branch, line, file_path)
+            self.log_positions[file_path] = f.tell()
+
     def on_modified(self, event):
         """
         Handle log file modification events.
@@ -200,34 +220,11 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             return
 
         file_path = str(event.src_path)
-
-        if not file_path.endswith('.log'):
-            return
-
-        if str(SYSTEM_LOGS_DIR) not in file_path:
+        if not file_path.endswith('.log') or str(SYSTEM_LOGS_DIR) not in file_path:
             return
 
         try:
-            current_size = Path(file_path).stat().st_size
-            last_pos = self.log_positions.get(file_path, 0)
-
-            if current_size < last_pos:
-                last_pos = 0
-
-            if current_size > last_pos:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(last_pos)
-                    new_lines = f.read()
-
-                    if new_lines.strip():
-                        branch = _detect_branch_from_log(file_path)
-
-                        for line in new_lines.strip().split('\n'):
-                            if line.strip() and not _should_skip_log(line):
-                                self._process_log_line(branch, line, file_path)
-
-                    self.log_positions[file_path] = f.tell()
-
+            self._read_new_lines(file_path)
         except Exception as exc:
             logger.warning("Failed to read log file '%s': %s", file_path, exc)
 
@@ -305,7 +302,7 @@ def start_log_watcher() -> Any:
 
     watcher = LogFileWatcher()
     watcher.initialize_positions()
-
+    _callback = watcher.on_modified  # watchdog dispatches FileSystemEvents here
     if WatchdogObserver is None:
         return None
     observer = WatchdogObserver()

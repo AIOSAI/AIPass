@@ -262,6 +262,7 @@ def detect_red_flags(
 
     # Sort: RED_FLAG first, then by branch name
     def sort_key(item: Dict[str, Any]) -> tuple:
+        """Sort branches by status severity (RED_FLAG first), then alphabetically."""
         status_order = {
             STATUS_RED_FLAG: 0,
             STATUS_ERROR: 1,

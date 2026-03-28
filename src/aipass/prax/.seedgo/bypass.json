@@ -388,6 +388,21 @@
       "reason": "format() is a logging.Formatter.format() override — called by the Python logging framework when formatting log records, not by name in branch code."
     },
     {
+      "file": "apps/handlers/logging/monitoring.py",
+      "standard": "unused_function",
+      "reason": "run_monitoring_loop() is the handler entry point for continuous monitoring — designed to be called by the logger module or daemon processes as a long-running loop."
+    },
+    {
+      "file": "apps/modules/logger.py",
+      "standard": "unused_function",
+      "reason": "initialize_logging_system() and shutdown_logging_system() are public API lifecycle functions exported in __all__ — designed to be called by other branches and entry points to start/stop the logging system."
+    },
+    {
+      "file": "apps/handlers/dashboard/template_pusher.py",
+      "standard": "naming",
+      "reason": "False positive — 'changed' is a local variable inside _apply_structural_updates(), not a module-level constant."
+    },
+    {
       "file": "apps/",
       "standard": "architecture",
       "reason": "Template files managed by spawn — prax cannot add/remove template files. Template structure is defined in spawn/templates/builder/ and applied at branch creation time."
