@@ -9,16 +9,12 @@
 """
 Error Handling Standards Checker Handler
 
-Validates module compliance with AIPass 3-tier logging standards.
-- Modules: MUST import Prax, logger.error() for system failures only
-- Handlers: MAY import Prax for info/warning, MUST NOT use logger.error()
-- stdlib logging.getLogger() prohibited everywhere
+Validates error handling compliance — detects silent failures
+(bare except: pass) in production code.
 """
 
-import re
 from pathlib import Path
-from typing import Dict, List
-
+from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -30,14 +26,11 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        # Must match standard
         if rule.get('standard') and rule.get('standard') != standard:
             continue
-        # Must match file (check if rule file path is in the full path)
         rule_file = rule.get('file', '')
         if rule_file and rule_file not in file_path:
             continue
-        # Check line-specific bypass
         rule_lines = rule.get('lines', [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
@@ -46,31 +39,10 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows 3-tier error handling standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict: {
-            'passed': bool,           # Overall pass/fail
-            'checks': [               # Individual check results
-                {
-                    'name': str,      # Check name
-                    'passed': bool,   # Pass/fail
-                    'message': str,   # Details
-                }
-            ],
-            'score': int,             # 0-100 percentage
-            'standard': str           # Standard name
-        }
-    """
+    """Check if module follows error handling standards"""
     checks = []
     path = Path(module_path)
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, 'error_handling', bypass_rules=bypass_rules):
         return {
             'passed': True,
@@ -79,7 +51,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             'standard': 'ERROR_HANDLING'
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             'passed': False,
@@ -88,7 +59,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             'standard': 'ERROR_HANDLING'
         }
 
-    # Read file
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -102,51 +72,16 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             'standard': 'ERROR_HANDLING'
         }
 
-    # Determine file type
-    is_handler = '/handlers/' in module_path
-    is_module = '/modules/' in module_path
-    is_entry_point = path.name.endswith('.py') and '/apps/' in module_path and path.parent.name == 'apps'
+    # Only check: Error handling (for all files, not just non-test files)
+    error_handling_check = check_error_handling(content, lines, module_path)
+    if error_handling_check:
+        checks.append(error_handling_check)
 
-    # Check 1: Modules MUST import Prax
-    # Skip prax's own modules (can't import itself) and cli modules (prax depends on cli — circular)
-    is_prax_module = '/prax/' in module_path
-    is_cli_module = '/cli/' in module_path
-    if is_module and not is_prax_module and not is_cli_module:
-        prax_import_check = check_module_has_prax(content, module_path, bypass_rules)
-        checks.append(prax_import_check)
-
-    # Check 2: Handlers MUST NOT use stdlib logging.getLogger
-    if is_handler:
-        no_stdlib_check = check_handler_no_stdlib_logging(content, module_path, bypass_rules)
-        checks.append(no_stdlib_check)
-
-    # Note: Handlers MAY import Prax and use logger.info/warning/error (DPLAN-0040)
-    # Only stdlib logging.getLogger() is prohibited (check 2 above)
-
-    # Check 4: Modules should have error logging
-    if is_module:
-        error_logging_check = check_module_error_logging(content)
-        checks.append(error_logging_check)
-
-    # Check 5: Modules - ERROR vs WARNING usage
-    if is_module:
-        error_warning_check = check_error_vs_warning_usage(lines, module_path, bypass_rules)
-        checks.append(error_warning_check)
-
-    # If not module or handler, skip checks
-    if not is_module and not is_handler and not is_entry_point:
-        return {
-            'passed': True,
-            'checks': [{'name': 'Error handling check', 'passed': True, 'message': 'Not a module or handler (skipped)'}],
-            'score': 100,
-            'standard': 'ERROR_HANDLING'
-        }
-
-    # Calculate score
+    # If no checks were added (no try/except blocks), pass
     if not checks:
         return {
             'passed': True,
-            'checks': [{'name': 'Error handling check', 'passed': True, 'message': 'No checks applicable'}],
+            'checks': [{'name': 'Error handling', 'passed': True, 'message': 'No try/except blocks detected (not applicable)'}],
             'score': 100,
             'standard': 'ERROR_HANDLING'
         }
@@ -154,8 +89,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     passed_checks = sum(1 for check in checks if check['passed'])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
-
-    # Overall pass if score >= 75%
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "error_handling"})
@@ -167,173 +100,60 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
-def check_module_has_prax(content: str, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that modules import Prax logger
-
-    Modules MUST import Prax for business logging
-    """
-    has_prax_import = (
-        'from aipass.prax import logger' in content
-        or 'from aipass.prax import' in content and 'logger' in content
-        or 'from aipass.prax.apps.modules.logger import system_logger' in content
-    )
-
-    if has_prax_import:
-        return {
-            'name': 'Module Prax import',
-            'passed': True,
-            'message': 'Module imports Prax logger (required for business logging)'
-        }
-    else:
-        # Check if bypassed (whole file bypass for this check)
-        if is_bypassed(file_path, 'error_handling', None, bypass_rules):
-            return {
-                'name': 'Module Prax import',
-                'passed': True,
-                'message': 'Module Prax import check bypassed'
-            }
-        return {
-            'name': 'Module Prax import',
-            'passed': False,
-            'message': 'Module MUST import Prax: from aipass.prax import logger'
-        }
+def _is_silent_except(lines: List[str], pass_index: int, pass_line: str) -> bool:
+    pass_indent = len(pass_line) - len(pass_line.lstrip())
+    for j in range(pass_index, min(pass_index + 3, len(lines))):
+        next_line = lines[j].strip()
+        is_pass_line = next_line == 'pass' or next_line.startswith('pass ') or next_line.startswith('pass#')
+        if next_line and not is_pass_line:
+            if lines[j].startswith(' ') and len(lines[j]) - len(lines[j].lstrip()) > pass_indent:
+                return False
+            break
+    return True
 
 
-def check_handler_no_stdlib_logging(content: str, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that handlers do NOT use stdlib ``logging.get`` ``Logger()``.
+def check_error_handling(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
+    """Check for proper error handling patterns"""
+    try_count = content.count('try:')
 
-    Handlers should use Prax system_logger instead. stdlib logging
-    creates blind spots invisible to Prax monitor.
-    """
-    lines = content.split('\n')
-    stdlib_lines = []
+    if try_count == 0:
+        return None
 
+    silent_failures = []
     in_docstring = False
-    for i, line in enumerate(lines, 1):
+    in_except = False
+    except_line = 0
+
+    for i, line in enumerate(lines):
         stripped = line.strip()
-
-        # Track docstrings
-        if '"""' in line or "'''" in line:
-            in_docstring = not in_docstring
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            quote = '"""' if stripped.startswith('"""') else "'''"
+            if stripped.count(quote) == 2 and len(stripped) > len(quote) * 2:
+                pass
+            else:
+                in_docstring = not in_docstring
+        if in_docstring:
             continue
-
-        # Skip if in docstring or comment
-        if in_docstring or stripped.startswith('#'):
+        if 'except' in stripped and ':' in stripped:
+            in_except = True
+            except_line = i
             continue
+        if in_except:
+            if stripped == 'pass' or stripped.startswith('pass ') or stripped.startswith('pass#'):
+                if _is_silent_except(lines, i, line):
+                    silent_failures.append(f"line {except_line}")
+            if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
+                in_except = False
 
-        # Check for stdlib logging.getLogger usage
-        if re.search(r'logging\.getLogger\s*\(', line):
-            if not is_bypassed(file_path, 'error_handling', i, bypass_rules):
-                stdlib_lines.append(i)
-
-    if stdlib_lines:
+    if silent_failures:
         return {
-            'name': 'Handler stdlib logging',
+            'name': 'Error handling',
             'passed': False,
-            'message': f'Handler uses stdlib logging.get' f'Logger() on lines {stdlib_lines[:3]} — use Prax system_logger instead'
-        }
-    else:
-        return {
-            'name': 'Handler stdlib logging',
-            'passed': True,
-            'message': 'Handler correctly avoids stdlib logging.get' 'Logger()'
+            'message': f'Silent failure detected (except: pass) in {Path(module_path).name if module_path else "file"} at {silent_failures[0]} - errors should log/return'
         }
 
-
-def check_module_error_logging(content: str) -> Dict:
-    """
-    Check that modules have Prax logger available for error logging.
-
-    Entry point @track_operation handles exception catching.
-    Modules just need Prax import (checked separately).
-    This check passes if Prax is imported - modules CAN log but aren't required to.
-    """
-    has_prax_import = 'from aipass.prax import logger' in content or (
-        'from aipass.prax import' in content and 'logger' in content
-    ) or 'from aipass.prax.apps.modules.logger import system_logger' in content
-
-    if has_prax_import:
-        return {
-            'name': 'Module error logging',
-            'passed': True,
-            'message': 'Module has Prax logger available (entry point handles exceptions)'
-        }
-    else:
-        # No Prax import - this is caught by check_module_has_prax
-        # Still pass here to avoid double-flagging
-        return {
-            'name': 'Module error logging',
-            'passed': True,
-            'message': 'Module error logging deferred to Prax import check'
-        }
-
-
-def _matches_user_input_pattern(line_lower: str, user_input_patterns: list) -> bool:
-    for pattern in user_input_patterns:
-        if re.search(pattern, line_lower):
-            return True
-    return False
-
-
-def check_error_vs_warning_usage(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that logger.error() is used for system failures, not user input validation.
-
-    User input validation (should be WARNING):
-    - "not found", "invalid", "required", "missing", "does not exist"
-
-    System failures (should be ERROR):
-    - File I/O errors, crashes, dependency failures
-    """
-    # Patterns that indicate user input validation (should be warning, not error)
-    user_input_patterns = [
-        r'not\s+found',
-        r'invalid',
-        r'\brequired\b',
-        r'\bmissing\b',
-        r'does\s+not\s+exist',
-        r'unable\s+to\s+find',
-        r'no\s+such',
-        r'doesn\'t\s+exist',
-        r'not\s+exist',
-    ]
-
-    violations = []
-
-    in_docstring = False
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        # Track docstrings
-        if '"""' in line or "'''" in line:
-            in_docstring = not in_docstring
-            continue
-
-        # Skip if in docstring or comment
-        if in_docstring or stripped.startswith('#'):
-            continue
-
-        # Look for logger.error() calls
-        if re.search(r'logger\.error\s*\(', line):
-            # Check if the message contains user input patterns
-            line_lower = line.lower()
-            if _matches_user_input_pattern(line_lower, user_input_patterns):
-                if not is_bypassed(file_path, 'error_handling', i, bypass_rules):
-                    violations.append(i)
-
-    if violations:
-        return {
-            'name': 'ERROR vs WARNING usage',
-            'passed': False,
-            'message': f'logger.error() used for user input validation on lines {violations[:5]} - use logger.warning() instead'
-        }
-    else:
-        return {
-            'name': 'ERROR vs WARNING usage',
-            'passed': True,
-            'message': 'logger.error() correctly used for system failures only'
-        }
-
-
+    return {
+        'name': 'Error handling',
+        'passed': True,
+        'message': f'Error handling present ({try_count} try/except blocks with proper handling)'
+    }

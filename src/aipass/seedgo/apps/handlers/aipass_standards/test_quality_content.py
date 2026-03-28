@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_quality_content.py
 # Description: Test Quality Standards Content Handler
-# Version: 3.0.0
+# Version: 4.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-03-27
 # =============================================
 
 """
@@ -24,22 +24,27 @@ def get_test_quality_standards() -> str:
     """
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
-        "  Every branch should have tests covering 10 standard categories.",
+        "  Every branch should have tests covering 11 standard categories.",
         "  The checker scans ALL test files in tests/ (including conftest.py) —",
         "  no specific filenames required. Quality = coverage breadth.",
+        "",
+        "  [dim]Consolidates the former test_coverage standard into this single[/dim]",
+        "  [dim]comprehensive test checker (module coverage is category 11).[/dim]",
         "",
         "[bold cyan]WHAT IT CHECKS:[/bold cyan]",
         "  Branch-level static analysis (does NOT run pytest):",
         "",
-        "  [yellow]1. Test file discovery:[/yellow]",
+        "  [yellow]1. Pattern coverage (categories 1-10):[/yellow]",
         "  Scans [dim]tests/[/dim] for ALL [dim]test_*.py[/dim] files + [dim]conftest.py[/dim]",
-        "  No naming requirements — any test file counts",
-        "",
-        "  [yellow]2. Category coverage:[/yellow]",
         "  For each of 10 categories, checks if test files reference",
         "  the expected patterns. Reports per-category: X/N covered",
         "",
-        "[bold cyan]THE 10 CATEGORIES (48 items total):[/bold cyan]",
+        "  [yellow]2. Module coverage (category 11):[/yellow]",
+        "  Discovers test files broadly (tests/ + scattered test_*.py)",
+        "  Maps tested modules via import patterns",
+        "  Checks: test files exist, test functions exist, module coverage >= 25%",
+        "",
+        "[bold cyan]THE 11 CATEGORIES (51 items total):[/bold cyan]",
         "",
         "  [bold]1. JSON Handler (8 items)[/bold]",
         "     [dim]default_factory, validate, get_path, ensure_exists,[/dim]",
@@ -89,13 +94,18 @@ def get_test_quality_standards() -> str:
         "      [dim]autouse_fixtures, sys_modules_mock, reimport_after_mock[/dim]",
         "      Template: seedgo/templates/test_conftest_template.py",
         "",
+        "  [bold]11. Module Coverage (3 items)[/bold]",
+        "      [dim]test_files_exist, test_functions_exist, module_coverage_25pct[/dim]",
+        "      Uses import-based module mapping (from aipass.<branch>.apps...)",
+        "      Threshold: 25% of modules covered via imports",
+        "",
         "[bold cyan]SCORING MODEL:[/bold cyan]",
         "",
-        "  Score = (items_covered / 48) * 100",
+        "  Score = (items_covered / 51) * 100",
         "",
-        "  Overall pass threshold: [yellow]75%[/yellow] (36+ of 48 items)",
+        "  Overall pass threshold: [yellow]75%[/yellow] (39+ of 51 items)",
         "",
-        "  [dim]No test files = 0%. All 48 items covered = 100%.[/dim]",
+        "  [dim]No test files = 0%. All 51 items covered = 100%.[/dim]",
         "",
         "[bold cyan]EXAMPLE OUTPUT:[/bold cyan]",
         "",
@@ -103,7 +113,8 @@ def get_test_quality_standards() -> str:
         "  [dim]cli_routing: 7/9 covered (missing: help_word, output_capture)[/dim]",
         "  [dim]conftest_fixtures: 4/6 covered (missing: mock_infrastructure, mock_logger)[/dim]",
         "  [dim]error_resilience: 0/4 covered (...)[/dim]",
-        "  [dim]Overall: 23/48 items covered across 10 categories (47%)[/dim]",
+        "  [dim]module_coverage: 3/3 covered (5/8 modules, 42 tests)[/dim]",
+        "  [dim]Overall: 26/51 items covered across 11 categories (50%)[/dim]",
         "",
         "[bold cyan]HOW TO COMPLY:[/bold cyan]",
         "",
@@ -126,6 +137,11 @@ def get_test_quality_standards() -> str:
         "[bold cyan]BYPASS:[/bold cyan]",
         "  Via [dim].seedgo/bypass.json[/dim] — supports standard-level and",
         "  file-level bypass rules",
+        "",
+        "[bold cyan]HISTORY:[/bold cyan]",
+        "  [dim]v4.0 (2026-03-27): Consolidated test_coverage into test_quality[/dim]",
+        "  [dim]  Module coverage is now category 11 (3 items). Total: 51 items.[/dim]",
+        "  [dim]v3.0 (2026-03-24): Expanded from 8 to 48 items across 10 categories[/dim]",
     ]
 
     json_handler.log_operation("standard_content_queried", {"standard": "test_quality"})

@@ -1,30 +1,53 @@
 # =================== AIPass ====================
 # Name: test_quality_check.py
-# Description: Test Quality Standards Checker — 10 standard categories
-# Version: 3.0.0
+# Description: Test Quality Standards Checker — 11 categories (consolidated)
+# Version: 4.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-03-27
 # =============================================
 
 """
 Test Quality Standards Checker Handler
 
 Branch-level checker that scans ALL test files in a branch's tests/
-directory and evaluates coverage across 10 standard test categories.
+directory and evaluates coverage across 11 standard test categories
+(10 pattern categories + module coverage).
+
+Consolidates the former test_coverage_check.py (import-based module
+coverage analysis) into this single comprehensive test checker.
 
 Does NOT require specific filenames. Does NOT run pytest -- analyses
-test files statically via text scan.
+test files statically via text scan + import mapping.
 
 Scoring model:
     Score = (total_items_covered / total_items) * 100
 """
 
+import re
 from pathlib import Path
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "branch_level"
+
+# -- Directories to skip when scanning for module coverage --------------------
+SKIP_DIRS: set[str] = {
+    "__pycache__", ".archive", ".mypy_cache", ".ruff_cache",
+    ".pytest_cache", ".venv", "venv", "node_modules", ".git",
+    "site-packages", "logs", "tools", ".trinity", ".aipass",
+    ".ai_mail.local", ".spawn", "backups", "reports", "docs",
+    ".sorting_unprocessed",
+}
+
+# -- Regex patterns for module coverage (from test_coverage_check.py) ---------
+RE_TEST_FUNC = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.MULTILINE)
+RE_IMPORT_FROM = re.compile(
+    r"from\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)\s+import"
+)
+RE_IMPORT_DIRECT = re.compile(
+    r"import\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)"
+)
 
 # -- Standard test categories and their detection patterns --------------------
 STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
@@ -127,9 +150,13 @@ STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
     },
 }
 
-TOTAL_ITEMS = sum(
-    len(items) for items in STANDARD_CATEGORIES.values()
-)
+# Pattern-based items from STANDARD_CATEGORIES
+_PATTERN_ITEMS = sum(len(items) for items in STANDARD_CATEGORIES.values())
+
+# Module coverage adds 3 items: test_files_exist, test_functions_exist, module_coverage
+_MODULE_COVERAGE_ITEMS = 3
+
+TOTAL_ITEMS = _PATTERN_ITEMS + _MODULE_COVERAGE_ITEMS
 
 
 # =============================================
@@ -169,6 +196,103 @@ def _read_file_safe(path: Path) -> str:
     except (OSError, UnicodeDecodeError):
         logger.info("Cannot read %s for test quality analysis", path)
         return ""
+
+
+def _should_skip_dir(name: str) -> bool:
+    """Check if a directory name should be skipped."""
+    return name in SKIP_DIRS or name.startswith(".")
+
+
+def _find_test_files_broad(branch_path: Path) -> list[Path]:
+    """Find all test files for module coverage analysis.
+
+    Broader than _find_all_test_files — also finds scattered test files
+    outside tests/ directory. Used for import-based module mapping.
+    """
+    test_files: list[Path] = []
+    seen: set[Path] = set()
+
+    # 1. Standard tests/ directory
+    tests_dir = branch_path / "tests"
+    if tests_dir.is_dir():
+        for py_file in sorted(tests_dir.rglob("*.py")):
+            if py_file.name in ("__init__.py", "conftest.py"):
+                continue
+            if "__pycache__" in py_file.parts:
+                continue
+            resolved = py_file.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                test_files.append(py_file)
+
+    # 2. Scattered test_*.py or *_test.py anywhere in the branch
+    for py_file in sorted(branch_path.rglob("*.py")):
+        if any(_should_skip_dir(part) for part in py_file.relative_to(branch_path).parts):
+            continue
+        if py_file.name in ("__init__.py", "conftest.py"):
+            continue
+        if py_file.name.startswith("test_") or py_file.name.endswith("_test.py"):
+            resolved = py_file.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                test_files.append(py_file)
+
+    return test_files
+
+
+def _analyze_test_file_imports(source: str) -> set[str]:
+    """Extract tested module names from a test file source via import patterns."""
+    tested_modules: set[str] = set()
+
+    for match in RE_IMPORT_FROM.finditer(source):
+        sub_path = match.group(1)
+        if sub_path:
+            tested_modules.add(sub_path.split(".")[0])
+
+    for match in RE_IMPORT_DIRECT.finditer(source):
+        sub_path = match.group(1)
+        if sub_path:
+            tested_modules.add(sub_path.split(".")[0])
+
+    return tested_modules
+
+
+def _collect_testable_modules(branch_path: Path) -> set[str]:
+    """Collect module names from apps/modules/ and apps/handlers/.
+
+    Returns set of module names:
+    - apps/modules/*.py  -> file stem
+    - apps/handlers/*.py -> file stem
+    - apps/handlers/subdir/ -> directory name if it contains .py files
+    """
+    modules: set[str] = set()
+    apps_dir = branch_path / "apps"
+    if not apps_dir.is_dir():
+        return modules
+
+    modules_dir = apps_dir / "modules"
+    if modules_dir.is_dir():
+        for item in sorted(modules_dir.iterdir()):
+            if item.is_file() and item.suffix == ".py" and item.name != "__init__.py":
+                modules.add(item.stem)
+
+    handlers_dir = apps_dir / "handlers"
+    if handlers_dir.is_dir():
+        for item in sorted(handlers_dir.iterdir()):
+            if _should_skip_dir(item.name):
+                continue
+            if item.is_dir() and item.name != "__pycache__":
+                has_py = any(
+                    f.suffix == ".py" and f.name != "__init__.py"
+                    for f in item.iterdir()
+                    if f.is_file()
+                )
+                if has_py:
+                    modules.add(item.name)
+            elif item.is_file() and item.suffix == ".py" and item.name != "__init__.py":
+                modules.add(item.stem)
+
+    return modules
 
 
 def _find_all_test_files(branch_path: Path) -> list[Path]:
@@ -233,8 +357,8 @@ def _detect_all_coverage(
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Run test quality analysis on a branch.
 
-    Scans all test_*.py and conftest.py files in tests/ and evaluates
-    coverage across 10 standard test categories.
+    Scans all test files and evaluates coverage across 11 categories
+    (10 pattern categories + module coverage).
     Score = total items covered / total items.
 
     Args:
@@ -318,12 +442,12 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         if source:
             file_sources.append((tf.name, source))
 
-    # Phase 3: Detect coverage across all categories
+    # Phase 3: Detect coverage across all pattern categories
     all_coverage = _detect_all_coverage(file_sources)
 
     total_items_covered = 0
 
-    # Per-category summary checks
+    # Per-category summary checks (10 pattern categories)
     for category, item_coverage in all_coverage.items():
         cat_total = len(item_coverage)
         cat_covered = sum(1 for f in item_coverage.values() if f is not None)
@@ -348,11 +472,87 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 ),
             })
 
-    # Score = coverage percentage
+    # Phase 4: Module coverage (category 11 — from test_coverage_check.py)
+    # Uses broader file discovery + import-based module mapping
+    broad_test_files = _find_test_files_broad(bp)
+    total_tests = 0
+    tested_modules: set[str] = set()
+    for tf in broad_test_files:
+        source = _read_file_safe(tf)
+        if not source:
+            continue
+        total_tests += len(RE_TEST_FUNC.findall(source))
+        tested_modules.update(_analyze_test_file_imports(source))
+
+    if total_tests == 0:
+        tested_modules = set()
+
+    all_modules = _collect_testable_modules(bp)
+    total_modules = len(all_modules)
+
+    # 3 module coverage items
+    mc_items_covered = 0
+
+    # Item 1: Test files exist
+    has_test_files = len(broad_test_files) > 0
+    if has_test_files:
+        mc_items_covered += 1
+
+    # Item 2: Test functions exist
+    has_test_funcs = total_tests > 0
+    if has_test_funcs:
+        mc_items_covered += 1
+
+    # Item 3: Module coverage >= 25%
+    if total_modules > 0:
+        covered_count = len(tested_modules & all_modules)
+        coverage_pct = (covered_count / total_modules) * 100
+    else:
+        covered_count = 0
+        coverage_pct = 100.0  # Nothing to test = full coverage
+
+    has_module_coverage = coverage_pct >= 25 or total_modules == 0
+    if has_module_coverage:
+        mc_items_covered += 1
+
+    total_items_covered += mc_items_covered
+
+    # Module coverage check summary
+    mc_details: list[str] = []
+    if not has_test_files:
+        mc_details.append("no test files")
+    if not has_test_funcs:
+        mc_details.append("no test functions")
+    if not has_module_coverage:
+        mc_details.append(f"module coverage {coverage_pct:.0f}% < 25%")
+
+    if mc_items_covered == _MODULE_COVERAGE_ITEMS:
+        mc_msg = f"module_coverage: {mc_items_covered}/{_MODULE_COVERAGE_ITEMS} covered"
+        if total_modules > 0:
+            mc_msg += f" ({covered_count}/{total_modules} modules, {total_tests} tests)"
+        checks.append({
+            "name": "module_coverage",
+            "passed": True,
+            "message": mc_msg,
+        })
+    else:
+        checks.append({
+            "name": "module_coverage",
+            "passed": False,
+            "message": (
+                f"module_coverage: {mc_items_covered}/{_MODULE_COVERAGE_ITEMS} covered "
+                f"(missing: {', '.join(mc_details)})"
+            ),
+        })
+
+    # Score = total coverage percentage
     score = int((total_items_covered / TOTAL_ITEMS) * 100)
 
     # Overall pass at 75%
     overall_passed = score >= 75
+
+    # Total categories = 10 pattern + 1 module coverage = 11
+    total_categories = len(STANDARD_CATEGORIES) + 1
 
     # Overall summary check
     if overall_passed:
@@ -361,7 +561,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "passed": True,
             "message": (
                 f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                f"across {len(STANDARD_CATEGORIES)} categories ({score}%)"
+                f"across {total_categories} categories ({score}%)"
             ),
         })
     else:
@@ -370,7 +570,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "passed": False,
             "message": (
                 f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                f"across {len(STANDARD_CATEGORIES)} categories ({score}%) "
+                f"across {total_categories} categories ({score}%) "
                 f"-- minimum 75% required"
             ),
         })
@@ -384,14 +584,25 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "test_files": len(test_files),
             "items_covered": total_items_covered,
             "items_total": TOTAL_ITEMS,
+            "module_coverage": {
+                "covered_modules": covered_count,
+                "total_modules": total_modules,
+                "total_tests": total_tests,
+            },
             "category_detail": {
-                cat: {
-                    "covered": sum(
-                        1 for f in items.values() if f is not None
-                    ),
-                    "total": len(items),
-                }
-                for cat, items in all_coverage.items()
+                **{
+                    cat: {
+                        "covered": sum(
+                            1 for f in items.values() if f is not None
+                        ),
+                        "total": len(items),
+                    }
+                    for cat, items in all_coverage.items()
+                },
+                "module_coverage": {
+                    "covered": mc_items_covered,
+                    "total": _MODULE_COVERAGE_ITEMS,
+                },
             },
         },
     )

@@ -1,18 +1,20 @@
 # Test Quality Standards
-**Status:** v3.0 — 10 standard categories (48 items)
-**Date:** 2026-03-24
+**Status:** v4.0 — 11 categories (51 items), consolidated
+**Date:** 2026-03-27
 
 ---
 
 ## What It Is
 
-The test quality standard evaluates whether a branch's test files cover 10 standard test categories (48 total items). It scans ALL `test_*.py` files and `conftest.py` in a branch's `tests/` directory. This is a static analysis check; it does not run pytest, only inspects test file contents for detection patterns.
+The test quality standard evaluates whether a branch's test files cover 11 standard categories (51 total items): 10 pattern-based categories plus module coverage. It scans ALL `test_*.py` files and `conftest.py` in a branch's `tests/` directory. This is a static analysis check; it does not run pytest, only inspects test file contents.
+
+**v4.0 consolidation:** The former `test_coverage` standard (import-based module coverage) is now category 11 within this checker. One unified test standard instead of two.
 
 ---
 
 ## Why It Matters
 
-Standard test categories ensure every branch tests its shared infrastructure (json_handler, CLI routing), error handling, contracts, and fixtures consistently. Coverage breadth across categories means reliable, predictable behavior across the ecosystem.
+Standard test categories ensure every branch tests its shared infrastructure (json_handler, CLI routing), error handling, contracts, and fixtures consistently. Module coverage ensures test files actually import and exercise the branch's modules. Coverage breadth across categories means reliable, predictable behavior across the ecosystem.
 
 ---
 
@@ -106,15 +108,26 @@ Standard test categories ensure every branch tests its shared infrastructure (js
 | sys_modules_mock | `sys.modules` |
 | reimport_after_mock | `importlib.reload`, `reload(` |
 
+### 11. Module Coverage (3 items)
+| Item | What It Checks |
+|------|---------------|
+| test_files_exist | At least one test file found (tests/ or scattered test_*.py) |
+| test_functions_exist | At least one `def test_*` function found |
+| module_coverage_25pct | >= 25% of modules in apps/modules/ and apps/handlers/ are covered via imports |
+
+Module coverage uses import-based mapping:
+- `from aipass.<branch>.apps.modules.<name> import ...` -> covers module `<name>`
+- `from aipass.<branch>.apps.handlers.<name> import ...` -> covers handler `<name>`
+
 ---
 
 ## Scoring
 
-Score = (items_covered / 48) x 100
+Score = (items_covered / 51) x 100
 
-- **Overall pass threshold:** 75% (36+ of 48 items)
+- **Overall pass threshold:** 75% (39+ of 51 items)
 - **No test files:** 0%
-- **All 48 items covered:** 100%
+- **All 51 items covered:** 100%
 
 ---
 
@@ -146,3 +159,10 @@ Bypass rules are configured in `.seedgo/bypass.json`. Supports:
 - **Scope:** `branch_level`
 - **Entry point:** `check_branch(branch_path, bypass_rules)`
 - **Standard label:** `TEST_QUALITY`
+
+---
+
+## History
+
+- **v4.0 (2026-03-27):** Consolidated `test_coverage` into `test_quality` as category 11. Total: 51 items across 11 categories.
+- **v3.0 (2026-03-24):** Expanded from 8 to 48 items across 10 categories.

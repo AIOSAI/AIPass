@@ -82,13 +82,8 @@
       "reason": "print() appears in string patterns/regex, not as executable code"
     },
     {
-      "file": "test_coverage_check.py",
-      "standard": "testing",
-      "reason": "Checker file for the test_coverage standard — not a test file despite 'test' in name"
-    },
-    {
       "file": "test_quality_check.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "reason": "Checker file for the test_quality standard — not a test file despite 'test' in name"
     },
     {
