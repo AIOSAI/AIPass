@@ -61,8 +61,9 @@ else
     FAIL=1
 fi
 
-if seedgo --help &>/dev/null; then
-    echo "  seedgo ... ok"
+# seedgo is accessed via drone @seedgo, not as a standalone CLI
+if drone @seedgo --help &>/dev/null; then
+    echo "  seedgo ... ok (via drone @seedgo)"
 else
     echo "  seedgo ... FAILED"
     FAIL=1
@@ -97,11 +98,11 @@ repo_root = sys.argv[1]
 src_dir = Path(repo_root) / "src" / "aipass"
 today = date.today().isoformat()
 
-branches = {}
+branches = []
 # Discover modules under src/aipass/
 for d in sorted(src_dir.iterdir()):
     if d.is_dir() and not d.name.startswith(("_", ".")):
-        branches[d.name] = {
+        branches.append({
             "name": d.name,
             "path": str(d),
             "profile": "library",
@@ -110,13 +111,13 @@ for d in sorted(src_dir.iterdir()):
             "status": "active",
             "created": today,
             "last_active": today,
-        }
+        })
 
 # Add external branches: commons and skills
 for ext_name in ["commons", "skills"]:
     ext_path = Path(repo_root) / "src" / ext_name
     if ext_path.is_dir():
-        branches[ext_name] = {
+        branches.append({
             "name": ext_name,
             "path": str(ext_path),
             "profile": "library",
@@ -125,7 +126,7 @@ for ext_name in ["commons", "skills"]:
             "status": "active",
             "created": today,
             "last_active": today,
-        }
+        })
 
 registry = {
     "metadata": {
@@ -349,7 +350,7 @@ echo "Creating global symlinks ..."
 VENV_BIN="$SCRIPT_DIR/.venv/bin"
 LOCAL_BIN="/usr/local/bin"
 
-for cmd in drone seedgo; do
+for cmd in drone; do
     if [ -f "$VENV_BIN/$cmd" ]; then
         if sudo ln -sf "$VENV_BIN/$cmd" "$LOCAL_BIN/$cmd" 2>/dev/null; then
             echo "  $LOCAL_BIN/$cmd -> $VENV_BIN/$cmd"
@@ -365,8 +366,9 @@ echo ""
 if [ "$FAIL" -eq 0 ]; then
     echo "=== Setup complete ==="
     echo ""
-    echo "drone and seedgo are available globally via /usr/local/bin symlinks."
-    echo "No venv activation needed."
+    echo "drone is available globally via /usr/local/bin symlink."
+    echo "seedgo is accessed via: drone @seedgo"
+    echo "No venv activation needed for CLI commands."
     echo ""
 else
     echo "=== Setup finished with errors ==="

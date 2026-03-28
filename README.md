@@ -15,9 +15,9 @@ cd AIPass
 ./setup.sh
 ```
 
-`setup.sh` creates a `.venv`, installs the package in editable mode, generates the branch registry (`AIPASS_REGISTRY.json`), bootstraps `.trinity/` identity files for all 15 branches, copies an `.env` template to `~/.secrets/aipass/.env`, installs Claude Code hooks, and creates global symlinks for `drone` and `seedgo` (requires `sudo` for symlinks — will prompt). Idempotent — safe to re-run.
+`setup.sh` creates a `.venv`, installs the package in editable mode, generates the branch registry (`AIPASS_REGISTRY.json`), bootstraps `.trinity/` identity files for all 15 branches, copies an `.env` template to `~/.secrets/aipass/.env`, installs Claude Code hooks, and creates a global symlink for `drone` (requires `sudo` — will prompt). Idempotent — safe to re-run.
 
-After setup, `drone` and `seedgo` are available globally via `/usr/local/bin` symlinks. No venv activation needed for CLI use. For development (running tests, importing modules), activate the venv:
+After setup, `drone` is available globally via `/usr/local/bin` symlink. No venv activation needed for CLI use. `seedgo` is accessed via `drone @seedgo`. For development (running tests, importing modules), activate the venv:
 
 ```bash
 source .venv/bin/activate
