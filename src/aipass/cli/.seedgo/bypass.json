@@ -8,64 +8,64 @@
     {
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "json_structure",
-      "reason": "Pure Python bootstrap — no branch imports by design"
+      "reason": "Pure Python bootstrap \u2014 no branch imports by design"
     },
     {
       "file": "apps/modules/display.py",
       "standard": "silent_catch",
-      "reason": "Circular import — display.py cannot import prax (prax depends on cli). Silent catches are ImportError guard for optional trigger and __main__ error handler."
+      "reason": "Circular import \u2014 display.py cannot import prax (prax depends on cli). Silent catches are ImportError guard for optional trigger and __main__ error handler."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "silent_catch",
-      "reason": "Dependency-free by design — json_handler cannot import prax (circular: json_handler → prax → cli.display → json_handler). Catch regenerates corrupted JSON silently."
+      "reason": "Dependency-free by design \u2014 json_handler cannot import prax (circular: json_handler \u2192 prax \u2192 cli.display \u2192 json_handler). Catch regenerates corrupted JSON silently."
     },
     {
       "file": "apps/modules/display.py",
       "standard": "naming",
       "pattern": "__all__",
-      "reason": "Python dunder convention — __all__ controls public API exports, not a constant to uppercase"
+      "reason": "Python dunder convention \u2014 __all__ controls public API exports, not a constant to uppercase"
     },
     {
       "file": "apps/modules/init_project.py",
       "standard": "naming",
       "pattern": "__all__",
-      "reason": "Python dunder convention — __all__ controls public API exports, not a constant to uppercase"
+      "reason": "Python dunder convention \u2014 __all__ controls public API exports, not a constant to uppercase"
     },
     {
       "file": "drone_adapter.py",
       "standard": "unused_function",
-      "reason": "get_help() and get_introspective() are external API — called by drone, not from within CLI branch"
+      "reason": "get_help() and get_introspective() are external API \u2014 called by drone, not from within CLI branch"
     },
     {
       "file": "drone_adapter.py",
       "standard": "silent_catch",
-      "reason": "Drone adapter cannot import prax (circular: drone_adapter → cli.main → prax → cli). Catches return graceful fallbacks."
+      "reason": "Drone adapter cannot import prax (circular: drone_adapter \u2192 cli.main \u2192 prax \u2192 cli). Catches return graceful fallbacks."
     },
     {
       "file": "apps/modules/display.py",
-      "standard": "testing",
-      "reason": "Testing flags same silent catch as silent_catch standard — already bypassed (circular import prevents prax logger)"
+      "standard": "error_handling",
+      "reason": "Testing flags same silent catch as silent_catch standard \u2014 already bypassed (circular import prevents prax logger)"
     },
     {
       "file": "apps/handlers/json/json_handler.py",
-      "standard": "testing",
-      "reason": "Testing flags same silent catch as silent_catch standard — already bypassed (dependency-free by design)"
+      "standard": "error_handling",
+      "reason": "Testing flags same silent catch as silent_catch standard \u2014 already bypassed (dependency-free by design)"
     },
     {
       "file": "apps/modules/display.py",
       "standard": "imports",
-      "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
+      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
     },
     {
       "file": "apps/modules/templates.py",
       "standard": "imports",
-      "reason": "Cannot import prax — circular import (prax depends on cli). Documented in code comment."
+      "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
     },
     {
       "file": "system_logs",
       "standard": "log_structure",
-      "reason": "Prax branch detection bug — CLI logs land as unknown_branch. Prax confirmed known limitation (2026-03-23), fix pending on prax side."
+      "reason": "Prax branch detection bug \u2014 CLI logs land as unknown_branch. Prax confirmed known limitation (2026-03-23), fix pending on prax side."
     }
   ],
   "notes": {

@@ -9,7 +9,7 @@
       "file": "apps/handlers/events/registry.py",
       "standard": "trigger",
       "pattern": "setup_handlers",
-      "reason": "setup_handlers() is a wiring function that registers event handlers, not an event handler itself. It does not handle any event — it calls trigger.on() to wire handle_{event} callbacks."
+      "reason": "setup_handlers() is a wiring function that registers event handlers, not an event handler itself. It does not handle any event \u2014 it calls trigger.on() to wire handle_{event} callbacks."
     },
     {
       "file": "apps/modules/core.py",
@@ -24,55 +24,55 @@
       "file": "apps/handlers/events/error_detected.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/error_logged.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/bulletin_created.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/startup.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/memory_threshold_exceeded.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/plan_file.py",
       "standard": "silent_catch",
       "pattern": "_log_error except",
-      "reason": "Meta-logging helper: _log_error() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_error() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/config.py",
       "standard": "silent_catch",
       "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
+      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
     },
     {
       "file": "apps/handlers/log_watcher.py",
@@ -80,7 +80,7 @@
       "lines": [
         75
       ],
-      "reason": "log_watcher imports error_registry.report() for Medic v2 dedup. This is a deliberate handler-to-handler dependency — the registry IS the dedup backend."
+      "reason": "log_watcher imports error_registry.report() for Medic v2 dedup. This is a deliberate handler-to-handler dependency \u2014 the registry IS the dedup backend."
     },
     {
       "file": "apps/handlers/error_reporter.py",
@@ -89,7 +89,7 @@
         25,
         45
       ],
-      "reason": "error_reporter imports error_registry for tracking and ai_mail for email delivery. These are its core dependencies — it's the dispatch endpoint of the error pipeline."
+      "reason": "error_reporter imports error_registry for tracking and ai_mail for email delivery. These are its core dependencies \u2014 it's the dispatch endpoint of the error pipeline."
     },
     {
       "file": "apps/handlers/watchers/log_watcher.py",
@@ -97,7 +97,7 @@
       "lines": [
         242
       ],
-      "reason": "Watcher imports trigger module to fire events. Handler→module import needed because watcher operates as standalone watchdog callback."
+      "reason": "Watcher imports trigger module to fire events. Handler\u2192module import needed because watcher operates as standalone watchdog callback."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
@@ -117,105 +117,105 @@
     },
     {
       "file": "apps/config.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         31
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/modules/core.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         160
       ],
       "pattern": "except Exception: pass",
-      "reason": "Deferred event queue handler execution — logging would cause infinite recursion (logger fires events via trigger). Same as silent_catch bypass."
+      "reason": "Deferred event queue handler execution \u2014 logging would cause infinite recursion (logger fires events via trigger). Same as silent_catch bypass."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         24
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/plan_file.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         58
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_error() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_error() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/memory_threshold_exceeded.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         46
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/error_logged.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         48
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/bulletin_created.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         55
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         54
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/startup.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         51
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/events/registry.py",
-      "standard": "testing",
+      "standard": "error_handling",
       "lines": [
         28
       ],
       "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
+      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
     },
     {
       "file": "apps/handlers/error_registry.py",
       "standard": "architecture",
       "pattern": "file_length",
-      "reason": "Error registry at 870 lines — core dedup engine with fingerprinting, circuit breaker, backoff, and CLI. Splitting would break cohesion of the error tracking lifecycle."
+      "reason": "Error registry at 870 lines \u2014 core dedup engine with fingerprinting, circuit breaker, backoff, and CLI. Splitting would break cohesion of the error tracking lifecycle."
     },
     {
       "file": "apps/handlers/log_watcher.py",
       "standard": "architecture",
       "pattern": "file_length",
-      "reason": "Log watcher at 782 lines — watchdog event handler with position tracking, dedup, and medic integration. Splitting would break the file monitoring pipeline."
+      "reason": "Log watcher at 782 lines \u2014 watchdog event handler with position tracking, dedup, and medic integration. Splitting would break the file monitoring pipeline."
     },
     {
       "file": "apps/handlers/error_reporter.py",
@@ -243,7 +243,7 @@
         243
       ],
       "pattern": "handler importing from parent module",
-      "reason": "error_detected imports error_registry (line 76) and medic_state — core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
+      "reason": "error_detected imports error_registry (line 76) and medic_state \u2014 core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
     },
     {
       "file": "apps/handlers/events/registry.py",
@@ -273,7 +273,7 @@
         34
       ],
       "pattern": "handler imports modules",
-      "reason": "Registry wiring function imports trigger module to call trigger.on(). Must access the event bus to register handlers — this IS its purpose."
+      "reason": "Registry wiring function imports trigger module to call trigger.on(). Must access the event bus to register handlers \u2014 this IS its purpose."
     },
     {
       "file": "apps/handlers/error_registry.py",
@@ -315,13 +315,13 @@
       "file": "apps/config.py",
       "standard": "imports",
       "pattern": "prax logger import",
-      "reason": "config.py cannot import prax logger — circular dependency. Uses _log_warning() file-based pattern instead. Comment on line 26 documents this."
+      "reason": "config.py cannot import prax logger \u2014 circular dependency. Uses _log_warning() file-based pattern instead. Comment on line 26 documents this."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "unused_function",
       "pattern": "validate_json_structure, get_json_path, increment_counter, update_data_metrics",
-      "reason": "JSON handler framework utilities — part of the json_structure standard infrastructure. Available for future use by modules that need JSON validation and metrics."
+      "reason": "JSON handler framework utilities \u2014 part of the json_structure standard infrastructure. Available for future use by modules that need JSON validation and metrics."
     }
   ],
   "notes": {

@@ -45,73 +45,73 @@
       "file": "apps/handlers/mbank/process.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader.discover_plan_types — mbank needs plan type discovery to process closed plans across all registered types"
+      "reason": "Cross-handler import of plan_type_loader.discover_plan_types \u2014 mbank needs plan type discovery to process closed plans across all registered types"
     },
     {
       "file": "apps/handlers/dashboard/push_central.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of aggregate_ops — push_central calls aggregate_central_impl after pushing data to central"
+      "reason": "Cross-handler import of aggregate_ops \u2014 push_central calls aggregate_central_impl after pushing data to central"
     },
     {
       "file": "apps/handlers/dashboard/push_central.py",
       "standard": "imports",
       "category": "architectural",
-      "reason": "Parent module import needed — push_central invokes aggregate_central for dashboard data"
+      "reason": "Parent module import needed \u2014 push_central invokes aggregate_central for dashboard data"
     },
     {
       "file": "apps/handlers/registry/monitor_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Handler imports trigger module — monitor_ops fires trigger events for registry health changes"
+      "reason": "Handler imports trigger module \u2014 monitor_ops fires trigger events for registry health changes"
     },
     {
       "file": "apps/handlers/plan/get_open_plans.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of load_registry — get_open_plans needs registry data to find open plans"
+      "reason": "Cross-handler import of load_registry \u2014 get_open_plans needs registry data to find open plans"
     },
     {
       "file": "apps/handlers/plan/list_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader — list_ops needs plan type discovery to merge plans from all registries"
+      "reason": "Cross-handler import of plan_type_loader \u2014 list_ops needs plan type discovery to merge plans from all registries"
     },
     {
       "file": "apps/handlers/plan/close_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler imports of load_registry, plan_type_loader, display — close needs registry access, type resolution, and formatting"
+      "reason": "Cross-handler imports of load_registry, plan_type_loader, display \u2014 close needs registry access, type resolution, and formatting"
     },
     {
       "file": "apps/handlers/plan/display.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of load_registry — display needs registry data for plan status formatting"
+      "reason": "Cross-handler import of load_registry \u2014 display needs registry data for plan status formatting"
     },
     {
       "file": "apps/handlers/plan/create.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of load_registry — create needs registry to register new plans"
+      "reason": "Cross-handler import of load_registry \u2014 create needs registry to register new plans"
     },
     {
       "file": "apps/handlers/plan/validate.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of load_registry — validate needs registry data to check plan existence"
+      "reason": "Cross-handler import of load_registry \u2014 validate needs registry data to check plan existence"
     },
     {
       "file": "apps/handlers/mbank/restore_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler imports of load_registry, plan_type_loader — restore needs registry and type resolution to recover archived plans"
+      "reason": "Cross-handler imports of load_registry, plan_type_loader \u2014 restore needs registry and type resolution to recover archived plans"
     },
     {
       "file": "apps/handlers/registry/load_registry.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of plan_type_loader — registry loader needs type discovery for auto-healing orphaned entries"
+      "reason": "Cross-handler import of plan_type_loader \u2014 registry loader needs type discovery for auto-healing orphaned entries"
     },
     {
       "file": "apps/modules/create_plan.py",
@@ -195,91 +195,91 @@
       "file": "apps/handlers/template/registry_ops.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "add_type has docstring — checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
+      "reason": "add_type has docstring \u2014 checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
     },
     {
       "file": "apps/handlers/template/get_template.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "get_template has docstring — checker 5-line lookahead too small for multi-line signature (9 lines to closing paren)"
+      "reason": "get_template has docstring \u2014 checker 5-line lookahead too small for multi-line signature (9 lines to closing paren)"
     },
     {
       "file": "apps/handlers/plan/list_ops.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "list_plans_impl has docstring — checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
+      "reason": "list_plans_impl has docstring \u2014 checker 5-line lookahead too small for multi-line signature (8 lines to closing paren)"
     },
     {
       "file": "apps/handlers/plan/create.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "create_registry_entry has docstring — checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
+      "reason": "create_registry_entry has docstring \u2014 checker 5-line lookahead too small for multi-line signature (6 lines to closing paren)"
     },
     {
       "file": "apps/modules/create_plan.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "create_plan has docstring — checker 5-line lookahead too small for multi-line signature"
+      "reason": "create_plan has docstring \u2014 checker 5-line lookahead too small for multi-line signature"
     },
     {
       "file": "apps/handlers/plan/close_ops.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
     },
     {
       "file": "apps/handlers/mbank/process.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
     },
     {
       "file": "apps/handlers/mbank/restore_ops.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
     },
     {
       "file": "apps/handlers/plan/display.py",
       "standard": "documentation",
       "category": "false_positive",
-      "reason": "Functions have docstrings — checker 5-line lookahead too small for multi-line signatures"
+      "reason": "Functions have docstrings \u2014 checker 5-line lookahead too small for multi-line signatures"
     },
     {
       "file": "apps/handlers/plan/aggregate_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Handler imports trigger module — aggregate_ops fires trigger events for plan aggregation changes"
+      "reason": "Handler imports trigger module \u2014 aggregate_ops fires trigger events for plan aggregation changes"
     },
     {
       "file": "apps/handlers/plan/create_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Handler imports trigger module — create_ops fires trigger events when plans are created"
+      "reason": "Handler imports trigger module \u2014 create_ops fires trigger events when plans are created"
     },
     {
       "file": "apps/handlers/plan/get_closed_plans.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of load_registry — get_closed_plans needs registry data to find closed plans"
+      "reason": "Cross-handler import of load_registry \u2014 get_closed_plans needs registry data to find closed plans"
     },
     {
       "file": "apps/handlers/plan/command_parser.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler import of registry_ops.get_type_map — parser needs plan type mappings to validate commands"
+      "reason": "Cross-handler import of registry_ops.get_type_map \u2014 parser needs plan type mappings to validate commands"
     },
     {
       "file": "apps/handlers/plan/restore_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Handler imports trigger module — restore_ops fires trigger events when plans are restored"
+      "reason": "Handler imports trigger module \u2014 restore_ops fires trigger events when plans are restored"
     },
     {
       "file": "apps/handlers/summary/summary_ops.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "Cross-handler imports — summary_ops needs plan type loader and registry for summarization"
+      "reason": "Cross-handler imports \u2014 summary_ops needs plan type loader and registry for summarization"
     },
     {
       "file": "apps/handlers/plan/calculate_relative_path.py",
@@ -321,7 +321,7 @@
       "file": "apps/handlers/config/load_config.py",
       "standard": "handlers",
       "category": "architectural",
-      "reason": "module_name parameter is intentional DI pattern — callers inject module name, auto-detection not needed"
+      "reason": "module_name parameter is intentional DI pattern \u2014 callers inject module name, auto-detection not needed"
     },
     {
       "file": "apps/handlers/plan/resolve_location.py",
@@ -333,79 +333,79 @@
       "file": "apps/modules/close_plan.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/modules/create_plan.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/modules/restore_plan.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/modules/registry_monitor.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/mbank/process.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — 793-line file needs splitting, nesting follows from complex plan processing"
+      "reason": "Deferred per devpulse dispatch \u2014 793-line file needs splitting, nesting follows from complex plan processing"
     },
     {
       "file": "apps/handlers/dashboard/push_branch_dashboard.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/registry/monitor_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/plan/list_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/plan/display.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/plan/create_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/plan/close_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "apps/handlers/plan/restore_ops.py",
       "standard": "deep_nesting",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — refactoring to reduce nesting planned for future sprint"
+      "reason": "Deferred per devpulse dispatch \u2014 refactoring to reduce nesting planned for future sprint"
     },
     {
       "file": "*",
-      "standard": "test_coverage",
+      "standard": "test_quality",
       "category": "deferred",
-      "reason": "Deferred per devpulse dispatch — test infrastructure not yet in place for flow branch"
+      "reason": "Deferred per devpulse dispatch \u2014 test infrastructure not yet in place for flow branch"
     }
   ],
   "notes": {

@@ -28,7 +28,10 @@ _SPAWN_DIR = ".spawn"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 
 # Directories to skip entirely during scan
-_SKIP_DIRS = {"__pycache__", ".git", ".spawn"}
+_SKIP_DIRS = {"__pycache__", ".git"}
+
+# Files to skip within .spawn/ (tracking files that shouldn't be in the registry)
+_SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
 
 # Placeholder patterns to detect in filenames
 _BRANCH_PLACEHOLDERS = ("{{BRANCH}}", "{{BRANCHNAME}}")
@@ -180,6 +183,10 @@ def _scan_template_directory(
 
         # Skip excluded directories and their contents
         if any(part in _SKIP_DIRS for part in rel.parts):
+            continue
+
+        # Skip tracking files within .spawn/ (but allow README.md etc.)
+        if ".spawn" in rel.parts and item.is_file() and item.name in _SKIP_SPAWN_FILES:
             continue
 
         if item.is_dir():

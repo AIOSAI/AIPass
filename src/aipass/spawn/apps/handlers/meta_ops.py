@@ -261,9 +261,14 @@ def generate_branch_meta(branch_dir: Path, template_registry: dict) -> dict:
         for item in sorted(scan_path.iterdir()):
             rel = str(item.relative_to(branch_dir))
 
-            # Skip .spawn internals and __pycache__
-            if _BRANCH_META_DIR in Path(rel).parts or "__pycache__" in Path(rel).parts:
+            # Skip __pycache__
+            if "__pycache__" in Path(rel).parts:
                 continue
+
+            # Skip .spawn tracking files (but allow README.md, .registry_ignore.json)
+            if _BRANCH_META_DIR in Path(rel).parts and item.is_file():
+                if item.name in (_BRANCH_META_FILE, _TEMPLATE_REGISTRY_FILE):
+                    continue
 
             if item.is_dir():
                 branch_dirs.append((item, rel))
