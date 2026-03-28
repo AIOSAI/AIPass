@@ -94,7 +94,12 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
 
         registry_dir = registry_path.parent
 
-        for branch in registry_data.get('branches', []):
+        raw_branches = registry_data.get('branches', [])
+        # Handle both list format and dict format (keyed by name)
+        if isinstance(raw_branches, dict):
+            raw_branches = list(raw_branches.values())
+
+        for branch in raw_branches:
             branch_name = branch.get('name', '')
             raw_path = branch.get('path', '')
             branch_path = Path(raw_path)
