@@ -38,6 +38,7 @@ tools/
 docs.local/
 .archive/
 .backup/
+.recovery/
 .seed/
 .spawn/
 

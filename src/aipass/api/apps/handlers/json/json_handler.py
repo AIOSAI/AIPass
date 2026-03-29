@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import sys
 import inspect
 
 # Logging
@@ -121,7 +120,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             if validate_json_structure(data, json_type):
                 return True
             else:
-                pass  # Corrupted - regenerating
+                logger.warning(f"Corrupted JSON structure at {json_path}, regenerating")
         except Exception as e:
             logger.warning(f"Unreadable JSON at {json_path}, regenerating: {e}")
 

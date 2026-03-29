@@ -25,12 +25,11 @@ COMPLIANT STANDARDS:
 - Under 300 lines
 """
 
-import sys
 from pathlib import Path
 
 import json
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 from aipass.prax import logger
 
@@ -102,7 +101,7 @@ def get_default_caller_config() -> Dict[str, Any]:
         Dict with default OpenRouter configuration (model must be set by caller)
     """
     return {
-        "skill_name": "openrouter",
+        "module_name": "openrouter",
         "timestamp": datetime.now().isoformat(),
         "config": {
             "ai_model": "",  # Caller must set their own model
@@ -121,7 +120,7 @@ def get_default_caller_data() -> Dict[str, Any]:
         Dict with initial usage tracking data
     """
     return {
-        "skill_name": "openrouter",
+        "module_name": "openrouter",
         "timestamp": datetime.now().isoformat(),
         "data": {
             "total_requests": 0,
@@ -141,7 +140,7 @@ def get_default_caller_log() -> Dict[str, Any]:
         Dict with empty log structure
     """
     return {
-        "skill_name": "openrouter",
+        "module_name": "openrouter",
         "timestamp": datetime.now().isoformat(),
         "logs": []
     }

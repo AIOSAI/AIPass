@@ -21,7 +21,7 @@ from pathlib import Path
 
 from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error, warning, section
+from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
 
@@ -174,7 +174,22 @@ def track_usage(args: List[str]):
     header("Track API Usage")
     console.print()
 
-    warning("Usage tracking workflow - TODO")
+    if not args:
+        error("Generation ID required", suggestion="drone @api track <generation_id> [caller]")
+        return
+
+    generation_id = args[0]
+    caller = args[1] if len(args) > 1 else "manual"
+
+    console.print(f"[dim]Tracking generation {generation_id}...[/dim]")
+
+    result = tracking.track_usage(generation_id, caller)
+
+    if result.get("success"):
+        metrics = result.get("metrics", {})
+        success(f"Tracked: {metrics.get('tokens_prompt', 0)} prompt + {metrics.get('tokens_completion', 0)} completion tokens, ${metrics.get('total_cost', 0):.6f}")
+    else:
+        error(f"Tracking failed: {result.get('error', 'unknown')}")
 
 
 def show_stats():

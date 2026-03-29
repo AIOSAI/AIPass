@@ -17,10 +17,9 @@ Functions:
 
 # Infrastructure
 from pathlib import Path
-import sys
 
 # Standard library
-from typing import Optional, Dict
+from typing import Optional
 
 # Logging
 from aipass.prax import logger

@@ -2,7 +2,7 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-03-28 | **Session:** 58 | **PRs merged:** 137
+**Last updated:** 2026-03-29 | **Session:** 62 | **PRs merged:** 141
 
 ---
 
@@ -10,10 +10,23 @@
 
 - **15 branches** operational
 - **100% seedgo compliance** across all 15 branches, all 33 standards
-- **2,000+ tests** system-wide
-- **137 PRs** merged since inception
+- **2,900+ tests** system-wide
+- **141 PRs** merged since inception
+- **Backup rebuild in progress** — 4-phase autonomous night shift running now
 
 ## Recent Sessions
+
+### S62 — Backup Deep Audit + Night Shift Launch (2026-03-29)
+Full backup branch investigation with 8 parallel agents (inventory, CLI, ignore patterns, Google Drive, live test, routing, tests, diff). Found: snapshot broken by JSON corruption (versioned works fine), 388GB legacy data from before ignore patterns were fixed, Google Drive auth duplicates API branch. Diff system is clean and stays. Renamed `.backup` to `.recovery` system-wide (79 directories) so backup branch owns the `.backup` namespace. Drone adapter pattern investigated — identical boilerplate across branches, documented for future redesign. Backup proposed a 4-phase plan (cleanup, JSON fix, Google Drive migration to API, test coverage), Patrick approved, and backup is now running autonomously through all phases overnight.
+
+### S61 — Branch Audit Deep-Dive: API + Drone (2026-03-29)
+API dispatched with 18-item P0/P1/P2 cleanup list — all fixed (186 tests, 100% seedgo). Drone audit verified all 4 architecture fixes from boardroom consensus (self-routing removed, adapter hack deleted, dual help paths unified, @ enforcement working). Naming checker false positives traced to seedgo — 71 bypasses across 11 branches eliminated by fixing `__dunder__` skip and local variable scope detection. Drone path routing fixed with passport walk-up (replaces hardcoded `src/aipass/<branch>` pattern). Access control investigation revealed no registry-scoped auth exists — DPLAN-0083 created. 4 new DPLANs: git workflow, VS Code reload bug, flow audit, access control.
+
+### S60 — System Verification Wave (2026-03-29)
+Prax queue spam eliminated (144k log entries per 4 hours). 9 stale plans closed. 15 branch audit DPLANs reorganized into dedicated directory. TTS Listen summaries added to all DPLANs (pure plaintext for Piper). 15-agent verification wave fact-checked every branch audit against live seedgo + pytest. System: 2,905 tests, 100% seedgo across all 15 branches.
+
+### S59 — Full System Walkthrough (2026-03-28)
+11 agents audited all 15 branches (2,378 tests at the time). Docker install verified — found and fixed registry format mismatch and seedgo CLI entry point bugs. README rewritten with verified claims. HERALD.md created. Dispatched 8 branches for fixes. PR #140 merged.
 
 ### S58 — Night Shift: 100% Compliance (2026-03-28)
 The big one. Every branch, every standard, 100%. Seven agents deployed overnight to fix the final 8 branches that were stuck at 99%. Commons was the hardest — test_quality at 68%, unused functions, architecture gaps, deep nesting. All fixed. Daemon needed plugin architecture bypasses. Memory and spawn needed test gaps filled. PR #137 (167 files, +12,843 lines).
@@ -43,17 +56,22 @@ First autonomous night shift. PR #118 (75 files). Persistent git branches (citiz
 
 | DPLAN | Subject | Status |
 |-------|---------|--------|
-| 0031 | Drone audit + git workflow improvements | Open — master key concept, PR review gate |
-| 0033 | Commons audit | Silent catch done, orphan cleanup remaining |
-| 0034 | Backup audit | Silent catch done, scope/filtering remaining |
-| 0035 | Spawn audit | Template overhaul complete, nesting deferred |
-| 0036 | AI Mail audit | Silent catch done, nesting + reply-while-locked bug |
-| 0049 | API compliance | 100% achieved |
+| 0029 | API branch audit | Complete — 186 tests, 100% seedgo, all P0/P1/P2 items fixed |
+| 0034 | Backup branch audit | In progress — 4-phase rebuild running overnight |
+| 0035 | Spawn branch audit | Template overhaul complete, .backup→.recovery rename done |
+| 0036 | AI Mail audit | Silent catch done, nesting + reply-while-locked bug remaining |
+| 0053 | Drone branch audit | Architecture fixes complete, adapter redesign documented |
+| 0080 | Devpulse git workflow | Design captured, not built yet |
+| 0082 | Flow branch audit | Created, not started |
+| 0083 | Access control design | Investigation complete, design pending |
 
 ## Key Milestones
 
 | Date | Milestone |
 |------|-----------|
+| 2026-03-29 | Backup rebuild launched — 4-phase autonomous night shift |
+| 2026-03-29 | .backup→.recovery rename — 79 dirs, namespace clarity |
+| 2026-03-29 | Branch audit deep-dives — API complete, Drone complete, Backup in progress |
 | 2026-03-28 | 100% seedgo compliance — all 15 branches, all 33 standards |
 | 2026-03-25 | Spawn template overhaul — registry regen, 41-file template |
 | 2026-03-24 | First autonomous night shift — 6 branches dispatched, all returned |
@@ -76,9 +94,9 @@ First autonomous night shift. PR #118 (75 files). Persistent git branches (citiz
 ```
 Branches:        15
 Standards:       33 (was 34, consolidated in S57)
-Tests:           2,000+
-PRs merged:      137
-Sessions:        58
+Tests:           2,900+
+PRs merged:      141
+Sessions:        62
 Compliance:      100%
 ```
 

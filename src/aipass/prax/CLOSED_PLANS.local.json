@@ -41,6 +41,13 @@
       "subject": "Monitor Phase 2: caller attribution via drone CALLER markers",
       "date_closed": "2026-03-19",
       "location": "prax"
+    },
+    {
+      "plan_id": "FPLAN-0071",
+      "type": "FPLAN",
+      "subject": "Self-audit compliance sprint",
+      "date_closed": "2026-03-28",
+      "location": "prax"
     }
   ]
 }

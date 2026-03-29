@@ -42,9 +42,9 @@ def _guard_branch_access():
 
     import os
     if os.environ.get("AIPASS_DEBUG_GUARD"):
-        import sys
-        print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
-        print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
+        from aipass.prax import logger as _guard_logger
+        _guard_logger.info(f"[GUARD] caller_file = {caller_file}")
+        _guard_logger.info(f"[GUARD] import_line = {import_line}")
 
     if caller_file is None:
         stack = inspect.stack()

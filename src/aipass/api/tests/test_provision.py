@@ -60,7 +60,7 @@ def test_create_caller_config_defaults(tmp_path: Path):
     assert config["config"]["ai_max_tokens"] == 4000
     assert config["config"]["enabled"] is True
     assert config["config"]["ai_model"] == ""
-    assert config["skill_name"] == "openrouter"
+    assert config["module_name"] == "openrouter"
 
 
 def test_create_caller_config_data_defaults(tmp_path: Path):
@@ -87,7 +87,7 @@ def test_create_caller_config_log_defaults(tmp_path: Path):
     log = read_json(json_folder / "openrouter_skill_log.json")
     assert log is not None
     assert log["logs"] == []
-    assert log["skill_name"] == "openrouter"
+    assert log["module_name"] == "openrouter"
 
 
 def test_create_caller_config_creates_folder(tmp_path: Path):
@@ -187,7 +187,7 @@ def test_get_default_caller_config_structure():
     """Default config should have expected structure."""
     config = get_default_caller_config()
 
-    assert "skill_name" in config
+    assert "module_name" in config
     assert "timestamp" in config
     assert "config" in config
     assert isinstance(config["config"], dict)

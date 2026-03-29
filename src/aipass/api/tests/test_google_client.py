@@ -137,10 +137,10 @@ def test_handle_command_routes_reauth_google(
 def test_handle_command_help_gate(
     _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, mock_console
 ):
-    """handle_command prints help when args=['--help'] and returns True."""
+    """handle_command prints help when args=['google', '--help'] and returns True."""
     from aipass.api.apps.modules import google_client
 
-    result = google_client.handle_command("validate", ["--help"])
+    result = google_client.handle_command("validate", ["google", "--help"])
 
     assert result is True
     # print_help calls console.print with the argparse output

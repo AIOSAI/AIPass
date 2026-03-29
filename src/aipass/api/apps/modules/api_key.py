@@ -20,10 +20,9 @@ from pathlib import Path
 
 from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error, warning, section
+from aipass.cli.apps.modules import console, header, success, error
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import keys, env
-from aipass.api.apps.handlers.config import provider
 
 
 def print_introspection():
@@ -110,7 +109,8 @@ def get_key(args: List[str]):
 
     if api_key:
         success(f"API key retrieved for {provider_name}")
-        console.print(f"  Key (first 20 chars): {api_key[:20]}...")
+        masked = api_key[:6] + "****" + api_key[-4:] if len(api_key) > 10 else "****"
+        console.print(f"  Key: {masked}")
     else:
         error(f"Failed to retrieve API key for {provider_name}")
 

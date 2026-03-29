@@ -596,17 +596,17 @@ def test_list_models_formats_free_pricing(mock_console, mock_header, mock_keys, 
 # =============================================
 
 
-@patch(f"{_MOD}.warning")
+@patch(f"{_MOD}.error")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_make_call_shows_todo_warning(mock_console, mock_header, mock_warning):
-    """make_call currently shows a TODO warning."""
+def test_make_call_no_model_shows_error(mock_console, mock_header, mock_error):
+    """make_call without --model shows error."""
     from aipass.api.apps.modules import openrouter_client
 
     openrouter_client.make_call(["What is AI?"])
 
-    mock_warning.assert_called_once()
-    assert "TODO" in mock_warning.call_args[0][0]
+    mock_error.assert_called_once()
+    assert "Model required" in mock_error.call_args[0][0]
 
 
 # =============================================

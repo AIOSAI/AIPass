@@ -32,14 +32,31 @@ _COMMANDS = ("pr", "status", "sync", "lock", "unlock")
 
 
 def _detect_branch_dir() -> tuple[str, Path] | None:
-    """Detect caller's branch from CWD. Returns (branch_name, branch_dir) or None."""
-    cwd = Path.cwd()
-    parts = cwd.parts
-    for i, part in enumerate(parts):
-        if part == "aipass" and i > 0 and parts[i - 1] == "src" and i + 1 < len(parts):
-            branch_name = parts[i + 1]
-            branch_dir = Path(*parts[: i + 2])
-            return branch_name, branch_dir
+    """Detect caller's branch from CWD via passport lookup.
+
+    Walks up from CWD looking for ``.trinity/passport.json`` and extracts
+    the branch name + directory.  Works for any registered branch regardless
+    of where it lives on disk (commons, skills, aipass sub-dirs, etc.).
+    """
+    current = Path.cwd().resolve()
+    for _ in range(10):
+        passport = current / ".trinity" / "passport.json"
+        if passport.exists():
+            try:
+                with open(passport, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                name = data.get("branch_info", {}).get("branch_name")
+                if not name:
+                    name = data.get("identity", {}).get("name")
+                if name:
+                    return name, current
+            except Exception as exc:
+                logger.warning("Failed to read passport at %s: %s", passport, exc)
+                return None
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
     return None
 
 

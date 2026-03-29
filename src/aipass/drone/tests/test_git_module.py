@@ -585,23 +585,51 @@ class TestGitModuleRouting:
 class TestDetectBranchDir:
     """Branch directory detection tests."""
 
-    def test_detects_branch_from_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Detects branch name and dir from a path like .../src/aipass/drone/..."""
-        # Simulate CWD being inside a branch
-        fake_path = Path("/home/user/Projects/AIPass/src/aipass/drone/apps/modules")
-        monkeypatch.chdir("/")  # Just need a valid dir for the test
-        with patch("aipass.drone.apps.modules.git_module.Path.cwd", return_value=fake_path):
-            detected = _detect_branch_dir()
+    def test_detects_branch_from_passport(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Detects branch name and dir by walking up to .trinity/passport.json."""
+        # Create a fake branch directory with passport
+        branch_dir = tmp_path / "mybranch"
+        trinity = branch_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        passport = trinity / "passport.json"
+        passport.write_text(json.dumps({
+            "branch_info": {"branch_name": "mybranch"},
+        }))
 
+        # CWD is inside a subdirectory of the branch
+        sub_dir = branch_dir / "apps" / "modules"
+        sub_dir.mkdir(parents=True)
+        monkeypatch.chdir(sub_dir)
+
+        detected = _detect_branch_dir()
         assert detected is not None
         name, bdir = detected
-        assert name == "drone"
+        assert name == "mybranch"
+        assert bdir == branch_dir.resolve()
 
     def test_returns_none_for_unrecognized_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns None when CWD is not under src/aipass/."""
+        """Returns None when CWD has no .trinity/passport.json above it."""
         monkeypatch.chdir(tmp_path)
         detected = _detect_branch_dir()
         assert detected is None
+
+    def test_detects_non_aipass_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Detects branches outside src/aipass/ (e.g. commons, skills)."""
+        branch_dir = tmp_path / "src" / "commons"
+        trinity = branch_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        passport = trinity / "passport.json"
+        passport.write_text(json.dumps({
+            "branch_info": {"branch_name": "commons"},
+        }))
+
+        monkeypatch.chdir(branch_dir)
+
+        detected = _detect_branch_dir()
+        assert detected is not None
+        name, bdir = detected
+        assert name == "commons"
+        assert bdir == branch_dir.resolve()
 
 
 class TestGitModuleHelp:

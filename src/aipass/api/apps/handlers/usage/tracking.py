@@ -15,11 +15,9 @@ Business logic for tracking API usage from OpenRouter:
 - Store generation tracking data with newest-first ordering
 - Handle HTTP requests with proper error handling
 
-Extracted from legacy archive (api_usage.py).
-Functions: track_usage(), _get_generation_metrics(), _store_usage_data()
+Functions: track_usage(), get_generation_metrics(), store_usage_data()
 """
 
-import sys
 from pathlib import Path
 
 # Standard library imports
@@ -147,7 +145,8 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
 
         # Query the generation endpoint
         response = requests.get(
-            f"{GENERATION_ENDPOINT}?id={generation_id}",
+            GENERATION_ENDPOINT,
+            params={"id": generation_id},
             headers=headers,
             timeout=30
         )
@@ -158,7 +157,7 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
 
             # Validate response structure
             if not data or "data" not in data:
-                # Invalid response structure from OpenRouter
+                logger.warning(f"[{MODULE_NAME}] Invalid response structure from OpenRouter for generation {generation_id}")
                 return None
 
             # Extract metrics from response
@@ -176,7 +175,7 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
             return result
 
         else:
-            # OpenRouter API returned non-200 status
+            logger.warning(f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}")
             return None
 
     except requests.exceptions.Timeout as e:

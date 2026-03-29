@@ -615,7 +615,7 @@ class TestBackupJson:
     """Tests for backup_json()."""
 
     def test_creates_backup_file(self, tmp_path):
-        """Backup should create a copy in .backup/ directory."""
+        """Backup should create a copy in .recovery/ directory."""
         from aipass.spawn.apps.handlers.json_ops import backup_json
 
         source = tmp_path / "data.json"
@@ -624,7 +624,7 @@ class TestBackupJson:
         backup_path = backup_json(source)
 
         assert backup_path.exists()
-        assert ".backup" in str(backup_path)
+        assert ".recovery" in str(backup_path)
         assert "data.json" in backup_path.name
         assert ".backup" in backup_path.name
 

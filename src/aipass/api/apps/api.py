@@ -157,8 +157,15 @@ def print_help():
     table.add_row("reauth google", "Re-authenticate Google OAuth2")
     table.add_row("test", "Test OpenRouter connection status")
     table.add_row("models", "List available models from provider")
+    table.add_row("status", "Check OpenRouter client status")
+    table.add_row("call", "Make API call to model")
+    table.add_row("list-providers", "List available API providers")
+    table.add_row("init", "Initialize .env template")
     table.add_row("track", "Track API usage metrics")
     table.add_row("stats", "Display API usage statistics")
+    table.add_row("session", "Show session usage data")
+    table.add_row("caller-usage", "Show usage by caller module")
+    table.add_row("cleanup", "Clean up old usage data")
 
     console.print(table)
     console.print()
@@ -193,7 +200,7 @@ def print_help():
     console.print("─" * 70)
     console.print()
 
-    console.print("[dim]Commands: get-key, validate, test, models, track, stats, help, --help[/dim]")
+    console.print("[dim]Commands: get-key, validate, test, models, status, call, list-providers, init, track, stats, session, caller-usage, cleanup[/dim]")
     console.print()
 
 

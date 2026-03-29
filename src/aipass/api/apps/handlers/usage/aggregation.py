@@ -15,7 +15,6 @@ Business logic for aggregating usage statistics:
 - Cost, token, and latency aggregation
 - Model usage tracking and breakdown
 
-Extracted from legacy archive (api_usage.py).
 Functions: get_caller_usage(), get_session_summary()
 """
 

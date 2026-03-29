@@ -186,7 +186,7 @@ Git workflow is atomic via `drone @git pr` — one command handles: lock acquisi
 
 ## Status
 
-Beta. 15 branches. 137 PRs merged. 2,000+ tests. 100% compliance across 33 standards. See [HERALD.md](HERALD.md) for detailed progress and session history.
+Beta. 15 branches. 141 PRs merged. 2,900+ tests. 100% compliance across 33 standards. See [HERALD.md](HERALD.md) for detailed progress and session history.
 
 ## License
 

@@ -74,6 +74,11 @@
       "file": "apps/modules/google_client.py",
       "standard": "unused_function",
       "reason": "Public API exports for cross-branch consumption (get_drive_service, authenticate_google, validate_google, reauth_google). Tested in test_google_client.py. Backup migration pending."
+    },
+    {
+      "file": "apps/modules/openrouter_client.py",
+      "standard": "modules",
+      "reason": "make_call() is a CLI orchestrator — parses args then delegates to client.get_response(). All business logic lives in handlers/openrouter/client.py."
     }
   ],
   "notes": {

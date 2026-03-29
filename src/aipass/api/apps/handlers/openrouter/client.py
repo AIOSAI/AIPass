@@ -11,7 +11,7 @@
 OpenRouter Client Handler
 
 Business logic for OpenRouter API client creation and request execution.
-Extracted from archive.temp/openrouter.py following AIPASS standards.
+OpenRouter API client creation and request execution.
 
 Functions:
 - get_response() - Main API call with tracking integration
@@ -34,8 +34,6 @@ Standards:
 """
 
 # INFRASTRUCTURE IMPORT PATTERN
-import sys
-from pathlib import Path
 
 # Standard library imports
 import time
@@ -193,6 +191,7 @@ def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: 
         OpenAI response object or None on failure
     """
     if not client or not messages or not model:
+        logger.warning(f"make_api_request() called with missing params — client={bool(client)}, messages={bool(messages)}, model={bool(model)}")
         return None
 
     api_params = {
@@ -242,9 +241,11 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
     try:
         # Validate response structure
         if not hasattr(response, 'choices') or not response.choices:
+            logger.warning("Response missing 'choices' or choices is empty")
             return None
 
         if not hasattr(response.choices[0], 'message'):
+            logger.warning("Response choice missing 'message' attribute")
             return None
 
         # Extract content

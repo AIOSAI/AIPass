@@ -17,11 +17,10 @@ Orchestrates LLM API client operations:
 """
 
 import sys
-from pathlib import Path
 
 from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.cli.apps.modules import console, header, success, error, warning, section
+from aipass.cli.apps.modules import console, header, success, error
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.openrouter import client, models
@@ -188,7 +187,42 @@ def make_call(args: List[str]):
     header("OpenRouter API Call")
     console.print()
 
-    warning("API call workflow - TODO")
+    if not args:
+        error("Prompt required", suggestion="drone @api call \"your prompt\" --model MODEL")
+        return
+
+    # Parse args: first non-flag arg is prompt, --model MODEL is optional
+    prompt = None
+    model = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--model" and i + 1 < len(args):
+            model = args[i + 1]
+            i += 2
+        elif prompt is None:
+            prompt = args[i]
+            i += 1
+        else:
+            i += 1
+
+    if not prompt:
+        error("Prompt required", suggestion="drone @api call \"your prompt\" --model MODEL")
+        return
+
+    if not model:
+        error("Model required", suggestion="drone @api call \"your prompt\" --model anthropic/claude-3.5-sonnet")
+        return
+
+    console.print(f"[dim]Calling {model}...[/dim]")
+
+    response = client.get_response(prompt, caller="cli", model=model)
+
+    if response:
+        success(f"Response received ({len(response['content'])} chars)")
+        console.print()
+        console.print(response["content"])
+    else:
+        error("API call failed")
 
 
 def list_models(args: List[str] | None = None):

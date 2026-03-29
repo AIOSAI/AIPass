@@ -13,10 +13,9 @@ Validates module compliance with AIPass naming standards.
 Checks file naming, function naming, variable naming, constant naming.
 """
 
-import sys
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -90,7 +89,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
-            lines = content.split('\n')
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
@@ -236,49 +234,6 @@ def check_function_naming(content: str) -> Optional[Dict]:
     }
 
 
-def _iter_module_level_lines(lines: List[str]) -> List[str]:
-    result = []
-    in_function_or_class = False
-    in_multiline_string = False
-    multiline_delimiter = None
-    current_indentation = 0
-
-    for line in lines:
-        stripped = line.strip()
-
-        if '"""' in stripped or "'''" in stripped:
-            delimiter = '"""' if '"""' in stripped else "'''"
-            count = stripped.count(delimiter)
-
-            if count % 2 == 1 and not in_multiline_string:
-                in_multiline_string = True
-                multiline_delimiter = delimiter
-            elif count % 2 == 1 and in_multiline_string and multiline_delimiter == delimiter:
-                in_multiline_string = False
-                multiline_delimiter = None
-
-        if in_multiline_string:
-            continue
-
-        if (stripped.startswith('def ') or
-            stripped.startswith('class ') or
-            stripped.startswith('async def ') or
-            stripped.startswith('if __name__')):
-            in_function_or_class = True
-            current_indentation = len(line) - len(line.lstrip())
-            continue
-
-        if in_function_or_class and not line.startswith(' ') and not line.startswith('\t') and stripped:
-            in_function_or_class = False
-            current_indentation = 0
-
-        if in_function_or_class:
-            continue
-
-        result.append(stripped)
-
-    return result
-
 
 def check_constant_naming(content: str) -> Optional[Dict]:
     """
@@ -286,8 +241,9 @@ def check_constant_naming(content: str) -> Optional[Dict]:
 
     Rules:
     - UPPER_CASE for module-level constants
-    - Assigned outside of functions/classes
+    - Assigned outside of functions/classes (column 0 only)
     - Excludes module imports (from X import Y as Z)
+    - Excludes __dunder__ variables (PEP 8 convention: always lowercase)
     """
     # First pass: collect imported names to exclude from constant checking
     imported_names = set()
@@ -306,13 +262,34 @@ def check_constant_naming(content: str) -> Optional[Dict]:
                     # Direct import like "console"
                     imported_names.add(item.strip())
 
-    # Second pass: find module-level assignments (not inside functions/classes)
-    module_lines = _iter_module_level_lines(content.split('\n'))
+    # Second pass: find TRUE module-level assignments
+    # Only check lines at column 0 (no indentation) — this eliminates local
+    # variables inside functions/classes, which are always indented.
+    # The old _iter_module_level_lines approach had a bug: multi-line function
+    # signatures with closing ) at column 0 tricked it into thinking the
+    # function body had ended.
     constants = []
     bad_constants = []
+    in_multiline_string = False
 
-    for stripped in module_lines:
-        # Find assignments at module level
+    for line in content.split('\n'):
+        stripped = line.strip()
+
+        # Track multiline strings
+        for delimiter in ('"""', "'''"):
+            if delimiter in stripped:
+                count = stripped.count(delimiter)
+                if count % 2 == 1:
+                    in_multiline_string = not in_multiline_string
+
+        if in_multiline_string:
+            continue
+
+        # Only consider lines with zero indentation (true module-level)
+        if line and (line[0] == ' ' or line[0] == '\t'):
+            continue
+
+        # Find assignments
         if '=' not in stripped or stripped.startswith('#'):
             continue
 
@@ -323,6 +300,10 @@ def check_constant_naming(content: str) -> Optional[Dict]:
 
         const_name = match.group(1)
         assigned_value = match.group(2)
+
+        # Skip __dunder__ variables (__all__, __version__, etc.)
+        if const_name.startswith('__') and const_name.endswith('__'):
+            continue
 
         # Skip if this is an imported name (like logger, console)
         if const_name in imported_names:
