@@ -155,7 +155,7 @@ def _print_help() -> None:
 
     console.print("[yellow]CREATE OPTIONS:[/yellow]")
     console.print("  --due     (Required) Due date: 1d, 7d, 2w, 1m, or ISO date (2026-02-15)")
-    console.print("  --to      (Required) Recipient branch (e.g., @flow, @seed)")
+    console.print("  --to      (Required) Recipient branch (e.g., @flow, @seedgo)")
     console.print("  --message (Optional) Additional details for the follow-up")
     console.print()
 
@@ -164,7 +164,7 @@ def _print_help() -> None:
     console.print('  schedule create "Check FPLAN-0290 status" --due 7d --to @flow')
     console.print()
     console.print('  # Follow up with Seed about code review in 2 weeks')
-    console.print('  schedule create "Code review follow-up" --due 2w --to @seed --message "Review PR #45"')
+    console.print('  schedule create "Code review follow-up" --due 2w --to @seedgo --message "Review PR #45"')
     console.print()
     console.print('  # Check all due tasks and send reminder emails')
     console.print('  schedule run-due')

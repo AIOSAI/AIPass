@@ -297,7 +297,7 @@ def extract_mentions(content: str) -> List[str]:
 
         conn = get_db()
         placeholders = ",".join("?" * len(mentioned))
-        query = f"SELECT branch_name FROM agents WHERE LOWER(branch_name) IN ({placeholders})"
+        query = f"SELECT DISTINCT LOWER(branch_name) FROM agents WHERE LOWER(branch_name) IN ({placeholders})"
         rows = conn.execute(query, mentioned).fetchall()
         close_db(conn)
 

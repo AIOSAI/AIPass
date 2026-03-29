@@ -207,7 +207,7 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]SET SCHEDULE:[/yellow]")
-    console.print('  set schedule @seed "Run audit" daily 04:00')
+    console.print('  set schedule @seedgo "Run audit" daily 04:00')
     console.print('  set schedule @vera "Heartbeat" interval 240')
     console.print('  set schedule @flow "Check plans" hourly 30')
     console.print("  [dim]Types: daily HH:MM, hourly MM, interval MINUTES[/dim]")
@@ -264,7 +264,7 @@ def _handle_set_reminder(args: List[str]) -> bool:
 
     date_str = args[0]
     message = args[1]
-    target_branch = "@dev_central"  # Default reminder target
+    target_branch = "@devpulse"  # Default reminder target
 
     # Parse --to flag
     if "--to" in args:

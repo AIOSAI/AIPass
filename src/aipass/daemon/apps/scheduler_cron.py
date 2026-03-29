@@ -228,7 +228,7 @@ def _process_single_task(task: dict, results: dict) -> None:
             message=email_body,
             from_branch='@daemon',
             auto_execute=True,
-            reply_to='@dev_central',
+            reply_to='@devpulse',
         )
 
         if email_sent:

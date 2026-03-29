@@ -406,6 +406,11 @@
       "file": "apps/",
       "standard": "architecture",
       "reason": "Template files managed by spawn — prax cannot add/remove template files. Template structure is defined in spawn/templates/builder/ and applied at branch creation time."
+    },
+    {
+      "file": "apps/handlers/monitoring/event_queue.py",
+      "standard": "silent_catch",
+      "reason": "queue.Empty is expected control flow from PriorityQueue.get(timeout=N), not an error. Logging it produces 144,000 noise entries per 4hrs of monitoring (10 polls/sec). The empty state IS the normal idle state."
     }
   ],
   "notes": {

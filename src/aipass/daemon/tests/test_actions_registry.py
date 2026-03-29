@@ -57,7 +57,7 @@ class TestCreate:
             name="test_audit",
             action_type="schedule",
             schedule_type="daily",
-            target_branch="@seed",
+            target_branch="@seedgo",
             prompt="Run audit",
             time="04:00",
             fresh=True,
@@ -68,7 +68,7 @@ class TestCreate:
         assert action["type"] == "schedule"
         assert action["schedule_type"] == "daily"
         assert action["time"] == "04:00"
-        assert action["target_branch"] == "@seed"
+        assert action["target_branch"] == "@seedgo"
         assert action["enabled"] is True
         assert action["last_run"] is None
         assert action["completed"] is None
@@ -88,7 +88,7 @@ class TestCreate:
             name="Check VERA progress",
             action_type="reminder",
             schedule_type="once",
-            target_branch="@dev_central",
+            target_branch="@devpulse",
             prompt="Check VERA progress",
             due_date="2026-03-11",
         )

@@ -174,11 +174,11 @@ class TestCreateTask:
         task = create_task(
             task="Check backup health",
             due_date="7d",
-            recipient="@dev_central",
+            recipient="@devpulse",
             message="Verify backup systems",
         )
         assert task["task"] == "Check backup health"
-        assert task["recipient"] == "@dev_central"
+        assert task["recipient"] == "@devpulse"
         assert task["message"] == "Verify backup systems"
         assert task["status"] == "pending"
         assert len(task["id"]) == 16
@@ -192,7 +192,7 @@ class TestCreateTask:
         create_task(
             task="persisted task",
             due_date="1d",
-            recipient="@seed",
+            recipient="@seedgo",
             message="msg",
         )
         raw = json.loads(isolate_registry.read_text(encoding="utf-8"))

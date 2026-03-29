@@ -77,6 +77,10 @@ def _guard_branch_access():
                 return  # Allow command-line Python through
         return  # Allow if truly can't determine
 
+    # Allow pytest — test files need to import handlers for testing
+    if "pytest" in caller_file or "/_pytest/" in caller_file:
+        return
+
     # Check if caller is from our branch
     # MY_BRANCH is "aipass.seedgo" (dotted), but filesystem uses "/aipass/seedgo/"
     branch_path = "/" + MY_BRANCH.replace(".", "/") + "/"
@@ -104,7 +108,7 @@ def _guard_branch_access():
         f"    from {MY_BRANCH}.apps.modules.logger import logger\n"
         f"\n"
         f"  For full standards guide:\n"
-        f"    drone @seed handlers\n"
+        f"    drone @seedgo handlers\n"
         f"{'='*60}"
     )
 

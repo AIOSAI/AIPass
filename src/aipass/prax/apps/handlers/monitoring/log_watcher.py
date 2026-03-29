@@ -254,12 +254,12 @@ class LogFileWatcher(FileSystemEventHandler):
             elif "search" in log_line.lower() and "query" in log_line.lower():
                 return {'command': "memory_bank search", 'caller': None, 'target': None}
 
-        # Pattern 10: Cortex operations (direct python3 calls)
-        if "[cortex]" in log_line.lower():
+        # Pattern 10: Spawn operations (direct python3 calls)
+        if "[spawn]" in log_line.lower():
             if "Creating" in log_line and "branch" in log_line.lower():
                 match = re.search(r"Creating\s+(?:branch\s+)?(\w+)", log_line)
                 target = match.group(1).upper() if match else None
-                return {'command': "cortex create branch", 'caller': None, 'target': target}
+                return {'command': "spawn create branch", 'caller': None, 'target': target}
 
         # Pattern 11: Trigger operations (direct python3 calls)
         if "[trigger]" in log_line.lower():

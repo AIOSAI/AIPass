@@ -1,9 +1,39 @@
 """Shared test fixtures for spawn test suite."""
 
 import json
+import shutil
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+
+# ---------------------------------------------------------------------------
+# Registry backup/restore — prevents test ghost entries in AIPASS_REGISTRY.json
+# ---------------------------------------------------------------------------
+
+def _find_registry_path() -> Path:
+    """Locate AIPASS_REGISTRY.json from the spawn branch."""
+    return Path(__file__).resolve().parents[4] / "AIPASS_REGISTRY.json"
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _protect_registry():
+    """Backup AIPASS_REGISTRY.json before the test session, restore after.
+
+    Prevents tests that call spawn_agent/grant_passport without a
+    registry_path override from permanently polluting the real registry.
+    """
+    reg = _find_registry_path()
+    backup = reg.with_suffix(".json.test_backup")
+
+    if reg.exists():
+        shutil.copy2(reg, backup)
+
+    yield
+
+    if backup.exists():
+        shutil.copy2(backup, reg)
+        backup.unlink()
 
 
 @pytest.fixture

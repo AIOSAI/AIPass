@@ -228,6 +228,15 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
                     from aipass.flow.apps.handlers.mbank.process import archive_plan
                     if archive_plan(plan_file):
                         logger.info(f"[{MODULE_NAME}] Cleaned up orphaned file for {plan_label}: {plan_file}")
+                        # Update registry flags that were missed on the failed first close
+                        plan_info["processed"] = True
+                        plan_info["processed_date"] = datetime.now(timezone.utc).isoformat()
+                        plan_info["cleanup_completed"] = True
+                        plan_info["cleanup_date"] = datetime.now(timezone.utc).isoformat()
+                        if reg_file:
+                            save_registry(registry, registry_file=reg_file)
+                        else:
+                            save_registry(registry)
                         messages.append({"type": "success", "text": "  Orphaned file archived successfully"})
                     else:
                         logger.warning(f"[{MODULE_NAME}] Failed to archive orphaned file for {plan_label}: {plan_file}")

@@ -60,7 +60,7 @@ def get_calling_module() -> str:
     """Detect calling module from stack trace
 
     Returns:
-        Module name (e.g., 'drone', 'flow', 'cortex') or 'unknown_module'
+        Module name (e.g., 'drone', 'flow', 'spawn') or 'unknown_module'
     """
     caller_path = _find_external_caller_path()
     if caller_path:

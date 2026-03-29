@@ -79,7 +79,6 @@ class MonitoringQueue:
         try:
             return self.queue.get(timeout=timeout)
         except Empty:
-            logger.info("[event_queue] Queue empty on dequeue poll")
             return None
 
     def flush(self):
@@ -89,7 +88,6 @@ class MonitoringQueue:
                 try:
                     self.queue.get_nowait()
                 except Empty:
-                    logger.info("[event_queue] Flush complete (queue drained)")
                     break
             self.recent_events.clear()
 

@@ -32,7 +32,7 @@ PLUGIN_CONFIG Schema:
         "time": str | None,       # For daily: "HH:MM" (24h). For hourly: minute "MM"
         "interval_minutes": int | None,  # For interval: minutes between runs
         "enabled": bool,          # Plugin active/inactive toggle
-        "branch": str,            # Target branch email (e.g., "@seed")
+        "branch": str,            # Target branch email (e.g., "@seedgo")
         "fresh": bool,            # True = fresh session, False = resume
         "max_turns": int,         # Max agent turns (safety limit)
         "prompt": str,            # What the spawned agent should do

@@ -645,11 +645,18 @@ def test_get_json_path_returns_pathlib_path(tmp_path: Path) -> None:
 
 
 def test_ensure_no_overwrite_existing(tmp_path: Path) -> None:
-    """no_overwrite: ensure_json_exists does not overwrite already_exists data."""
+    """no_overwrite: ensure_json_exists does not overwrite already_exists valid data."""
     json_dir = _json_dir_as_path(tmp_path)
     json_dir.mkdir(parents=True, exist_ok=True)
     target = json_dir / "preserve_config.json"
-    target.write_text('{"custom": "data"}', encoding="utf-8")
+    # Write a VALID config structure with an extra custom key
+    valid_config = {
+        "module_name": "preserve",
+        "version": "1.0.0",
+        "config": {"auto_save": True, "enabled": True},
+        "custom": "data",
+    }
+    target.write_text(json.dumps(valid_config), encoding="utf-8")
     json_handler.ensure_json_exists("preserve", "config")
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data.get("custom") == "data", "Must not overwrite existing file"

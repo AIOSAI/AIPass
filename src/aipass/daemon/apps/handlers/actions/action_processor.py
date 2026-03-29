@@ -182,7 +182,7 @@ def _dispatch_action(
                 message=action.get("prompt", name),
                 from_branch='@daemon',
                 auto_execute=True,
-                reply_to='@dev_central',
+                reply_to='@devpulse',
             )
             if email_sent:
                 assert mark_reminder_completed is not None

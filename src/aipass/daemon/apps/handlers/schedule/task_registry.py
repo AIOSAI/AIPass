@@ -179,7 +179,7 @@ def create_task(
     Args:
         task: Brief description of the task/follow-up
         due_date: When to trigger (supports "7d", "1w", "YYYY-MM-DD")
-        recipient: Target branch (e.g., "@dev_central")
+        recipient: Target branch (e.g., "@devpulse")
         message: Message to deliver when due
 
     Returns:
@@ -501,7 +501,7 @@ def process_due_tasks_batch(
                 message=email_body,
                 from_branch='@daemon',
                 auto_execute=True,
-                reply_to='@dev_central',
+                reply_to='@devpulse',
             )
 
             if email_sent:
@@ -574,7 +574,7 @@ if __name__ == "__main__":
     test_task = create_task(
         task="Test backup health check",
         due_date="7d",
-        recipient="@dev_central",
+        recipient="@devpulse",
         message="Please verify backup systems are healthy"
     )
     console.print(f"  Created task: {test_task['id']}")

@@ -25,6 +25,7 @@ _PKG_ROOT = Path(__file__).resolve().parents[4]
 
 # Standard imports
 import json
+import shutil
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 
@@ -421,8 +422,8 @@ def archive_plan(plan_path: Path) -> bool:
         # Store source path for verification
         source_path = Path(plan_path)
 
-        # Attempt move
-        plan_path.rename(destination)
+        # Attempt move (shutil.move handles cross-filesystem moves)
+        shutil.move(str(plan_path), str(destination))
 
         # VERIFICATION LAYER: Confirm move actually happened
         if not destination.exists():

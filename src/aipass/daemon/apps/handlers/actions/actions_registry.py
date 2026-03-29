@@ -112,7 +112,7 @@ def create_action(
         name: Human-readable action name (e.g., "daily_audit")
         action_type: "plugin" | "schedule" | "reminder"
         schedule_type: "daily" | "hourly" | "interval" | "once"
-        target_branch: Target branch email (e.g., "@seed")
+        target_branch: Target branch email (e.g., "@seedgo")
         prompt: What the dispatched agent should do
         time: For daily: "HH:MM", for hourly: "MM"
         interval_minutes: For interval schedule type
