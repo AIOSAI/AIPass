@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: Entry point CLI for drone @backup
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-03-08
 # Modified: 2026-03-08
 # =============================================
@@ -17,7 +17,8 @@ Main handles routing, modules implement functionality.
 import sys
 import argparse
 from pathlib import Path
-from typing import Any, List
+from collections.abc import Sequence
+from typing import Any
 
 from aipass.cli.apps.modules import console, error
 from aipass.prax import logger
@@ -46,20 +47,28 @@ MODULE_ROOT = Path(__file__).parent
 # COMMAND ROUTING
 # =============================================================================
 
-def route_command(args: argparse.Namespace, modules: List[Any]) -> bool:
+def route_command(args: argparse.Namespace, modules: Sequence[Any], pre_scanned=None) -> bool:
     """
     Route command to appropriate module
 
     Args:
         args: Parsed command line arguments
         modules: List of discovered modules
+        pre_scanned: Optional pre-scanned file list to pass through to backup_core.
 
     Returns:
         True if command was handled
     """
     for module in modules:
         try:
-            if module.handle_command(args):
+            if pre_scanned:
+                try:
+                    handled = module.handle_command(args, pre_scanned=pre_scanned)
+                except TypeError:
+                    handled = module.handle_command(args)
+            else:
+                handled = module.handle_command(args)
+            if handled:
                 return True
         except Exception as e:
             # Show the actual error — don't mask it behind "Unknown command"
@@ -106,7 +115,7 @@ def print_introspection():
 
 def show_version():
     """Print version from META DATA HEADER."""
-    console.print("BACKUP_SYSTEM v1.2.0")
+    console.print("backup v1.2.0")
 
 
 def main():
@@ -120,7 +129,7 @@ def main():
     # 2. Universal flags (checked before command routing, execute and exit)
     if sys.argv[1] in ['--help', '-h', 'help']:
         console.print()
-        console.print("[bold cyan]BACKUP_SYSTEM[/bold cyan] — Automated File Protection")
+        console.print("[bold cyan]backup[/bold cyan] — Automated File Protection")
         console.print()
         console.print("[yellow]Commands:[/yellow]")
         console.print("  --all             Run snapshot + versioned + drive-sync (full backup cycle)")
@@ -153,7 +162,7 @@ def main():
 
     # 3. Parse args (behavioral flags handled by argparse)
     parser = argparse.ArgumentParser(
-        description='backup_system Branch Operations',
+        description='backup Branch Operations',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('command', nargs='?', help='Command to execute')
@@ -184,13 +193,36 @@ def main():
         console.print("[bold cyan]Full Backup Cycle: snapshot → versioned → drive-sync[/bold cyan]")
         console.print()
 
-        # Step 1: Snapshot
+        # Scan files ONCE and share between snapshot + versioned (saves ~20s)
+        console.print("[dim]Scanning files...[/dim]")
+        from aipass.backup.apps.handlers.operations.file_scanner import scan_files
+        from aipass.backup.apps.handlers.config.config_handler import (
+            GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, SOURCE_WHITELIST, MAX_FILE_SIZE_MB,
+            should_ignore,
+        )
+        from pathlib import Path as _Path
+
+        _source_dir = _Path.home()
+        _backup_dest = _Path(__file__).resolve().parents[1] / "backups"
+
+        def _should_ignore(path):
+            return should_ignore(path, GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, _backup_dest)
+
+        pre_scanned = scan_files(
+            _source_dir, _should_ignore,
+            whitelist=SOURCE_WHITELIST,
+            max_file_size_mb=MAX_FILE_SIZE_MB,
+        )
+        console.print(f"[dim]Found {len(pre_scanned[0])} files to process[/dim]")
+        console.print()
+
+        # Step 1: Snapshot (reuses pre-scanned files)
         snapshot_args = argparse.Namespace(
             command='snapshot', path=None, verbose=args.verbose,
             note=args.note, dry_run=args.dry_run, project=args.project,
             force=args.force, test=False, limit=0
         )
-        if not route_command(snapshot_args, modules):
+        if not route_command(snapshot_args, modules, pre_scanned=pre_scanned):
             error("Snapshot failed - aborting")
             return 1
 
@@ -198,13 +230,13 @@ def main():
         console.print("[dim]─── snapshot complete, starting versioned ───[/dim]")
         console.print()
 
-        # Step 2: Versioned
+        # Step 2: Versioned (reuses pre-scanned files)
         versioned_args = argparse.Namespace(
             command='versioned', path=None, verbose=args.verbose,
             note=args.note, dry_run=args.dry_run, project=args.project,
             force=args.force, test=False, limit=0
         )
-        if not route_command(versioned_args, modules):
+        if not route_command(versioned_args, modules, pre_scanned=pre_scanned):
             error("Versioned backup failed - aborting")
             return 1
 
@@ -212,15 +244,18 @@ def main():
         console.print("[dim]─── versioned complete, starting drive-sync ───[/dim]")
         console.print()
 
-        # Step 3: Drive sync
-        sync_args = argparse.Namespace(
-            command='drive-sync', path=None, verbose=args.verbose,
-            note=args.note, dry_run=args.dry_run, project=args.project,
-            force=args.force, test=False, limit=args.limit
-        )
-        if not route_command(sync_args, modules):
-            error("Drive sync failed")
-            return 1
+        # Step 3: Drive sync (skip in dry-run — no point uploading nothing)
+        if args.dry_run:
+            console.print("[dim]Drive sync skipped (dry-run mode)[/dim]")
+        else:
+            sync_args = argparse.Namespace(
+                command='drive-sync', path=None, verbose=args.verbose,
+                note=args.note, dry_run=args.dry_run, project=args.project,
+                force=args.force, test=False, limit=args.limit
+            )
+            if not route_command(sync_args, modules):
+                error("Drive sync failed")
+                return 1
 
         console.print()
         console.print("[green]Full backup cycle complete[/green]")

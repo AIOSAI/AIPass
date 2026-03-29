@@ -22,11 +22,30 @@ Functions:
 # =============================================
 
 import json
+import os
 import datetime
+import tempfile
 from pathlib import Path
 from typing import Dict
 
 from aipass.prax import logger
+
+
+def _atomic_write(file_path: Path, data: dict) -> None:
+    """Write JSON atomically via temp file + rename."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=str(file_path.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(file_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning(f"[backup_info_handler] Failed to clean temp file: {cleanup_err}")
+        raise
+
 
 # =============================================
 # BACKUP INFO OPERATIONS
@@ -67,8 +86,7 @@ def save_backup_info(backup_info_file: Path, backup_info: Dict) -> bool:
         True if save succeeded, False otherwise
     """
     try:
-        with open(backup_info_file, 'w', encoding='utf-8') as f:
-            json.dump(backup_info, f, indent=2, ensure_ascii=False)
+        _atomic_write(backup_info_file, backup_info)
         return True
     except Exception as e:
         logger.warning(f"[backup_info_handler] Failed to save backup info to {backup_info_file}: {e}")

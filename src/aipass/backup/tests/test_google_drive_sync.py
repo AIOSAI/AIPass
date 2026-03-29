@@ -188,10 +188,10 @@ class TestHandleCommand:
         result = drive_sync_env["handle_command"](args)
         assert result is False
 
-    def test_handle_command_drive_sync_test_alias(self, drive_sync_env):
-        """'drive-sync-test' routes to _run_sync_test."""
+    def test_handle_command_drive_sync_with_test_flag(self, drive_sync_env):
+        """'drive-sync --test' routes to _run_sync_test."""
         mod = drive_sync_env["module"]
-        args = SimpleNamespace(command="drive-sync-test")
+        args = SimpleNamespace(command="drive-sync", test=True)
 
         with patch.object(mod, "_run_sync_test", return_value=True) as mock_fn:
             result = drive_sync_env["handle_command"](args)

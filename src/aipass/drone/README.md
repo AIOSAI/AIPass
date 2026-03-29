@@ -122,14 +122,14 @@ Commands in the interactive tuple bypass capture and inherit the terminal direct
 | Command      | Reason                                      |
 |--------------|---------------------------------------------|
 | `monitor`    | Prax real-time monitoring (live TUI)        |
-| `snapshot`   | Backup snapshot (Rich progress bars)        |
-| `versioned`  | Backup versioned (Rich progress, long-running) |
+| `audit`      | Seedgo audit (Rich progress bars)           |
 
 **Per-branch allowlist** — all commands from these branches get interactive mode:
 
-| Branch | Reason                                      |
-|--------|---------------------------------------------|
-| `cli`  | User-facing CLI with Rich formatted output  |
+| Branch   | Reason                                        |
+|----------|-----------------------------------------------|
+| `cli`    | User-facing CLI with Rich formatted output    |
+| `backup` | Heavy-IO branch (file scanning, Google APIs)  |
 
 To add: edit `interactive_commands` or `interactive_branches` in `_handle_target()` in `apps/drone.py`.
 

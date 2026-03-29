@@ -13,9 +13,8 @@
 Builder citizen — full 3-layer architecture with identity and memory.
 
 Provides automated file protection through snapshot backups, versioned backups,
-and Google Drive synchronization. The entry point routes commands to four
-specialized modules: `backup_core`, `google_drive_sync`, `integrations`, and
-`reauth_drive`.
+and Google Drive synchronization. The entry point routes commands to two
+specialized modules: `backup_core` and `google_drive_sync`.
 
 ---
 
@@ -29,16 +28,12 @@ backup/
 │   ├── backup.py                # Entry point (CLI) — drone @backup
 │   ├── modules/
 │   │   ├── backup_core.py       # Core backup operations (snapshot, versioned)
-│   │   ├── google_drive_sync.py # Google Drive sync orchestration
-│   │   ├── integrations.py      # Cross-module integration commands
-│   │   └── reauth_drive.py      # Google Drive re-authentication
+│   │   └── google_drive_sync.py # Google Drive sync orchestration
 │   ├── handlers/
 │   │   ├── config/
 │   │   │   └── config_handler.py        # Configuration management
 │   │   ├── diff/
-│   │   │   ├── diff_generator.py        # Diff generation between backups
-│   │   │   ├── version_manager.py       # Version tracking
-│   │   │   └── vscode_integration.py    # VS Code diff viewer integration
+│   │   │   └── diff_generator.py        # Diff generation between backups
 │   │   ├── json/
 │   │   │   ├── backup_info_handler.py   # Backup info JSON read/write
 │   │   │   ├── backup_metadata_builder.py # Metadata construction
@@ -54,17 +49,13 @@ backup/
 │   │   │   ├── file_cleanup.py          # Old backup cleanup
 │   │   │   ├── file_operations.py       # File copy/move operations
 │   │   │   ├── file_scanner.py          # File discovery and filtering
-│   │   │   ├── integration_ops.py       # Integration operation logic
 │   │   │   └── path_builder.py          # Backup path construction
 │   │   ├── reporting/
 │   │   │   └── report_formatter.py      # Backup report formatting
 │   │   └── utils/
 │   │       ├── backup_timestamps.py     # Timestamp utilities
-│   │       ├── reauth_handler.py        # Re-auth implementation
 │   │       └── system_utils.py          # System-level utilities
-│   ├── extensions/              # Extension point (placeholder)
-│   ├── json_templates/          # JSON template files
-│   └── plugins/                 # Plugin point (placeholder)
+│   └── json_templates/          # JSON template files
 ├── backup_json/                 # JSON tracking data
 ├── artifacts/                   # Backup artifacts
 ├── docs/                        # Documentation
@@ -122,8 +113,6 @@ drone @backup drive-clear-tracker          # Clear Drive file tracker cache
 |--------|---------|
 | `backup_core` | Core backup operations — snapshot and versioned backup creation |
 | `google_drive_sync` | Google Drive synchronization — upload, track, and manage cloud backups |
-| `integrations` | Cross-module integration commands and coordination |
-| `reauth_drive` | Google Drive re-authentication when credentials expire |
 
 ---
 

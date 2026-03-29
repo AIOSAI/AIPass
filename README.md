@@ -1,7 +1,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-# AIPass
+# AIPass (UNDER CONSTRUCTION)
 
 A multi-agent operating system where AI agents live as citizens in a shared filesystem. Persistent memory, inter-agent messaging, standards enforcement, and CLI routing — no cloud required.
 

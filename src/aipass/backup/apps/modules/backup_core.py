@@ -133,7 +133,7 @@ def print_help():
     console.print()
 
 
-def handle_command(args) -> bool:
+def handle_command(args, pre_scanned=None) -> bool:
     """Route backup commands to appropriate handler.
 
     This is the module-level entry point for CLI commands related to backup.
@@ -141,6 +141,7 @@ def handle_command(args) -> bool:
 
     Args:
         args: Command-line arguments from CLI parser
+        pre_scanned: Optional pre-scanned file list tuple to avoid duplicate scans.
 
     Returns:
         bool: True if command was handled, False if not a backup command
@@ -161,7 +162,7 @@ def handle_command(args) -> bool:
     if args.command not in ['snapshot', 'versioned', 'all']:
         return False
 
-    # 'all' is orchestrated by backup_system.py entry point (snapshot → versioned → drive-sync)
+    # 'all' is orchestrated by backup.py entry point (snapshot → versioned → drive-sync)
     if args.command == 'all':
         return False
 
@@ -183,7 +184,7 @@ def handle_command(args) -> bool:
     try:
         # Create engine and run backup
         engine = BackupEngine(mode, dry_run=dry_run)
-        result = engine.run_backup(backup_note)
+        result = engine.run_backup(backup_note, pre_scanned=pre_scanned)
 
         # Rich summary
         duration = (datetime.datetime.now() - result.start_time).total_seconds()
@@ -352,13 +353,15 @@ class BackupEngine:
     # MAIN BACKUP EXECUTION
     # =============================================
 
-    def run_backup(self, backup_note: str = "No note provided") -> BackupResult:
+    def run_backup(self, backup_note: str = "No note provided", pre_scanned=None) -> BackupResult:
         """Execute backup - thin orchestration layer calling handlers.
 
         Coordinates backup workflow by delegating to specialized handlers.
 
         Args:
             backup_note: User note describing backup purpose/context
+            pre_scanned: Optional tuple of (files_to_backup, skipped_items) from a
+                previous scan. Used by the 'all' command to avoid scanning twice.
 
         Returns:
             BackupResult: Complete operation result with statistics and status
@@ -396,13 +399,16 @@ class BackupEngine:
         if not isinstance(last_timestamps, dict):
             last_timestamps = {}
 
-        # HANDLER: Scan files
-        from aipass.backup.apps.handlers.operations.file_scanner import scan_files
-        files_to_backup, skipped_items = scan_files(
-            self.source_dir, self.should_ignore,
-            whitelist=SOURCE_WHITELIST,
-            max_file_size_mb=MAX_FILE_SIZE_MB
-        )
+        # HANDLER: Scan files (reuse pre_scanned if provided by 'all' command)
+        if pre_scanned:
+            files_to_backup, skipped_items = pre_scanned
+        else:
+            from aipass.backup.apps.handlers.operations.file_scanner import scan_files
+            files_to_backup, skipped_items = scan_files(
+                self.source_dir, self.should_ignore,
+                whitelist=SOURCE_WHITELIST,
+                max_file_size_mb=MAX_FILE_SIZE_MB
+            )
 
         # HANDLER: Process files
         from aipass.backup.apps.handlers.operations.path_builder import build_backup_path
@@ -528,10 +534,7 @@ class BackupEngine:
             console.print(f"  [dim]Versioned:  {format_age(ts.get('versioned'))}[/dim]")
             console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
 
-            # Integration hooks (stubs - implement in handlers/integrations/)
-            if self.mode == 'versioned':
-                logger.info("[backup_core] Drive sync skipped (not implemented)")
-            logger.info("[backup_core] Read-only protection skipped (not implemented)")
+            # Drive sync runs separately via 'all' command in backup.py entry point
         else:
             json_handler.log_operation(
                 "backup",
@@ -572,6 +575,6 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    console.print("[yellow]Note:[/yellow] Run via backup_system.py entry point for full functionality")
+    console.print("[yellow]Note:[/yellow] Run via drone @backup for full functionality")
     console.print()
     print_introspection()

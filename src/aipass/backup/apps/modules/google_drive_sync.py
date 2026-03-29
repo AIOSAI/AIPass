@@ -291,12 +291,14 @@ def handle_command(args) -> bool:
         return True
 
     if command == 'drive-test':
-        return _test_drive_sync()
+        _test_drive_sync()
+        return True
 
     elif command == 'drive-sync':
         # --test flag routes to test mode
         if getattr(args, 'test', False):
-            return _run_sync_test()
+            _run_sync_test()
+            return True
 
         raw_path = getattr(args, 'path', None)
         if raw_path:
@@ -306,7 +308,7 @@ def handle_command(args) -> bool:
             backup_path = _BACKUP_ROOT / "backups" / "system_snapshot"
         if not backup_path.exists():
             error(f"Backup directory not found: {backup_path}")
-            return False
+            return True  # Command was recognized, just failed
 
         project = getattr(args, 'project', 'AIPass') or 'AIPass'
         note = getattr(args, 'note', 'Manual sync') or 'Manual sync'
@@ -314,11 +316,11 @@ def handle_command(args) -> bool:
 
         if GoogleDriveSync is None:
             error("Drive sync dependencies not available")
-            return False
+            return True  # Command was recognized, just failed
         sync = GoogleDriveSync()
         if not sync.authenticate():
             error("FAILED: Could not authenticate with Google Drive")
-            return False
+            return True  # Command was recognized, just failed
 
         limit = getattr(args, 'limit', 0) or 0
 
@@ -339,7 +341,7 @@ def handle_command(args) -> bool:
             error_msg = sync.last_error or "Unknown error"
             error(f"FAILED: {error_msg}")
             error("Sync aborted - no files uploaded")
-            return False
+            return True  # Command was recognized, just failed
         console.print(f"  Drive folder ready: {project}")
 
         if sync.tracker_was_reset:
@@ -393,7 +395,7 @@ def handle_command(args) -> bool:
         if result.get("error"):
             error(f"FAILED: {result['error']}")
             error("Sync aborted - no files uploaded")
-            return False
+            return True  # Command was recognized, just failed
 
         # Summary
         console.print()
@@ -410,16 +412,15 @@ def handle_command(args) -> bool:
         else:
             error(f"Sync failed: {result['uploaded']} uploaded, {result['failed']} failed, {result['skipped']} unchanged")
 
-        return result["success"]
-
-    elif command == 'drive-sync-test':
-        return _run_sync_test()
+        return True  # Command was handled; success/failure shown to user above
 
     elif command == 'drive-clear-tracker':
-        return _clear_file_tracker()
+        _clear_file_tracker()
+        return True
 
     elif command == 'drive-stats':
-        return _show_file_tracker_stats()
+        _show_file_tracker_stats()
+        return True
 
     json_handler.log_operation("drive_command", {"command": command})
     return False

@@ -518,6 +518,151 @@ class TestErrorContracts:
             jh.save_json("t", "config", {"wrong": True})
 
 
+class TestIncrementCounter:
+    """increment_counter increments (or initialises) a named counter in data JSON."""
+
+    def test_increment_new_counter(self, tmp_path, monkeypatch):
+        """Creates counter at 1 when it does not exist yet."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        result = jh.increment_counter("ctr_mod", "my_counter")
+
+        assert result is True
+        data = jh.load_json("ctr_mod", "data")
+        assert data is not None
+        assert data["my_counter"] == 1
+
+    def test_increment_existing_counter(self, tmp_path, monkeypatch):
+        """Adds to an existing counter value."""
+        import json
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        json_dir.mkdir(parents=True)
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        seed_data = {"created": "2026-01-01", "last_updated": "2026-01-01", "hits": 5}
+        with open(json_dir / "ctr_mod_data.json", "w", encoding="utf-8") as f:
+            json.dump(seed_data, f)
+
+        result = jh.increment_counter("ctr_mod", "hits", amount=3)
+
+        assert result is True
+        data = jh.load_json("ctr_mod", "data")
+        assert data is not None
+        assert data["hits"] == 8
+
+    def test_increment_default_amount_is_one(self, tmp_path, monkeypatch):
+        """Default increment amount is 1."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        jh.increment_counter("def_mod", "count")
+        jh.increment_counter("def_mod", "count")
+
+        data = jh.load_json("def_mod", "data")
+        assert data is not None
+        assert data["count"] == 2
+
+    def test_increment_returns_bool(self, tmp_path, monkeypatch):
+        """Return type is exactly bool."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        result = jh.increment_counter("bool_mod", "x")
+        assert type(result) is bool
+
+
+class TestUpdateDataMetrics:
+    """update_data_metrics merges keyword arguments into the data JSON."""
+
+    def test_update_single_metric(self, tmp_path, monkeypatch):
+        """Sets a single metric key in data."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        result = jh.update_data_metrics("met_mod", status="healthy")
+
+        assert result is True
+        data = jh.load_json("met_mod", "data")
+        assert data is not None
+        assert data["status"] == "healthy"
+
+    def test_update_multiple_metrics(self, tmp_path, monkeypatch):
+        """Sets multiple metric keys in one call."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        result = jh.update_data_metrics("mm_mod", alpha=1, beta="two", gamma=[3])
+
+        assert result is True
+        data = jh.load_json("mm_mod", "data")
+        assert data is not None
+        assert data["alpha"] == 1
+        assert data["beta"] == "two"
+        assert data["gamma"] == [3]
+
+    def test_update_overwrites_existing_key(self, tmp_path, monkeypatch):
+        """Overwrites a pre-existing key with the new value."""
+        import json
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        json_dir.mkdir(parents=True)
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        seed = {"created": "2026-01-01", "last_updated": "2026-01-01", "level": "low"}
+        with open(json_dir / "ow_mod_data.json", "w", encoding="utf-8") as f:
+            json.dump(seed, f)
+
+        jh.update_data_metrics("ow_mod", level="high")
+
+        data = jh.load_json("ow_mod", "data")
+        assert data is not None
+        assert data["level"] == "high"
+
+    def test_update_preserves_existing_keys(self, tmp_path, monkeypatch):
+        """Keys not mentioned in metrics are left untouched."""
+        import json
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        json_dir.mkdir(parents=True)
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        seed = {"created": "2026-01-01", "last_updated": "2026-01-01", "keep_me": 42}
+        with open(json_dir / "pk_mod_data.json", "w", encoding="utf-8") as f:
+            json.dump(seed, f)
+
+        jh.update_data_metrics("pk_mod", new_key="added")
+
+        data = jh.load_json("pk_mod", "data")
+        assert data is not None
+        assert data["keep_me"] == 42
+        assert data["new_key"] == "added"
+
+    def test_update_returns_bool(self, tmp_path, monkeypatch):
+        """Return type is exactly bool."""
+        import aipass.backup.apps.handlers.json.json_handler as jh
+
+        json_dir = tmp_path / "backup_json"
+        monkeypatch.setattr(jh, "BACKUP_JSON_DIR", json_dir)
+
+        result = jh.update_data_metrics("br_mod", k="v")
+        assert type(result) is bool
+
+
 class TestEnsureModuleJsonsContract:
     """ensure_module_jsons creates exactly 3 files."""
 

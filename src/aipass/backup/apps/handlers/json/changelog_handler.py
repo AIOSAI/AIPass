@@ -24,12 +24,29 @@ Functions:
 
 import datetime
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Dict
 
 from aipass.prax import logger
 
-# logger imported from aipass.prax
+
+def _atomic_write(file_path: Path, data: dict) -> None:
+    """Write JSON atomically via temp file + rename."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=str(file_path.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(file_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning(f"[changelog_handler] Failed to clean temp file: {cleanup_err}")
+        raise
+
 
 # =============================================
 # CHANGELOG OPERATIONS
@@ -76,8 +93,7 @@ def save_changelog_entry(changelog_file: Path, note: str, mode: str,
         }
         changelog["entries"].append(new_entry)
 
-        with open(changelog_file, 'w', encoding='utf-8') as f:
-            json.dump(changelog, f, indent=2, ensure_ascii=False)
+        _atomic_write(changelog_file, changelog)
         logger.info(f"[changelog_handler] Saved changelog entry: {note[:50]}")
         return True
     except Exception as e:

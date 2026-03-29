@@ -269,8 +269,8 @@ def _handle_custom_command(args: list[str]) -> int:
     module_name = target.lstrip("@").lower()
 
     # Interactive detection -- same logic as _handle_target
-    interactive_commands = ("monitor", "snapshot", "versioned", "audit")
-    interactive_branches = ("cli",)
+    interactive_commands = ("monitor", "audit")
+    interactive_branches = ("cli", "backup")
     interactive = command in interactive_commands or module_name in interactive_branches
 
     try:
@@ -300,8 +300,8 @@ def _handle_target(args: List[str]) -> int:
     # Interactive mode bypasses capture + timeout for human-facing output.
     # Per-command: specific commands that need live terminal (progress bars, TUI).
     # Per-branch: all commands from that branch get interactive mode (Rich CLI).
-    interactive_commands = ("monitor", "snapshot", "versioned", "audit")
-    interactive_branches = ("cli",)
+    interactive_commands = ("monitor", "audit")
+    interactive_branches = ("cli", "backup")
     first_cmd = rest[0] if rest and rest[0] != "--help" else None
     needs_interactive = (
         first_cmd in interactive_commands or module_name in interactive_branches

@@ -158,7 +158,23 @@ def load_log(log_file: Path, max_retries: int = 3) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             if log_file.exists() and log_file.stat().st_size > 0:
-                return _read_json_locked(log_file)
+                raw = _read_json_locked(log_file)
+                # Validate structure — legacy files may be a bare list
+                if isinstance(raw, dict) and "entries" in raw and "summary" in raw:
+                    return raw
+                # Migrate legacy list format to new structure
+                if isinstance(raw, list):
+                    logger.info(f"[drive_sync_json] Migrating legacy log format for {log_file}")
+                    migrated = dict(default_log)
+                    migrated["entries"] = raw[:100]
+                    migrated["summary"]["total_entries"] = len(raw)
+                    migrated["summary"]["next_id"] = len(raw) + 1
+                    save_log(log_file, migrated)
+                    return migrated
+                # Unknown structure — reset
+                logger.warning(f"[drive_sync_json] Unexpected log structure in {log_file}, resetting")
+                save_log(log_file, default_log)
+                return default_log
             else:
                 save_log(log_file, default_log)
                 return default_log

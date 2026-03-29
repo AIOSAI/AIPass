@@ -7,7 +7,9 @@
 # =============================================
 
 import json
+import os
 import inspect
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -17,6 +19,22 @@ from aipass.prax import logger
 # Constants
 _BACKUP_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/backup/
 BACKUP_JSON_DIR = _BACKUP_ROOT / "backup_json"
+
+
+def _atomic_json_write(file_path: Path, data: Any) -> None:
+    """Write JSON atomically via temp file + rename to prevent corruption."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=str(file_path.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(file_path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning(f"[json_handler] Failed to clean up temp file: {cleanup_err}")
+        raise
 
 
 def _get_caller_module_name() -> str:
@@ -108,24 +126,32 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     template = _get_default_template(json_type, module_name)
 
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(template, f, indent=2, ensure_ascii=False)
+    _atomic_json_write(json_path, template)
     return True
 
 
 def load_json(module_name: str, json_type: str) -> Optional[Any]:
-    """Load JSON file, auto-create if missing"""
+    """Load JSON file, auto-create if missing. Self-heals corrupt files."""
     if not ensure_json_exists(module_name, json_type):
         return None
 
     json_path = get_json_path(module_name, json_type)
 
-    with open(json_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"[json_handler] Corrupt JSON at {json_path}, regenerating: {e}")
+        template = _get_default_template(json_type, module_name)
+        try:
+            _atomic_json_write(json_path, template)
+        except Exception as write_err:
+            logger.error(f"[json_handler] Failed to regenerate {json_path}: {write_err}")
+        return template
 
 
 def save_json(module_name: str, json_type: str, data: Any) -> bool:
-    """Save JSON file"""
+    """Save JSON file atomically."""
     json_path = get_json_path(module_name, json_type)
 
     if not validate_json_structure(data, json_type):
@@ -134,8 +160,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
     if json_type == "data" and isinstance(data, dict):
         data["last_updated"] = datetime.now().date().isoformat()
 
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _atomic_json_write(json_path, data)
     return True
 
 
@@ -241,7 +266,7 @@ if __name__ == "__main__":
         border_style="bright_blue"
     ))
     console.print()
-    console.print("[yellow]TESTING:[/yellow] Creating BACKUP_SYSTEM JSONs...")
+    console.print("[yellow]TESTING:[/yellow] Creating backup JSONs...")
 
     # Test auto-creation
     log_operation("test_operation", {"test": "data"}, "backup_system")

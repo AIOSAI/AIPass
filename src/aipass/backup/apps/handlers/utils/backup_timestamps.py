@@ -14,6 +14,8 @@ backup command can display how fresh each backup type is.
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -61,7 +63,17 @@ def update_timestamp(mode: str) -> None:
     data[mode] = datetime.now().isoformat()
 
     TIMESTAMPS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TIMESTAMPS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    fd, tmp_path = tempfile.mkstemp(suffix='.tmp', dir=str(TIMESTAMPS_FILE.parent))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, str(TIMESTAMPS_FILE))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning(f"[backup_timestamps] Failed to clean temp file: {cleanup_err}")
+        raise
 
 
 def format_age(iso_str: str | None) -> str:

@@ -18,8 +18,6 @@ Called exclusively by the google_drive_sync module orchestrator.
 # IMPORTS
 # =============================================
 
-import sys
-import ssl
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,22 +27,20 @@ from typing import Optional, Dict, Any
 
 from aipass.prax import logger
 
-# Google API imports (optional — not installed in every environment)
+# Google Drive service from API branch
 try:
-    from googleapiclient.discovery import build  # type: ignore[import-unresolved]
+    from aipass.api.apps.modules.google_client import (
+        get_drive_service,
+        api_call_with_retry as _api_retry,
+    )
     from googleapiclient.http import MediaFileUpload  # type: ignore[import-unresolved]
-    from google.auth.transport.requests import Request  # type: ignore[import-unresolved]
-    from google.oauth2.credentials import Credentials  # type: ignore[import-unresolved]
-    from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-unresolved]
     GOOGLE_API_AVAILABLE = True
 except ImportError as e:
     logger.info(f"Google API libraries not available: {e}")
     GOOGLE_API_AVAILABLE = False
-    build = None  # type: ignore[assignment]
+    get_drive_service = None  # type: ignore[assignment]
+    _api_retry = None  # type: ignore[assignment]
     MediaFileUpload = None  # type: ignore[assignment]
-    Request = None  # type: ignore[assignment]
-    Credentials = None  # type: ignore[assignment]
-    InstalledAppFlow = None  # type: ignore[assignment]
 
 # JSON handler for data persistence
 from aipass.backup.apps.handlers.json.drive_sync_json import (
@@ -99,10 +95,6 @@ class GoogleDriveSync:
         self.config = _load_config()
         self.data = _load_data()
 
-        # Paths
-        self.creds_path = Path.home() / '.aipass' / 'drive_creds.json'
-        self.client_secrets_path = Path(__file__).parent.parent / 'credentials.json'
-
         # Runtime state
         self._drive_service = None
         self._thread_local = threading.local()
@@ -114,11 +106,15 @@ class GoogleDriveSync:
         self.last_error = None  # Last error message for callers
         self.tracker_was_reset = False  # Set True when new folder = tracker invalidated
 
-        # Check if Google API is available
+        # Sync enabled flag with actual library availability
         if not GOOGLE_API_AVAILABLE:
-
-            self.config["config"]["enabled"] = False
-            _save_config(self.config)
+            if self.config.get("config", {}).get("enabled", True):
+                self.config.setdefault("config", {})["enabled"] = False
+                _save_config(self.config)
+        else:
+            if not self.config.get("config", {}).get("enabled", True):
+                self.config.setdefault("config", {})["enabled"] = True
+                _save_config(self.config)
 
     @property
     def drive_service(self):
@@ -131,87 +127,28 @@ class GoogleDriveSync:
         self._drive_service = value
 
     def authenticate(self) -> bool:
-        """Authenticate with Google Drive using OAuth credentials"""
+        """Authenticate with Google Drive via API branch."""
         json_handler.log_operation("drive_authenticate_started")
 
         if not GOOGLE_API_AVAILABLE:
-            python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-
-
             return False
 
         start_time = datetime.now()
-        creds = None
-
-        # Load existing credentials if they exist
-        if self.creds_path.exists():
-            try:
-                creds = Credentials.from_authorized_user_file(str(self.creds_path), SCOPES)  # type: ignore[union-attr]
-            except Exception as e:
-                logger.warning(f"Failed to load credentials from {self.creds_path}: {e}")
-                creds = None
-
-        # If no valid credentials, start OAuth flow
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())  # type: ignore[misc]
-
-                except Exception as e:
-                    logger.warning(f"Failed to refresh credentials: {e}")
-                    creds = None
-
-            if not creds:
-                # Check if client secrets file exists
-                if not self.client_secrets_path.exists():
-
-
-                    return False
-
-                try:
-
-
-                    flow = InstalledAppFlow.from_client_secrets_file(  # type: ignore[union-attr]
-                        str(self.client_secrets_path), SCOPES
-                    )
-                    creds = flow.run_local_server(port=0)
-
-                except Exception as e:
-                    logger.warning(f"OAuth flow failed: {e}")
-                    _log_operation("authenticate", {"message": f"OAuth flow failed: {e}", "error_details": {"exception_type": type(e).__name__, "stack_trace": str(e)}}, success=False)
-                    return False
-
-        # Save credentials for next time
         try:
-            # Create .aipass directory if it doesn't exist
-            self.creds_path.parent.mkdir(parents=True, exist_ok=True)
+            self.drive_service = get_drive_service()  # type: ignore[misc]
 
-            # Save credentials
-            with open(self.creds_path, 'w', encoding='utf-8') as f:
-                f.write(creds.to_json())
-
-        except Exception as e:
-            logger.warning(f"Failed to save credentials to {self.creds_path}: {e}")
-
-        # Build Drive service
-        try:
-            self.creds = creds  # Store for building per-thread services
-            self.drive_service = build('drive', 'v3', credentials=creds)  # type: ignore[misc]
-
-            # Update runtime state (ensure runtime_state exists first)
+            # Update runtime state
             if "runtime_state" not in self.data:
                 self.data["runtime_state"] = {}
             self.data["runtime_state"]["authenticated"] = True
             _save_data(self.data)
 
-            # Log successful authentication
             execution_time = int((datetime.now() - start_time).total_seconds() * 1000)
-            _log_operation("authenticate", {"message": "Successfully authenticated with Google Drive", "execution_time_ms": execution_time}, success=True)
-
+            _log_operation("authenticate", {"message": "Authenticated via API branch", "execution_time_ms": execution_time}, success=True)
             return True
         except Exception as e:
-            logger.warning(f"Failed to build Drive service: {e}")
-            _log_operation("authenticate", {"message": f"Failed to build Drive service: {e}", "error_details": {"exception_type": type(e).__name__, "stack_trace": str(e)}}, success=False)
+            logger.warning(f"Drive authentication failed: {e}")
+            _log_operation("authenticate", {"message": f"Auth failed: {e}"}, success=False)
             return False
 
     def _verify_folder_id(self, folder_id: str) -> bool:
@@ -572,47 +509,18 @@ class GoogleDriveSync:
         _save_data(self.data)
 
     def _build_thread_service(self):
-        """Build a separate Drive service instance for use in a worker thread.
-
-        Loads fresh credentials from disk to avoid sharing credential state
-        (token refresh races) and creates a fully isolated HTTP/SSL connection.
-        """
-        creds = Credentials.from_authorized_user_file(str(self.creds_path), SCOPES)  # type: ignore[union-attr]
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())  # type: ignore[misc]
-        return build('drive', 'v3', credentials=creds)  # type: ignore[misc]
-
-    @staticmethod
-    def _is_ssl_error(exc: Exception) -> bool:
-        """Check if an exception is a transient SSL/connection error."""
-        if isinstance(exc, (ssl.SSLError, BrokenPipeError, ConnectionResetError)):
-            return True
-        ssl_keywords = (
-            'DECRYPTION_FAILED_OR_BAD_RECORD_MAC',
-            'WRONG_VERSION_NUMBER',
-            'EOF occurred',
-            'ssl.SSLError',
-            'BrokenPipeError',
-            'ConnectionReset',
-        )
-        msg = str(exc)
-        return any(kw in msg for kw in ssl_keywords)
+        """Build a thread-safe Drive service via API branch."""
+        return get_drive_service(thread_safe=True)  # type: ignore[misc]
 
     def _api_call_with_retry(self, request: Any, max_retries: int = 3) -> Dict[str, Any]:
-        """Execute a Google API request with exponential backoff on SSL errors."""
-        for attempt in range(max_retries + 1):
-            try:
-                return request.execute()
-            except Exception as e:
-                if attempt < max_retries and self._is_ssl_error(e):
-                    wait = 2 ** attempt
-
-                    time.sleep(wait)
-                    # Rebuild this thread's service on SSL failure
-                    self._thread_local.service = self._build_thread_service()
-                    continue
-                raise
-        raise RuntimeError("Retries exhausted")
+        """Execute a Google API request with retry via API branch."""
+        try:
+            return _api_retry(request, max_retries=max_retries)  # type: ignore[misc]
+        except Exception as e:
+            # On failure, rebuild thread service and retry once
+            logger.warning(f"[drive_sync_client] API call failed, rebuilding service: {e}")
+            self._thread_local.service = self._build_thread_service()
+            return _api_retry(request, max_retries=1)  # type: ignore[misc]
 
     def _check_file_needs_upload_local(self, local_file: Path, backup_root: Path) -> bool:
         """Check if file needs upload using local tracker (no API calls)"""
