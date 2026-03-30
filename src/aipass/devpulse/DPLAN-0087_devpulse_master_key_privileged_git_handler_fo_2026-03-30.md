@@ -163,8 +163,59 @@ elif command == "system-pr":
 - **Dry-run mode:** `drone @git system-pr --dry-run "description"` shows what would be staged and the PR description without actually creating anything. Good for reviewing before committing.
 - **Selective staging:** `drone @git system-pr --include "src/aipass/backup/ src/aipass/drone/" "description"` to stage only specific branch directories. Useful when not all changes should go in one PR.
 - **PR template:** Auto-generate the PR body from git diff stats, listing which branches were modified and how many files/lines per branch.
-- **Merge plugin:** `drone @git merge 147` to merge a PR from the CLI. Would use `gh pr merge 147 --squash`. Same auth gate.
 - **Patrick mode:** `drone @git system-pr --author patrick "description"` changes the Co-Authored-By to Patrick's name. Requires a separate auth check (env var, config file, or interactive prompt).
+
+## Phase 2 Plugins (dispatched to drone)
+
+### merge_plugin.py — `drone @git merge <PR#>`
+- Squash-merges a PR via gh cli, auto-syncs local main after
+- Same auth gate as system-pr
+
+### sync_plugin.py — `drone @git smart-sync`
+- Detects diverged local/origin main, rebases cleanly
+- Aborts and reports on conflict instead of leaving a mess
+
+### fix_plugin.py — `drone @git fix`
+- Emergency button: detects stuck rebase, detached HEAD, diverged state, dirty index
+- Auto-resolves common broken states, reports what it did
+
+## Phase 3: Git Snapshot Cache (Patrick's design)
+
+**IMPORTANT: This is NOT a plugin.** Plugins are devpulse-only privileged extensions. The snapshot cache protects ALL git operations for ALL branches — it's a handler. Lives in `drone/apps/handlers/git/snapshot_handler.py` alongside pr_handler, lock_handler, sync_handler. Both `pr_handler.py` and the devpulse plugins call it before any destructive action.
+
+### snapshot_handler.py — safety net for all git operations
+
+**Concept:** Before every git action (PR, merge, rebase), the affected files get copied to a local snapshot folder. Rolling history of ~10 snapshots. When the 11th comes in, the oldest rolls off — but not deleted, rolls to the backup system (like plans and deleted branches do).
+
+**Why:** We lost files in the past due to git operations gone wrong. The drone git workflow was built partly for this reason. But even with safe workflows, things can go sideways — a rebase drops a file, a merge conflict resolution loses changes, a force-push overwrites work. The snapshot cache means files are never truly lost.
+
+**Design:**
+```
+drone/apps/plugins/devpulse_ops/
+├── snapshot_plugin.py          # Snapshot before action, restore on demand
+```
+
+Each branch gets a `.git_snapshots/` directory (or a central one in the repo root):
+```
+.git_snapshots/
+├── 001_2026-03-30T14:00_system-pr/    # Snapshot of files before PR #148
+│   ├── manifest.json                   # What files, what action, timestamp
+│   └── files/                          # Actual file copies
+├── 002_2026-03-30T14:30_merge-148/    # Snapshot before merge
+│   ├── manifest.json
+│   └── files/
+└── ...up to 010 (rolling)
+```
+
+**Integration:** Every other plugin calls `snapshot_plugin.take_snapshot(action, files)` before doing anything destructive. The snapshot happens silently — no user interaction needed.
+
+**Rolloff:** When snapshot 11 arrives, snapshot 1 gets moved to the backup system (same pattern as deleted branches and closed plans — they don't delete, they archive).
+
+**Restore:** `drone @git restore <snapshot_id>` or `drone @git restore latest` to recover files from a snapshot. Shows what would be restored before doing it.
+
+**Patrick's words:** "Even if there were multiple errors where files got lost and the temp file got overridden, at least we have the previous versions. When you make a PR, the files that you've included get cached to a temporary folder. They don't delete, they just roll off somewhere. So there's always like — what happened to those files? They were there last week. We look at the backup system, we see the trail."
+
+**Not building now** — this is Phase 3, after merge/sync/fix are proven. But the architecture should accommodate it from the start.
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0086 (Patrick's git workflow cheat sheet — this solves several of his pain points)

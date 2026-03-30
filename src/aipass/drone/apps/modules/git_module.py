@@ -28,7 +28,7 @@ DRONE_MODULE = {
     "description": "Git workflow — PR, status, sync, lock management",
 }
 
-_COMMANDS = ("pr", "status", "sync", "lock", "unlock", "system-pr")
+_COMMANDS = ("pr", "status", "sync", "lock", "unlock", "system-pr", "merge", "smart-sync", "fix")
 
 
 def _detect_branch_dir() -> tuple[str, Path] | None:
@@ -83,6 +83,12 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
     if command == "system-pr":
         return _handle_system_pr(args)
+    if command == "merge":
+        return _handle_merge(args)
+    if command == "smart-sync":
+        return _handle_smart_sync(args)
+    if command == "fix":
+        return _handle_fix(args)
     if command == "pr":
         return _handle_pr(args)
     if command == "status":
@@ -139,6 +145,129 @@ def _handle_system_pr(args: list[str]) -> dict:
     if result["success"]:
         return {
             "stdout": f"System PR created: {result['pr_url']}\nBranch: {result['feature_branch']}",
+            "stderr": "",
+            "exit_code": 0,
+        }
+    return {
+        "stdout": "",
+        "stderr": result["message"],
+        "exit_code": 1,
+    }
+
+
+def _handle_merge(args: list[str]) -> dict:
+    """Handle the merge subcommand (devpulse-only)."""
+    if not args:
+        return {
+            "stdout": "",
+            "stderr": "Usage: drone @git merge <PR#>",
+            "exit_code": 1,
+        }
+
+    pr_number = args[0]
+
+    try:
+        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_caller
+        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
+    except ImportError as exc:
+        logger.error("Failed to import devpulse_ops merge plugin: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": f"devpulse_ops plugin not available: {exc}",
+            "exit_code": 1,
+        }
+
+    try:
+        caller = verify_caller()
+    except PermissionError as exc:
+        logger.error("merge authorization failed: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": 1,
+        }
+
+    result = merge_pr(pr_number, caller)
+
+    if result["success"]:
+        return {
+            "stdout": result["message"],
+            "stderr": "",
+            "exit_code": 0,
+        }
+    return {
+        "stdout": "",
+        "stderr": result["message"],
+        "exit_code": 1,
+    }
+
+
+def _handle_smart_sync(args: list[str]) -> dict:
+    """Handle the smart-sync subcommand (devpulse-only)."""
+    try:
+        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_caller
+        from aipass.drone.apps.plugins.devpulse_ops.sync_plugin import smart_sync
+    except ImportError as exc:
+        logger.error("Failed to import devpulse_ops sync plugin: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": f"devpulse_ops plugin not available: {exc}",
+            "exit_code": 1,
+        }
+
+    try:
+        caller = verify_caller()
+    except PermissionError as exc:
+        logger.error("smart-sync authorization failed: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": 1,
+        }
+
+    result = smart_sync(caller)
+
+    if result["success"]:
+        return {
+            "stdout": result["message"],
+            "stderr": "",
+            "exit_code": 0,
+        }
+    return {
+        "stdout": "",
+        "stderr": result["message"],
+        "exit_code": 1,
+    }
+
+
+def _handle_fix(args: list[str]) -> dict:
+    """Handle the fix subcommand (devpulse-only)."""
+    try:
+        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_caller
+        from aipass.drone.apps.plugins.devpulse_ops.fix_plugin import fix_git_state
+    except ImportError as exc:
+        logger.error("Failed to import devpulse_ops fix plugin: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": f"devpulse_ops plugin not available: {exc}",
+            "exit_code": 1,
+        }
+
+    try:
+        caller = verify_caller()
+    except PermissionError as exc:
+        logger.error("fix authorization failed: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": 1,
+        }
+
+    result = fix_git_state(caller)
+
+    if result["success"]:
+        return {
+            "stdout": result["message"],
             "stderr": "",
             "exit_code": 0,
         }
@@ -296,6 +425,21 @@ def get_help(command: str | None = None) -> str:
             "  Stages all tracked changes, creates a disposable feature branch,\n"
             "  and opens a PR. Requires devpulse passport authorization.\n"
         )
+    if command == "merge":
+        return (
+            "git merge <PR#> — Squash-merge a PR and sync local main (devpulse only)\n"
+            "  Runs gh pr merge --squash --delete-branch, then git pull --rebase.\n"
+        )
+    if command == "smart-sync":
+        return (
+            "git smart-sync — Fetch origin and rebase if behind (devpulse only)\n"
+            "  Detects divergence and rebases safely; aborts on conflict.\n"
+        )
+    if command == "fix":
+        return (
+            "git fix — Detect and fix common broken git states (devpulse only)\n"
+            "  Fixes stuck rebases, detached HEAD, diverged branches, dirty index.\n"
+        )
 
     return (
         "git — Git workflow: PR, status, sync, lock management\n"
@@ -303,6 +447,9 @@ def get_help(command: str | None = None) -> str:
         "Commands:\n"
         "  pr <description>       Create a PR with scoped changes\n"
         "  system-pr <desc>       Create a system-wide PR (devpulse only)\n"
+        "  merge <PR#>            Squash-merge a PR (devpulse only)\n"
+        "  smart-sync             Fetch + rebase if behind (devpulse only)\n"
+        "  fix                    Fix broken git states (devpulse only)\n"
         "  status                 Show git status for your branch\n"
         "  sync                   Checkout main and pull\n"
         "  lock                   Check lock status\n"
@@ -325,8 +472,11 @@ def get_introspective() -> str:
         "  plugins/devpulse_ops/\n"
         "    - auth.py (verify_caller — passport-based authorization)\n"
         "    - pr_plugin.py (create_system_pr — system-wide PR workflow)\n"
+        "    - merge_plugin.py (merge_pr — squash-merge PR + sync)\n"
+        "    - sync_plugin.py (smart_sync — fetch + rebase if behind)\n"
+        "    - fix_plugin.py (fix_git_state — detect/fix broken states)\n"
         "\n"
-        "Commands: pr, system-pr, status, sync, lock, unlock\n"
+        "Commands: pr, system-pr, merge, smart-sync, fix, status, sync, lock, unlock\n"
     )
 
 

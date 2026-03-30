@@ -76,6 +76,36 @@
       "file": "apps/plugins/devpulse_ops/pr_plugin.py",
       "standard": "trigger",
       "reason": "create_system_pr is a privileged operation — trigger integration deferred until trigger branch supports plugin events."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/merge_plugin.py",
+      "standard": "architecture",
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/merge_plugin.py",
+      "standard": "encapsulation",
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/sync_plugin.py",
+      "standard": "architecture",
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/sync_plugin.py",
+      "standard": "encapsulation",
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/fix_plugin.py",
+      "standard": "architecture",
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/fix_plugin.py",
+      "standard": "encapsulation",
+      "reason": "Plugin imports lock_handler.find_repo_root() — drone-internal plugin, same branch."
     }
   ],
   "notes": {
