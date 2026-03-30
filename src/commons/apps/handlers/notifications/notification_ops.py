@@ -88,7 +88,7 @@ def _set_notification_level(args: List[str], level: str) -> dict:
 
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 
@@ -151,7 +151,7 @@ def show_preferences(args: List[str]) -> dict:
     """
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 

@@ -15,7 +15,6 @@ All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 """
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -501,3 +500,43 @@ class TestShowSearchResults:
         mocks["execute_search"].assert_called_once_with(
             query="q", branch="SEED", memory_type="local", n_results=3
         )
+
+    def test_handler_timeout_returns_false(self, monkeypatch):
+        """When the handler returns a timeout error, show_search_results returns False."""
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = {
+            "success": False,
+            "error": "Search operation timed out",
+        }
+
+        result = search_mod.show_search_results("timeout query")
+
+        assert result is False
+        mocks["error"].assert_called_once()
+
+    def test_handler_timeout_does_not_crash(self, monkeypatch):
+        """A timeout error from the handler should not raise an exception."""
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = {
+            "success": False,
+            "error": "Embedding timed out",
+        }
+
+        # Must not raise -- graceful handling
+        result = search_mod.show_search_results("slow query")
+
+        assert result is False
+        mocks["error"].assert_called_once()
+
+    def test_handler_exception_does_not_crash(self, monkeypatch):
+        """If the handler raises an unexpected exception, it should not propagate."""
+        import subprocess
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].side_effect = subprocess.TimeoutExpired(
+            cmd="python embed_subprocess.py", timeout=120
+        )
+
+        result = search_mod.show_search_results("crash query")
+
+        assert result is False
+        mocks["error"].assert_called_once()

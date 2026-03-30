@@ -115,7 +115,7 @@ def mock_registry(repo_root, mock_branch):
 class TestDeleteBranch:
     """Tests for delete_branch()."""
 
-    def test_delete_archives_and_removes(self, repo_root, mock_branch, mock_registry):
+    def test_delete_archives_and_removes(self, repo_root: Path, mock_branch: Path, mock_registry: Path):
         """Successful delete should archive the branch and remove from registry."""
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 

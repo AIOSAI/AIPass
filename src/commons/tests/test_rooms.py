@@ -139,6 +139,7 @@ def test_create_room_no_caller(mock_caller: object) -> None:
     result = create_room(["orphan-room"])
     assert result["success"] is False
     assert "Could not detect calling branch" in result["error"]
+    assert "drone routing" in result["error"]
 
 
 @patch("commons.apps.handlers.rooms.room_ops.get_db")

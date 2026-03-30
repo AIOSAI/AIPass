@@ -163,10 +163,27 @@ class TestHandleCommand:
             assert result is True
             mock_fn.assert_called_once()
 
-    def test_handle_command_drive_clear_tracker(self, drive_sync_env):
-        """'drive-clear-tracker' routes to _clear_file_tracker function."""
+    def test_handle_command_drive_clear_tracker_without_force(self, drive_sync_env):
+        """'drive-clear-tracker' without --force shows warning, does NOT clear."""
         mod = drive_sync_env["module"]
-        args = SimpleNamespace(command="drive-clear-tracker")
+        args = SimpleNamespace(command="drive-clear-tracker", force=False)
+
+        with patch.object(
+            mod, "_clear_file_tracker", return_value=True
+        ) as mock_fn:
+            with patch.object(
+                mod, "_load_data",
+                return_value={"runtime_state": {"file_tracker": {"a": 1, "b": 2}}},
+            ):
+                result = drive_sync_env["handle_command"](args)
+
+            assert result is True
+            mock_fn.assert_not_called()
+
+    def test_handle_command_drive_clear_tracker_with_force(self, drive_sync_env):
+        """'drive-clear-tracker --force' routes to _clear_file_tracker."""
+        mod = drive_sync_env["module"]
+        args = SimpleNamespace(command="drive-clear-tracker", force=True)
 
         with patch.object(
             mod, "_clear_file_tracker", return_value=True
@@ -198,6 +215,89 @@ class TestHandleCommand:
 
             assert result is True
             mock_fn.assert_called_once()
+
+    def test_handle_command_drive_sync_dry_run_no_upload(self, drive_sync_env, tmp_path, monkeypatch):
+        """'drive-sync --dry-run' scans but does NOT upload files."""
+        mod = drive_sync_env["module"]
+
+        # Mock the backup_timestamps module (imported inside the function)
+        mock_ts_mod = MagicMock()
+        mock_ts_mod.get_timestamps = MagicMock(return_value={})
+        mock_ts_mod.format_age = MagicMock(return_value="never")
+        monkeypatch.setitem(
+            sys.modules, "aipass.backup.apps.handlers.utils.backup_timestamps", mock_ts_mod
+        )
+
+        # Create a fake backup dir with files
+        backup_dir = tmp_path / "backups" / "system_snapshot"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "test.txt").write_text("hello")
+
+        mock_sync = MagicMock()
+        mock_sync.authenticate.return_value = True
+        mock_sync.get_or_create_project_folder.return_value = "folder_id"
+        mock_sync.tracker_was_reset = False
+        mock_sync.prepare_sync.return_value = (
+            [backup_dir / "test.txt"],  # files_to_upload (list of Paths)
+            0,   # skipped
+            1,   # total
+        )
+
+        args = SimpleNamespace(
+            command="drive-sync", path=str(backup_dir), verbose=False,
+            note="test", dry_run=True, project="AIPass", force=False,
+            test=False, limit=0,
+        )
+
+        with patch.object(mod, "GoogleDriveSync", return_value=mock_sync):
+            result = drive_sync_env["handle_command"](args)
+
+        assert result is True
+        # Critical: sync_backup_files must NOT be called in dry-run
+        mock_sync.sync_backup_files.assert_not_called()
+
+    def test_handle_command_drive_sync_no_dry_run_uploads(self, drive_sync_env, tmp_path, monkeypatch):
+        """'drive-sync' without --dry-run DOES upload files."""
+        mod = drive_sync_env["module"]
+
+        # Mock the backup_timestamps module
+        mock_ts_mod = MagicMock()
+        mock_ts_mod.get_timestamps = MagicMock(return_value={})
+        mock_ts_mod.format_age = MagicMock(return_value="never")
+        mock_ts_mod.update_timestamp = MagicMock()
+        monkeypatch.setitem(
+            sys.modules, "aipass.backup.apps.handlers.utils.backup_timestamps", mock_ts_mod
+        )
+
+        backup_dir = tmp_path / "backups" / "system_snapshot"
+        backup_dir.mkdir(parents=True)
+        (backup_dir / "test.txt").write_text("hello")
+
+        mock_sync = MagicMock()
+        mock_sync.authenticate.return_value = True
+        mock_sync.get_or_create_project_folder.return_value = "folder_id"
+        mock_sync.tracker_was_reset = False
+        mock_sync.prepare_sync.return_value = (
+            [backup_dir / "test.txt"],
+            0,
+            1,
+        )
+        mock_sync.sync_backup_files.return_value = {
+            "success": True, "uploaded": 1, "failed": 0, "skipped": 0,
+            "total": 1, "error": None,
+        }
+
+        args = SimpleNamespace(
+            command="drive-sync", path=str(backup_dir), verbose=False,
+            note="test", dry_run=False, project="AIPass", force=False,
+            test=False, limit=0,
+        )
+
+        with patch.object(mod, "GoogleDriveSync", return_value=mock_sync):
+            result = drive_sync_env["handle_command"](args)
+
+        assert result is True
+        mock_sync.sync_backup_files.assert_called_once()
 
 
 # ===================================================================

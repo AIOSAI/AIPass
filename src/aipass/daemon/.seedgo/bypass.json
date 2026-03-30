@@ -108,6 +108,12 @@
       "pattern": "no-args gate"
     },
     {
+      "file": "apps/modules/update.py",
+      "standard": "introspection",
+      "reason": "update runs the status digest with no args — that IS its primary function. Showing introspection instead was reported as a dead-end UX bug (DPLAN-0085).",
+      "pattern": "no-args gate"
+    },
+    {
       "file": "apps/plugins/heartbeat.py",
       "standard": "architecture",
       "reason": "Scheduler plugin — autodiscovered by plugins/__init__.py discover_plugins(). Lives in apps/plugins/ by design, not a module or handler.",

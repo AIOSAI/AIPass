@@ -124,18 +124,19 @@ def test_handle_command_help_gate(mock_console, mock_header, mock_jh, mock_help)
     mock_jh.log_operation.assert_not_called()
 
 
-@patch(f"{_MOD}.print_introspection")
+@patch(f"{_MOD}.error")
 @patch(f"{_MOD}.json_handler")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_handle_command_introspection_gate(mock_console, mock_header, mock_jh, mock_intro):
-    """'call' with no args triggers introspection instead of make_call."""
+def test_handle_command_call_no_args_executes(mock_console, mock_header, mock_jh, mock_error):
+    """'call' with no args should execute (show error), not show introspection."""
     from aipass.api.apps.modules import openrouter_client
 
     result = openrouter_client.handle_command("call", [])
 
     assert result is True
-    mock_intro.assert_called_once()
+    mock_error.assert_called()
+    assert "Prompt required" in mock_error.call_args[0][0]
 
 
 # =============================================
@@ -607,6 +608,21 @@ def test_make_call_no_model_shows_error(mock_console, mock_header, mock_error):
 
     mock_error.assert_called_once()
     assert "Model required" in mock_error.call_args[0][0]
+
+
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.json_handler")
+@patch(f"{_MOD}.header")
+@patch(f"{_MOD}.console")
+def test_handle_command_call_no_args_shows_error(mock_console, mock_header, mock_jh, mock_error):
+    """call with no args should show error, not introspection."""
+    from aipass.api.apps.modules import openrouter_client
+
+    result = openrouter_client.handle_command("call", [])
+
+    assert result is True
+    mock_error.assert_called_once()
+    assert "Prompt required" in mock_error.call_args[0][0]
 
 
 # =============================================

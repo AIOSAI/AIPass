@@ -430,9 +430,12 @@ def main() -> int:
 
     # activate — scan + register all discovered commands from a branch
     if command == "activate":
-        if len(args) < 2:
-            err_console.print("drone: activate requires a target (e.g., drone activate @seedgo)")
-            return 1
+        if len(args) < 2 or args[1] in ("--help", "-h"):
+            console.print("Usage: drone activate @branch")
+            console.print()
+            console.print("Scan a branch for available commands and register them as shortcuts.")
+            console.print("Example: drone activate @seedgo")
+            return 0
         return _handle_activate(args[1])
 
     # list — show registered custom commands

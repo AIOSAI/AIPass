@@ -236,9 +236,11 @@ def _extract_branch_name(args: List[str]) -> str | None:
 
 
 def _handle_branch_health(args: List[str]) -> bool:
-    """Handle 'branch-health <branch>' command."""
+    """Handle 'branch-health [branch]' command. No args = all branches summary."""
     if not args:
-        print_introspection()
+        json_handler.log_operation("branch_health_all", {"command": "branch-health"})
+        report = generate_activity_report(since_hours=24, verbosity="normal")
+        console.print(report)
         return True
     if args[0] in ('--help', '-h', 'help'):
         _print_branch_health_help()

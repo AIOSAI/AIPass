@@ -35,6 +35,7 @@ except ImportError:
 from commons.apps.handlers.identity.identity_ops import (
     find_branch_root,
     get_branch_info_from_registry,
+    get_branch_info_by_name,
     get_caller_branch,
     extract_mentions,
     resolve_display_name,
@@ -44,6 +45,7 @@ from commons.apps.handlers.json import json_handler
 __all__ = [
     "find_branch_root",
     "get_branch_info_from_registry",
+    "get_branch_info_by_name",
     "get_caller_branch",
     "extract_mentions",
     "resolve_display_name",

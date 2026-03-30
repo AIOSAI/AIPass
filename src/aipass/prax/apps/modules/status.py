@@ -45,33 +45,31 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != 'status':
         return False
 
-    if not args:
-        print_introspection()
-        return True
-
-    json_handler.log_operation("status_checked", {"subcommand": args[0]})
-
     # --- sub-command routing ------------------------------------------------
-    if args[0] in ("--help", "-h", "help"):
+    if args and args[0] in ("--help", "-h", "help"):
         print_help()
         return True
 
     if args and args[0] == "sync":
+        json_handler.log_operation("status_checked", {"subcommand": "sync"})
         return _handle_sync()
 
-    # --- default: show PRAX system status -----------------------------------
+    # --- default: show PRAX system status (bare 'status' or unknown sub) ---
+    json_handler.log_operation("status_checked", {"subcommand": "show"})
     status = get_system_status()
 
-    console.print("\n📊 PRAX System Status")
+    console.print()
+    console.print("[bold cyan]PRAX System Status[/bold cyan]")
     console.print("=" * 60)
-    console.print(f"Total Modules: {status['total_modules']}")
-    console.print(f"Active Loggers: {status['individual_loggers']}")
-    console.print(f"System Logs Dir: {status['system_logs_dir']}")
-    console.print(f"Module Logs Dir: {status['module_logs_dir']}")
-    console.print(f"Registry File: {status['registry_file']}")
-    console.print(f"File Watcher: {'🟢 Active' if status['file_watcher_active'] else '🔴 Inactive'}")
-    console.print(f"Logger Override: {'🟢 Active' if status['logger_override_active'] else '🔴 Inactive'}")
-    console.print("=" * 60 + "\n")
+    console.print(f"  Total Modules:   {status['total_modules']}")
+    console.print(f"  Active Loggers:  {status['individual_loggers']}")
+    console.print(f"  System Logs Dir: {status['system_logs_dir']}")
+    console.print(f"  Module Logs Dir: {status['module_logs_dir']}")
+    console.print(f"  Registry File:   {status['registry_file']}")
+    console.print(f"  File Watcher:    {'Active' if status['file_watcher_active'] else 'Inactive'}")
+    console.print(f"  Logger Override: {'Active' if status['logger_override_active'] else 'Inactive'}")
+    console.print("=" * 60)
+    console.print()
     return True
 
 

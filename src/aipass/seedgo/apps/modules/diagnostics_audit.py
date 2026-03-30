@@ -14,7 +14,7 @@ undefined variables, and other static analysis issues.
 
 Usage:
     seedgo diagnostics           # All branches
-    seedgo diagnostics flow      # Specific branch
+    seedgo diagnostics @flow     # Specific branch
 """
 
 import sys
@@ -170,7 +170,7 @@ def print_introspection():
     console.print("[yellow]How It Works:[/yellow]")
     console.print("  Diagnostics checking runs through the audit pipeline:")
     console.print("  [green]drone @seedgo audit aipass[/green]         [dim]# All branches[/dim]")
-    console.print("  [green]drone @seedgo audit aipass flow[/green]    [dim]# Single branch[/dim]")
+    console.print("  [green]drone @seedgo audit aipass @flow[/green]   [dim]# Single branch[/dim]")
     console.print()
 
     console.print("[yellow]Next:[/yellow]")
@@ -187,13 +187,13 @@ def print_help():
 
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [green]drone @seedgo diagnostics_audit[/green]            [dim]Scan all branches for type errors[/dim]")
-    console.print("  [green]drone @seedgo diagnostics_audit <branch>[/green]   [dim]Scan specific branch[/dim]")
+    console.print("  [green]drone @seedgo diagnostics_audit @<branch>[/green]  [dim]Scan specific branch[/dim]")
     console.print()
 
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [green]drone @seedgo diagnostics_audit[/green]")
-    console.print("  [green]drone @seedgo diagnostics_audit flow[/green]")
-    console.print("  [green]drone @seedgo diagnostics_audit spawn[/green]")
+    console.print("  [green]drone @seedgo diagnostics_audit @flow[/green]")
+    console.print("  [green]drone @seedgo diagnostics_audit @spawn[/green]")
     console.print()
 
     console.print("[yellow]WHAT IT CHECKS:[/yellow]")

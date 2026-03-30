@@ -72,24 +72,24 @@ def handle_command(command: str, args: List[str]) -> bool:
         # Log operation
         json_handler.log_operation(f"api_key_{command}", {"command": command})
 
-        # Standalone commands — route before introspection gate
+        # Route all commands before introspection gate
         if command == "list-providers":
             list_providers()
             return True
         if command == "init":
             init_env()
             return True
+        if command == "get-key":
+            get_key(args)
+            return True
+        if command == "validate":
+            validate_key(args)
+            return True
 
-        # NO-ARGS GATE (seedgo standard)
+        # NO-ARGS GATE (seedgo standard) — only for unrecognized subcommands
         if not args:
             print_introspection()
             return True
-
-        # Arg-required commands
-        if command == "get-key":
-            get_key(args)
-        elif command == "validate":
-            validate_key(args)
 
         return True
     except Exception as e:

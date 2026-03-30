@@ -55,8 +55,10 @@ class TestFullLifecycle:
         assert skills[0]["has_handler"] is False
 
         # Load (parse full SKILL.md)
-        metadata, body = parse_full_skill_md(skill_path / "SKILL.md")
+        result = parse_full_skill_md(skill_path / "SKILL.md")
+        metadata, body = result[0], result[1]
         assert metadata is not None
+        assert isinstance(metadata, dict)
         assert metadata["name"] == "test-md"
         assert body is not None
 
@@ -113,7 +115,10 @@ class TestCatalogSkillsLifecycle:
         assert github[0]["has_handler"] is False
 
         # Parse full SKILL.md
-        metadata, body = parse_full_skill_md(github[0]["path"] / "SKILL.md")
+        result = parse_full_skill_md(github[0]["path"] / "SKILL.md")
+        metadata, body = result[0], result[1]
+        assert metadata is not None
+        assert isinstance(metadata, dict)
         assert metadata["name"] == "github"
         assert body is not None
         assert "gh" in body.lower()
@@ -176,5 +181,30 @@ class TestTemplates:
             result = copy_template(template["path"], target, "exists")
             assert result["success"] is False
             assert "already exists" in result["error"]
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_copy_template_excludes_pycache(self):
+        """copy_template must not include __pycache__ directories in output."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            template = get_template("full")
+            assert template["success"] is True
+            # Create a __pycache__ dir inside the template to ensure it gets filtered
+            pycache = template["path"] / "__pycache__"
+            pycache_existed = pycache.exists()
+            if not pycache_existed:
+                pycache.mkdir()
+                (pycache / "dummy.pyc").write_bytes(b"\x00")
+            try:
+                target = Path(tmpdir) / "cache-test"
+                result = copy_template(template["path"], target, "cache-test")
+                assert result["success"] is True
+                assert not (target / "__pycache__").exists()
+                for f in result["created_files"]:
+                    assert "__pycache__" not in f
+            finally:
+                if not pycache_existed:
+                    shutil.rmtree(str(pycache))
         finally:
             shutil.rmtree(tmpdir)

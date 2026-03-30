@@ -183,7 +183,7 @@ def print_help() -> None:
     console.print("[yellow]Audit:[/yellow]")
     console.print("  [green]drone @seedgo audit[/green]                          [dim]# Show available checker packs[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]                   [dim]# Audit all branches[/dim]")
-    console.print("  [green]drone @seedgo audit aipass flow[/green]              [dim]# Audit single branch[/dim]")
+    console.print("  [green]drone @seedgo audit aipass @flow[/green]             [dim]# Audit single branch[/dim]")
     console.print()
 
     console.print("[yellow]Query Standards:[/yellow]")
@@ -195,6 +195,11 @@ def print_help() -> None:
     console.print("[yellow]Checklist:[/yellow]")
     console.print("  [green]drone @seedgo checklist[/green]                      [dim]# Show checklist introspection[/dim]")
     console.print("  [green]drone @seedgo checklist <file>[/green]               [dim]# Run per-standard checklist on file[/dim]")
+    console.print()
+
+    console.print("[yellow]Diagnostics:[/yellow]")
+    console.print("  [green]drone @seedgo diagnostics[/green]                    [dim]# Pyright errors across all branches[/dim]")
+    console.print("  [green]drone @seedgo diagnostics @flow[/green]              [dim]# Single branch diagnostics[/dim]")
     console.print()
 
     console.print("─" * 70)

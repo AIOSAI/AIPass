@@ -192,16 +192,20 @@ def show_search_results(
         console.print(f"[cyan]Type:[/cyan] {memory_type}")
     console.print()
 
-    console.print("[dim]Encoding query...[/dim]")
-    console.print("[dim]Searching collections...[/dim]")
+    console.print("[dim]Searching... (first run may take 30s for model loading)[/dim]")
 
     # Delegate to handler
-    result = _handler_execute_search(
-        query=query,
-        branch=branch,
-        memory_type=memory_type,
-        n_results=n_results
-    )
+    try:
+        result = _handler_execute_search(
+            query=query,
+            branch=branch,
+            memory_type=memory_type,
+            n_results=n_results
+        )
+    except Exception as exc:
+        logger.error(f"[search] Handler raised exception: {exc}")
+        error(f"Search failed: {exc}")
+        return False
 
     if not result['success']:
         error(result.get('error', 'Unknown error'))

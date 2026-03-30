@@ -86,7 +86,7 @@ def add_comment(args: List[str]) -> dict:
     # --- Get caller identity ---
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     author = caller.get("name", "UNKNOWN")
 
@@ -270,7 +270,7 @@ def vote_on_content(args: List[str]) -> dict:
     # --- Get caller identity ---
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     voter = caller.get("name", "UNKNOWN")
 

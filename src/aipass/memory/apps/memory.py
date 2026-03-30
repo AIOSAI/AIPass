@@ -114,6 +114,9 @@ def print_help():
     table.add_row("rollover check", "Dry run — check what needs rollover")
     table.add_row("rollover sync-lines", "Update line count metadata")
     table.add_row("search <query>", "Semantic search across all branch memories")
+    table.add_row("symbolic <subcommand>", "Symbolic/fragmented memory extraction and search")
+    table.add_row("templates <subcommand>", "Living template push, diff, and status")
+    table.add_row("verify <plan_label>", "Check if a plan is vectorized in ChromaDB")
     table.add_row("watch", "Start memory watcher (auto-rollover on changes)")
 
     console.print(table)
@@ -159,7 +162,7 @@ def print_help():
     console.print("-" * 70)
     console.print()
 
-    console.print("Commands: search, rollover [run|status|check|sync-lines], watch")
+    console.print("Commands: search, rollover [run|status|check|sync-lines], symbolic, templates, verify, watch")
     console.print()
 
 

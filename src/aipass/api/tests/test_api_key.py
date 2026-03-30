@@ -165,16 +165,41 @@ def test_handle_command_help_gate_short_flag(mock_jh, mock_header, mock_console)
 
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
+@patch(PATCH_SUCCESS)
+@patch(PATCH_ERROR)
 @patch(PATCH_JSON_HANDLER)
-def test_handle_command_introspection_gate(mock_jh, mock_header, mock_console):
-    """get-key with no args should trigger print_introspection and return True."""
+@patch(PATCH_KEYS)
+def test_handle_command_get_key_no_args_defaults_to_openrouter(
+    mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console
+):
+    """get-key with no args should execute with default provider 'openrouter'."""
+    mock_keys.get_api_key.return_value = "sk-or-test-key-123"
+
     result = api_key.handle_command("get-key", [])
 
     assert result is True
-    # Introspection gate fires after log_operation
-    mock_jh.log_operation.assert_called_once()
-    # Introspection prints the header "API Key Module Introspection"
-    mock_header.assert_called_with("API Key Module Introspection")
+    mock_keys.get_api_key.assert_called_once_with("openrouter")
+    mock_header.assert_called_with("Get API Key - openrouter")
+
+
+@patch(PATCH_CONSOLE)
+@patch(PATCH_HEADER)
+@patch(PATCH_SUCCESS)
+@patch(PATCH_ERROR)
+@patch(PATCH_JSON_HANDLER)
+@patch(PATCH_KEYS)
+def test_handle_command_validate_no_args_defaults_to_openrouter(
+    mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console
+):
+    """validate with no args should execute with default provider 'openrouter'."""
+    mock_keys.get_api_key.return_value = "sk-or-test-key-123"
+    mock_keys.validate_key.return_value = True
+
+    result = api_key.handle_command("validate", [])
+
+    assert result is True
+    mock_keys.get_api_key.assert_called_once_with("openrouter")
+    mock_header.assert_called_with("Validate API Key - openrouter")
 
 
 @patch(PATCH_CONSOLE)

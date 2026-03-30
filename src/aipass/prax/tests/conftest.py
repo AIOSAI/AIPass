@@ -16,6 +16,8 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
+collect_ignore_glob = [".archive/*"]
+
 
 # =============================================
 # INFRASTRUCTURE MOCKS

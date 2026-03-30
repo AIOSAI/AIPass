@@ -151,6 +151,9 @@ def handle_command(command: str, args: list) -> bool:
         if not args:
             print_introspection()
             return True
+        if args[0] in ['--help', '-h', 'help']:
+            print_help()
+            return True
         subcommand = args[0]
         remaining = args[1:]
         return handle_command(subcommand, remaining)

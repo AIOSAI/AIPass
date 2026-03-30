@@ -68,6 +68,20 @@ def _delivery_callback(branch_path, new_count, opened_count, total):
                        update_central_fn=update_central)
 
 
+def _resolve_branch_path() -> Path:
+    """Resolve the branch path for inbox operations.
+
+    Tries get_current_user() first (detects caller's branch).
+    Falls back to this module's own branch path when caller detection fails
+    (e.g., user calling from terminal outside any branch directory).
+    """
+    try:
+        return Path(get_current_user()["mailbox_path"]).parent
+    except RuntimeError as e:
+        logger.warning("[email] caller detection failed, using own branch: %s", e)
+        return _AI_MAIL_DIR
+
+
 HELP_TEXT = """
 Email Module - Send and manage branch-to-branch email (Lifecycle v2)
 
@@ -250,7 +264,16 @@ def handle_inbox(args: List[str]) -> bool:
     json_handler.log_operation("inbox_viewed")
     try:
         first_arg = args[0] if args else None
-        ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, get_current_user)
+        def _get_user_with_fallback():
+            try:
+                return get_current_user()
+            except RuntimeError as e:
+                logger.warning("[email] caller detection failed for inbox, using own branch: %s", e)
+                return {
+                    "mailbox_path": str(_AI_MAIL_DIR / ".ai_mail.local"),
+                    "display_name": "AI_MAIL",
+                }
+        ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, _get_user_with_fallback)
         if not ok:
             error(info['error'])
             return False
@@ -290,13 +313,13 @@ def handle_view(args: List[str]) -> bool:
     json_handler.log_operation("view_email_initiated", {"args": args})
     if not args:
         error("Usage: drone @ai_mail view <message_id>")
-        return False
+        return True
     try:
-        branch_path = Path(get_current_user()["mailbox_path"]).parent
+        branch_path = _resolve_branch_path()
         success, message, email_data = mark_as_opened(branch_path, args[0])
         if not success or email_data is None:
             error(message)
-            return False
+            return True
         header = format_email_header(email_data)
         console.print(f"\n{header}")
         console.print(f"\n{email_data.get('message', '')}\n{'='*70}")
@@ -311,7 +334,7 @@ def handle_view(args: List[str]) -> bool:
     except Exception as e:
         logger.error(f"[email] View failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def handle_close(args: List[str]) -> bool:
@@ -319,9 +342,9 @@ def handle_close(args: List[str]) -> bool:
     json_handler.log_operation("close_email_initiated", {"args": args})
     if not args:
         error("Usage: drone @ai_mail close <id> [id2 ...] | close all")
-        return False
+        return True
     try:
-        branch_path = Path(get_current_user()["mailbox_path"]).parent
+        branch_path = _resolve_branch_path()
         if args[0].lower() == "all":
             success, message, count = mark_all_read_and_archive(branch_path)
             if success:
@@ -354,7 +377,7 @@ def handle_close(args: List[str]) -> bool:
     except Exception as e:
         logger.error(f"[email] Close failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def handle_reply(args: List[str]) -> bool:
@@ -362,14 +385,14 @@ def handle_reply(args: List[str]) -> bool:
     json_handler.log_operation("reply_email_initiated", {"args": args})
     if len(args) < 2:
         error("Usage: drone @ai_mail reply <message_id> \"your message\"")
-        return False
+        return True
     try:
-        branch_path = Path(get_current_user()["mailbox_path"]).parent
+        branch_path = _resolve_branch_path()
         inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
         original = get_email_by_id(inbox_file, args[0])
         if not original:
             error(f"Message not found: {args[0]}")
-            return False
+            return True
         success, message, reply_id = send_reply(branch_path, original, args[1])
         if success:
             console.print(f"[green]{message}[/green]")
@@ -377,18 +400,18 @@ def handle_reply(args: List[str]) -> bool:
             error(message)
         if success:
             json_handler.log_operation("email_replied", {"message_id": args[0], "reply_id": reply_id})
-        return success
+        return True
     except Exception as e:
         logger.error(f"[email] Reply failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def handle_sent(args: List[str]) -> bool:
     """View sent messages."""
     json_handler.log_operation("sent_viewed")
     try:
-        sent_folder = Path(get_current_user()["mailbox_path"]) / "sent"
+        sent_folder = _resolve_branch_path() / ".ai_mail.local" / "sent"
         if not sent_folder.exists():
             console.print("No sent messages")
             return True
@@ -406,7 +429,7 @@ def handle_sent(args: List[str]) -> bool:
     except Exception as e:
         logger.error(f"[email] Sent view failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def handle_contacts(args: List[str]) -> bool:
@@ -416,7 +439,7 @@ def handle_contacts(args: List[str]) -> bool:
         branches = get_all_branches()
         if not branches:
             error("No contacts found")
-            return False
+            return True
         console.print(f"\nTotal: {len(branches)} branches\n")
         console.print(f"{'EMAIL':<20} {'BRANCH NAME':<25} {'PATH':<35}")
         console.print("-" * 80)
@@ -426,7 +449,7 @@ def handle_contacts(args: List[str]) -> bool:
     except Exception as e:
         logger.error(f"[email] Contacts view failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def print_introspection():

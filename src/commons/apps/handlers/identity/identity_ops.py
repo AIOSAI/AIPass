@@ -135,11 +135,44 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict[str, Any]]
         return None
 
 
+def get_branch_info_by_name(branch_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Look up branch information in AIPASS_REGISTRY.json by name.
+
+    Args:
+        branch_name: Branch name to look up (case-insensitive).
+
+    Returns:
+        Dict with branch info from registry, or None if not found.
+    """
+    if not BRANCH_REGISTRY_PATH.exists():
+        return None
+
+    try:
+        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+
+        name_upper = branch_name.upper()
+        for branch in registry.get("branches", []):
+            if branch.get("name", "").upper() == name_upper:
+                return branch
+
+        return None
+
+    except Exception:
+        logger.warning("[identity_ops] Failed to look up branch by name in registry")
+        return None
+
+
 def get_caller_branch() -> Optional[Dict[str, Any]]:
     """
-    Detect which branch is calling The Commons based on PWD.
+    Detect which branch is calling The Commons.
 
-    Walks up from CWD to find branch root, then looks up in AIPASS_REGISTRY.json.
+    Detection order:
+    1. AIPASS_CALLER_CWD env var (set by drone) — walk up to find .trinity/
+    2. Current working directory — walk up to find .trinity/
+    3. AIPASS_CALLER_BRANCH env var (set by drone) — direct name lookup
+
     Auto-registers the branch as a Commons agent if not already present.
 
     Returns:
@@ -147,27 +180,29 @@ def get_caller_branch() -> Optional[Dict[str, Any]]:
         or None if no branch detected.
     """
     try:
-        # Use caller's original CWD if routed through drone
+        # Strategy 1 & 2: Walk up from CWD to find branch root
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
         cwd = Path(caller_cwd) if caller_cwd else Path.cwd()
         branch_root = find_branch_root(cwd)
 
-        if not branch_root:
-            logger.warning("[commons.identity] Could not detect branch from PWD")
-            return None
+        if branch_root:
+            branch_info = get_branch_info_from_registry(branch_root)
+            if branch_info:
+                _ensure_agent_registered(branch_info)
+                json_handler.log_operation("caller_detected", {"branch": branch_info.get("name", "unknown")})
+                return branch_info
 
-        branch_info = get_branch_info_from_registry(branch_root)
-        if not branch_info:
-            logger.warning(
-                f"[commons.identity] Branch at {branch_root} not in BRANCH_REGISTRY"
-            )
-            return None
+        # Strategy 3: Use AIPASS_CALLER_BRANCH env var (drone sets this)
+        caller_branch_name = os.environ.get("AIPASS_CALLER_BRANCH", "")
+        if caller_branch_name:
+            branch_info = get_branch_info_by_name(caller_branch_name)
+            if branch_info:
+                _ensure_agent_registered(branch_info)
+                json_handler.log_operation("caller_detected", {"branch": branch_info.get("name", "unknown"), "via": "AIPASS_CALLER_BRANCH"})
+                return branch_info
 
-        # Auto-register as Commons agent
-        _ensure_agent_registered(branch_info)
-
-        json_handler.log_operation("caller_detected", {"branch": branch_info.get("name", "unknown")})
-        return branch_info
+        logger.warning("[commons.identity] Could not detect calling branch — run from a branch directory or use drone routing")
+        return None
 
     except Exception as e:
         logger.error(f"[commons.identity] Branch detection failed: {e}")

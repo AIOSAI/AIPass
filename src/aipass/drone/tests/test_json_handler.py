@@ -634,3 +634,66 @@ def test_reimport_after_mock(tmp_path: Path) -> None:
     )
     if handler_module:
         importlib.reload(handler_module)
+
+
+# ============================================================================
+# Group 9 — Empty file resilience (4 tests)
+# ============================================================================
+
+def test_ensure_regenerates_empty_log_file(tmp_path: Path) -> None:  # JH-044
+    """Empty log.json should be regenerated, not crash with JSONDecodeError."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    target = json_dir / "empty_log.json"
+    target.write_text("", encoding="utf-8")
+
+    json_handler.ensure_json_exists("empty", "log")
+
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert isinstance(data, list), "Empty log file must be regenerated to valid list"
+
+
+def test_ensure_regenerates_empty_config_file(tmp_path: Path) -> None:  # JH-045
+    """Empty config.json should be regenerated, not crash."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    target = json_dir / "empty_config.json"
+    target.write_text("", encoding="utf-8")
+
+    json_handler.ensure_json_exists("empty", "config")
+
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert "module_name" in data, "Empty config must be regenerated with correct structure"
+
+
+def test_load_json_handles_empty_file(tmp_path: Path) -> None:  # JH-046
+    """load_json on an empty file should return default, not crash."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    target = json_dir / "empty2_log.json"
+    target.write_text("", encoding="utf-8")
+
+    result = json_handler.load_json("empty2", "log")
+    assert isinstance(result, list), "load_json must return default list for empty log"
+
+
+def test_log_operation_survives_empty_log_file(tmp_path: Path) -> None:  # JH-047
+    """log_operation should succeed even if log.json is empty."""
+    json_dir = _json_dir_as_path(tmp_path)
+    json_dir.mkdir(parents=True, exist_ok=True)
+    # Create valid config but empty log
+    config_path = json_dir / "recover_config.json"
+    config_path.write_text(json.dumps({
+        "module_name": "recover", "version": "1.0.0",
+        "config": {"max_log_entries": 100},
+        "created": "2026-01-01", "last_updated": "2026-01-01",
+    }), encoding="utf-8")
+    log_path = json_dir / "recover_log.json"
+    log_path.write_text("", encoding="utf-8")
+
+    result = json_handler.log_operation("test_op", {"key": "val"}, module_name="recover")
+    assert result is True, "log_operation must succeed on empty log file"
+
+    data = json.loads(log_path.read_text(encoding="utf-8"))
+    assert len(data) == 1, "Should have exactly one log entry after recovery"
+    assert data[0]["operation"] == "test_op"

@@ -103,7 +103,7 @@ def _show_audit_introspection() -> None:
     console.print("[yellow]Next:[/yellow]  Pick a pack to audit")
     first_pack = next(iter(packs))
     console.print(f"  [green]drone @seedgo audit {first_pack}[/green]              [dim]# All branches[/dim]")
-    console.print(f"  [green]drone @seedgo audit {first_pack} flow[/green]         [dim]# Single branch[/dim]")
+    console.print(f"  [green]drone @seedgo audit {first_pack} @flow[/green]        [dim]# Single branch[/dim]")
     console.print()
 
 
@@ -357,7 +357,7 @@ def print_help():
     console.print("[yellow]COMMANDS:[/yellow]")
     console.print("  [green]drone @seedgo audit[/green]                      [dim]Show available packs[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]               [dim]All branches, aipass pack[/dim]")
-    console.print("  [green]drone @seedgo audit aipass flow[/green]          [dim]Single branch[/dim]")
+    console.print("  [green]drone @seedgo audit aipass @flow[/green]         [dim]Single branch[/dim]")
     console.print("  [green]drone @seedgo audit --help[/green]               [dim]This help message[/dim]")
     console.print()
 
@@ -366,7 +366,7 @@ def print_help():
     console.print("  [green]drone @seedgo audit aipass[/green]")
     console.print()
     console.print("  [dim]# Audit specific branch[/dim]")
-    console.print("  [green]drone @seedgo audit aipass spawn[/green]")
+    console.print("  [green]drone @seedgo audit aipass @spawn[/green]")
     console.print()
 
     console.print("[yellow]REFERENCE:[/yellow]")

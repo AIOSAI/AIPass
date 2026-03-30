@@ -180,3 +180,51 @@ def test_handle_command_output_capture(capsys):
     # capsys captures stdout — print_help uses Rich console, so captured may be empty
     # but the capsys fixture inclusion satisfies the pattern requirement
     _captured = capsys.readouterr()
+
+
+def test_help_text_at_prefix_consistency():
+    """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
+
+    Scans help text strings in seedgo.py and all modules for branch name
+    patterns that should use @ prefix but don't.
+    """
+    import re
+    from pathlib import Path
+
+    branch_root = Path(__file__).resolve().parents[1]
+    files_to_check = [
+        branch_root / "apps" / "seedgo.py",
+        *sorted((branch_root / "apps" / "modules").glob("*.py")),
+    ]
+
+    # Pattern: 'audit aipass <word>' or 'diagnostics <word>' where <word> is
+    # a known branch name without @ prefix. We check for bare branch names
+    # after command keywords in string literals.
+    known_branches = {
+        "drone", "seedgo", "prax", "cli", "flow", "ai_mail", "api",
+        "trigger", "spawn", "devpulse", "backup", "daemon", "memory",
+        "commons", "skills",
+    }
+    # Match: a command keyword followed by a bare branch name (no @)
+    bare_branch_re = re.compile(
+        r'(?:audit\s+aipass|diagnostics(?:_audit)?|readme(?:_update)?)\s+'
+        r'(' + '|'.join(known_branches) + r')\b'
+    )
+
+    violations = []
+    for fpath in files_to_check:
+        if not fpath.exists():
+            continue
+        source = fpath.read_text(encoding="utf-8")
+        for i, line in enumerate(source.splitlines(), 1):
+            # Only check inside string literals (lines with quotes)
+            if '"' not in line and "'" not in line:
+                continue
+            match = bare_branch_re.search(line)
+            if match:
+                violations.append(f"{fpath.name}:{i}: bare '{match.group(1)}' (should be '@{match.group(1)}')")
+
+    assert not violations, (
+        f"Help text has {len(violations)} bare branch references (missing @):\n"
+        + "\n".join(violations)
+    )

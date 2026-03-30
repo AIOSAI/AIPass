@@ -178,11 +178,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command was recognized, False if not
     """
-    # Introspection gate: no args = show module info
-    if not args:
-        print_introspection()
-        return True
-
     # ---- templates ----
     if command == "templates":
         # Intercept help before arg parsing

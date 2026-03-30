@@ -154,18 +154,19 @@ def test_handle_command_help_gate(mock_jh, mock_header, mock_console, mock_help)
     mock_jh.log_operation.assert_not_called()
 
 
-@patch(f"{PATCH_ROOT}.print_introspection")
+@patch(f"{PATCH_ROOT}.error")
 @patch(f"{PATCH_ROOT}.console")
 @patch(f"{PATCH_ROOT}.header")
 @patch(f"{PATCH_ROOT}.json_handler")
-def test_handle_command_introspection_gate(mock_jh, mock_header, mock_console, mock_intro):
-    """'track' with empty args triggers introspection gate."""
+def test_handle_command_track_no_args_executes(mock_jh, mock_header, mock_console, mock_error):
+    """'track' with empty args should execute (show error), not show introspection."""
     from aipass.api.apps.modules import usage_tracker
 
     result = usage_tracker.handle_command("track", [])
 
     assert result is True
-    mock_intro.assert_called_once()
+    mock_error.assert_called()
+    assert "Generation ID required" in mock_error.call_args[0][0]
 
 
 @patch(f"{PATCH_ROOT}.console")

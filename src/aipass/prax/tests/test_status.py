@@ -86,16 +86,16 @@ def test_handle_command_help_word(mock_prax_infrastructure, monkeypatch):
     assert any("status" in c.lower() for c in calls)
 
 
-def test_handle_command_no_args_calls_introspection(mock_prax_infrastructure, monkeypatch):
-    """No args prints introspection and returns True."""
+def test_handle_command_no_args_shows_system_status(mock_prax_infrastructure, monkeypatch):
+    """No args shows system status and returns True."""
     _ensure_sync_mock(monkeypatch)
     handle_command, _, _ = _fresh_import()
 
     result = handle_command("status", [])
     assert result is True
-    # Introspection prints "status Module"
+    # System status prints "PRAX System Status"
     calls = [str(c) for c in mock_prax_infrastructure.console.print.call_args_list]
-    assert any("status Module" in c for c in calls)
+    assert any("System Status" in c for c in calls)
 
 
 def test_handle_command_wrong_command(mock_prax_infrastructure, monkeypatch):

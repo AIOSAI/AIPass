@@ -54,6 +54,8 @@ except ImportError:
 from commons.apps.modules.commons_identity import extract_mentions
 from commons.apps.handlers.identity.identity_ops import (
     find_branch_root,
+    get_branch_info_by_name,
+    get_caller_branch,
     resolve_display_name,
 )
 import commons.apps.handlers.identity.identity_ops as identity_ops_mod
@@ -218,3 +220,143 @@ def test_resolve_display_name_compact_no_alias(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(identity_ops_mod, "_alias_cache", {})
     result = resolve_display_name("RAW_NAME", compact=True)
     assert result == "RAW_NAME"
+
+
+# ===========================================================================
+# get_branch_info_by_name — registry lookup by name
+# ===========================================================================
+
+def test_get_branch_info_by_name_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Returns branch info when name matches a registry entry."""
+    import json as json_mod
+
+    registry = {"branches": [
+        {"name": "DRONE", "path": "src/aipass/drone", "email": "@drone"},
+        {"name": "FLOW", "path": "src/aipass/flow", "email": "@flow"},
+    ]}
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text(json_mod.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", reg_file)
+
+    result = get_branch_info_by_name("drone")
+    assert result is not None
+    assert result["name"] == "DRONE"
+    assert result["email"] == "@drone"
+
+
+def test_get_branch_info_by_name_case_insensitive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Lookup is case-insensitive."""
+    import json as json_mod
+
+    registry = {"branches": [{"name": "FLOW", "path": "src/aipass/flow"}]}
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text(json_mod.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", reg_file)
+
+    result = get_branch_info_by_name("Flow")
+    assert result is not None
+    assert result["name"] == "FLOW"
+
+
+def test_get_branch_info_by_name_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Returns None when name is not in registry."""
+    import json as json_mod
+
+    registry = {"branches": [{"name": "DRONE", "path": "src/aipass/drone"}]}
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text(json_mod.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", reg_file)
+
+    result = get_branch_info_by_name("nonexistent")
+    assert result is None
+
+
+def test_get_branch_info_by_name_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Returns None when registry file doesn't exist."""
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", tmp_path / "nope.json")
+    result = get_branch_info_by_name("DRONE")
+    assert result is None
+
+
+# ===========================================================================
+# get_caller_branch — drone routing fallback via AIPASS_CALLER_BRANCH
+# ===========================================================================
+
+@patch("commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_uses_caller_branch_env(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Falls back to AIPASS_CALLER_BRANCH when CWD has no .trinity/."""
+    import json as json_mod
+
+    registry = {"branches": [{"name": "DRONE", "path": "src/aipass/drone", "email": "@drone"}]}
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text(json_mod.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", reg_file)
+
+    # CWD with no .trinity/ — simulates running from project root
+    no_branch_dir = tmp_path / "somewhere"
+    no_branch_dir.mkdir()
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(no_branch_dir))
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "drone")
+
+    result = get_caller_branch()
+    assert result is not None
+    assert result["name"] == "DRONE"
+    mock_register.assert_called_once()
+
+
+@patch("commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_prefers_cwd_over_env(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """CWD-based detection takes priority over AIPASS_CALLER_BRANCH."""
+    import json as json_mod
+
+    # Set up a branch directory with .trinity/
+    trinity = tmp_path / ".trinity"
+    trinity.mkdir()
+    (trinity / "passport.json").write_text("{}", encoding="utf-8")
+
+    registry = {"branches": [
+        {"name": "FLOW", "path": str(tmp_path.relative_to(tmp_path.parent.parent)), "email": "@flow"},
+    ]}
+    reg_file = tmp_path / "AIPASS_REGISTRY.json"
+    reg_file.write_text(json_mod.dumps(registry), encoding="utf-8")
+    monkeypatch.setattr(identity_ops_mod, "BRANCH_REGISTRY_PATH", reg_file)
+
+    # CWD is inside the branch
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+    # Also set CALLER_BRANCH to something different — should NOT be used
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "DRONE")
+
+    # Need to patch get_branch_info_from_registry to return for our tmp_path
+    with patch.object(identity_ops_mod, "get_branch_info_from_registry", return_value={"name": "FLOW", "email": "@flow"}):
+        result = get_caller_branch()
+
+    assert result is not None
+    assert result["name"] == "FLOW"  # CWD-based, not DRONE from env
+
+
+@patch("commons.apps.handlers.identity.identity_ops.json_handler")
+def test_get_caller_branch_returns_none_when_no_detection(
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Returns None when neither CWD nor env var yields a branch."""
+    no_branch_dir = tmp_path / "empty"
+    no_branch_dir.mkdir()
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(no_branch_dir))
+    monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+
+    result = get_caller_branch()
+    assert result is None

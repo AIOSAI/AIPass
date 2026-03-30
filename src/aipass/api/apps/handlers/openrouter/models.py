@@ -65,7 +65,7 @@ def fetch_models_from_api(api_key: str) -> List[Dict]:
 
         # Make API request
         logger.info(f"[{MODULE_NAME}] Requesting models from OpenRouter API")
-        response = requests.get(
+        response = requests.get(  # type: ignore[attr-defined]
             OPENROUTER_API_URL,
             headers=headers,
             timeout=DEFAULT_TIMEOUT

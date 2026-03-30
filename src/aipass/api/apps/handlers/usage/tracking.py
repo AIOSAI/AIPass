@@ -144,7 +144,7 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
         }
 
         # Query the generation endpoint
-        response = requests.get(
+        response = requests.get(  # type: ignore[attr-defined]
             GENERATION_ENDPOINT,
             params={"id": generation_id},
             headers=headers,

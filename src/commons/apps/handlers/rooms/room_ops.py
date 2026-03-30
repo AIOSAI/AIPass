@@ -56,7 +56,7 @@ def create_room(args: List[str]) -> dict:
     # Get caller identity
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     caller_name = caller.get("name", "UNKNOWN")
 
@@ -171,7 +171,7 @@ def join_room(args: List[str]) -> dict:
     # Get caller identity
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     caller_name = caller.get("name", "UNKNOWN")
 

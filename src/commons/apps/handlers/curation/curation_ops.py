@@ -76,7 +76,7 @@ def add_react(args: List[str]) -> dict:
 
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 
@@ -142,7 +142,7 @@ def remove_react(args: List[str]) -> dict:
 
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 
@@ -237,7 +237,7 @@ def pin_post_cmd(args: List[str]) -> dict:
 
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 
@@ -301,7 +301,7 @@ def unpin_post_cmd(args: List[str]) -> dict:
 
     caller = get_caller_branch()
     if not caller:
-        return {"success": False, "error": "Could not detect calling branch"}
+        return {"success": False, "error": "Could not detect calling branch. Run from a branch directory or use drone routing (drone @commons ...)"}
 
     agent_name = caller["name"]
 

@@ -71,25 +71,25 @@ class TestSuggestPrefix:
 class TestHandleCommandRouting:
     """Verify handle_command routes to the correct function for each input."""
 
-    def test_no_args_calls_introspection(self):
-        """No args should call print_introspection and return True."""
-        with patch(f"{_MOD}.print_introspection") as mock_intro:
+    def test_no_args_shows_registered_types(self):
+        """templates with no args shows registered types (default action)."""
+        mock_registry = {"types": {"flow_plans": {"prefix": "FPLAN"}}}
+
+        with patch(f"{_MOD}.load_registry", return_value=mock_registry), \
+             patch(f"{_MOD}._display_registered_types") as mock_display:
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("templates", [])
 
-            mock_intro.assert_called_once()
+            mock_display.assert_called_once_with(mock_registry)
             assert result is True
 
-    def test_any_command_no_args_calls_introspection(self):
-        """Even non-templates commands with no args trigger introspection."""
-        with patch(f"{_MOD}.print_introspection") as mock_intro:
-            from aipass.flow.apps.modules.template_manager import handle_command
+    def test_unknown_command_no_args_returns_false(self):
+        """Non-template commands with no args are not claimed."""
+        from aipass.flow.apps.modules.template_manager import handle_command
 
-            result = handle_command("register", [])
-
-            mock_intro.assert_called_once()
-            assert result is True
+        result = handle_command("post", [])
+        assert result is False
 
     @pytest.mark.parametrize("help_flag", ["--help", "-h", "help"])
     def test_templates_help_flags(self, help_flag: str):
@@ -188,25 +188,13 @@ class TestHandleCommandRouting:
     # ---- unregister command ----
 
     def test_unregister_no_args_shows_error(self):
-        """'unregister' with no dir arg should show usage error.
-
-        Note: empty args hits the introspection gate, so we test that
-        unregister with at least one arg but no dir is handled.  Actually,
-        looking at the source, unregister checks ``if not args`` *after*
-        the introspection gate already caught truly empty args.  So we
-        need a different approach: the introspection gate fires when
-        args is empty for ANY command.  unregister's own ``if not args``
-        is unreachable via handle_command.  Test via route that reaches it.
-        """
-        # The introspection gate catches empty args before we ever reach
-        # the unregister block, so args=[] triggers introspection, not error.
-        # We verify that behavior here -- this is correct by design.
-        with patch(f"{_MOD}.print_introspection") as mock_intro:
+        """'unregister' with no dir arg should show usage error."""
+        with patch(f"{_MOD}.error") as mock_error:
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("unregister", [])
 
-            mock_intro.assert_called_once()
+            mock_error.assert_called_once()
             assert result is True
 
     def test_unregister_valid_calls_remove_type(self):

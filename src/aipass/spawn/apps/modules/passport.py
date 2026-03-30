@@ -78,6 +78,11 @@ def handle_passport(args: list[str]) -> int:
         warning("--purpose", details="Purpose description")
         return 1
 
+    # Intercept --help before argparse (argparse has add_help=False)
+    if "--help" in args or "-h" in args:
+        print_introspection()
+        return 0
+
     parser = argparse.ArgumentParser(prog="spawn passport", add_help=False)
     parser.add_argument("target")
     parser.add_argument("--role", default="")

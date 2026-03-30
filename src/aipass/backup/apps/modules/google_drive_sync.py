@@ -280,13 +280,15 @@ def handle_command(args) -> bool:
         console.print("  drive-test          - Test Google Drive connectivity")
         console.print("  drive-sync          - Sync backup directory to Google Drive")
         console.print("  drive-sync --test   - Run a small test sync to verify integration")
-        console.print("  drive-clear-tracker - Clear file tracker cache")
+        console.print("  drive-sync --dry-run - Preview what would be uploaded (no files sent)")
+        console.print("  drive-clear-tracker --force - Clear file tracker cache (requires --force)")
         console.print("  drive-stats         - Show file tracker statistics")
         console.print()
         console.print("[yellow]Options:[/yellow]")
-        console.print("  --project  Project name (default: AIPass)")
-        console.print("  --note     Sync note (default: Manual sync)")
-        console.print("  --force    Force upload all files")
+        console.print("  --project   Project name (default: AIPass)")
+        console.print("  --note      Sync note (default: Manual sync)")
+        console.print("  --force     Force upload all files / confirm destructive actions")
+        console.print("  --dry-run   Preview without executing")
         console.print()
         return True
 
@@ -361,6 +363,25 @@ def handle_command(args) -> bool:
             console.print("[green]All files up to date - nothing to sync[/green]")
             return True
 
+        # Dry-run: show what would be uploaded, then stop
+        dry_run = getattr(args, 'dry_run', False)
+        if dry_run:
+            console.print()
+            warning("DRY-RUN MODE — showing what would be uploaded (no files sent)")
+            console.print()
+            for file_path in files_to_upload[:20]:
+                try:
+                    rel_path = file_path.relative_to(backup_path)
+                except ValueError as e:
+                    logger.info(f"[google_drive_sync] Could not compute relative path: {e}")
+                    rel_path = file_path.name
+                console.print(f"  [dim]Would upload:[/dim] {rel_path}")
+            if upload_count > 20:
+                console.print(f"  [dim]... and {upload_count - 20} more files[/dim]")
+            console.print()
+            console.print(f"[green]Dry-run complete: {upload_count} files would be uploaded, 0 sent[/green]")
+            return True
+
         console.print()
 
         # Phase 2: Upload with progress bar
@@ -415,6 +436,13 @@ def handle_command(args) -> bool:
         return True  # Command was handled; success/failure shown to user above
 
     elif command == 'drive-clear-tracker':
+        force = getattr(args, 'force', False)
+        if not force:
+            data = _load_data() if _LOAD_DATA_FN else {}
+            tracker_count = len(data.get("runtime_state", {}).get("file_tracker", {}))
+            warning(f"This will clear {tracker_count} tracked file entries. Next sync will re-upload all files.")
+            console.print("  Run with --force to confirm: drone @backup drive-clear-tracker --force")
+            return True
         _clear_file_tracker()
         return True
 

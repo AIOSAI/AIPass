@@ -71,6 +71,11 @@ def handle_create(args):
         error("target path required", suggestion="drone @spawn create [class] <target_path> [--role ...]")
         return 1
 
+    # Intercept --help before argparse (argparse has add_help=False)
+    if "--help" in args or "-h" in args:
+        print_help()
+        return 0
+
     # Check if first arg is a citizen class
     citizen_class = get_default_class()
     remaining_args = args
@@ -81,6 +86,10 @@ def handle_create(args):
             error("target path required after class name")
             return 1
 
+    dry_run = "--dry-run" in remaining_args
+    if dry_run:
+        remaining_args = [a for a in remaining_args if a != "--dry-run"]
+
     parser = argparse.ArgumentParser(prog="spawn create", add_help=False)
     parser.add_argument("target_path")
     parser.add_argument("--role", default="")
@@ -90,6 +99,9 @@ def handle_create(args):
     parser.add_argument("--registry", default=None)
 
     parsed = parser.parse_args(remaining_args)
+
+    if dry_run:
+        return _dry_run_create(parsed.target_path, citizen_class, parsed)
 
     result = spawn_agent(
         target_path=parsed.target_path,
@@ -115,6 +127,51 @@ def handle_create(args):
     else:
         error(result['error'])
         return 1
+
+
+def _dry_run_create(target_path, citizen_class, parsed):
+    """Preview what create would do without making changes."""
+    from pathlib import Path
+    from aipass.spawn.apps.modules.core import _get_template_dir, get_branch_name, normalize_branch_name
+
+    target = Path(target_path).resolve()
+    template = _get_template_dir(citizen_class)
+    branch_name = get_branch_name(target)
+    branch_upper = normalize_branch_name(branch_name, "upper")
+
+    console.print()
+    header("DRY RUN — Create Preview")
+    console.print()
+    console.print(f"  [bold]Branch:[/bold]  {branch_upper}")
+    console.print(f"  [bold]Class:[/bold]   {citizen_class}")
+    console.print(f"  [bold]Path:[/bold]    {target}")
+    console.print(f"  [bold]Template:[/bold] {template}")
+    if parsed.role:
+        console.print(f"  [bold]Role:[/bold]    {parsed.role}")
+    if parsed.purpose:
+        console.print(f"  [bold]Purpose:[/bold] {parsed.purpose}")
+
+    if target.exists():
+        error(f"Target already exists: {target}")
+        return 1
+
+    if not template.exists():
+        error(f"Template not found: {template}")
+        return 1
+
+    # Count template files
+    file_count = sum(1 for f in template.rglob("*") if f.is_file() and "__pycache__" not in str(f))
+    dir_count = sum(1 for d in template.rglob("*") if d.is_dir() and "__pycache__" not in str(d))
+
+    console.print()
+    console.print(f"  [bold cyan]Would create:[/bold cyan]")
+    console.print(f"    Files:       ~{file_count}")
+    console.print(f"    Directories: ~{dir_count}")
+    console.print(f"    Registry:    add to AIPASS_REGISTRY.json")
+    console.print()
+    console.print("  [dim]No files were created. Remove --dry-run to execute.[/dim]")
+    console.print()
+    return 0
 
 
 def print_introspection():

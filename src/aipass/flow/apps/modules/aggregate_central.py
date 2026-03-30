@@ -144,12 +144,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "aggregate":
         return False
 
-    if not args:
-        print_introspection()
-        return True
-
     # Handle help flag
-    if args[0] in ["--help", "-h", "help"]:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -164,7 +160,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     if "--no-heal" in args:
         heal = False
 
-    return aggregate_central(heal=heal)
+    result = aggregate_central(heal=heal)
+    if result:
+        console.print("[green]Central plans aggregated successfully[/green]")
+    else:
+        console.print("[red]Central plans aggregation failed[/red]")
+    return result
 
 
 # =============================================

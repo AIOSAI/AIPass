@@ -133,14 +133,29 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
 
 def load_json(module_name: str, json_type: str) -> Optional[Any]:
-    """Load JSON file, auto-create if missing"""
+    """Load JSON file, auto-create if missing.
+
+    Guards against empty or corrupt JSON files by regenerating from template.
+    """
     if not ensure_json_exists(module_name, json_type):
         return None
 
     json_path = get_json_path(module_name, json_type)
 
-    with open(json_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        content = json_path.read_text(encoding='utf-8').strip()
+        if not content:
+            _log_warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
+            ensure_json_exists(module_name, json_type)
+            content = json_path.read_text(encoding='utf-8').strip()
+        return json.loads(content)
+    except (json.JSONDecodeError, OSError) as exc:
+        _log_warning(f"load_json failed for {module_name}_{json_type}: {exc}")
+        ensure_json_exists(module_name, json_type)
+        try:
+            return json.loads(json_path.read_text(encoding='utf-8'))
+        except Exception:
+            return _get_default_template(json_type, module_name)
 
 
 def save_json(module_name: str, json_type: str, data: Any) -> bool:

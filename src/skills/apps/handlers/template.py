@@ -83,8 +83,9 @@ def copy_template(template_path, target_path, skill_name):
         }
 
     try:
-        # Copy the entire template tree
-        shutil.copytree(str(template_path), str(target))
+        # Copy the entire template tree, excluding __pycache__
+        shutil.copytree(str(template_path), str(target),
+                        ignore=shutil.ignore_patterns("__pycache__"))
 
         # Replace placeholders in all files
         created_files = []

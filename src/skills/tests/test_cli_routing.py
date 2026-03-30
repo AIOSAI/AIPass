@@ -101,6 +101,28 @@ class TestHandleCommand:
         result = handle_command("create")
         assert result is False
 
+    def test_create_help_flag_returns_true(self):
+        """create --help shows help instead of treating --help as a skill name."""
+        result = handle_command("create", ["--help"])
+        assert result is True
+
+    def test_create_help_flag_shows_usage(self, capsys):
+        """create --help prints usage text."""
+        handle_command("create", ["--help"])
+        captured = capsys.readouterr()
+        assert "Usage" in captured.out
+        assert "create" in captured.out.lower()
+
+    def test_create_h_flag_returns_true(self):
+        """create -h shows help."""
+        result = handle_command("create", ["-h"])
+        assert result is True
+
+    def test_create_help_word_returns_true(self):
+        """create help shows help."""
+        result = handle_command("create", ["help"])
+        assert result is True
+
 
 # ===================================================================
 # Missing coverage: no_args, print_help, print_introspection, output_capture

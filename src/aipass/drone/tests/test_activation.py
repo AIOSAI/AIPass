@@ -474,13 +474,13 @@ class TestMainIntegration:
         mock_activate.assert_called_once_with("@seedgo")
 
     def test_activate_no_target(self) -> None:
-        """main() returns 1 when activate is called without a target."""
+        """main() returns 0 and shows help when activate has no target."""
         from aipass.drone.apps.drone import main
 
         with patch("sys.argv", ["drone", "activate"]):
             result = main()
 
-        assert result == 1
+        assert result == 0
 
     @patch("aipass.drone.apps.drone._handle_list")
     def test_list_route(self, mock_list: MagicMock) -> None:

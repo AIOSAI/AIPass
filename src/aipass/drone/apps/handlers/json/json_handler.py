@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -60,6 +62,29 @@ def _get_caller_module_name() -> str:
         if module_name and not module_name.startswith("_"):
             return module_name
     return "unknown"
+
+
+def _atomic_write_json(path: Path, data: Any) -> None:
+    """Write JSON atomically — write to temp file then rename.
+
+    Prevents truncation/corruption during concurrent access.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(path.parent), suffix=".tmp", prefix=".json_"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(path))
+    except Exception as exc:
+        logger.warning("_atomic_write_json: failed for %s: %s", path, exc)
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_exc:
+            logger.warning("_atomic_write_json: cleanup failed for %s: %s", tmp_path, cleanup_exc)
+        raise
 
 
 def _default_config(module_name: str) -> dict[str, Any]:
@@ -167,11 +192,15 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            if validate_json_structure(data, json_type):
-                return True
-            # Corrupted — fall through to regenerate
+            # Guard: empty or zero-byte files cause JSONDecodeError
+            if json_path.stat().st_size == 0:
+                logger.warning("ensure_json_exists: empty file at %s, regenerating", json_path)
+            else:
+                with open(json_path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if validate_json_structure(data, json_type):
+                    return True
+                # Corrupted — fall through to regenerate
         except Exception as exc:  # noqa: BLE001
             logger.warning("ensure_json_exists: failed to read %s, regenerating: %s", json_path, exc)
 
@@ -181,8 +210,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         raise ValueError(f"Unknown json_type: {json_type!r}")
 
     default = factory(module_name)
-    with open(json_path, "w", encoding="utf-8") as fh:
-        json.dump(default, fh, indent=2, ensure_ascii=False)
+    _atomic_write_json(json_path, default)
 
     return True
 
@@ -215,8 +243,17 @@ def load_json(module_name: str, json_type: str) -> Any | None:
         return None
 
     json_path = get_json_path(module_name, json_type)
-    with open(json_path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        if json_path.stat().st_size == 0:
+            logger.warning("load_json: empty file at %s, returning default", json_path)
+            factory = _DEFAULTS.get(json_type)
+            return factory(module_name) if factory else None
+        with open(json_path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("load_json: failed to read %s, returning default: %s", json_path, exc)
+        factory = _DEFAULTS.get(json_type)
+        return factory(module_name) if factory else None
 
 
 def save_json(module_name: str, json_type: str, data: Any) -> bool:
@@ -243,8 +280,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = _today()
 
     json_path = get_json_path(module_name, json_type)
-    with open(json_path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
+    _atomic_write_json(json_path, data)
     return True
 
 

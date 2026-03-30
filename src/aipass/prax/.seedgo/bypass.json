@@ -403,6 +403,11 @@
       "reason": "False positive — 'changed' is a local variable inside _apply_structural_updates(), not a module-level constant."
     },
     {
+      "file": "apps/modules/status.py",
+      "standard": "introspection",
+      "reason": "Intentional — status is a leaf command where bare invocation shows system status (the primary user intent), not module introspection. Introspection is available via print_introspection() and __main__."
+    },
+    {
       "file": "apps/",
       "standard": "architecture",
       "reason": "Template files managed by spawn — prax cannot add/remove template files. Template structure is defined in spawn/templates/builder/ and applied at branch creation time."

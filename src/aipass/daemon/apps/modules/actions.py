@@ -237,7 +237,7 @@ def _handle_toggle(action_id: str, enable: bool) -> bool:
     action = get_action(action_id)
     if action is None:
         _error(f"Action not found: {action_id}")
-        return False
+        return True  # Error displayed
 
     toggle_action(action_id, enable)
     state = "enabled" if enable else "disabled"
@@ -250,7 +250,7 @@ def _handle_info(action_id: str) -> bool:
     action = get_action(action_id)
     if action is None:
         _error(f"Action not found: {action_id}")
-        return False
+        return True  # Error displayed
 
     _print_action_detail(action)
     return True
@@ -260,7 +260,7 @@ def _handle_set_reminder(args: List[str]) -> bool:
     """Handle 'actions set reminder <date> "message" [--to @branch]'."""
     if len(args) < 2:
         _error('Usage: actions set reminder <date> "message" [--to @branch]')
-        return False
+        return True  # Error displayed
 
     date_str = args[0]
     message = args[1]
@@ -277,7 +277,7 @@ def _handle_set_reminder(args: List[str]) -> bool:
     if not due_date:
         _error(f"Invalid date format: {date_str}")
         console.print("[dim]Valid formats: YYYY-MM-DD, 1d, 7d, 1w, 2w[/dim]")
-        return False
+        return True  # Error displayed
 
     action = create_action(
         name=message[:50],
@@ -303,7 +303,7 @@ def _handle_set_schedule(args: List[str]) -> bool:
     """Handle 'actions set schedule @branch "prompt" <type> [time_spec]'."""
     if len(args) < 3:
         _error('Usage: actions set schedule @branch "prompt" <daily|hourly|interval> [time_spec]')
-        return False
+        return True  # Error displayed
 
     target_branch = args[0]
     prompt = args[1]
@@ -315,11 +315,11 @@ def _handle_set_schedule(args: List[str]) -> bool:
     if schedule_type not in ("daily", "hourly", "interval"):
         _error(f"Unknown schedule type: {schedule_type}")
         console.print("[dim]Valid types: daily, hourly, interval[/dim]")
-        return False
+        return True  # Error displayed
 
     if len(args) < 4:
         _error(f"{schedule_type.title()} schedule requires a time/value argument")
-        return False
+        return True  # Error displayed
 
     if schedule_type in ("daily", "hourly"):
         time_val = args[3]
@@ -329,7 +329,7 @@ def _handle_set_schedule(args: List[str]) -> bool:
         except ValueError:
             logger.warning("Invalid interval minutes value: %s", args[3])
             _error(f"Invalid interval minutes: {args[3]}")
-            return False
+            return True  # Error displayed
 
     # Generate a name from the prompt
     name = prompt[:50].replace(" ", "_").lower()
@@ -381,13 +381,13 @@ def _handle_delete(args: List[str]) -> bool:
     """Handle 'actions delete <id>'."""
     if not args:
         _error("Action ID required: actions delete <id>")
-        return False
+        return True  # Error displayed
 
     action_id = args[0]
     action = get_action(action_id)
     if action is None:
         _error(f"Action not found: {action_id}")
-        return False
+        return True  # Error displayed
 
     delete_action(action_id)
     _success(f"Deleted action {action_id}: {action['name']}")
@@ -444,14 +444,14 @@ def _route_set_subcommand(args: List[str]) -> bool:
     """Route 'actions set reminder ...' / 'actions set schedule ...'."""
     if len(args) < 2:
         _error("Usage: actions set <reminder|schedule> ...")
-        return False
+        return True  # Error displayed
     set_type = args[1]
     if set_type == "reminder":
         return _handle_set_reminder(args[2:])
     if set_type == "schedule":
         return _handle_set_schedule(args[2:])
     _error(f"Unknown set type: {set_type}. Use 'reminder' or 'schedule'.")
-    return False
+    return True  # Error displayed
 
 
 def _route_action_id(action_id: str, args: List[str]) -> bool:
@@ -466,7 +466,7 @@ def _route_action_id(action_id: str, args: List[str]) -> bool:
     if sub_action == "info":
         return _handle_info(action_id)
     _error(f"Unknown action command: {sub_action}. Use 'on', 'off', or 'info'.")
-    return False
+    return True  # Error displayed
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -514,12 +514,12 @@ def handle_command(command: str, args: List[str]) -> bool:
 
         _error(f"Unknown subcommand: {subcommand}")
         console.print("[dim]Run 'actions --help' for available commands[/dim]")
-        return False
+        return True  # Command was handled (error displayed)
 
     except Exception as e:
         logger.error("[actions] Error in actions command: %s", e, exc_info=True)
         _error(f"Error: {e}")
-        return False
+        return True  # Error displayed
 
 
 # =============================================

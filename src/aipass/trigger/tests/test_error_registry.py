@@ -836,3 +836,65 @@ def test_report_return_type_is_dict(tmp_path: Path) -> None:
         component="API",
     )
     assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# Empty / corrupt JSON file resilience
+# ---------------------------------------------------------------------------
+
+class TestEmptyJsonResilience:
+    """Verify no crashes when JSON files are empty or corrupt."""
+
+    def test_load_registry_empty_file(self, tmp_path: Path) -> None:
+        """_load_registry returns default structure when registry file is empty."""
+        registry_dir = tmp_path / "trigger_json"
+        registry_dir.mkdir(parents=True, exist_ok=True)
+        registry_file = registry_dir / "error_registry.json"
+        registry_file.write_text("", encoding="utf-8")
+
+        er = _import_registry()
+        result = er._load_registry()
+        assert isinstance(result, dict)
+        assert "errors" in result
+        assert result["errors"] == {}
+
+    def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
+        """_load_registry returns default on corrupt JSON content."""
+        registry_dir = tmp_path / "trigger_json"
+        registry_dir.mkdir(parents=True, exist_ok=True)
+        registry_file = registry_dir / "error_registry.json"
+        registry_file.write_text("{invalid json", encoding="utf-8")
+
+        er = _import_registry()
+        result = er._load_registry()
+        assert isinstance(result, dict)
+        assert "errors" in result
+
+    def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
+        """_load_circuit_breaker_state returns default when config is empty."""
+        config_dir = tmp_path / "trigger_json"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_file = config_dir / "trigger_config.json"
+        config_file.write_text("", encoding="utf-8")
+
+        er = _import_registry()
+        result = er._load_circuit_breaker_state()
+        assert result.state == "closed"
+        assert result.cooldown_seconds == 300
+
+    def test_report_with_empty_registry(self, tmp_path: Path) -> None:
+        """report() works when registry file is empty (creates fresh)."""
+        registry_dir = tmp_path / "trigger_json"
+        registry_dir.mkdir(parents=True, exist_ok=True)
+        registry_file = registry_dir / "error_registry.json"
+        registry_file.write_text("", encoding="utf-8")
+
+        er = _import_registry()
+        result = er.report(
+            error_type="TestError",
+            message="test with empty registry",
+            component="TRIGGER",
+        )
+        assert isinstance(result, dict)
+        assert result["is_new"] is True
+        assert result["count"] == 1

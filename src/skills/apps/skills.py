@@ -86,6 +86,9 @@ def handle_command(command, args=None):
         if not args:
             error("Error: skill name required. Usage: skills create <name> [--with-handler|--full]")
             return False
+        if args[0] in ("--help", "-h", "help"):
+            _print_create_help()
+            return True
         return _cmd_create(args)
 
     if command == "validate":
@@ -220,6 +223,21 @@ def _cmd_run(name, action, extra_args):
         error(f"Error: {err}")
 
     return result["success"]
+
+
+def _print_create_help():
+    """Print help text for the create subcommand."""
+    console.print("Skills Create - Scaffold a new skill from a template")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills create <name>                Create a markdown-only skill")
+    console.print("  drone @skills create <name> --with-handler Create with handler.py")
+    console.print("  drone @skills create <name> --full         Create with full 3-layer structure")
+    console.print()
+    console.print("Templates:")
+    console.print("  markdown_only   SKILL.md with instructions (AI reads and follows)")
+    console.print("  with_handler    SKILL.md + handler.py (programmatic execution)")
+    console.print("  full            SKILL.md + apps/ structure (complex skills)")
 
 
 def _cmd_create(args):

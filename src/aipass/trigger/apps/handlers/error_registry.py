@@ -137,7 +137,9 @@ def _save_circuit_breaker_state() -> None:
     try:
         data: Dict[str, Any] = {}
         if TRIGGER_CONFIG_FILE.exists():
-            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
+            raw = TRIGGER_CONFIG_FILE.read_text(encoding='utf-8').strip()
+            if raw:
+                data = json.loads(raw)
         data['circuit_breaker'] = {
             'state': _circuit_breaker.state,
             'opened_at': _circuit_breaker.opened_at,
@@ -162,7 +164,10 @@ def _load_circuit_breaker_state() -> CircuitBreakerState:
     """
     try:
         if TRIGGER_CONFIG_FILE.exists():
-            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
+            raw = TRIGGER_CONFIG_FILE.read_text(encoding='utf-8').strip()
+            if not raw:
+                return CircuitBreakerState()
+            data = json.loads(raw)
             cb_data = data.get('circuit_breaker')
             if isinstance(cb_data, dict) and cb_data.get('state') in ('closed', 'open', 'half_open'):
                 breaker = CircuitBreakerState()
@@ -182,7 +187,10 @@ def _clear_circuit_breaker_state() -> None:
     """
     try:
         if TRIGGER_CONFIG_FILE.exists():
-            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
+            raw = TRIGGER_CONFIG_FILE.read_text(encoding='utf-8').strip()
+            if not raw:
+                return
+            data = json.loads(raw)
             if 'circuit_breaker' in data:
                 del data['circuit_breaker']
                 TRIGGER_CONFIG_FILE.write_text(
@@ -499,7 +507,10 @@ def _load_registry() -> dict:
     """
     try:
         if REGISTRY_FILE.exists():
-            data = json.loads(REGISTRY_FILE.read_text(encoding='utf-8'))
+            raw = REGISTRY_FILE.read_text(encoding='utf-8').strip()
+            if not raw:
+                return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
+            data = json.loads(raw)
             if isinstance(data, dict) and 'errors' in data:
                 return data
     except Exception as exc:
