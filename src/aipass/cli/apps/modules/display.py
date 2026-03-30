@@ -54,26 +54,16 @@ def print_introspection():
     CONSOLE.print("[bold cyan]CLI Display Module[/bold cyan]")
     CONSOLE.print()
 
-    CONSOLE.print("[yellow]Connected Handlers:[/yellow]")
+    CONSOLE.print("[yellow]Functions:[/yellow]")
     CONSOLE.print()
-
-    # Auto-discover handler files from handlers/display/
-    handlers_dir = Path(__file__).parent.parent / "handlers" / "display"
-
-    if handlers_dir.exists():
-        handler_files = sorted([f for f in handlers_dir.iterdir() if f.is_file() and f.suffix == '.py' and f.name != '__init__.py'])
-
-        if handler_files:
-            CONSOLE.print("  [cyan]handlers/display/[/cyan]")
-            for handler_file in handler_files:
-                CONSOLE.print(f"    [dim]- {handler_file.name}[/dim]")
-            CONSOLE.print()
-        else:
-            CONSOLE.print("  [dim]handlers/display/ (empty - no handlers yet)[/dim]")
-            CONSOLE.print()
-    else:
-        CONSOLE.print("  [dim]handlers/display/ (not found)[/dim]")
-        CONSOLE.print()
+    CONSOLE.print("  [cyan]header()[/cyan]      Bordered section header with optional details")
+    CONSOLE.print("  [cyan]success()[/cyan]     Green checkmark message with kwargs")
+    CONSOLE.print("  [cyan]error()[/cyan]       Red error with optional suggestion")
+    CONSOLE.print("  [cyan]warning()[/cyan]     Yellow warning with optional details")
+    CONSOLE.print("  [cyan]fatal()[/cyan]       Error + sys.exit(1)")
+    CONSOLE.print("  [cyan]section()[/cyan]     Visual section separator")
+    CONSOLE.print("  [cyan]console[/cyan]       Rich Console instance")
+    CONSOLE.print()
 
     CONSOLE.print("[dim]Run 'drone @cli display --help' for usage[/dim]")
     CONSOLE.print()

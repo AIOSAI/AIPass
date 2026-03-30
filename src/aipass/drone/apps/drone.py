@@ -129,14 +129,28 @@ def show_introspection() -> None:
 # COMMAND HANDLERS
 # =============================================================================
 
+def _cwd_has_registry() -> bool:
+    """Check if CWD is within a project that has a *_REGISTRY.json."""
+    cwd = Path.cwd()
+    for parent in [cwd] + list(cwd.parents):
+        if list(parent.glob("*_REGISTRY.json")):
+            return True
+    return False
+
+
 def _handle_systems() -> int:
     """Handle `drone systems` — list registered branches and modules."""
+    if not _cwd_has_registry():
+        console.print("No registry found in current directory tree.")
+        return 0
+
     branches = list_branches()
     modules = list_modules()
 
-    if not branches and not modules:
-        console.print("No branches or modules registered.")
-        return 0
+    # Infrastructure section — drone is the router, not a routable module
+    console.print("Infrastructure:")
+    console.print(f"  @{'drone':<18} Command routing and module discovery (v{VERSION})")
+    console.print()
 
     if modules:
         console.print(f"Modules ({len(modules)}):")

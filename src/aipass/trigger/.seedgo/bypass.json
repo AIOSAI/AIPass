@@ -322,6 +322,27 @@
       "standard": "unused_function",
       "pattern": "validate_json_structure, get_json_path, increment_counter, update_data_metrics",
       "reason": "JSON handler framework utilities \u2014 part of the json_structure standard infrastructure. Available for future use by modules that need JSON validation and metrics."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "cli",
+      "reason": "Systemd service \u2014 runs as persistent daemon process, no drone CLI interaction."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "debug_print",
+      "reason": "Systemd service \u2014 print() output goes to journald, not debug output. This is the correct pattern for systemd services."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "help_text",
+      "reason": "Systemd service \u2014 runs as persistent daemon process, no CLI help text needed."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "imports",
+      "pattern": "prax logger import",
+      "reason": "Systemd service \u2014 uses print() to journald, not prax logger. Importing prax adds unnecessary dependency for a standalone daemon."
     }
   ],
   "notes": {

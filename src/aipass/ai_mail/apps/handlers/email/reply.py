@@ -73,7 +73,8 @@ def send_reply(
     """
     json_handler.log_operation("send_reply", {"from_branch": str(from_branch_path), "reply_to": original_email.get("from", "unknown")})
     # Import here to avoid circular imports
-    from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch, get_all_branches
+    from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
+    from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
     from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_closed_and_archive
     from aipass.ai_mail.apps.handlers.users.branch_detection import get_branch_info_from_registry
 

@@ -17,7 +17,6 @@ Uses Rich library for beautiful terminal output.
 """
 
 import sys
-from pathlib import Path
 from typing import List
 
 # Import console from CLI display module (using our own service!)
@@ -37,26 +36,11 @@ def print_introspection():
     CONSOLE.print("[bold cyan]CLI Templates Module[/bold cyan]")
     CONSOLE.print()
 
-    CONSOLE.print("[yellow]Connected Handlers:[/yellow]")
+    CONSOLE.print("[yellow]Functions:[/yellow]")
     CONSOLE.print()
-
-    # Auto-discover handler files from handlers/templates/
-    handlers_dir = Path(__file__).parent.parent / "handlers" / "templates"
-
-    if handlers_dir.exists():
-        handler_files = sorted([f for f in handlers_dir.iterdir() if f.is_file() and f.suffix == '.py' and f.name != '__init__.py'])
-
-        if handler_files:
-            CONSOLE.print("  [cyan]handlers/templates/[/cyan]")
-            for handler_file in handler_files:
-                CONSOLE.print(f"    [dim]- {handler_file.name}[/dim]")
-            CONSOLE.print()
-        else:
-            CONSOLE.print("  [dim]handlers/templates/ (empty - no handlers yet)[/dim]")
-            CONSOLE.print()
-    else:
-        CONSOLE.print("  [dim]handlers/templates/ (not found)[/dim]")
-        CONSOLE.print()
+    CONSOLE.print("  [cyan]operation_start()[/cyan]      Standard operation header with details")
+    CONSOLE.print("  [cyan]operation_complete()[/cyan]   Completion summary with optional timing")
+    CONSOLE.print()
 
     CONSOLE.print("[dim]Run 'drone @cli templates --help' for usage[/dim]")
     CONSOLE.print()

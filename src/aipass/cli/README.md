@@ -2,7 +2,7 @@
 
 **Purpose:** Display and output formatting service for AIPass modules. Provides consistent terminal output — headers, success/error/warning messages, section breaks, and operation templates — so every module looks the same without duplicating Rich formatting code.
 **Module:** `aipass.cli`
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-03-29
 
 ## Usage
 
@@ -61,14 +61,18 @@ cli/
 ## Commands / Usage
 
 ```bash
+# Via drone
 drone @cli --help                        # Show services and Rich formatting showcase
 drone @cli --version                     # Show version
-drone @cli help                          # Same as --help
 drone @cli aipass                        # Show aipass subcommands
 drone @cli aipass init                   # Bootstrap AIPass project in current dir
 drone @cli aipass init /path             # Bootstrap in target directory
 drone @cli aipass init /path MyProject   # Bootstrap with custom name
 drone @cli aipass init --help            # Detailed init usage
+
+# Standalone (no drone required)
+python -m aipass.cli --help              # Same help output
+python -m aipass.cli aipass init /path   # Bootstrap directly
 ```
 
 ---

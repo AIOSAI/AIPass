@@ -23,6 +23,7 @@ from aipass.prax import logger
 # Constants
 _DAEMON_ROOT = Path(__file__).resolve().parents[3]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
+MAX_LOG_ENTRIES = 100  # Default FIFO limit for log_operation (overridable via config)
 
 
 def _get_caller_module_name() -> str:
@@ -173,9 +174,9 @@ def log_operation(operation: str, data: Optional[Dict[str, Any]] = None, module_
     ensure_module_jsons(module_name)
 
     config = load_json(module_name, "config")
-    max_entries = 100
+    max_entries = MAX_LOG_ENTRIES
     if config and "config" in config:
-        max_entries = config["config"].get("max_log_entries", 100)
+        max_entries = config["config"].get("max_log_entries", MAX_LOG_ENTRIES)
 
     log: List[Dict[str, Any]] = load_json(module_name, "log") or []
 

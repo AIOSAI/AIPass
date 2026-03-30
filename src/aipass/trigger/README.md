@@ -2,7 +2,7 @@
 
 **Purpose:** Event bus for AIPass. Branches fire events, registered handlers react. Decouples producers from consumers — the module that detects a condition doesn't need to know what should happen next.
 **Module:** `aipass.trigger`
-**Last Updated:** 2026-03-27
+**Last Updated:** 2026-03-29
 
 ## Commands / Usage
 
@@ -36,16 +36,16 @@ drone @trigger --version                 # Show version
 from aipass.trigger.apps.modules.core import Trigger
 
 # Fire an event — all registered handlers run
-Trigger.fire("plan_created", plan_id=42, branch="flow")
+Trigger.fire("plan_file_created", path="/path/to/FPLAN-0042.md")
 
 # Register a handler
-def on_plan_created(**data):
-    print(f"Plan {data['plan_id']} created")
+def on_plan_file_created(**data):
+    print(f"Plan created at {data['path']}")
 
-Trigger.on("plan_created", on_plan_created)
+Trigger.on("plan_file_created", on_plan_file_created)
 
 # Remove a handler
-Trigger.off("plan_created", on_plan_created)
+Trigger.off("plan_file_created", on_plan_file_created)
 ```
 
 ### Cross-branch error reporting
@@ -64,17 +64,22 @@ result = report_error(
 
 ## Events
 
-| Event | Fired when |
-|-------|------------|
-| `startup` | Branch session starts |
-| `plan_created` | New flow plan created |
-| `plan_closed` | Flow plan closed |
-| `error_logged` | Error detected in logs |
-| `error_detected` | Error registered and ready for dispatch |
-| `warning_logged` | Warning detected in logs |
-| `memory_threshold_exceeded` | Memory file approaching line limit |
-| `memory_template_updated` | Memory template changed |
-| `bulletin_created` | New system bulletin posted |
+12 events registered via `handlers/events/registry.py`. All fire through `Trigger.fire()`.
+
+| Event | Handler | Fired when | Action |
+|-------|---------|------------|--------|
+| `startup` | `startup.py` | Branch session starts | Error catch-up scan, memory rollover check |
+| `error_detected` | `error_detected.py` | Error registered in log watcher (Medic v2) | 8-gate dispatch pipeline, sends fix-it email to affected branch |
+| `error_logged` | `error_logged.py` | Error detected in system logs (legacy) | Rate-limited notification with medic gating |
+| `warning_logged` | `warning_logged.py` | Warning detected in system logs | Logged for monitoring, no dispatch |
+| `plan_file_created` | `plan_file.py` | New PLAN file detected in filesystem | Updates Flow's PLAN_REGISTRY.json |
+| `plan_file_deleted` | `plan_file.py` | PLAN file removed from filesystem | Marks plan as deleted in registry |
+| `plan_file_moved` | `plan_file.py` | PLAN file moved or renamed | Updates registry location |
+| `bulletin_created` | `bulletin_created.py` | New system bulletin posted | Propagates to all branch dashboards |
+| `memory_threshold_exceeded` | `memory_threshold_exceeded.py` | Memory file approaches line limit (600 lines) | Sends compression notification to branch |
+| `memory_template_updated` | `memory_template_updated.py` | Memory template modified | Pushes template updates to branches |
+| `memory_saved` | `memory.py` | Memory file saved | Placeholder for future rollover trigger |
+| `cli_header_displayed` | `cli.py` | CLI displays headers | Registration hook |
 
 ## Medic
 
@@ -86,6 +91,7 @@ Built-in error monitoring subsystem. Watches logs for errors, fingerprints them 
 trigger/
 ├── apps/
 │   ├── trigger.py             # Entry point (auto-discovers modules)
+│   ├── log_watcher_service.py # Persistent watcher process (systemd)
 │   ├── modules/
 │   │   ├── core.py            # Event bus (Trigger.fire/on/off)
 │   │   ├── errors.py          # Error registry + cross-branch API
@@ -93,7 +99,11 @@ trigger/
 │   │   ├── branch_log_events.py  # Branch-level log event handling
 │   │   └── log_events.py     # System-wide log event processing
 │   └── handlers/
-│       └── events/            # One handler per event type
+│       ├── events/            # One handler per event type
+│       ├── log_watcher.py     # Branch log watcher (watchdog)
+│       ├── error_registry.py  # SHA1 fingerprinting + circuit breaker
+│       ├── error_reporter.py  # Cross-branch error API
+│       └── medic_state.py     # Medic persistence (trigger_config.json)
 └── tests/
 ```
 
@@ -115,4 +125,4 @@ trigger/
 
 ---
 
-*Last Updated: 2026-03-27*
+*Last Updated: 2026-03-29*

@@ -1,10 +1,18 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-03-28
 # =============================================
+
+import sys
+from pathlib import Path
+
+# Prevent this script's parent dir from shadowing the 'skills' package
+_script_dir = str(Path(__file__).resolve().parent)
+if _script_dir in sys.path:
+    sys.path.remove(_script_dir)
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error

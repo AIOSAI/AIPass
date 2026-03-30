@@ -23,7 +23,7 @@ Usage:
 
     registry = load_registry()
     stats = get_registry_statistics(registry)
-    print(f"Total plans: {stats['total_plans']}")
+    # stats contains: total_plans, open_plans, closed_plans, etc.
 """
 
 from pathlib import Path

@@ -22,18 +22,11 @@ from typing import Dict, Tuple, List, Optional, Callable
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json_utils.json_handler import load_json, save_json
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file to find AIPASS_REGISTRY.json (repo root)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-_REPO_ROOT = _find_repo_root()
+_REPO_ROOT = find_repo_root()
 
 # Lazy imports to avoid circular dependencies
 _INBOX_LOCK = None
@@ -47,76 +40,6 @@ def _get_inbox_lock():
         _INBOX_LOCK = inbox_lock
     return _INBOX_LOCK
 
-
-def get_all_branches() -> List[Dict]:
-    """
-    Get list of all branches for email routing.
-    Reads from AIPass branch registry (AIPASS_REGISTRY.json at repo root).
-
-    Returns:
-        List of dicts with branch info:
-        [{"name": "AIPASS.admin", "path": "/", "email": "@admin"}, ...]
-    """
-    registry_file = _REPO_ROOT / "AIPASS_REGISTRY.json"
-    branches = []
-
-    if not registry_file.exists():
-        return []
-
-    try:
-        with open(registry_file, 'r', encoding='utf-8') as f:
-            registry_data = json.load(f)
-
-        # Parse branch entries from JSON structure
-        # Handle both formats: list of dicts or dict keyed by name
-        raw_branches = registry_data.get("branches", [])
-        if isinstance(raw_branches, dict):
-            raw_branches = list(raw_branches.values())
-        for branch in raw_branches:
-            branch_name = branch.get("name", "")
-            path = branch.get("path", "")
-
-            if not branch_name or not path:
-                continue
-
-            # Use explicit email from registry if present (preferred)
-            # Fall back to derivation only if email field is missing
-            explicit_email = branch.get("email", "")
-            if explicit_email:
-                email = explicit_email
-            else:
-                # Legacy fallback: derive email from branch name
-                if '.' in branch_name:
-                    email_part = branch_name.split('.')[-1].lower()
-                elif ' ' in branch_name:
-                    email_part = branch_name.split()[0].lower()
-                elif '-' in branch_name and branch_name.split('-')[0] == 'AIPASS':
-                    email_part = branch_name.split('-', 1)[1].lower()
-                else:
-                    email_part = branch_name.split('-')[0].lower()
-                email = f"@{email_part}"
-
-            branches.append({
-                "name": branch_name,
-                "path": path,
-                "email": email
-            })
-
-        # COLLISION DETECTION: Check for duplicate email addresses
-        email_map = {}
-        collisions = []
-        for branch in branches:
-            if branch["email"] in email_map:
-                collision_msg = f"Email collision: {branch['email']} used by both '{email_map[branch['email']]}' and '{branch['name']}'"
-                collisions.append(collision_msg)
-            else:
-                email_map[branch["email"]] = branch["name"]
-
-        return branches
-
-    except Exception as e:
-        logger.warning("[delivery] get_all_branches() failed to read registry: %s", e)
-        return []
 
 
 def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
@@ -439,6 +362,6 @@ if __name__ == "__main__":
     console.print()
     console.print("USAGE FROM MODULES:")
     console.print("  from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch")
-    console.print("  from aipass.ai_mail.apps.handlers.email.delivery import get_all_branches")
+    console.print("  from aipass.ai_mail.apps.handlers.registry.read import get_all_branches")
     console.print()
     console.print("="*70 + "\n")

@@ -23,20 +23,12 @@ from typing import Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 # =============================================
 # CONSTANTS
 # =============================================
-def _find_repo_root() -> Path:
-    """Walk up from this file to find AIPASS_REGISTRY.json (repo root)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-BRANCH_REGISTRY_PATH = _find_repo_root() / "AIPASS_REGISTRY.json"
+BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def _get_branches_list(registry: dict) -> list:

@@ -247,9 +247,8 @@ def print_help() -> None:
   - init_project.py     Project bootstrap (aipass init)
 
 [green]\u2713[/green] apps/handlers/      = PRIVATE (internal implementation)
-  - display/            Header, message formatters
-  - templates/          Operation patterns
-  - init/               Bootstrap logic
+  - init/               Bootstrap logic (aipass init)
+  - json/               JSON file I/O and validation
 
 [green]\u2713[/green] Rich library        = Underlying formatting engine
   - Console, Table, Panel, Columns, Text styling"""

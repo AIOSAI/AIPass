@@ -148,6 +148,18 @@ class Trigger:
         return {event: len(handlers) for event, handlers in cls._handlers.items()}
 
 
+def _coerce_value(val_str: str) -> int | float | str:
+    """Coerce a string value to int, float, or leave as string."""
+    try:
+        return int(val_str)
+    except ValueError:
+        pass
+    try:
+        return float(val_str)
+    except ValueError:
+        return val_str
+
+
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point.
 
@@ -191,8 +203,8 @@ def handle_command(command: str, args: list) -> bool:
         data = {}
         for arg in args[1:]:
             if "=" in arg:
-                key, value = arg.split("=", 1)
-                data[key] = value
+                key, val_str = arg.split("=", 1)
+                data[key] = _coerce_value(val_str)
             else:
                 logger.warning(f"[TRIGGER] Ignoring unparseable arg: {arg}")
         Trigger.fire(event_name, **data)

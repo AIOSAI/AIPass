@@ -3,11 +3,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-03-29
 
 ---
 
-**Status:** Operational. Core email workflow (send/inbox/reply/close), dispatch system, daemon, desktop notifications all working. Seedgo 96%.
+**Status:** Operational. Core email workflow (send/inbox/reply/close), dispatch system, daemon, desktop notifications all working. Seedgo 100%.
 
 ## Commands / Usage
 

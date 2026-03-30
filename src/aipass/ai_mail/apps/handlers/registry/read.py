@@ -21,33 +21,27 @@ Handler Independence:
 """
 
 import json
-from pathlib import Path
 from typing import List, Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 
 # Constants
 MODULE_NAME = "registry.read"
 
-
-def _find_repo_root() -> Path:
-    """Walk up from this file to find AIPASS_REGISTRY.json (repo root)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
-
-
-BRANCH_REGISTRY_PATH = _find_repo_root() / "AIPASS_REGISTRY.json"
+BRANCH_REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def get_all_branches() -> List[Dict]:
     """
-    Get list of all branches for email selection.
-    Reads from AIPass branch registry (AIPASS_REGISTRY.json at repo root)
+    Get list of all branches for email routing and selection.
+    Reads from AIPass branch registry (AIPASS_REGISTRY.json at repo root).
+
+    Handles both list and dict formats for branches in the registry.
+    Uses explicit email field from registry when present, falls back
+    to derivation from branch name.
 
     Returns:
         List of dicts with branch info:
@@ -67,16 +61,25 @@ def get_all_branches() -> List[Dict]:
         with open(BRANCH_REGISTRY_PATH, 'r', encoding='utf-8') as f:
             registry_data = json.load(f)
 
-        # Parse branch entries from JSON structure
-        for branch in registry_data.get("branches", []):
+        # Handle both formats: list of dicts or dict keyed by name
+        raw_branches = registry_data.get("branches", [])
+        if isinstance(raw_branches, dict):
+            raw_branches = list(raw_branches.values())
+
+        for branch in raw_branches:
             branch_name = branch.get("name", "")
             path = branch.get("path", "")
 
             if not branch_name or not path:
                 continue
 
-            # Derive email address from branch name
-            email = _derive_email_from_branch_name(branch_name)
+            # Use explicit email from registry if present (preferred)
+            # Fall back to derivation only if email field is missing
+            explicit_email = branch.get("email", "")
+            if explicit_email:
+                email = explicit_email
+            else:
+                email = _derive_email_from_branch_name(branch_name)
 
             branches.append({
                 "name": branch_name,

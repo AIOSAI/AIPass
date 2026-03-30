@@ -60,12 +60,13 @@ def _guard_branch_access():
     """
     caller_file, import_line = _find_real_caller()
 
-    # DEBUG: Print what we found
+    # DEBUG: Log guard resolution details when debugging
     import os
     if os.environ.get("AIPASS_DEBUG_GUARD"):
-        import sys
-        print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
-        print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
+        import logging
+        _guard_logger = logging.getLogger("aipass.seedgo.handlers.guard")
+        _guard_logger.info("caller_file = %s", caller_file)
+        _guard_logger.info("import_line = %s", import_line)
 
     if caller_file is None:
         # Can't determine caller from real files

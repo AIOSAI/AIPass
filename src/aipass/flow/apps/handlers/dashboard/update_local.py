@@ -62,10 +62,7 @@ Usage:
     from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
 
     success = update_dashboard_local()
-    if success:
-        print("Dashboard updated successfully")
-    else:
-        print("Dashboard update failed")
+    # Returns True on success, False on failure
 """
 
 import json

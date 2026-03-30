@@ -334,7 +334,9 @@ def _process_due_tasks() -> bool:
         console.print(f"[bold]Results:[/bold] {results['success']} sent, {results['failed']} failed")
         console.print()
 
-        return results["failed"] == 0
+        if results["failed"] > 0:
+            logger.warning("[DAEMON] %d scheduled task(s) failed to send", results["failed"])
+        return True  # Command was handled (failures are logged, not routing errors)
 
     except Exception as e:
         _error(f"Failed to run due tasks: {e}")

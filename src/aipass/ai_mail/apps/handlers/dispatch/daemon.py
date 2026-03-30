@@ -34,19 +34,11 @@ from urllib.error import URLError
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
-
-
-def _find_repo_root() -> Path:
-    """Walk up from this file to find AIPASS_REGISTRY.json (repo root)."""
-    current = Path(__file__).resolve().parent
-    for parent in [current] + list(current.parents):
-        if (parent / "AIPASS_REGISTRY.json").exists():
-            return parent
-    return Path.cwd()
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 
 # Infrastructure paths
-_REPO_ROOT = _find_repo_root()
+_REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
 
 # Paths

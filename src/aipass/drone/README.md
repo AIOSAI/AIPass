@@ -86,7 +86,6 @@ except CommandExecutionError as e:
 ```
 drone/
 ├── cli.py                 # pip entry point (drone command)
-├── drone_adapter.py       # Self-routing adapter for drone @drone
 ├── __init__.py            # Public API exports
 ├── apps/
 │   ├── drone.py           # Core entry point
@@ -102,6 +101,8 @@ drone/
 │   └── handlers/          # Implementation
 │       ├── executor.py    # Safe subprocess execution
 │       ├── exceptions.py  # Exception hierarchy
+│       ├── generic_adapter.py   # Centralized capture for external modules
+│       ├── routing_config.json  # External module routing declarations
 │       ├── json/          # Three-JSON Pattern handler
 │       ├── scanning/      # Scan result formatting + discovery
 │       └── command_registry/  # Command shortcut CRUD + lookup
@@ -149,5 +150,5 @@ To add: edit `interactive_commands` or `interactive_branches` in `_handle_target
 
 ---
 
-**Last Updated:** 2026-03-27
+**Last Updated:** 2026-03-29
 

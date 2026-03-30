@@ -14,6 +14,8 @@ Never manually create JSONs - they build themselves.
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -97,6 +99,26 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
     return False
 
 
+def _atomic_write_json(target_path: Path, data: Any) -> None:
+    """Write JSON data atomically via temp file + rename.
+
+    Prevents corruption from concurrent processes writing the same file.
+    """
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(target_path.parent), suffix=".tmp", prefix=target_path.stem
+    )
+    succeeded = False
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, str(target_path))
+        succeeded = True
+    finally:
+        if not succeeded and Path(tmp_path).exists():
+            logger.warning("[json_handler] Cleaning up temp file after write failure: %s", tmp_path)
+            os.unlink(tmp_path)
+
+
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Get path for module JSON file"""
     filename = f"{module_name}_{json_type}.json"
@@ -125,8 +147,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         return False
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(template, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(json_path, template)
         return True
     except Exception as exc:
         logger.error("[json_handler] Failed to write JSON template for '%s/%s': %s", module_name, json_type, exc)
@@ -159,8 +180,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = datetime.now().date().isoformat()
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(json_path, data)
         return True
     except Exception as exc:
         logger.error("[json_handler] Failed to save JSON for '%s/%s': %s", module_name, json_type, exc)

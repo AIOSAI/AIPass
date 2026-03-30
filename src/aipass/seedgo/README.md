@@ -1,6 +1,6 @@
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass modules. Audits Python code against checker packs, scores each file, and reports violations. Ships with the `aipass_standards` pack (33 checkers covering imports, architecture, naming, logging, documentation, and more).
+**Purpose:** Standards compliance platform for AIPass modules. Audits Python code against checker packs, scores each file, and reports violations. Ships with the `aipass_standards` pack (32 checkers covering imports, architecture, naming, logging, documentation, and more).
 **Module:** `aipass.seedgo`
 **Created:** 2026-03-05
 
@@ -63,7 +63,7 @@ seedgo/
 │   │   ├── readme_update.py         # README generation
 │   │   └── test_map.py              # Custom function test coverage mapping
 │   └── handlers/
-│       ├── aipass_standards/        # Built-in checker pack (33 standards)
+│       ├── aipass_standards/        # Built-in checker pack (32 standards)
 │       │   ├── *_check.py           # Checker implementations (score 0-100)
 │       │   ├── *_content.py         # Queryable standard content
 │       │   └── *.md                 # Standard documentation
@@ -93,7 +93,7 @@ Checker packs live in `handlers/*_standards/` directories. A valid pack must con
 
 ## Checker Packs
 
-The `aipass_standards` pack checks: architecture, CLI, CLI flags, commented logger, dead code, debug print, deep nesting, documentation, encapsulation, error handling, handlers, hardcoded key, help text, imports, introspection, JSON structure, log handler, log level, log structure, log visibility, meta, modules, naming, permission flags, readme, shebang, silent catch, stderr routing, test coverage, testing, todo, trigger, and unused function.
+The `aipass_standards` pack checks: architecture, CLI, CLI flags, commented logger, dead code, debug print, deep nesting, documentation, encapsulation, error handling, handlers, hardcoded key, help text, imports, introspection, JSON structure, log handler, log level, log structure, log visibility, meta, modules, naming, permission flags, readme, shebang, silent catch, stderr routing, test quality, todo, trigger, and unused function.
 
 New packs go in `handlers/<name>_standards/` — add `*_check.py` files that implement scoring functions, and optionally `*_content.py` files that provide `get_<name>_standards()` for content queries.
 
@@ -114,4 +114,34 @@ New packs go in `handlers/<name>_standards/` — add `*_check.py` files that imp
 
 ---
 
-**Last Updated:** 2026-03-22
+## Proof System
+
+The `seedgo_proof` module orchestrates proof checks and `proof_query` provides content queries against the `aipass_proof/` handler pack. Proof checks verify triplet completeness (passport + local + observations), interface compliance, plugin integrity, content naming conventions, and README currency. Results are scored per-branch like standard audits.
+
+---
+
+## Diagnostics
+
+The `diagnostics_audit` module runs pyright type checking across branches via handlers in the `diagnostics/` directory. Reports type errors, missing imports, and signature mismatches. Integrated into the audit pipeline as a separate diagnostic pass.
+
+---
+
+## Bypass System
+
+The `bypass/` handler directory contains `bypass_handler.py` and `ignore_handler.py`. These manage `.seedgo/bypass.json` files per branch, allowing specific files, standards, or lines to be exempted from audit scoring. Each bypass requires a documented reason and is tracked in audit output.
+
+---
+
+## Checklist
+
+The `checklist` module provides quick per-file or per-directory standards checks. Designed for consumption by auto-fix hooks and pre-commit validation, returning pass/fail results without full audit overhead.
+
+---
+
+## Test Map
+
+The `test_map` module and `test_map/` handler directory provide custom function-level test coverage mapping. Scans public functions in source files and cross-references them against test files to identify untested functions and coverage gaps.
+
+---
+
+**Last Updated:** 2026-03-29

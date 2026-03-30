@@ -47,6 +47,17 @@ MODULE_ROOT = Path(__file__).parent
 # COMMAND ROUTING
 # =============================================================================
 
+def _dispatch_to_module(module, args, pre_scanned):
+    """Call module.handle_command, passing pre_scanned only if supported."""
+    if not pre_scanned:
+        return module.handle_command(args)
+    try:
+        return module.handle_command(args, pre_scanned=pre_scanned)
+    except TypeError as e:
+        logger.info(f"Module {getattr(module, '__name__', '?')} does not accept pre_scanned: {e}")
+        return module.handle_command(args)
+
+
 def route_command(args: argparse.Namespace, modules: Sequence[Any], pre_scanned=None) -> bool:
     """
     Route command to appropriate module
@@ -61,13 +72,7 @@ def route_command(args: argparse.Namespace, modules: Sequence[Any], pre_scanned=
     """
     for module in modules:
         try:
-            if pre_scanned:
-                try:
-                    handled = module.handle_command(args, pre_scanned=pre_scanned)
-                except TypeError:
-                    handled = module.handle_command(args)
-            else:
-                handled = module.handle_command(args)
+            handled = _dispatch_to_module(module, args, pre_scanned)
             if handled:
                 return True
         except Exception as e:
@@ -195,24 +200,7 @@ def main():
 
         # Scan files ONCE and share between snapshot + versioned (saves ~20s)
         console.print("[dim]Scanning files...[/dim]")
-        from aipass.backup.apps.handlers.operations.file_scanner import scan_files
-        from aipass.backup.apps.handlers.config.config_handler import (
-            GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, SOURCE_WHITELIST, MAX_FILE_SIZE_MB,
-            should_ignore,
-        )
-        from pathlib import Path as _Path
-
-        _source_dir = _Path.home()
-        _backup_dest = _Path(__file__).resolve().parents[1] / "backups"
-
-        def _should_ignore(path):
-            return should_ignore(path, GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, _backup_dest)
-
-        pre_scanned = scan_files(
-            _source_dir, _should_ignore,
-            whitelist=SOURCE_WHITELIST,
-            max_file_size_mb=MAX_FILE_SIZE_MB,
-        )
+        pre_scanned = backup_core.scan_source_files()
         console.print(f"[dim]Found {len(pre_scanned[0])} files to process[/dim]")
         console.print()
 

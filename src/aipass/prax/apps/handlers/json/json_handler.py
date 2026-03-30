@@ -150,8 +150,28 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
         return None
 
 
+def _atomic_write(json_path: Path, content: str) -> None:
+    """Write content to file atomically via temp file + rename."""
+    import os
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, json_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning("json_handler: temp file cleanup failed: %s", cleanup_err)
+        raise
+
+
 def save_json(module_name: str, json_type: str, data: Any) -> bool:
-    """Save JSON file"""
+    """Save JSON file using atomic write (temp file + rename) to prevent corruption."""
     json_path = get_json_path(module_name, json_type)
 
     if not validate_json_structure(data, json_type):
@@ -161,8 +181,8 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = datetime.now().date().isoformat()
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        content = json.dumps(data, indent=2, ensure_ascii=False)
+        _atomic_write(json_path, content)
         return True
     except Exception as e:
         logger.error("json_handler: failed to save json '%s/%s': %s", module_name, json_type, e)

@@ -47,9 +47,8 @@ INACTIVITY_THRESHOLD = 10
 # Every branch is a citizen -- the Commons gives them life.
 # Only exclude branches that can't or shouldn't be auto-woken.
 EXCLUDED_BRANCHES = {
-    "VERA",            # Already checks Commons via her own heartbeat plugin
-    "DEV_CENTRAL",     # Human workspace -- can't be auto-woken (needs Patrick)
-    # "PATRICK_PRIVATE",  # Commented out — CLI registry handles branch locking now. May return.
+    "DEVPULSE",        # Orchestrator branch -- should not self-wake
+    "DAEMON",          # Self -- should not wake itself
 }
 
 # Engagement prompt -- what each branch does when woken

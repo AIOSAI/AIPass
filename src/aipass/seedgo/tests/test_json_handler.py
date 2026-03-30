@@ -519,16 +519,17 @@ def test_log_operation_multiple_calls_accumulate(tmp_path: Path) -> None:  # JH-
 
 
 def test_log_operation_fifo_rotation(tmp_path: Path) -> None:  # JH-040
-    # Find the max log entries constant
+    # Find the max log entries constant — check module attrs first, fall back
+    # to the default used inside log_operation() (100).
     max_entries = getattr(_mod, "MAX_LOG_ENTRIES", getattr(_mod, "max_log_entries", None))
     if max_entries is None:
-        # Try to find it by checking common names
         for attr in ("MAX_LOG_ENTRIES", "max_log_entries", "LOG_MAX_ENTRIES", "_MAX_LOG_ENTRIES"):
             max_entries = getattr(_mod, attr, None)
             if max_entries is not None:
                 break
     if max_entries is None:
-        pytest.skip("Cannot find max_log_entries constant on module")
+        # Default used by log_operation when config has no override
+        max_entries = 100
 
     # Fill to max + 5
     for i in range(max_entries + 5):

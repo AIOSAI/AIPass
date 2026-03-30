@@ -668,10 +668,10 @@ class TestModuleRegistration:
     """Verify git is registered in the module registry."""
 
     def test_git_in_registry(self) -> None:
-        """git module is registered in _MODULE_REGISTRY."""
-        from aipass.drone.apps.handlers.module_registry_handler import _MODULE_REGISTRY
-        assert "git" in _MODULE_REGISTRY
-        assert _MODULE_REGISTRY["git"] == "aipass.drone.apps.modules.git_module"
+        """git module is registered in _INTERNAL_MODULES."""
+        from aipass.drone.apps.handlers.module_registry_handler import _INTERNAL_MODULES
+        assert "git" in _INTERNAL_MODULES
+        assert _INTERNAL_MODULES["git"] == "aipass.drone.apps.modules.git_module"
 
     def test_module_importable(self) -> None:
         """The registered module path is importable."""

@@ -1,0 +1,14 @@
+{
+  "modules": {
+    "seedgo": {
+      "entry_point": "aipass.seedgo.apps.seedgo",
+      "description": "Standards compliance through pluggable checker packs",
+      "version": "2.0.0"
+    },
+    "cli": {
+      "entry_point": "aipass.cli.apps.cli",
+      "description": "Universal Display & Output Service Provider",
+      "version": "2.0.0"
+    }
+  }
+}

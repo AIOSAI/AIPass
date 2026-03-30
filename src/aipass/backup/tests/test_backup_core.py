@@ -271,7 +271,7 @@ class TestHandleCommand:
 
             assert result is True
             MockEngine.assert_called_once_with("snapshot", dry_run=False)
-            mock_instance.run_backup.assert_called_once_with("test")
+            mock_instance.run_backup.assert_called_once_with("test", pre_scanned=None)
 
     def test_handle_command_versioned(self, backup_core_env):
         """'versioned' command creates BackupEngine with mode='versioned'."""
@@ -299,7 +299,7 @@ class TestHandleCommand:
 
             assert result is True
             MockEngine.assert_called_once_with("versioned", dry_run=False)
-            mock_instance.run_backup.assert_called_once_with("test note")
+            mock_instance.run_backup.assert_called_once_with("test note", pre_scanned=None)
 
     def test_handle_command_unknown(self, backup_core_env):
         """Unknown command returns False (not handled)."""
@@ -546,7 +546,7 @@ class TestHandleCommandDelegationContract:
 
             backup_core_env["handle_command"](args)
 
-            mock_instance.run_backup.assert_called_once_with("important note")
+            mock_instance.run_backup.assert_called_once_with("important note", pre_scanned=None)
 
 
 # ===================================================================

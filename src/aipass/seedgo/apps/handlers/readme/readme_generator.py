@@ -682,15 +682,17 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
 
 
 if __name__ == "__main__":
+    from rich.console import Console as _Console
+    _cli = _Console()
     target = sys.argv[1] if len(sys.argv) > 1 else str(Path.cwd())
-    print(f"Generating README sections for: {target}\n{'='*70}")
+    _cli.print(f"Generating README sections for: {target}\n{'='*70}")
     sections = generate_all_sections(target)
     for name, content in sections.items():
-        print(f"\n{'='*70}\nSECTION: {name}\n{'='*70}")
-        print(content if content else "(empty - no content generated)")
+        _cli.print(f"\n{'='*70}\nSECTION: {name}\n{'='*70}")
+        _cli.print(content if content else "(empty - no content generated)")
     # Test updater in dry_run mode
-    print(f"\n{'='*70}\nUPDATE DRY RUN\n{'='*70}")
+    _cli.print(f"\n{'='*70}\nUPDATE DRY RUN\n{'='*70}")
     update_result = update_readme_auto_sections(target, dry_run=True)
-    print(f"Would update: {update_result['updated']}")
-    print(f"Missing markers: {update_result['missing_markers']}")
-    print(f"Errors: {update_result['errors']}")
+    _cli.print(f"Would update: {update_result['updated']}")
+    _cli.print(f"Missing markers: {update_result['missing_markers']}")
+    _cli.print(f"Errors: {update_result['errors']}")

@@ -47,6 +47,24 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 
 # =============================================================================
+# PATH HELPERS
+# =============================================================================
+
+def _get_repo_root() -> Path | None:
+    """Return the git repo root derived from this file's location.
+
+    Walks up from this module's directory to find the repo root
+    (the parent that contains the .git directory).  Falls back to
+    None if not inside a git repo.
+    """
+    current = Path(__file__).resolve().parent
+    for parent in (current, *current.parents):
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+# =============================================================================
 # CHECKER APPLICABILITY
 # =============================================================================
 
@@ -264,11 +282,19 @@ def handle_command(command: str, args: List[str]) -> bool:
         error("No file specified", suggestion="Usage: drone @seedgo checklist <file>")
         return True
 
-    # Resolve path
+    # Resolve path — try absolute, then repo root, then CWD
     resolved = Path(file_path)
-    if not resolved.is_absolute():
-        resolved = Path.cwd() / resolved
-    resolved = resolved.resolve()
+    if resolved.is_absolute():
+        resolved = resolved.resolve()
+    else:
+        # Try relative to git repo root first (handles cross-CWD invocations)
+        repo_root = _get_repo_root()
+        candidate = (repo_root / resolved).resolve() if repo_root else None
+        if candidate and candidate.exists():
+            resolved = candidate
+        else:
+            # Fallback: resolve relative to CWD
+            resolved = (Path.cwd() / resolved).resolve()
 
     # Directory mode — run checklist on all .py files in directory
     if resolved.is_dir():

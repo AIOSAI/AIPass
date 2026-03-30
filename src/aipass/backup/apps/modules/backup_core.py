@@ -111,6 +111,34 @@ def print_introspection():
 
 
 # =============================================
+# MODULE-LEVEL FUNCTIONS
+# =============================================
+
+
+def scan_source_files():
+    """Scan source directory for backup-eligible files.
+
+    Used by the 'all' command to scan once and share results between modes.
+
+    Returns:
+        Tuple of (files_to_backup, skipped_items)
+    """
+    from aipass.backup.apps.handlers.operations.file_scanner import scan_files
+
+    source_dir = Path.home()
+    backup_dest = _BACKUP_ROOT / "backups"
+
+    def _should_ignore(path):
+        return should_ignore(path, GLOBAL_IGNORE_PATTERNS, IGNORE_EXCEPTIONS, backup_dest)
+
+    return scan_files(
+        source_dir, _should_ignore,
+        whitelist=SOURCE_WHITELIST,
+        max_file_size_mb=MAX_FILE_SIZE_MB,
+    )
+
+
+# =============================================
 # MODULE-LEVEL COMMAND HANDLER
 # =============================================
 

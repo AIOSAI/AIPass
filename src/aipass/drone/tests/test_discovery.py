@@ -524,9 +524,10 @@ class TestOrchestrationGetSystemHelp:
 class TestGetModuleIntrospective:
     """Tests for module_registry_handler.get_module_introspective()."""
 
-    @patch("aipass.drone.apps.handlers.module_registry_handler._MODULE_REGISTRY", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._EXTERNAL_MODULES", {})
     def test_returns_introspective_output(self):
-        """Should call get_introspective() on the module adapter."""
+        """Should call get_introspective() on the internal module adapter."""
         fake_mod = types.ModuleType("fake.module.path")
         fake_mod.get_introspective = lambda: "Introspective info for testmod"  # type: ignore[attr-defined]
 
@@ -535,7 +536,8 @@ class TestGetModuleIntrospective:
 
         assert result == "Introspective info for testmod"
 
-    @patch("aipass.drone.apps.handlers.module_registry_handler._MODULE_REGISTRY", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._INTERNAL_MODULES", {"testmod": "fake.module.path"})
+    @patch("aipass.drone.apps.handlers.module_registry_handler._EXTERNAL_MODULES", {})
     def test_falls_back_to_help(self):
         """Should fall back to get_help(None) if get_introspective is missing."""
         fake_mod = types.ModuleType("fake.module.path")

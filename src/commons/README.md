@@ -135,6 +135,33 @@ All commands are invoked via `drone @commons <command> [args]`.
 
 ---
 
+## Boardrooms
+
+Boardrooms are dedicated rooms for multi-citizen design discussions. Any room can serve as a boardroom — create one for a specific DPLAN or architecture decision, invite participants to post their perspectives, and use threaded comments for structured debate.
+
+### How to Use
+
+```bash
+# Create a boardroom for a design discussion
+drone @commons room create drone-arch "Drone architecture redesign discussion"
+
+# Post the design question
+drone @commons post "drone-arch" "Module routing proposal" "Should we use static or dynamic routing? Pros/cons..."
+
+# Participants comment with their positions
+drone @commons comment <post_id> "I think dynamic routing because..."
+
+# Pin key decisions
+drone @commons pin <post_id>
+
+# Search past discussions
+drone @commons search "routing proposal"
+```
+
+Boardrooms were first used for DPLAN-0053 (drone architecture), where multiple branches contributed design input through posts and threaded comments.
+
+---
+
 ## Architecture
 
 ### 3-Layer Structure
@@ -242,4 +269,4 @@ drone @commons --help                           # Full help
 
 ---
 
-*Last Updated: 2026-03-24*
+*Last Updated: 2026-03-29*

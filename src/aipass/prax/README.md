@@ -2,7 +2,7 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard for AIPass.
 **Module:** `aipass.prax`
-**Last Updated:** 2026-03-28
+**Last Updated:** 2026-03-29
 
 ---
 
@@ -23,6 +23,8 @@ drone @prax --help                              # Full help
 
 ### Logging
 
+**Canonical import (use this):**
+
 ```python
 from aipass.prax import logger
 
@@ -31,15 +33,17 @@ logger.warning("Disk usage high")
 logger.error("Connection failed")
 ```
 
-Logs auto-route via two-tier placement: `system_logs/<branch>_<module>.log` (central aggregation) and `<branch>/logs/` (branch-local). No configuration needed — prax detects the caller via stack introspection.
+This is Pattern A — the recommended way for all branches. Logs auto-route via two-tier placement: `system_logs/<branch>_<module>.log` (central aggregation) and `<branch>/logs/` (branch-local). No configuration needed — prax detects the caller via stack introspection.
 
-For handlers or plugins that need to bypass the event pipeline:
+Pattern B (`from aipass.prax.apps.modules.logger import system_logger as logger`) also works but is verbose and exposes internals. Use Pattern A.
+
+For prax handlers that need to bypass the event pipeline (watchdog threads, import-chain files):
 
 ```python
 from aipass.prax.apps.modules.logger import get_direct_logger
 
-log = get_direct_logger("my_handler")
-log.info("Direct log entry")
+logger = get_direct_logger()
+logger.info("Direct log entry")
 ```
 
 ### Mission Control
@@ -65,16 +69,10 @@ quit                # Exit
 | Command | Description |
 |---------|-------------|
 | `drone @prax monitor` | Launch Mission Control |
-| `drone @prax init` | Initialize logging system |
 | `drone @prax status` | Show system status |
-| `drone @prax run` | Start continuous logging mode |
-| `drone @prax shutdown` | Shutdown logging system |
-| `drone @prax discover` | Discover Python modules in ecosystem |
 | `drone @prax log-audit` | Audit log file sizes and health |
-| `drone @prax terminal enable\|disable` | Enable or disable terminal output |
 | `drone @prax dashboard` | Show system dashboard |
 | `drone @prax dashboard refresh --all` | Refresh dashboard data from centrals |
-| `drone @prax agent-status` | Show agent status overview |
 | `drone @prax status sync` | Sync STATUS.md from all branch STATUS.local.md |
 
 ## Architecture
@@ -86,15 +84,10 @@ prax/
 │   ├── modules/
 │   │   ├── logger.py              # SystemLogger (public API)
 │   │   ├── monitor.py             # Mission Control
-│   │   ├── agent_status.py        # Agent status overview
 │   │   ├── dashboard.py           # System dashboard
-│   │   ├── discover.py            # Module discovery
-│   │   ├── init_prax.py           # Logging system initialization
-│   │   ├── log_audit.py           # Log file audit
-│   │   ├── run.py                 # Continuous logging mode
-│   │   ├── shutdown.py            # Logging system shutdown
 │   │   ├── status.py              # System status / STATUS sync
-│   │   └── terminal.py            # Terminal output toggle
+│   │   ├── log_audit.py           # Log file audit
+│   │   └── agent_status.py        # Agent status overview
 │   └── handlers/
 │       ├── central/               # Central file reader
 │       ├── config/                # Configuration loading
@@ -132,4 +125,4 @@ prax/
 
 ---
 
-*Last Updated: 2026-03-17*
+*Last Updated: 2026-03-29*

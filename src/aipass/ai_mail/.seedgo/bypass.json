@@ -73,7 +73,7 @@
     {
       "file": "apps/handlers/email/delivery.py",
       "standard": "handlers",
-      "reason": "Imports json_utils.json_handler (load_json, save_json) — shared handler utility for JSON I/O, same-branch cross-handler import."
+      "reason": "Imports json_utils.json_handler (load_json, save_json) — shared handler utility for JSON I/O, same-branch cross-handler import. Also imports registry.read.get_all_branches — consolidated from dual implementation per DPLAN-0036."
     },
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
@@ -83,7 +83,7 @@
     {
       "file": "apps/handlers/email/reply.py",
       "standard": "handlers",
-      "reason": "Imports users.branch_detection.get_branch_info_from_registry — same-branch cross-handler import for sender identity resolution on reply."
+      "reason": "Imports users.branch_detection.get_branch_info_from_registry and registry.read.get_all_branches — same-branch cross-handler imports for sender identity and branch listing on reply."
     },
     {
       "file": "apps/handlers/email/send.py",
@@ -224,6 +224,31 @@
       "file": "apps/handlers/monitoring/errors.py",
       "standard": "handlers",
       "reason": "Archived — file moved to .archive/errors(disabled).py. No longer in active codebase."
+    },
+    {
+      "file": "apps/handlers/central_writer.py",
+      "standard": "handlers",
+      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+    },
+    {
+      "file": "apps/handlers/registry/read.py",
+      "standard": "handlers",
+      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+    },
+    {
+      "file": "apps/handlers/email/format.py",
+      "standard": "handlers",
+      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+    },
+    {
+      "file": "apps/handlers/email/purge.py",
+      "standard": "handlers",
+      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+    },
+    {
+      "file": "apps/handlers/users/branch_detection.py",
+      "standard": "handlers",
+      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
     }
   ],
   "notes": {

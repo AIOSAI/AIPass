@@ -48,6 +48,13 @@
       "subject": "Self-audit compliance sprint",
       "date_closed": "2026-03-28",
       "location": "prax"
+    },
+    {
+      "plan_id": "FPLAN-0144",
+      "type": "FPLAN",
+      "subject": "DPLAN-0039 prax audit work items — test coverage, JSON corruption, stale cleanup",
+      "date_closed": "2026-03-29",
+      "location": "prax"
     }
   ]
 }

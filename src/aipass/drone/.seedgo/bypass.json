@@ -44,6 +44,17 @@
         29
       ],
       "reason": "Scanner needs discovery_handler's get_entry_point() and parse_help_for_commands() to discover commands from branch help output. Justified — scanner's core function depends on discovery's parsing."
+    },
+    {
+      "file": "apps/handlers/module_registry_handler.py",
+      "standard": "naming",
+      "reason": "_ExternalModuleConfig is PascalCase — leading underscore is Python private convention, not a naming violation"
+    },
+    {
+      "file": "apps/handlers/module_registry_handler.py",
+      "standard": "handlers",
+      "lines": [28],
+      "reason": "module_registry_handler routes through generic_adapter.capture_main() — this IS the routing mechanism. Cross-handler import is the core design."
     }
   ],
   "notes": {
