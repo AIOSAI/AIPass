@@ -101,3 +101,6 @@ src/aipass/spawn/templates/builder/.spawn/.template_registry.json
 branch_audits _only
 notepad.md
 src/aipass/trigger/trigger_data.json
+src/aipass/memory/config/.plans_processed.json
+src/aipass/drone/drone_command_registry.json
+src/aipass/spawn/templates/builder/.spawn/.template_registry.json

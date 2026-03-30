@@ -28,7 +28,7 @@ DRONE_MODULE = {
     "description": "Git workflow — PR, status, sync, lock management",
 }
 
-_COMMANDS = ("pr", "status", "sync", "lock", "unlock")
+_COMMANDS = ("pr", "status", "sync", "lock", "unlock", "system-pr")
 
 
 def _detect_branch_dir() -> tuple[str, Path] | None:
@@ -81,6 +81,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
     json_handler.log_operation("git_handle_command", {"command": command, "args": args})
 
+    if command == "system-pr":
+        return _handle_system_pr(args)
     if command == "pr":
         return _handle_pr(args)
     if command == "status":
@@ -96,6 +98,53 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     return {
         "stdout": "",
         "stderr": f"Unknown git command: '{command}'. Available: {available}",
+        "exit_code": 1,
+    }
+
+
+def _handle_system_pr(args: list[str]) -> dict:
+    """Handle the system-pr subcommand (devpulse-only)."""
+    if not args:
+        return {
+            "stdout": "",
+            "stderr": "Usage: drone @git system-pr <description>",
+            "exit_code": 1,
+        }
+
+    description = " ".join(args)
+
+    try:
+        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_caller
+        from aipass.drone.apps.plugins.devpulse_ops.pr_plugin import create_system_pr
+    except ImportError as exc:
+        logger.error("Failed to import devpulse_ops plugin: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": f"devpulse_ops plugin not available: {exc}",
+            "exit_code": 1,
+        }
+
+    try:
+        caller = verify_caller()
+    except PermissionError as exc:
+        logger.error("system-pr authorization failed: %s", exc)
+        return {
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": 1,
+        }
+
+    result = create_system_pr(description, caller)
+
+    if result["success"]:
+        return {
+            "stdout": f"System PR created: {result['pr_url']}\nBranch: {result['feature_branch']}",
+            "stderr": "",
+            "exit_code": 0,
+        }
+    return {
+        "stdout": "",
+        "stderr": result["message"],
         "exit_code": 1,
     }
 
@@ -241,16 +290,23 @@ def get_help(command: str | None = None) -> str:
             "git unlock --force — Force-release the PR lock\n"
             "  Removes .git_pr.lock regardless of holder.\n"
         )
+    if command == "system-pr":
+        return (
+            "git system-pr <description> — Create a system-wide PR (devpulse only)\n"
+            "  Stages all tracked changes, creates a disposable feature branch,\n"
+            "  and opens a PR. Requires devpulse passport authorization.\n"
+        )
 
     return (
         "git — Git workflow: PR, status, sync, lock management\n"
         "\n"
         "Commands:\n"
-        "  pr <description>    Create a PR with scoped changes\n"
-        "  status              Show git status for your branch\n"
-        "  sync                Checkout main and pull\n"
-        "  lock                Check lock status\n"
-        "  unlock --force      Force-release the PR lock\n"
+        "  pr <description>       Create a PR with scoped changes\n"
+        "  system-pr <desc>       Create a system-wide PR (devpulse only)\n"
+        "  status                 Show git status for your branch\n"
+        "  sync                   Checkout main and pull\n"
+        "  lock                   Check lock status\n"
+        "  unlock --force         Force-release the PR lock\n"
     )
 
 
@@ -266,7 +322,11 @@ def get_introspective() -> str:
         "    - sync_handler.py (sync_main — safe main synchronization)\n"
         "    - pr_handler.py (create_pr — full PR workflow with lockfile)\n"
         "\n"
-        "Commands: pr, status, sync, lock, unlock\n"
+        "  plugins/devpulse_ops/\n"
+        "    - auth.py (verify_caller — passport-based authorization)\n"
+        "    - pr_plugin.py (create_system_pr — system-wide PR workflow)\n"
+        "\n"
+        "Commands: pr, system-pr, status, sync, lock, unlock\n"
     )
 
 

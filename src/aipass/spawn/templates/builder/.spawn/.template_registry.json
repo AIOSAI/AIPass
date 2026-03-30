@@ -1,7 +1,7 @@
 {
   "metadata": {
     "version": "1.0.0",
-    "last_updated": "2026-03-28",
+    "last_updated": "2026-03-29",
     "description": "Template file tracking registry for ID-based updates"
   },
   "files": {
@@ -65,6 +65,18 @@
       "content_hash": "0ac90a35515b",
       "has_branch_placeholder": false
     },
+    "f016": {
+      "path": ".spawn/.registry_ignore.json",
+      "name": ".registry_ignore.json",
+      "content_hash": "34f5e7ff7e01",
+      "has_branch_placeholder": false
+    },
+    "f042": {
+      "path": ".spawn/README.md",
+      "name": "README.md",
+      "content_hash": "e22ad5337efd",
+      "has_branch_placeholder": false
+    },
     "f028": {
       "path": ".trinity/README.md",
       "name": "README.md",
@@ -123,6 +135,12 @@
       "path": "apps/handlers/README.md",
       "name": "README.md",
       "content_hash": "2e4f4a0c1b47",
+      "has_branch_placeholder": false
+    },
+    "f017": {
+      "path": "apps/handlers/__init__.py",
+      "name": "__init__.py",
+      "content_hash": "55afc5eddbe0",
       "has_branch_placeholder": false
     },
     "f031": {
@@ -239,24 +257,6 @@
       "content_hash": "28e9ae373563",
       "has_branch_placeholder": false
     },
-    "f017": {
-      "path": "apps/handlers/__init__.py",
-      "name": "__init__.py",
-      "content_hash": "55afc5eddbe0",
-      "has_branch_placeholder": false
-    },
-    "f016": {
-      "path": ".spawn/.registry_ignore.json",
-      "name": ".registry_ignore.json",
-      "content_hash": "34f5e7ff7e01",
-      "has_branch_placeholder": false
-    },
-    "f042": {
-      "path": ".spawn/README.md",
-      "name": "README.md",
-      "content_hash": "e22ad5337efd",
-      "has_branch_placeholder": false
-    },
     "f043": {
       "path": "apps/plugins/__init__.py",
       "name": "__init__.py",
@@ -293,6 +293,11 @@
     "d006": {
       "path": ".seedgo",
       "name": ".seedgo",
+      "has_branch_placeholder": false
+    },
+    "d023": {
+      "path": ".spawn",
+      "name": ".spawn",
       "has_branch_placeholder": false
     },
     "d007": {
@@ -373,11 +378,6 @@
     "d022": {
       "path": "{{BRANCH}}_json/custom_config",
       "name": "custom_config",
-      "has_branch_placeholder": false
-    },
-    "d023": {
-      "path": ".spawn",
-      "name": ".spawn",
       "has_branch_placeholder": false
     }
   }

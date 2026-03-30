@@ -55,6 +55,27 @@
       "standard": "handlers",
       "lines": [28],
       "reason": "module_registry_handler routes through generic_adapter.capture_main() — this IS the routing mechanism. Cross-handler import is the core design."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/auth.py",
+      "standard": "architecture",
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure. Plugins are an intentional extension point."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
+      "standard": "architecture",
+      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
+      "standard": "encapsulation",
+      "lines": [23],
+      "reason": "Plugin imports lock_handler directly — it's a drone-internal plugin in the same branch, not a cross-branch import."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
+      "standard": "trigger",
+      "reason": "create_system_pr is a privileged operation — trigger integration deferred until trigger branch supports plugin events."
     }
   ],
   "notes": {
