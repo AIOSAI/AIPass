@@ -2,19 +2,25 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-03-29 | **Session:** 62 | **PRs merged:** 141
+**Last updated:** 2026-03-30 | **Session:** 64 | **PRs merged:** 145
 
 ---
 
 ## Current State
 
 - **15 branches** operational
-- **100% seedgo compliance** across all 15 branches, all 33 standards
-- **2,900+ tests** system-wide
-- **141 PRs** merged since inception
-- **Backup rebuild in progress** — 4-phase autonomous night shift running now
+- **100% seedgo compliance** across all 15 branches, all 32 standards
+- **3,330+ tests** system-wide
+- **145 PRs** merged since inception
+- **Fresh-eyes CLI audit complete** — 15 agents tested 229 commands across all branches (DPLAN-0085)
 
 ## Recent Sessions
+
+### S64 — Fresh-Eyes CLI Testing (2026-03-30)
+Pre-promotion quality gate. 15 zero-context agents deployed simultaneously, one per branch. Each started from --help with no memory access and tested every discoverable command. 229 commands tested total. System averages: Navigation 4.1/5, Output Quality 3.9/5. CLI branch scored perfect 5/5. Five critical bugs found: backup drive-sync ignores --dry-run (uploads anyway), ai_mail per-message commands broken, commons branch detection fails from drone routing, drone JSON log corruption crashes 3+ branches, flow close gives zero output. Seven system-wide patterns identified including ghost modules, argparse --help interception, and introspection fallback. All findings fed into 14 branch audit DPLANs. Created DPLAN-0086 (Patrick branch audit — git workflows and system learning). PR #144 (S63 work, 85 files) and PR #145 (gitignore) merged.
+
+### S63 — Full System Audit: 13 Branches Dispatched (2026-03-29)
+Largest single-session dispatch. 13 branches worked autonomously, zero failures. ~500 new tests (2,905 to 3,330+). Adapter pattern eliminated (generic_adapter.py replaces 3 drone_adapter.py files). Seedgo 225 to 314 tests. Skills list bug fixed. Medic wired with systemd. 3 daemon demo schedules. Commons 92% coverage. JSON corruption root cause found and fixed in prax + flow (atomic writes).
 
 ### S62 — Backup Deep Audit + Night Shift Launch (2026-03-29)
 Full backup branch investigation with 8 parallel agents (inventory, CLI, ignore patterns, Google Drive, live test, routing, tests, diff). Found: snapshot broken by JSON corruption (versioned works fine), 388GB legacy data from before ignore patterns were fixed, Google Drive auth duplicates API branch. Diff system is clean and stays. Renamed `.backup` to `.recovery` system-wide (79 directories) so backup branch owns the `.backup` namespace. Drone adapter pattern investigated — identical boilerplate across branches, documented for future redesign. Backup proposed a 4-phase plan (cleanup, JSON fix, Google Drive migration to API, test coverage), Patrick approved, and backup is now running autonomously through all phases overnight.
@@ -32,7 +38,7 @@ Prax queue spam eliminated (144k log entries per 4 hours). 9 stale plans closed.
 The big one. Every branch, every standard, 100%. Seven agents deployed overnight to fix the final 8 branches that were stuck at 99%. Commons was the hardest — test_quality at 68%, unused functions, architecture gaps, deep nesting. All fixed. Daemon needed plugin architecture bypasses. Memory and spawn needed test gaps filled. PR #137 (167 files, +12,843 lines).
 
 ### S57 — Checker Consolidation + 14-Branch Sprint (2026-03-28)
-Consolidated 3 overlapping test checkers into 2 clear ones: `testing` renamed to `error_handling`, `test_coverage` merged into `test_quality` v4.0 (51 items, 11 categories, 33 standards total). Dispatched all 14 non-devpulse branches simultaneously. Prax fixed the log_structure bug (double stack walk). Seedgo fixed the unused_function display bug (branch-level checkers now show details). PRs #132-135 merged. Multiple re-dispatches needed — branches need babysitting at scale.
+Consolidated 3 overlapping test checkers into 2 clear ones: `testing` renamed to `error_handling`, `test_coverage` merged into `test_quality` v4.0 (51 items, 11 categories, 32 standards total). Dispatched all 14 non-devpulse branches simultaneously. Prax fixed the log_structure bug (double stack walk). Seedgo fixed the unused_function display bug (branch-level checkers now show details). PRs #132-135 merged. Multiple re-dispatches needed — branches need babysitting at scale.
 
 ### S56 — Spawn Template Overhaul (2026-03-25)
 Spawn delivered registry regeneration + update workflow (ported from Cortex). Registry grew from 26 to 41 files. All 12 applicable branches updated. 113 tests. PR #129 (168 files). 69 old remote branches deleted (74 down to 5). Persistent citizen branches now the standard.
@@ -57,13 +63,15 @@ First autonomous night shift. PR #118 (75 files). Persistent git branches (citiz
 | DPLAN | Subject | Status |
 |-------|---------|--------|
 | 0029 | API branch audit | Complete — 186 tests, 100% seedgo, all P0/P1/P2 items fixed |
-| 0034 | Backup branch audit | In progress — 4-phase rebuild running overnight |
-| 0035 | Spawn branch audit | Template overhaul complete, .backup→.recovery rename done |
-| 0036 | AI Mail audit | Silent catch done, nesting + reply-while-locked bug remaining |
-| 0053 | Drone branch audit | Architecture fixes complete, adapter redesign documented |
+| 0034 | Backup branch audit | Operational, drive-sync --dry-run bug found in S64 CLI test |
+| 0035 | Spawn branch audit | Template overhaul complete, create --help broken (argparse) |
+| 0036 | AI Mail audit | CRITICAL: view/close/reply per-ID broken (S64 CLI test) |
+| 0053 | Drone branch audit | Architecture complete, JSON log corruption found in S64 |
 | 0080 | Devpulse git workflow | Design captured, not built yet |
-| 0082 | Flow branch audit | Created, not started |
+| 0082 | Flow branch audit | close silent, template/scan/post misrouted (S64 CLI test) |
 | 0083 | Access control design | Investigation complete, design pending |
+| 0085 | Fresh-eyes CLI testing | Execution complete — 15/15 branches tested, 229 commands |
+| 0086 | Patrick branch audit | Git workflows, system learning — in progress |
 
 ## Key Milestones
 
@@ -72,7 +80,9 @@ First autonomous night shift. PR #118 (75 files). Persistent git branches (citiz
 | 2026-03-29 | Backup rebuild launched — 4-phase autonomous night shift |
 | 2026-03-29 | .backup→.recovery rename — 79 dirs, namespace clarity |
 | 2026-03-29 | Branch audit deep-dives — API complete, Drone complete, Backup in progress |
-| 2026-03-28 | 100% seedgo compliance — all 15 branches, all 33 standards |
+| 2026-03-30 | Fresh-eyes CLI audit — 15 agents, 229 commands, Nav 4.1/5, Output 3.9/5 |
+| 2026-03-29 | S63: 13 branches dispatched, ~500 new tests, adapter pattern eliminated |
+| 2026-03-28 | 100% seedgo compliance — all 15 branches, all 32 standards |
 | 2026-03-25 | Spawn template overhaul — registry regen, 41-file template |
 | 2026-03-24 | First autonomous night shift — 6 branches dispatched, all returned |
 | 2026-03-23 | System-wide silent catch wave — 14 branches, 93% avg |
@@ -83,21 +93,27 @@ First autonomous night shift. PR #118 (75 files). Persistent git branches (citiz
 
 ## Known Issues
 
-- **ai_mail reply-while-locked bug**: `drone @ai_mail reply` gives "Unknown command" when target is locked instead of "branch is locked"
-- **Memory bank venv missing**: vectorization fails for deleted emails, shows warning on every ai_mail archive
+- **backup drive-sync --dry-run ignores flag**: uploads to Google Drive even with --dry-run set (S64 finding)
+- **ai_mail per-message commands broken**: view, close <id>, reply all fail — only close all works (S64 finding)
+- **commons branch detection**: 12+ write commands fail from drone routing — cannot detect caller (S64 finding)
+- **drone JSON log corruption**: empty log.json crashes prax, trigger, spawn intermittently (S64 finding)
+- **flow close silent**: zero output on success, template/scan/post misrouted (S64 finding)
+- **Memory search timeout**: unfiltered search hangs 30s+ (model loading)
 - **Ruff CI**: 474 lint violations in backlog
 - **wake.py no --model flag**: dispatched branches use CLI default model
-- **prax dashboard CLI routing**: argparse eats flags before module
+- **inotify warnings**: system-wide noise on every command (too many file watchers)
 
 ## System Numbers
 
 ```
 Branches:        15
-Standards:       33 (was 34, consolidated in S57)
-Tests:           2,900+
-PRs merged:      141
-Sessions:        62
+Standards:       32 (was 34, consolidated in S57)
+Tests:           3,330+
+PRs merged:      145
+Sessions:        64
 Compliance:      100%
+CLI Nav avg:     4.1/5 (S64 fresh-eyes test)
+CLI Output avg:  3.9/5 (S64 fresh-eyes test)
 ```
 
 ---
