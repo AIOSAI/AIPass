@@ -8,9 +8,9 @@ Tag: research, external-repo, {tag}
 
 ## What is an RPLAN?
 
-Research Plans (RPLANs) are for **STUDYING EXTERNAL WORK** -- analyzing repos, packages, libraries, and projects to extract patterns, ideas, and lessons that could benefit AIPass.
+Research Plans (RPLANs) are for **studying external work** -- analyzing repos, packages, libraries, and projects to extract patterns, ideas, and lessons that could benefit AIPass.
 
-**This IS for:**
+**This is for:**
 - Analyzing an external repo or pip package
 - Documenting architecture, patterns, and design decisions found
 - Identifying what AIPass could learn from or adapt

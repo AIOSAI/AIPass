@@ -96,17 +96,17 @@ drone @ai_mail dispatch wake --fresh @target
 
 ## Logging & Debugging
 
-Prax is the ONLY logging system. Every branch uses:
+Prax is the **only** logging system. Every branch uses:
 ```python
 from aipass.prax import logger
 ```
 
 Two output channels — know the difference:
 
-- **Console** = what the user sees right now. Command results, errors, success messages. If something fails, the user MUST see it in the console — never fail silently. Use CLI console output for real-time feedback.
+- **Console** = what the user sees right now. Command results, errors, success messages. If something fails, the user **must** see it in the console — never fail silently. Use CLI console output for real-time feedback.
 - **Prax logs** = what gets written to your `logs/` directory. Operational history for after-the-fact debugging — what resolved, what path was taken, what failed and why. Use `logger.info()`, `logger.warning()`, `logger.error()`.
 
-**Errors go to BOTH.** Console tells the user something broke. Log tells you (or the next session) what happened and why.
+**Errors go to both.** Console tells the user something broke. Log tells you (or the next session) what happened and why.
 
 **Your logs are your first diagnostic tool.** When something unexpected happens — a command fails, output looks wrong, behavior doesn't match — check your `logs/` before trying anything else. The answer is usually already there. Other branches' logs are in their own `logs/` directories — you can read those too if you need to trace cross-branch behavior. Don't write debug scripts, don't add print statements — read your logs.
 
@@ -151,6 +151,7 @@ If the conversation suddenly shifts to a topic, project, or domain that doesn't 
 - **Cross-platform.** AIPass is a public package — code must work on Linux, macOS, and Windows. Use `pathlib.Path` not string concatenation. Use `Path.home()` not `~` or `/home/`. Secrets live at `~/.secrets/aipass/` (`Path.home() / ".secrets" / "aipass"`).
 - **Public repo — no local paths in code.** Never hardcode `/home/username/...` or any machine-specific path. All file paths must derive from `Path(__file__)`, `Path.home()`, or registry lookups. This repo is public — your local directory structure doesn't exist for anyone else. Tests included.
 - **Fail to errors, never fall back silently.** When a command, handler, or module receives input it can't handle, return an explicit error — not a silent fallback to default output. No dimming, no swallowing, no showing the same screen regardless of input. The user must see that their input was received and rejected. Show what's missing (no help available, no introspection, no subcommands) and where to look (file path). Dead ends must announce themselves.
+- **Never use all caps for emphasis in prompts, templates, or instructions.** All caps reads as shouting and AI agents tend to deprioritize or ignore all-caps instructions. Use bold, italics, or clear phrasing instead. This applies everywhere: branch prompts, plan templates, dispatch emails, global prompt, README files.
 
 ## Memories
 
