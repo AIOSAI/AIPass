@@ -20,7 +20,20 @@
       "Bash(rm -r *)",
       "Bash(git checkout -b*)",
       "Bash(git commit*)",
-      
+      "Bash(git push*)",
+      "Bash(git add -f*)",
+      "Bash(gh pr close*)",
+      "Bash(gh pr create*)",
+      "Bash(*&& git commit*)",
+      "Bash(*&& git push*)",
+      "Bash(*&& git checkout -b*)",
+      "Bash(*&& git add -f*)",
+      "Bash(*&& git reset*)",
+      "Bash(*&& gh pr close*)",
+      "Bash(*&& gh pr create*)",
+      "Bash(*; git commit*)",
+      "Bash(*; git push*)",
+      "Bash(*; git checkout -b*)"
     ],
     "ask": []
   },
