@@ -2,7 +2,7 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-03-31 | **Session:** 67 | **PRs merged:** 158
+**Last updated:** 2026-03-31 | **Session:** 68 | **PRs merged:** 158 (PR #162 pending)
 
 ---
 
@@ -17,6 +17,9 @@
 - **Night shift planned** — DPLAN-0089 + FPLAN-0161: system-wide log cleanup targeting zero errors
 
 ## Recent Sessions
+
+### S68 — Night Shift: Zero Log Scanner Output (2026-03-31)
+Autonomous night shift executed FPLAN-0161. Log scanner went from 981 errors / 1805 warnings / 2000 failures to absolute zero. Clean-slate approach: archived all logs, ran 15 branches fresh (3,425 tests, 0 failures), triaged — 100% of noise was test-generated. Built test log isolation system: AIPASS_TEST_LOG_DIR env var in 14 conftest.py files + prax config/load.py check. Fixed 4 audit items: api magic number + list_providers, trigger errors detail crash + branch_log_events help. PR #162. 22 files changed.
 
 ### S67 — Plan Cleanup, APLAN Template, Log Scanner (2026-03-31)
 Major housekeeping session. Closed 8 devpulse root plans (DPLAN-0078/0080/0081/0083/0085/0088, FPLAN-0152/0154). Created APLAN (Audit Plan) template and registered with flow — standardized format with Quick Status table, Open/Resolved checkboxes, owner-split todos, Dispatch Log, and TTS Listen section. 15 agents reformatted all branch audits to the new standard simultaneously. System baseline established: 104 open items across 15 branches, 110 resolved. 4 GREEN (API, CLI, Daemon, Skills), 11 YELLOW, 0 RED. Built log_scanner_v1.py (tool #21) — scans all branch log directories for errors, warnings, and failures with Rich output. Full scan baseline: 981 errors, 1805 warnings, 2000 failures (mostly test-generated and stale). Investigated FPLAN auto-close gap — templates have the instruction but agents don't follow through. Strengthened close instruction in FPLAN template. Verified 20 potential night shift items — only 5 confirmed still open (api x2, backup x1, trigger x2). Backup audit updated from 18 to 12 open items after agent investigation confirmed 6 items already done. Deny rules expanded to catch cd && git bypass pattern. Local prompt updated with drone git workflow section. Night shift designed: DPLAN-0089 (clean-slate strategy) and FPLAN-0161 (8-phase master plan for zero-error goal). PR #158 merged.
@@ -52,14 +55,15 @@ Every branch, every standard, 100%. Seven agents deployed overnight. PR #137 (16
 
 | Plan | Subject | Status |
 |------|---------|--------|
-| DPLAN-0089 | Night shift: system log cleanup design | Ready for execution |
-| FPLAN-0161 | Night shift: 8-phase master plan | Ready for execution |
+| DPLAN-0089 | Night shift: system log cleanup design | Complete |
+| FPLAN-0161 | Night shift: 8-phase master plan | Phases 1-7 complete, PR #162 pending |
 | 15 branch audits | Living docs (APLAN format) | 104 open, 110 resolved |
 
 ## Key Milestones
 
 | Date | Milestone |
 |------|-----------|
+| 2026-03-31 | Zero log scanner output — test log isolation system built (S68 night shift) |
 | 2026-03-31 | APLAN template — standardized branch audits across 15 branches |
 | 2026-03-31 | Log scanner built — system-wide error/warning/failure visibility |
 | 2026-03-31 | Night shift planned — 8-phase log cleanup for zero-error baseline |
@@ -89,7 +93,7 @@ Branches:        15
 Standards:       32
 Tests:           3,410+
 PRs merged:      158
-Sessions:        67
+Sessions:        68
 Compliance:      100%
 Diagnostic tools: 21
 Open audit items: 104
