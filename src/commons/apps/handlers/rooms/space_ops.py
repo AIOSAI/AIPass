@@ -13,7 +13,7 @@ Data retrieval and mutation for spatial room commands: enter, look, decorate, vi
 Returns structured dicts for module-layer rendering.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -52,7 +52,7 @@ def get_room_enter_data(room_name: str) -> Dict[str, Any]:
             "SELECT COUNT(*) FROM posts WHERE room_name = ?", (room_name,)
         ).fetchone()[0]
 
-        cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
         recent_count = conn.execute(
             "SELECT COUNT(*) FROM posts WHERE room_name = ? AND created_at > ?",
             (room_name, cutoff),
@@ -205,7 +205,7 @@ def get_visitors_data(room_name: str) -> Dict[str, Any]:
             result["error"] = f"Room '{room_name}' not found"
             return result
 
-        cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Primary source: explicit room visits
         visit_rows = conn.execute(

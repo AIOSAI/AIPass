@@ -19,6 +19,7 @@ Phase 5: Suppress triggers source fix pipeline (email + fix status tracking)
 Architecture: Module orchestrates, error_registry handler manages data
 """
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -84,12 +85,15 @@ def _parse_args(args: list) -> dict:
 
 def _find_by_id_or_fp(identifier: str) -> Optional[dict]:
     """Look up error by fingerprint (prefix ok) or short ID field."""
-    entry = get_entry(identifier)
-    if entry:
-        return entry
-    for entry in query(limit=1000):
-        if entry.get("id") == identifier:
+    try:
+        entry = get_entry(identifier)
+        if entry:
             return entry
+        for entry in query(limit=1000):
+            if entry.get("id") == identifier:
+                return entry
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("Failed to look up error '%s': %s", identifier, exc)
     return None
 
 
@@ -238,7 +242,12 @@ def _cmd_detail(console, args: list) -> bool:
         error("Missing error ID or fingerprint", suggestion="Usage: drone @trigger errors detail <id_or_fingerprint>")
         return True
 
-    entry = _find_by_id_or_fp(args[0])
+    try:
+        entry = _find_by_id_or_fp(args[0])
+    except (json.JSONDecodeError, TypeError, KeyError) as exc:
+        error(f"Failed to read error registry: {exc}", suggestion="Registry may be corrupted — try 'drone @trigger errors list' first")
+        return True
+
     if not entry:
         error(f"Error not found: {args[0]}", suggestion="Try a fingerprint prefix, full fingerprint, or short ID")
         return True

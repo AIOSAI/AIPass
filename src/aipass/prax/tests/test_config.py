@@ -49,6 +49,8 @@ def _fresh_import_load(monkeypatch, tmp_path):
     monkeypatch.setattr(load_mod, "PRAX_LOGGER_CONFIG_FILE", prax_json_dir / "prax_logger_config.json")
     # Reset the lazy cache so get_system_logs_dir() re-resolves
     monkeypatch.setattr(load_mod, "_system_logs_dir_cache", None)
+    # Clear test log redirect so tests exercise real path resolution
+    monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
 
     return load_mod
 

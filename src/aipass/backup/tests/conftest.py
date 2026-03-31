@@ -1,8 +1,15 @@
 """Shared pytest fixtures for backup branch tests."""
+import os
+import tempfile
+
+# Redirect prax logs to temp directory during tests
+# Must be set before any prax imports to catch logger initialization
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
+
 import pytest
 import shutil
 import sys
-import tempfile
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock
