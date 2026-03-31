@@ -9,7 +9,7 @@
 
 ## What Are Flow Plans?
 
-Flow Plans (FPLANs) are for **BUILDING** - autonomous construction of systems, features, modules.
+Flow Plans (FPLANs) are for **building** - autonomous construction of systems, features, modules.
 
 **FPLANs are disposable.** They exist for exactly one task. When the task is complete, close this plan immediately — do not leave it open. Open FPLANs mean unfinished work. If the work is done, the plan is done: `drone @flow close {plan_number}`
 
@@ -54,9 +54,9 @@ Use dedicated directories - don't scatter files:
 
 ## Critical: Branch Manager Role
 
-**You are the ORCHESTRATOR, not the builder.**
+**You are the orchestrator, not the builder.**
 
-Your 200k context is precious. Burning it on file reads and code writing risks compaction during autonomous work. Agents have clean context - use them for ALL building.
+Your 200k context is precious. Burning it on file reads and code writing risks compaction during autonomous work. Agents have clean context - use them for all building.
 
 | You Do (Orchestrator) | Agents Do (Builders) |
 |-----------------------|----------------------|
@@ -151,15 +151,15 @@ Agents can't work blind. They need context before they build.
 1. [ ] Know where agent will work (branch path, key directories)
 2. [ ] Identify files agent needs to reference or modify
 3. [ ] Gather any specs, planning docs, or examples to include
-4. [ ] Prepare COMPLETE instructions (agents are stateless)
+4. [ ] Prepare complete instructions (agents are stateless)
 
 **Agent's First Task (context building):**
-- Agent should explore/read relevant files BEFORE writing code
+- Agent should explore/read relevant files before writing code
 - "First, read X and Y to understand the current structure"
 - "Look at Z for the pattern to follow"
 - Context-first, build-second
 
-**What Agents DON'T Have:**
+**What agents don't have:**
 - No prior conversation history
 - No memory files loaded automatically
 - No knowledge of other branches
@@ -171,28 +171,28 @@ Agents can't work blind. They need context before they build.
 
 ## Agent Instructions Template
 ```
-You are working at [BRANCH_PATH].
+You are working at [branch_path].
 
-TASK: [Specific single task]
+**Task:** [Specific single task]
 
-CONTEXT:
+**Context:**
 - [What they need to know]
 - Reference: [planning docs, existing code to study]
-- First, READ the relevant files to understand current structure
+- First, read the relevant files to understand current structure
 
-DELIVERABLES:
+**Deliverables:**
 - [Specific file or output expected]
 - Tests -> tests/
 - Reports/logs -> artifacts/reports/ or artifacts/logs/
 
-CONSTRAINTS:
+**Constraints:**
 - Follow Seedgo standards (3-layer architecture)
-- Do NOT modify files outside your task scope
-- CROSS-BRANCH: Never modify other branches' files unless explicitly authorized by the user
-- 2-ATTEMPT RULE: If something fails twice, note the issue and move on
-- Do NOT go down rabbit holes debugging
+- Do not modify files outside your task scope
+- Cross-branch: never modify other branches' files unless explicitly authorized by the user
+- Two-attempt rule: if something fails twice, note the issue and move on
+- Do not go down rabbit holes debugging
 
-WHEN COMPLETE:
+**When complete:**
 - Verify code runs without syntax errors
 - List files created/modified
 - Note any issues encountered (with what was attempted)
@@ -213,7 +213,7 @@ WHEN COMPLETE:
 
 **If production stops (critical blocker):**
 ```bash
-drone @ai_mail email @devpulse "PRODUCTION STOPPED: {plan_number}" "Issue: [description]. Attempted: [what was tried]. Awaiting guidance."
+drone @ai_mail email @devpulse "Production stopped: {plan_number}" "Issue: [description]. Attempted: [what was tried]. Awaiting guidance."
 ```
 
 ---
@@ -253,9 +253,12 @@ Write a plain English summary of this plan here. No markdown, no symbols, no tab
 
 ---
 
-## Close Command
+## Close This Plan
 
-When all boxes checked:
+**This is your final step.** When all goals are achieved and the completion checklist above is done, close this plan. Do not leave it open. An open plan means unfinished work.
+
 ```bash
 drone @flow close {plan_number}
 ```
+
+If you are an agent finishing the last task in this plan, close it yourself before your session ends. If you are the orchestrator reviewing agent output, close it once verified. Someone must close it — plans do not close themselves.

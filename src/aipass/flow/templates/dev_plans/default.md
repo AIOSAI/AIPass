@@ -8,7 +8,7 @@ Tag: {tag}
 
 ## What is a DPLAN?
 
-Design Plans (DPLANs) are for **THINKING** -- capturing ideas, brainstorming, investigating, planning, and making decisions. They are the space where conversations, research, and design work get written down so they can be reclaimed later.
+Design Plans (DPLANs) are for **thinking** -- capturing ideas, brainstorming, investigating, planning, and making decisions. They are the space where conversations, research, and design work get written down so they can be reclaimed later.
 
 **This IS for:**
 - Capturing an idea or concept worth exploring
