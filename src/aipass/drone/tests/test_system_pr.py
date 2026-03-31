@@ -183,7 +183,7 @@ class TestSystemPrNotOnMain:
 
 
 class TestSystemPrNothingToCommit:
-    """create_system_pr should fail when there are no staged changes."""
+    """create_system_pr should fail when there are no changes to PR."""
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.pr_plugin.release_lock")
     @patch("aipass.drone.apps.plugins.devpulse_ops.pr_plugin.acquire_lock")
@@ -214,6 +214,15 @@ class TestSystemPrNothingToCommit:
                 proc.stdout = ""
                 proc.stderr = ""
                 proc.returncode = 0
+            elif cmd[:3] == ["git", "fetch", "origin"]:
+                proc.stdout = ""
+                proc.stderr = ""
+                proc.returncode = 0
+            elif cmd[:3] == ["git", "rev-list", "--count"]:
+                # 0 commits ahead
+                proc.stdout = "0\n"
+                proc.stderr = ""
+                proc.returncode = 0
             else:
                 proc.stdout = ""
                 proc.stderr = ""
@@ -225,7 +234,7 @@ class TestSystemPrNothingToCommit:
         result = create_system_pr("test description", "devpulse")
 
         assert result["success"] is False
-        assert "Nothing to commit" in result["message"]
+        assert "Nothing to PR" in result["message"]
 
 
 # ===========================================================================
