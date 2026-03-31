@@ -2,7 +2,7 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-03-30 | **Session:** 64 | **PRs merged:** 145
+**Last updated:** 2026-03-31 | **Session:** 67 | **PRs merged:** 158
 
 ---
 
@@ -10,108 +10,89 @@
 
 - **15 branches** operational
 - **100% seedgo compliance** across all 15 branches, all 32 standards
-- **3,330+ tests** system-wide
-- **145 PRs** merged since inception
-- **Fresh-eyes CLI audit complete** — 15 agents tested 229 commands across all branches (DPLAN-0085)
+- **3,410+ tests** system-wide
+- **158 PRs** merged since inception
+- **APLAN template** registered — standardized branch audits with Quick Status, Open/Resolved tracking
+- **Log scanner** built — `tools/log_scanner_v1.py` scans all branch logs for errors/warnings/failures
+- **Night shift planned** — DPLAN-0089 + FPLAN-0161: system-wide log cleanup targeting zero errors
 
 ## Recent Sessions
 
+### S67 — Plan Cleanup, APLAN Template, Log Scanner (2026-03-31)
+Major housekeeping session. Closed 8 devpulse root plans (DPLAN-0078/0080/0081/0083/0085/0088, FPLAN-0152/0154). Created APLAN (Audit Plan) template and registered with flow — standardized format with Quick Status table, Open/Resolved checkboxes, owner-split todos, Dispatch Log, and TTS Listen section. 15 agents reformatted all branch audits to the new standard simultaneously. System baseline established: 104 open items across 15 branches, 110 resolved. 4 GREEN (API, CLI, Daemon, Skills), 11 YELLOW, 0 RED. Built log_scanner_v1.py (tool #21) — scans all branch log directories for errors, warnings, and failures with Rich output. Full scan baseline: 981 errors, 1805 warnings, 2000 failures (mostly test-generated and stale). Investigated FPLAN auto-close gap — templates have the instruction but agents don't follow through. Strengthened close instruction in FPLAN template. Verified 20 potential night shift items — only 5 confirmed still open (api x2, backup x1, trigger x2). Backup audit updated from 18 to 12 open items after agent investigation confirmed 6 items already done. Deny rules expanded to catch cd && git bypass pattern. Local prompt updated with drone git workflow section. Night shift designed: DPLAN-0089 (clean-slate strategy) and FPLAN-0161 (8-phase master plan for zero-error goal). PR #158 merged.
+
+### S66 — Synrix Research, Auto Status Sync (2026-03-30)
+External repo research: Synrix/Octopoda memory engine analyzed (16k LOC). RPLAN template created and registered with flow. DPLAN-0088: auto STATUS.md sync on PR create/merge — trigger built pr_created + pr_merged events, drone wired trigger.fire() into all 3 PR handlers. Live tested: PR creates trigger event, status syncs in 3 seconds. Denied git add -f system-wide. Global prompt updated. PRs #154-157.
+
+### S65 — Night Shift: devpulse_ops Plugin Suite (2026-03-30)
+FPLAN-0154 executed (14 branches, 3 phases, all S64 bugs fixed, 3,410 tests). Then designed and built devpulse_ops plugin suite (DPLAN-0087). Drone built 4 plugins: system-pr, merge, smart-sync, fix. All passport-gated to devpulse only. Full test suite: 8/8 scenarios passed. system-pr + merge cycle proven clean. 440 drone tests. PRs #147-153.
+
 ### S64 — Fresh-Eyes CLI Testing (2026-03-30)
-Pre-promotion quality gate. 15 zero-context agents deployed simultaneously, one per branch. Each started from --help with no memory access and tested every discoverable command. 229 commands tested total. System averages: Navigation 4.1/5, Output Quality 3.9/5. CLI branch scored perfect 5/5. Five critical bugs found: backup drive-sync ignores --dry-run (uploads anyway), ai_mail per-message commands broken, commons branch detection fails from drone routing, drone JSON log corruption crashes 3+ branches, flow close gives zero output. Seven system-wide patterns identified including ghost modules, argparse --help interception, and introspection fallback. All findings fed into 14 branch audit DPLANs. Created DPLAN-0086 (Patrick branch audit — git workflows and system learning). PR #144 (S63 work, 85 files) and PR #145 (gitignore) merged.
+Pre-promotion quality gate. 15 zero-context agents deployed simultaneously, one per branch. 229 commands tested total. System averages: Navigation 4.1/5, Output Quality 3.9/5. CLI branch scored perfect 5/5. Five critical bugs found. All findings fed into 14 branch audit DPLANs. PRs #144-146.
 
 ### S63 — Full System Audit: 13 Branches Dispatched (2026-03-29)
-Largest single-session dispatch. 13 branches worked autonomously, zero failures. ~500 new tests (2,905 to 3,330+). Adapter pattern eliminated (generic_adapter.py replaces 3 drone_adapter.py files). Seedgo 225 to 314 tests. Skills list bug fixed. Medic wired with systemd. 3 daemon demo schedules. Commons 92% coverage. JSON corruption root cause found and fixed in prax + flow (atomic writes).
+Largest single-session dispatch. 13 branches worked autonomously, zero failures. ~500 new tests (2,905 to 3,330+). Adapter pattern eliminated. Skills list bug fixed. Medic wired. 3 daemon schedules. Commons 92% coverage. PR #144.
 
 ### S62 — Backup Deep Audit + Night Shift Launch (2026-03-29)
-Full backup branch investigation with 8 parallel agents (inventory, CLI, ignore patterns, Google Drive, live test, routing, tests, diff). Found: snapshot broken by JSON corruption (versioned works fine), 388GB legacy data from before ignore patterns were fixed, Google Drive auth duplicates API branch. Diff system is clean and stays. Renamed `.backup` to `.recovery` system-wide (79 directories) so backup branch owns the `.backup` namespace. Drone adapter pattern investigated — identical boilerplate across branches, documented for future redesign. Backup proposed a 4-phase plan (cleanup, JSON fix, Google Drive migration to API, test coverage), Patrick approved, and backup is now running autonomously through all phases overnight.
+Full backup branch investigation with 8 parallel agents. Found: snapshot broken by JSON corruption, 388GB legacy data, Google Drive auth duplicates API branch. Renamed .backup to .recovery system-wide (79 directories). Backup 4-phase rebuild launched. PR #142-143.
 
 ### S61 — Branch Audit Deep-Dive: API + Drone (2026-03-29)
-API dispatched with 18-item P0/P1/P2 cleanup list — all fixed (186 tests, 100% seedgo). Drone audit verified all 4 architecture fixes from boardroom consensus (self-routing removed, adapter hack deleted, dual help paths unified, @ enforcement working). Naming checker false positives traced to seedgo — 71 bypasses across 11 branches eliminated by fixing `__dunder__` skip and local variable scope detection. Drone path routing fixed with passport walk-up (replaces hardcoded `src/aipass/<branch>` pattern). Access control investigation revealed no registry-scoped auth exists — DPLAN-0083 created. 4 new DPLANs: git workflow, VS Code reload bug, flow audit, access control.
+API dispatched with 18-item cleanup list — all fixed (186 tests, 100% seedgo). Drone architecture verified. Naming checker false positives fixed (71 bypasses eliminated). Access control investigation — DPLAN-0083 created.
 
 ### S60 — System Verification Wave (2026-03-29)
-Prax queue spam eliminated (144k log entries per 4 hours). 9 stale plans closed. 15 branch audit DPLANs reorganized into dedicated directory. TTS Listen summaries added to all DPLANs (pure plaintext for Piper). 15-agent verification wave fact-checked every branch audit against live seedgo + pytest. System: 2,905 tests, 100% seedgo across all 15 branches.
+Prax queue spam eliminated (144k/4hrs). 9 stale plans closed. TTS Listen summaries added to all DPLANs. 15-agent verification wave. System: 2,905 tests, 100% seedgo.
 
 ### S59 — Full System Walkthrough (2026-03-28)
-11 agents audited all 15 branches (2,378 tests at the time). Docker install verified — found and fixed registry format mismatch and seedgo CLI entry point bugs. README rewritten with verified claims. HERALD.md created. Dispatched 8 branches for fixes. PR #140 merged.
+11 agents audited all 15 branches. Docker install verified. README rewritten. HERALD.md created. PR #140.
 
 ### S58 — Night Shift: 100% Compliance (2026-03-28)
-The big one. Every branch, every standard, 100%. Seven agents deployed overnight to fix the final 8 branches that were stuck at 99%. Commons was the hardest — test_quality at 68%, unused functions, architecture gaps, deep nesting. All fixed. Daemon needed plugin architecture bypasses. Memory and spawn needed test gaps filled. PR #137 (167 files, +12,843 lines).
+Every branch, every standard, 100%. Seven agents deployed overnight. PR #137 (167 files, +12,843 lines).
 
-### S57 — Checker Consolidation + 14-Branch Sprint (2026-03-28)
-Consolidated 3 overlapping test checkers into 2 clear ones: `testing` renamed to `error_handling`, `test_coverage` merged into `test_quality` v4.0 (51 items, 11 categories, 32 standards total). Dispatched all 14 non-devpulse branches simultaneously. Prax fixed the log_structure bug (double stack walk). Seedgo fixed the unused_function display bug (branch-level checkers now show details). PRs #132-135 merged. Multiple re-dispatches needed — branches need babysitting at scale.
+## Active Work
 
-### S56 — Spawn Template Overhaul (2026-03-25)
-Spawn delivered registry regeneration + update workflow (ported from Cortex). Registry grew from 26 to 41 files. All 12 applicable branches updated. 113 tests. PR #129 (168 files). 69 old remote branches deleted (74 down to 5). Persistent citizen branches now the standard.
-
-### S55 — Test Quality Standard (2026-03-25)
-Expanded test quality framework: 48 items across 10 categories. Spawn template work: 23 READMEs, .gitignore exceptions, .spawn cleanup. Cortex investigation for working implementations. Git deny rules enforced on devpulse. .claude/settings.local.json unignored system-wide. PRs #127-128.
-
-### S54 — Test Template + Seedgo Checker (2026-03-25)
-Built test_json_handler_template (43 tests). Dry run across 6 branches (227/228 passed). Dispatched seedgo to build the checker — v1 was file-existence (wrong), caught the flaw, rewrote to v2 (function coverage scanning). Custom test survey revealed two naming paradigms. Architecture clarified: default vs custom tests are separate standards.
-
-### S52 — Stale Scanner + Test Dispatch (2026-03-24)
-Stale scanner upgraded (skip *_json dirs, full paths, code-only focus). System-wide test dispatch: 896 new tests across 6 branches. 3-agent seedgo audit found shallow test depth (32/34 checkers untested). Created DPLAN-0059 for test quality standard.
-
-### S51 — Compliance Wave (2026-03-24)
-Full system audit: 96% avg, all 14 branches at 95%+. Three dispatch waves. PR #122 merged (75 files). CLI blocked by prax log_structure bug. Daemon split scheduler_cron from 920 to 388 lines.
-
-### S50 — First Night Shift (2026-03-24)
-First autonomous night shift. PR #118 (75 files). Persistent git branches (citizen/{name} pattern). Drone module routing + output fix. @ enforcement complete. System avg ~96.6%.
-
-## Active DPLANs
-
-| DPLAN | Subject | Status |
-|-------|---------|--------|
-| 0029 | API branch audit | Complete — 186 tests, 100% seedgo, all P0/P1/P2 items fixed |
-| 0034 | Backup branch audit | Operational, drive-sync --dry-run bug found in S64 CLI test |
-| 0035 | Spawn branch audit | Template overhaul complete, create --help broken (argparse) |
-| 0036 | AI Mail audit | CRITICAL: view/close/reply per-ID broken (S64 CLI test) |
-| 0053 | Drone branch audit | Architecture complete, JSON log corruption found in S64 |
-| 0080 | Devpulse git workflow | Design captured, not built yet |
-| 0082 | Flow branch audit | close silent, template/scan/post misrouted (S64 CLI test) |
-| 0083 | Access control design | Investigation complete, design pending |
-| 0085 | Fresh-eyes CLI testing | Execution complete — 15/15 branches tested, 229 commands |
-| 0086 | Patrick branch audit | Git workflows, system learning — in progress |
+| Plan | Subject | Status |
+|------|---------|--------|
+| DPLAN-0089 | Night shift: system log cleanup design | Ready for execution |
+| FPLAN-0161 | Night shift: 8-phase master plan | Ready for execution |
+| 15 branch audits | Living docs (APLAN format) | 104 open, 110 resolved |
 
 ## Key Milestones
 
 | Date | Milestone |
 |------|-----------|
-| 2026-03-29 | Backup rebuild launched — 4-phase autonomous night shift |
-| 2026-03-29 | .backup→.recovery rename — 79 dirs, namespace clarity |
-| 2026-03-29 | Branch audit deep-dives — API complete, Drone complete, Backup in progress |
+| 2026-03-31 | APLAN template — standardized branch audits across 15 branches |
+| 2026-03-31 | Log scanner built — system-wide error/warning/failure visibility |
+| 2026-03-31 | Night shift planned — 8-phase log cleanup for zero-error baseline |
+| 2026-03-30 | devpulse_ops plugin suite — system-pr, merge, smart-sync, fix |
+| 2026-03-30 | Auto STATUS.md sync — PR events trigger status updates |
 | 2026-03-30 | Fresh-eyes CLI audit — 15 agents, 229 commands, Nav 4.1/5, Output 3.9/5 |
 | 2026-03-29 | S63: 13 branches dispatched, ~500 new tests, adapter pattern eliminated |
 | 2026-03-28 | 100% seedgo compliance — all 15 branches, all 32 standards |
 | 2026-03-25 | Spawn template overhaul — registry regen, 41-file template |
 | 2026-03-24 | First autonomous night shift — 6 branches dispatched, all returned |
-| 2026-03-23 | System-wide silent catch wave — 14 branches, 93% avg |
 | 2026-03-22 | Phase 1 diagnostic tools complete — 20 tools reviewed + accepted |
-| 2026-03-20 | Branch audit DPLANs created — systematic quality improvement begins |
-| 2026-03-18 | Persistent git branches — citizen/{name} pattern replaces throwaway feat/ |
-| 2026-03-18 | Plan cleanup — 60+ plans closed, flow delivered --dry-run |
 
 ## Known Issues
 
-- **backup drive-sync --dry-run ignores flag**: uploads to Google Drive even with --dry-run set (S64 finding)
-- **ai_mail per-message commands broken**: view, close <id>, reply all fail — only close all works (S64 finding)
-- **commons branch detection**: 12+ write commands fail from drone routing — cannot detect caller (S64 finding)
-- **drone JSON log corruption**: empty log.json crashes prax, trigger, spawn intermittently (S64 finding)
-- **flow close silent**: zero output on success, template/scan/post misrouted (S64 finding)
-- **Memory search timeout**: unfiltered search hangs 30s+ (model loading)
-- **Ruff CI**: 474 lint violations in backlog
-- **wake.py no --model flag**: dispatched branches use CLI default model
-- **inotify warnings**: system-wide noise on every command (too many file watchers)
+- **Trigger timestamp parser**: log_watcher.log — 173 "Failed to parse timestamp" entries. Real recurring bug.
+- **Trigger log watcher**: "Failed to start log watcher" errors in log_events.log.
+- **Flow dashboard push**: close_ops.log — "Failed to push flow section to branch dashboard".
+- **Memory bank venv**: MEMORY_BANK/.venv/bin/python3 missing. Vectorization fails for deleted emails.
+- **VS Code reload**: Terminal init dumps into Claude Code input on reload (tracked in devpulse STATUS.local.md).
+- **Ruff CI**: 474 lint violations in backlog.
+- **wake.py no --model flag**: dispatched branches use CLI default model.
 
 ## System Numbers
 
 ```
 Branches:        15
-Standards:       32 (was 34, consolidated in S57)
-Tests:           3,330+
-PRs merged:      145
-Sessions:        64
+Standards:       32
+Tests:           3,410+
+PRs merged:      158
+Sessions:        67
 Compliance:      100%
+Diagnostic tools: 21
+Open audit items: 104
 CLI Nav avg:     4.1/5 (S64 fresh-eyes test)
 CLI Output avg:  3.9/5 (S64 fresh-eyes test)
 ```

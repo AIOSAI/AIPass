@@ -29,6 +29,22 @@ When a task belongs to a specialist, send it there. Don't burn context doing the
 | Command routing | @drone | @branch resolution, subprocess |
 | Memory, vectors | @memory | ChromaDB, search, archival |
 
+## Git Workflow — Drone Only
+
+Never use raw git commands (git commit, git push, git checkout -b, gh pr create). Every time raw git is used, it causes divergence, rebase conflicts, and wasted time fixing the mess. Drone handles everything correctly.
+
+```
+drone @git system-pr "description"   # System-wide PR (devpulse only) — commit, branch, push, PR, back to main
+drone @git merge <PR#>               # Squash-merge a PR (devpulse only)
+drone @git smart-sync                # Fetch + rebase if behind (devpulse only)
+drone @git fix                       # Fix broken git states (devpulse only)
+drone @git status                    # What changed?
+drone @git sync                      # Pull latest main
+drone @git lock                      # Check PR lock status
+```
+
+Read-only git commands are fine: `git status`, `git diff`, `git log`.
+
 ## Key Commands
 
 ```
@@ -36,6 +52,7 @@ drone @ai_mail dispatch @target "Subject" "Body"             # Send + wake (one 
 drone @ai_mail email @target "Subject" "Body"                # Just mail, no wake
 drone @flow create . "Subject"                             # Create FPLAN
 drone @flow create . "Subject" dplan                       # Create DPLAN (dplan template)
+drone @flow create . "Subject" aplan                       # Create APLAN (audit plan)
 drone @flow list open                                      # Active plans
 drone systems                                              # All branches
 ```
