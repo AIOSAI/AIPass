@@ -104,6 +104,13 @@ def create_system_pr(description: str, caller: str) -> dict:
             logger.error(result["message"])
             return result
 
+        # Unstage STATUS.md — it's auto-synced by trigger events and
+        # including it causes rebase conflicts on every PR merge cycle.
+        subprocess.run(
+            ["git", "reset", "HEAD", "STATUS.md"],
+            capture_output=True, text=True, cwd=str(repo_root),
+        )
+
         # Step 4: Check if anything was staged
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
