@@ -193,6 +193,14 @@ def create_system_pr(description: str, caller: str) -> dict:
             },
         )
         logger.info(result["message"])
+
+        # Fire pr_created event (non-blocking — never fail the PR workflow)
+        try:
+            from aipass.trigger.apps.modules.core import trigger
+            trigger.fire("pr_created", branch=caller, pr_url=pr_url)
+        except Exception as exc:
+            logger.warning("trigger.fire('pr_created') failed: %s", exc)
+
         return result
 
     except (OSError, subprocess.SubprocessError) as exc:

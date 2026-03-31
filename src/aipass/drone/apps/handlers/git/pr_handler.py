@@ -204,6 +204,14 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             {"branch": branch_name, "feature_branch": feature_branch, "pr_url": pr_url},
         )
         logger.info(result["message"])
+
+        # Fire pr_created event (non-blocking — never fail the PR workflow)
+        try:
+            from aipass.trigger.apps.modules.core import trigger
+            trigger.fire("pr_created", branch=branch_name, pr_url=pr_url)
+        except Exception as exc:
+            logger.warning("trigger.fire('pr_created') failed: %s", exc)
+
         return result
 
     except (OSError, subprocess.SubprocessError) as exc:

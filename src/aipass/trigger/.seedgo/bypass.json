@@ -343,6 +343,24 @@
       "standard": "imports",
       "pattern": "prax logger import",
       "reason": "Systemd service \u2014 uses print() to journald, not prax logger. Importing prax adds unnecessary dependency for a standalone daemon."
+    },
+    {
+      "file": "apps/handlers/events/pr_status_sync.py",
+      "standard": "silent_catch",
+      "pattern": "_log_info except",
+      "reason": "Meta-logging helper: _log_info() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
+    },
+    {
+      "file": "apps/handlers/events/pr_status_sync.py",
+      "standard": "error_handling",
+      "pattern": "except Exception: pass",
+      "reason": "Meta-logging helper _log_info() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
+    },
+    {
+      "file": "apps/handlers/events/pr_status_sync.py",
+      "standard": "trigger",
+      "pattern": "handle_pr",
+      "reason": "PR event handlers (handle_pr_created, handle_pr_merged) are event handlers registered in registry.py, not trigger-specific naming violations."
     }
   ],
   "notes": {

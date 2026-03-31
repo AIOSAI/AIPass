@@ -73,9 +73,10 @@
       "reason": "Plugin imports lock_handler directly — it's a drone-internal plugin in the same branch, not a cross-branch import."
     },
     {
-      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
-      "standard": "trigger",
-      "reason": "create_system_pr is a privileged operation — trigger integration deferred until trigger branch supports plugin events."
+      "file": "apps/handlers/git/pr_handler.py",
+      "standard": "handlers",
+      "lines": [210],
+      "reason": "Lazy import of trigger.fire() — event notification after PR creation. Non-blocking, wrapped in try/except."
     },
     {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",

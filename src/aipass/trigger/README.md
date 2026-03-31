@@ -2,7 +2,7 @@
 
 **Purpose:** Event bus for AIPass. Branches fire events, registered handlers react. Decouples producers from consumers — the module that detects a condition doesn't need to know what should happen next.
 **Module:** `aipass.trigger`
-**Last Updated:** 2026-03-29
+**Last Updated:** 2026-03-30
 
 ## Commands / Usage
 
@@ -64,7 +64,7 @@ result = report_error(
 
 ## Events
 
-12 events registered via `handlers/events/registry.py`. All fire through `Trigger.fire()`.
+14 events registered via `handlers/events/registry.py`. All fire through `Trigger.fire()`.
 
 | Event | Handler | Fired when | Action |
 |-------|---------|------------|--------|
@@ -80,6 +80,8 @@ result = report_error(
 | `memory_template_updated` | `memory_template_updated.py` | Memory template modified | Pushes template updates to branches |
 | `memory_saved` | `memory.py` | Memory file saved | Placeholder for future rollover trigger |
 | `cli_header_displayed` | `cli.py` | CLI displays headers | Registration hook |
+| `pr_created` | `pr_status_sync.py` | PR opened on GitHub | Runs `drone @prax status sync` (fire-and-forget) |
+| `pr_merged` | `pr_status_sync.py` | PR merged on GitHub | Runs `drone @prax status sync` (fire-and-forget) |
 
 ## Medic
 
@@ -125,4 +127,4 @@ trigger/
 
 ---
 
-*Last Updated: 2026-03-29*
+*Last Updated: 2026-03-30*

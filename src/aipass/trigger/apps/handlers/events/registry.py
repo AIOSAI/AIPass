@@ -70,6 +70,7 @@ def setup_handlers():
     from .bulletin_created import handle_bulletin_created
     from .memory_threshold_exceeded import handle_memory_threshold_exceeded
     from .memory_template_updated import handle_memory_template_updated
+    from .pr_status_sync import handle_pr_created, handle_pr_merged
 
     trigger.on('startup', handle_startup)
     trigger.on('memory_saved', handle_memory_saved)
@@ -83,5 +84,7 @@ def setup_handlers():
     trigger.on('bulletin_created', handle_bulletin_created)
     trigger.on('memory_threshold_exceeded', handle_memory_threshold_exceeded)
     trigger.on('memory_template_updated', handle_memory_template_updated)
+    trigger.on('pr_created', handle_pr_created)
+    trigger.on('pr_merged', handle_pr_merged)
 
     json_handler.log_operation("handlers_registered", {"success": True})

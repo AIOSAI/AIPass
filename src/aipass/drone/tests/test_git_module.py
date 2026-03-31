@@ -681,3 +681,137 @@ class TestModuleRegistration:
         assert hasattr(mod, "handle_command")
         assert hasattr(mod, "get_help")
         assert hasattr(mod, "get_introspective")
+
+
+# ===========================================================================
+# 7. trigger.fire() integration tests
+# ===========================================================================
+
+
+class TestTriggerFireIntegration:
+    """Verify trigger.fire() is called after successful PR/merge operations."""
+
+    def test_pr_handler_fires_pr_created(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pr_handler.create_pr fires pr_created event on success."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        call_count = 0
+
+        def mock_run(cmd, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            r = MagicMock()
+            r.stderr = ""
+            if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
+                r.returncode = 0
+                r.stdout = "main\n"
+            elif cmd[0] == "git" and cmd[1] == "add":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[1:3] == ["diff", "--cached"]:
+                r.returncode = 1  # 1 = something staged
+                r.stdout = ""
+            elif cmd[0] == "git" and cmd[1] == "commit":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[0] == "git" and cmd[1] == "branch":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[0] == "git" and cmd[1] == "push":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[0] == "gh" and cmd[1] == "pr":
+                r.returncode = 0
+                r.stdout = "https://github.com/org/repo/pull/99\n"
+            else:
+                r.returncode = 0
+                r.stdout = ""
+            return r
+
+        mock_trigger = MagicMock()
+
+        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_run):
+            with patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", return_value={"success": True, "message": "ok"}):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                    with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
+                        result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
+
+        assert result["success"] is True
+        mock_trigger.fire.assert_any_call("pr_created", branch="api", pr_url="https://github.com/org/repo/pull/99")
+
+    def test_pr_handler_continues_if_trigger_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pr_handler.create_pr succeeds even if trigger.fire raises."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        def mock_run(cmd, **kwargs):
+            r = MagicMock()
+            r.stderr = ""
+            if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
+                r.returncode = 0
+                r.stdout = "main\n"
+            elif cmd[1:3] == ["diff", "--cached"]:
+                r.returncode = 1
+                r.stdout = ""
+            elif cmd[0] == "gh" and cmd[1] == "pr":
+                r.returncode = 0
+                r.stdout = "https://github.com/org/repo/pull/100\n"
+            else:
+                r.returncode = 0
+                r.stdout = ""
+            return r
+
+        mock_trigger = MagicMock()
+        mock_trigger.fire.side_effect = RuntimeError("trigger broken")
+
+        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_run):
+            with patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", return_value={"success": True, "message": "ok"}):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                    with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
+                        result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")
+
+        assert result["success"] is True  # PR still succeeds despite trigger failure
+
+    def test_merge_plugin_fires_pr_merged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """merge_plugin.merge_pr fires pr_merged event on success."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
+
+        call_idx = 0
+
+        def mock_run(cmd, **kwargs):
+            nonlocal call_idx
+            call_idx += 1
+            r = MagicMock()
+            r.stderr = ""
+            if cmd[0] == "gh" and cmd[1] == "pr" and cmd[2] == "merge":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[0] == "git" and cmd[1] == "pull":
+                r.returncode = 0
+                r.stdout = ""
+            elif cmd[1:3] == ["rev-parse", "HEAD"]:
+                r.returncode = 0
+                r.stdout = "abc123def456\n"
+            elif cmd[0] == "gh" and cmd[1] == "pr" and cmd[2] == "view":
+                r.returncode = 0
+                r.stdout = "Fix the thing\n"
+            else:
+                r.returncode = 0
+                r.stdout = ""
+            return r
+
+        mock_trigger = MagicMock()
+
+        with patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=mock_run):
+            with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
+                result = merge_pr("42", "devpulse")
+
+        assert result["success"] is True
+        mock_trigger.fire.assert_any_call("pr_merged", pr_number="42", title="Fix the thing")

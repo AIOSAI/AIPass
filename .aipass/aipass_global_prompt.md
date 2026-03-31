@@ -159,7 +159,7 @@ Your `.trinity/` files are your persistence. Without them you're just an instanc
 - `local.json` — session history, active tasks, learnings
 - `observations.json` — collaboration patterns over time
 
-Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. If compaction hits before you save, it's gone. Details in your branch prompt.
+Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`. Details in your branch prompt.
 
 ### STATUS.local.md — Equal Priority
 
@@ -171,7 +171,6 @@ Save memories **proactively**. Don't wait for `/memo` or end of session. These a
 - **After a milestone** — task completed, bug fixed, dispatch cycle done, plan closed
 - **After a decision** — the user chose an approach, rejected an idea, taught you something
 - **After learning something new** — a pattern, a gotcha, a command quirk, a system behavior
-- **Every ~10 turns** — if you haven't saved recently, save now. Context can compact at any time
 - **Before switching topics** — capture what you learned before the conversation moves on
 - **When the user teaches** — if they correct you or share insight, that's a key_learning immediately
 
@@ -180,7 +179,7 @@ What to save where:
 - `observations.json` → collaboration patterns (how the user works, what works well, what to avoid)
 - `STATUS.local.md` → current work, known issues, todos, recently completed. Surfaces in pre-compact recovery and startup reads.
 
-**The cost of saving too often is zero. The cost of losing context to compaction is everything.**
+**Don't stress about compaction.** We run on a 1M context window. Patrick monitors context usage and controls compaction manually — it's his job, not yours. Auto-compact is effectively obsolete. Save your memories because they're valuable, not because you're racing a clock. The cost of saving too often is zero.
 
 ## Breadcrumbs
 

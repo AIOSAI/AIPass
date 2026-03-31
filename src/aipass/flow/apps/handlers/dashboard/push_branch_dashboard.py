@@ -166,7 +166,9 @@ def _calculate_quick_status(sections: Dict[str, Any]) -> Dict[str, Any]:
 
     new_mail = ai_mail.get("new", ai_mail.get("unread", 0))
     opened_mail = ai_mail.get("opened", 0)
-    active_plans = flow.get("active_plans", 0)
+    active_plans = flow.get("active_count", 0)
+    if isinstance(active_plans, list):
+        active_plans = len(active_plans)
     mentions = commons.get("mentions", 0)
 
     action_required = new_mail > 0 or active_plans > 0 or mentions > 0
