@@ -17,6 +17,7 @@ __pycache__/
 # Plans (managed by flow, local to each installation)
 FPLAN-*.md
 DPLAN-*.md
+RPLAN-*.md
 
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json

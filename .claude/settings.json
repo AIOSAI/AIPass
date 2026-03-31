@@ -5,7 +5,9 @@
   "permissions": {
     "allow": [],
     "deny": [
-      "EnterPlanMode"
+      "EnterPlanMode",
+      "Bash(git add -f*)",
+      "Bash(git add --force*)"
     ],
     "defaultMode": "acceptEdits"
   },
