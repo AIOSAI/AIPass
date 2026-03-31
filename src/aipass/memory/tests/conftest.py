@@ -7,10 +7,17 @@
 # =============================================
 
 """Shared pytest fixtures for memory tests."""
+import os
+import tempfile
+
+# Redirect prax logs to temp directory during tests
+# Must be set before any prax imports to catch logger initialization
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
+
 import json
 import pytest
 import shutil
-import tempfile
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock

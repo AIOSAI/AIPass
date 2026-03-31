@@ -7,13 +7,18 @@
 # =============================================
 
 import json
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 import inspect
 
-# Infrastructure
-_LOG_FILE = Path(__file__).parent.parent.parent.parent / "logs" / "json_handler.log"
+# Infrastructure — redirect to temp dir during tests
+_test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
+if _test_log_dir:
+    _LOG_FILE = Path(_test_log_dir) / "trigger" / "json_handler.log"
+else:
+    _LOG_FILE = Path(__file__).parent.parent.parent.parent / "logs" / "json_handler.log"
 
 
 def _log_warning(msg: str) -> None:

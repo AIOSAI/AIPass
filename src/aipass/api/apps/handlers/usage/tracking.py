@@ -48,6 +48,7 @@ GENERATION_ENDPOINT = f"{OPENROUTER_BASE_URL}/generation"
 
 # Default configuration values
 DEFAULT_GENERATION_CHECK_DELAY = 2  # seconds to wait before querying metrics
+DEFAULT_REQUEST_TIMEOUT = 30  # seconds for HTTP request timeout
 
 
 # =============================================
@@ -148,7 +149,7 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
             GENERATION_ENDPOINT,
             params={"id": generation_id},
             headers=headers,
-            timeout=30
+            timeout=DEFAULT_REQUEST_TIMEOUT
         )
 
         # Check response status

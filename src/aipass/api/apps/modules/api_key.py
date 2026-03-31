@@ -140,10 +140,13 @@ def validate_key(args: List[str]):
 
 def list_providers():
     """Orchestrate list providers workflow"""
+    from aipass.api.apps.handlers.config.provider import PROVIDER_DEFAULTS
+
     header("Available Providers")
     console.print()
 
-    console.print("  - openrouter")
+    for provider_name in sorted(PROVIDER_DEFAULTS):
+        console.print(f"  - {provider_name}")
     console.print()
 
 

@@ -158,6 +158,11 @@ def handle_command(command: str, args: list) -> bool:
         remaining = args[1:]
         return handle_command(subcommand, remaining)
 
+    # Help gate — catch --help passed as direct command
+    if command in ['--help', '-h', 'help']:
+        print_help()
+        return True
+
     # Handle direct subcommands
     if command not in ["start", "stop", "status", "reset"]:
         return False

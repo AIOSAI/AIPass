@@ -29,6 +29,7 @@ Usage:
 
 import json
 import logging
+import os
 logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Dict, Any
@@ -64,6 +65,11 @@ def get_system_logs_dir() -> Path:
     Central aggregation: all branches log here for system-wide monitoring.
     Per-module logs use get_module_logs_dir() for local debugging.
     """
+    test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
+    if test_log_dir:
+        p = Path(test_log_dir) / "system"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     global _system_logs_dir_cache
     if _system_logs_dir_cache is None:
         repo_root = _find_repo_root()
@@ -87,6 +93,11 @@ def get_module_logs_dir(module_name: str) -> Path:
     Returns:
         Path to the module's branch-root logs directory
     """
+    test_log_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
+    if test_log_dir:
+        p = Path(test_log_dir) / module_name
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     # Standard: src/aipass/{module}/logs
     branch_dir = ECOSYSTEM_ROOT / module_name
     if branch_dir.exists():
