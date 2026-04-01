@@ -59,9 +59,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "capsule":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_seal(args)
     elif command == "capsules":
         result = _handle_list(args)

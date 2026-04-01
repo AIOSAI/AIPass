@@ -66,9 +66,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise.
     """
     if command == "post":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_create_post(args)
     elif command == "thread":
         result = _handle_view_thread(args)

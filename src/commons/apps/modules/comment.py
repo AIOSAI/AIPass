@@ -62,9 +62,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise.
     """
     if command == "comment":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_comment(args)
     elif command == "vote":
         result = _handle_vote(args)

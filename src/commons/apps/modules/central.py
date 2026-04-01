@@ -61,10 +61,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "push-central":
         return False
 
-    if not args:
-        print_introspection()
-        return True
-
     try:
         stats = update_central()
         branch_count = len(stats.get("branch_stats", {}))

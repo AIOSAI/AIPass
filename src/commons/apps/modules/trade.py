@@ -65,9 +65,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "gift":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_gift(args)
     elif command == "trade":
         result = _handle_trade(args)

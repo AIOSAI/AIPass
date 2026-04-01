@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import List
 
+from rich.text import Text
+
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
@@ -176,7 +178,9 @@ def _handle_module(name: str, args: List[str]) -> int:
     if not args:
         intro_text = get_module_introspective(name)
         if intro_text:
-            console.print(intro_text, end="")
+            # Text.from_ansi handles both pre-formatted ANSI (external modules)
+            # and plain text (internal modules) correctly
+            console.print(Text.from_ansi(intro_text), end="")
         else:
             console.print(f"No information available for @{name}.")
         return 0
@@ -184,7 +188,7 @@ def _handle_module(name: str, args: List[str]) -> int:
     if args == ["--help"]:
         help_text = get_module_help(name)
         if help_text:
-            console.print(help_text, end="")
+            console.print(Text.from_ansi(help_text), end="")
         else:
             console.print(f"No help available for @{name}.")
         return 0

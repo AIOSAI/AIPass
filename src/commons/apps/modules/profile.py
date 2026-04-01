@@ -62,9 +62,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     if command == "profile":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_profile(args)
     elif command == "who":
         result = _handle_who(args)

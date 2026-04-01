@@ -63,9 +63,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     if command == "craft":
-        if not args:
-            print_introspection()
-            return True
         result = _handle_craft(args)
     elif command == "artifacts":
         result = _handle_list(args)

@@ -41,7 +41,7 @@ def sync_main() -> dict:
             return {"success": False, "message": msg, "stdout": result.stdout}
 
         result = subprocess.run(
-            ["git", "pull"],
+            ["git", "pull", "--rebase"],
             capture_output=True, text=True, cwd=str(repo_root),
         )
         if result.returncode != 0:
