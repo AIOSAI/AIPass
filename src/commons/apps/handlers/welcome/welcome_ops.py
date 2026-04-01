@@ -46,13 +46,29 @@ def run_welcome(args: List[str]) -> dict:
     """
     conn = None
 
+    # Check for --dry-run flag
+    dry_run = "--dry-run" in args
+    filtered_args = [a for a in args if a != "--dry-run"]
+
     try:
         conn = get_db()
 
-        if args:
-            branch_name = args[0].upper()
+        if filtered_args:
+            branch_name = filtered_args[0].upper()
+            if dry_run:
+                already = has_been_welcomed(conn, branch_name)
+                close_db(conn)
+                return {"success": True, "dry_run": True, "branch": branch_name, "would_welcome": not already}
             result = _welcome_specific(conn, branch_name)
         else:
+            if dry_run:
+                # Show what would happen without creating posts
+                rows = conn.execute(
+                    "SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'"
+                ).fetchall()
+                unwelcomed = [r["branch_name"] for r in rows if not has_been_welcomed(conn, r["branch_name"])]
+                close_db(conn)
+                return {"success": True, "dry_run": True, "would_welcome": unwelcomed}
             result = _welcome_scan(conn)
 
         close_db(conn)
@@ -65,6 +81,14 @@ def run_welcome(args: List[str]) -> dict:
         if conn:
             close_db(conn)
         return {"success": False, "error": str(e)}
+
+
+def _get_unwelcomed_branches(conn) -> list:
+    """Return list of branch names that have not been welcomed yet."""
+    rows = conn.execute(
+        "SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'"
+    ).fetchall()
+    return [row["branch_name"] for row in rows if not has_been_welcomed(conn, row["branch_name"])]
 
 
 def _welcome_scan(conn) -> dict:

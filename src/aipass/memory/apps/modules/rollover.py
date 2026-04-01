@@ -189,9 +189,14 @@ def run_rollover() -> bool:
     ))
     console.print()
 
-    console.print("[cyan]Checking for rollover triggers...[/cyan]")
+    console.print("[cyan]Checking for rollover triggers... (first run may take 30s for model loading)[/cyan]")
 
-    result = _handler_execute_rollover()
+    try:
+        result = _handler_execute_rollover()
+    except Exception as e:
+        logger.error(f"[rollover] Rollover execution failed: {e}", exc_info=True)
+        error(f"Rollover failed: {e}")
+        return False
 
     if not result.get('success') and result.get('error'):
         error(result['error'])
