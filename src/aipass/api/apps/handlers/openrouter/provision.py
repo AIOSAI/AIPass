@@ -9,20 +9,15 @@
 """
 Caller Auto-Provisioning Handler
 
+Internal-only handler — not wired as a CLI command.
+Called automatically by client.get_response() via ensure_caller_config().
+
 Business logic for provisioning OpenRouter API configs:
 - Auto-create caller API configurations
 - Provision JSON folder structure
 - Set default model/temperature/max_tokens
 - Initialize caller-specific tracking files
 - Ensure caller has complete 3-file JSON structure
-
-COMPLIANT STANDARDS:
-- Uses prax logger for output (NO print() or console.print())
-- Uses prax logger for operations
-- Standalone functions (no class dependencies)
-- Imports from caller handler for detection logic
-- Complete docstrings with Args/Returns
-- Under 300 lines
 """
 
 from pathlib import Path

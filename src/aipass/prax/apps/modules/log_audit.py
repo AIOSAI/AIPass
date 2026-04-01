@@ -72,7 +72,10 @@ def _display_audit(files: list, summary: dict) -> None:
     console.print("[bold cyan]System Log Audit[/bold cyan]")
     console.print(f"  Total files: {summary['total_files']}")
     console.print(f"  Total lines: {summary['total_lines']:,}")
-    console.print(f"  Largest: {summary['largest_file']} ({summary['largest_lines']:,} lines)")
+    if summary.get('largest_file'):
+        console.print(f"  Largest: {summary['largest_file']} ({summary.get('largest_lines', 0):,} lines)")
+    else:
+        console.print("  Largest: (no log files found)")
 
     if summary['healthy']:
         console.print("[green]  Status: HEALTHY — all logs within limits[/green]")

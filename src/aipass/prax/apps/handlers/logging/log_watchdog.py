@@ -249,6 +249,7 @@ def log_health_summary() -> Dict[str, Any]:
             "oversized_count": 0,
             "critical_count": 0,
             "largest_file": None,
+            "largest_lines": 0,
             "healthy": True
         }
 

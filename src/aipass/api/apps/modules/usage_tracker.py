@@ -24,6 +24,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
+from aipass.api.apps.handlers.usage.cleanup import DEFAULT_RETENTION_DAYS
 
 
 def print_introspection():
@@ -114,7 +115,7 @@ EXAMPLES:
 
     # cleanup command
     cleanup_parser = subparsers.add_parser("cleanup", help="Clean up old usage data")
-    cleanup_parser.add_argument("days", nargs="?", default="30", help="Days to retain (default: 30)")
+    cleanup_parser.add_argument("days", nargs="?", default=str(DEFAULT_RETENTION_DAYS), help=f"Days to retain (default: {DEFAULT_RETENTION_DAYS})")
 
     console.print(parser.format_help())
 
@@ -249,7 +250,7 @@ def show_caller_usage(args: List[str]):
 
 def cleanup_data(args: List[str]):
     """Orchestrate cleanup workflow"""
-    days = int(args[0]) if args else 30
+    days = int(args[0]) if args else DEFAULT_RETENTION_DAYS
 
     header(f"Cleanup Old Data (retain {days} days)")
     console.print()

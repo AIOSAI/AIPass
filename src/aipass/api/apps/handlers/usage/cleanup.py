@@ -27,6 +27,9 @@ from aipass.prax import logger
 # JSON handler
 from aipass.api.apps.handlers.json import json_handler
 
+# Default retention period
+DEFAULT_RETENTION_DAYS = 30
+
 
 def _read_json(file_path: Path) -> Optional[Dict]:
     """Read JSON file with error handling."""
@@ -52,7 +55,7 @@ def _write_json(file_path: Path, data: Dict) -> bool:
         return False
 
 
-def cleanup_old_data(data_file_path: Path, retention_days: int = 30) -> int:
+def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTION_DAYS) -> int:
     """
     Remove usage data older than retention period.
 

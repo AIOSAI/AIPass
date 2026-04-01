@@ -21,10 +21,9 @@ Usage:
         json_folder = caller_info['json_folder']
 """
 
-from pathlib import Path
-
 # Standard library imports
 import inspect
+from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 # Logging

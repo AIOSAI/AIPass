@@ -212,10 +212,16 @@ def _calculate_quick_status_standalone(sections: Dict) -> Dict:
     flow = sections.get("flow", {})
     commons = sections.get("commons_activity", {})
 
-    new_mail = ai_mail.get("new", ai_mail.get("unread", 0))
-    opened_mail = ai_mail.get("opened", 0)
-    active_plans = flow.get("active_plans", 0)
-    mentions = commons.get("mentions", 0)
+    new_mail_raw = ai_mail.get("new", ai_mail.get("unread", 0))
+    opened_raw = ai_mail.get("opened", 0)
+    active_plans_raw = flow.get("active_plans", 0)
+    mentions_raw = commons.get("mentions", 0)
+
+    # Coerce to int — some branches store lists instead of counts
+    new_mail = len(new_mail_raw) if isinstance(new_mail_raw, list) else int(new_mail_raw or 0)
+    opened_mail = len(opened_raw) if isinstance(opened_raw, list) else int(opened_raw or 0)
+    active_plans = len(active_plans_raw) if isinstance(active_plans_raw, list) else int(active_plans_raw or 0)
+    mentions = len(mentions_raw) if isinstance(mentions_raw, list) else int(mentions_raw or 0)
 
     # Action required if new mail, active plans, or commons mentions
     action_required = new_mail > 0 or active_plans > 0 or mentions > 0

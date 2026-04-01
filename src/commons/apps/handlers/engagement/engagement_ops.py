@@ -61,11 +61,14 @@ def generate_prompt(args: List[str]) -> dict:
     Returns:
         Dict with success, post_id, room, theme, author
     """
+    dry_run = "--dry-run" in args
+    filtered_args = [a for a in args if a != "--dry-run"]
+
     custom_theme = None
-    if "--theme" in args:
-        idx = args.index("--theme")
-        if idx + 1 < len(args):
-            custom_theme = args[idx + 1]
+    if "--theme" in filtered_args:
+        idx = filtered_args.index("--theme")
+        if idx + 1 < len(filtered_args):
+            custom_theme = filtered_args[idx + 1]
         else:
             return {"success": False, "error": 'Usage: commons prompt --theme "Your custom question"'}
 
@@ -74,6 +77,9 @@ def generate_prompt(args: List[str]) -> dict:
     else:
         day_of_year = datetime.now().timetuple().tm_yday
         theme = PROMPT_THEMES[day_of_year % len(PROMPT_THEMES)]
+
+    if dry_run:
+        return {"success": True, "dry_run": True, "theme": theme, "room": DEFAULT_ROOM}
 
     title = f"Daily Prompt: {theme}"
     content = (
@@ -137,11 +143,17 @@ def create_event(args: List[str]) -> dict:
     Returns:
         Dict with success, post_id, room, title, author
     """
-    if not args or len(args) < 2:
-        return {"success": False, "error": 'Usage: commons event "title" "description"'}
+    dry_run = "--dry-run" in args
+    filtered_args = [a for a in args if a != "--dry-run"]
 
-    event_title = args[0]
-    event_description = args[1]
+    if not filtered_args or len(filtered_args) < 2:
+        return {"success": False, "error": 'Usage: commons event "title" "description" [--dry-run]'}
+
+    event_title = filtered_args[0]
+    event_description = filtered_args[1]
+
+    if dry_run:
+        return {"success": True, "dry_run": True, "title": event_title, "room": DEFAULT_ROOM}
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     title = f"Event: {event_title}"

@@ -135,10 +135,6 @@ def send_reply(
     if not target_branch:
         return False, f"Could not find branch for {reply_destination}", None
 
-    target_path = Path(target_branch.get("path", ""))
-    if not target_path.exists():
-        return False, f"Recipient path not found: {target_path}", None
-
     # Deliver the reply (pass email address, not path)
     success, error_msg = deliver_email_to_branch(reply_destination, reply_email_data)
     if not success:
