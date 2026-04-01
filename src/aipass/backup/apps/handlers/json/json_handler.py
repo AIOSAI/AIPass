@@ -269,13 +269,13 @@ if __name__ == "__main__":
     console.print("[yellow]TESTING:[/yellow] Creating backup JSONs...")
 
     # Test auto-creation
-    log_operation("test_operation", {"test": "data"}, "backup_system")
-    increment_counter("backup_system", "test_counter", 1)
-    update_data_metrics("backup_system", test_metric="working")
+    log_operation("test_operation", {"test": "data"}, "backup")
+    increment_counter("backup", "test_counter", 1)
+    update_data_metrics("backup", test_metric="working")
 
     console.print()
     console.print("[green]Check backup_json/ directory for created files:[/green]")
-    console.print("  [dim]-[/dim] backup_system_config.json")
-    console.print("  [dim]-[/dim] backup_system_data.json")
-    console.print("  [dim]-[/dim] backup_system_log.json")
+    console.print("  [dim]-[/dim] backup_config.json")
+    console.print("  [dim]-[/dim] backup_data.json")
+    console.print("  [dim]-[/dim] backup_log.json")
     console.print()

@@ -45,7 +45,7 @@ def _find_repo_root() -> Path:
             return parent
     return Path.cwd()
 
-def _get_branch_registry() -> Path:
+def _get_aipass_registry() -> Path:
     """Lazily resolve AIPASS_REGISTRY.json path."""
     return _find_repo_root() / "AIPASS_REGISTRY.json"
 
@@ -58,13 +58,13 @@ STALE_THRESHOLD_MINUTES = 120
 
 def _get_all_branches() -> List[Dict[str, Any]]:
     """
-    Load all branches from BRANCH_REGISTRY.json.
+    Load all branches from AIPASS_REGISTRY.json.
 
     Returns:
         List of dicts with 'name' and 'path' keys
     """
     try:
-        registry = _get_branch_registry()
+        registry = _get_aipass_registry()
         if not registry.exists():
             return []
 
@@ -79,7 +79,7 @@ def _get_all_branches() -> List[Dict[str, Any]]:
                 })
         return branches
     except Exception as e:
-        logger.warning("Failed to load branch registry: %s", e)
+        logger.warning("Failed to load AIPASS_REGISTRY.json: %s", e)
         return []
 
 
@@ -226,7 +226,7 @@ def build_agent_status_section() -> Dict[str, Any]:
 
 def _get_all_branch_paths() -> List[Path]:
     """
-    Get paths for all active branches from BRANCH_REGISTRY.json.
+    Get paths for all active branches from AIPASS_REGISTRY.json.
 
     Returns:
         List of Path objects for all registered branches
@@ -240,7 +240,7 @@ def _write_section_to_all_branches(section_name: str, section_data: Dict,
     Write a dashboard section to multiple branches via a single subprocess.
 
     Uses one subprocess call for all branches to avoid spawning N processes.
-    Pattern from MEMORY_BANK/apps/handlers/dashboard_push.py.
+    Pattern from memory/apps/handlers/dashboard_push.py.
 
     Args:
         section_name: Dashboard section key (e.g., "agent_status")

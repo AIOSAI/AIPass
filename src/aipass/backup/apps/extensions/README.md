@@ -1,3 +1,3 @@
 # Extensions
 
-Extension point for backup system add-ons.
+Extension point for backup add-ons.

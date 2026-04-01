@@ -140,15 +140,15 @@ def test_extract_mentions_case_insensitive(initialized_db: sqlite3.Connection):
 
 
 def test_extract_mentions_with_underscores(initialized_db: sqlite3.Connection):
-    """Mentions with underscores (e.g., @seed_cortex) are matched."""
+    """Mentions with underscores (e.g., @ai_mail) are matched."""
     initialized_db.execute(
         "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
-        ("seed_cortex", "Seed Cortex"),
+        ("ai_mail", "AI Mail"),
     )
     initialized_db.commit()
 
-    result = extract_mentions("Asking @seed_cortex for analysis")
-    assert result == ["seed_cortex"]
+    result = extract_mentions("Asking @ai_mail for analysis")
+    assert result == ["ai_mail"]
 
 
 # ===========================================================================

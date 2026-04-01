@@ -15,8 +15,8 @@ Wakes one branch per rotation on a rotating schedule to:
 3. Act on any pending notifications
 4. Browse The Commons feed and engage if something catches their eye
 
-Rotates through all eligible branches from BRANCH_REGISTRY,
-excluding VERA (has her own heartbeat), DEV_CENTRAL (human),
+Rotates through all eligible branches from AIPASS_REGISTRY,
+excluding VERA (has her own heartbeat), DEVPULSE (human),
 DAEMON (self), and non-agent directories.
 
 Full rotation every ~14 hours, then loops.
@@ -86,9 +86,9 @@ ENGAGEMENT_PROMPT = (
 
 
 def _load_eligible_branches() -> list:
-    """Load and filter branches from BRANCH_REGISTRY."""
+    """Load and filter branches from AIPASS_REGISTRY."""
     if not REGISTRY_PATH.exists():
-        logger.error("[community_rotation] BRANCH_REGISTRY not found at %s", REGISTRY_PATH)
+        logger.error("[community_rotation] AIPASS_REGISTRY not found at %s", REGISTRY_PATH)
         return []
     try:
         with open(REGISTRY_PATH, 'r', encoding='utf-8') as f:

@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: process.py
-# Description: Memory Bank Processing Handler
+# Description: Memory Processing Handler
 # Version: 1.5.0
 # Created: 2025-11-25
 # Modified: 2025-11-25
 # =============================================
 
 """
-Memory Bank Processing Handler
+Memory Processing Handler
 
 Handles archival of closed PLAN files to flow/processed_plans/.
 AI summarization removed — plans vectorized directly from flow/processed_plans/.
@@ -51,7 +51,7 @@ def _find_repo_root() -> Path:
 
 
 _REPO_ROOT = _find_repo_root()
-MEMORY_BANK_PATH = _REPO_ROOT / "MEMORY_BANK" / "plans"
+MEMORY_PATH = _REPO_ROOT / "src" / "aipass" / "memory"
 PROCESSED_PLANS_DIR = _PKG_ROOT / "backup" / "processed_plans"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 
@@ -316,12 +316,12 @@ def is_template_content(content: str) -> bool:
 #         raise Exception("No response from OpenRouter API - check API key and connection")
 
 # =============================================
-# MEMORY BANK CREATION (DISABLED)
+# MEMORY ENTRY CREATION (DISABLED)
 # AI summarization removed — plans vectorized directly from flow/processed_plans/
 # =============================================
 
 # def create_memory_entry(plan_path: Path, analysis: Dict[str, str]) -> Optional[Path]:
-#     """Create memory bank entry from analyzed plan
+#     """Create @memory entry from analyzed plan
 #
 #     Args:
 #         plan_path: Path to source PLAN file
@@ -359,7 +359,7 @@ def is_template_content(content: str) -> bool:
 #             archive_dir = Path(private_branch["path"]) / ".archive" / "plans"
 #             _private_archive_log = f"[mbank] Archiving plan locally for private branch: {private_branch['name']}"
 #         else:
-#             archive_dir = MEMORY_BANK_PATH
+#             archive_dir = MEMORY_PATH
 #             _private_archive_log = None
 #
 #         memory_file = archive_dir / filename
@@ -443,7 +443,7 @@ def archive_plan(plan_path: Path) -> bool:
 # =============================================
 
 def cleanup_temp_files() -> Dict[str, Any]:
-    """Remove old -TEMP files from MEMORY_BANK (empty template plans)
+    """Remove old -TEMP files from @memory (empty template plans)
 
     These files are created when empty template plans are closed and processed.
     They have no value and should be auto-cleaned.
@@ -461,9 +461,9 @@ def cleanup_temp_files() -> Dict[str, Any]:
     details = []
 
     try:
-        # Scan MEMORY_BANK/plans/ for files with -TEMP in name
-        if MEMORY_BANK_PATH.exists():
-            for temp_file in MEMORY_BANK_PATH.glob("*-TEMP-*.md"):
+        # Scan @memory for files with -TEMP in name
+        if MEMORY_PATH.exists():
+            for temp_file in MEMORY_PATH.glob("*-TEMP-*.md"):
                 files_found += 1
 
                 try:
@@ -496,7 +496,7 @@ def cleanup_temp_files() -> Dict[str, Any]:
 
     except Exception as e:
         # Failed to scan directory
-        logger.error("[mbank] Failed to scan MEMORY_BANK for temp files: %s", e)
+        logger.error("[mbank] Failed to scan @memory for temp files: %s", e)
         return {
             "files_found": 0,
             "files_deleted": 0,

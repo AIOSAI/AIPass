@@ -108,7 +108,7 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
 
         return None
     except Exception as e:
-        logger.error(f"[bypass_handler] Error reading branch registry: {e}")
+        logger.error(f"[bypass_handler] Error reading AIPASS_REGISTRY: {e}")
         return None
 
 

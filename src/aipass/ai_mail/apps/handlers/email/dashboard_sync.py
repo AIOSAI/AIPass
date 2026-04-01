@@ -29,7 +29,7 @@ _write_section = None
 
 
 def _get_write_section():
-    """Lazy import write_section from devpulse module API."""
+    """Lazy import write_section from prax dashboard."""
     global _write_section
     if _write_section is None:
         from aipass.prax.apps.modules.dashboard import write_section

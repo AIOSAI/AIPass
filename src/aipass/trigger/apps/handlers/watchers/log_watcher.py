@@ -74,7 +74,7 @@ def _detect_branch_from_log(log_file: str) -> str:
     Detect branch from log filename.
 
     Log files follow pattern: branch_operation.log
-    Example: seed_audit.log -> SEED
+    Example: seedgo_audit.log -> SEEDGO
 
     Args:
         log_file: Log filename or path

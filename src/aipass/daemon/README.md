@@ -61,7 +61,7 @@ daemon/
 │       ├── community_rotation.py      # Community rotation plugin
 │       ├── daily_audit.py             # Daily audit plugin
 │       ├── heartbeat.py               # Heartbeat / liveness plugin
-│       └── .archive/                  # botfather_reminder, dev_central_monitor (archived)
+│       └── .archive/                  # botfather_reminder, devpulse_monitor (archived)
 ├── daemon_json/                # JSON tracking data
 ├── docs/                       # Documentation
 ├── dropbox/                    # Incoming file drops

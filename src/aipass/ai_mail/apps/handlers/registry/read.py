@@ -10,7 +10,7 @@
 Registry Read Handler
 
 Handles reading branch registry data including:
-- Reading all branches from BRANCH_REGISTRY.json
+- Reading all branches from AIPASS_REGISTRY.json
 - Deriving email addresses from branch names
 - Mapping email addresses to branch paths
 
@@ -102,7 +102,7 @@ def _derive_email_from_branch_name(branch_name: str) -> str:
     - AIPASS.admin -> @admin (take part after dot)
     - AIPASS Workshop -> @aipass (take first word)
     - AIPASS-HELP -> @help (take second part to avoid collision)
-    - BACKUP-SYSTEM -> @backup (take first part)
+    - BACKUP -> @backup (take whole name)
     - DRONE -> @drone (take whole name)
 
     Args:

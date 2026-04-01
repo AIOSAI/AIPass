@@ -264,7 +264,7 @@ def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, 
 
     Args:
         central_file: Path to the central file
-        central_dir: Path to the .ai_central directory
+        central_dir: Path to the .ai_central/ directory
         central_data: Central data to save
 
     Returns:

@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: backup_core.py
-# Description: Main backup system orchestration module
+# Description: Main backup orchestration module
 # Version: 2.1.0
 # Created: 2025-11-23
 # Modified: 2026-03-09
 # =============================================
 
 """
-Backup System Core Module
+Backup Core Module
 
-Main entry point for backup functionality following seed architecture standards.
+Main entry point for backup functionality following seedgo architecture standards.
 Provides CLI command routing and BackupEngine orchestration.
 
 This module coordinates the complete backup workflow by bringing together:
@@ -22,7 +22,7 @@ This module coordinates the complete backup workflow by bringing together:
 Architecture Pattern:
 - handle_command(args) - CLI entry point for backup commands
 - BackupEngine class - Main orchestrator (delegates to handlers)
-- Follows seed 3-layer architecture (cli -> modules -> handlers)
+- Follows seedgo 3-layer architecture (cli -> modules -> handlers)
 """
 
 # =============================================
@@ -74,7 +74,7 @@ JSON_DIR = _BACKUP_ROOT / "backup_json"
 
 
 # =============================================
-# INTROSPECTION (SEED PATTERN)
+# INTROSPECTION (SEEDGO PATTERN)
 # =============================================
 
 def print_introspection():
@@ -247,9 +247,9 @@ def handle_command(args, pre_scanned=None) -> bool:
 
 
 class BackupEngine:
-    """Main backup system orchestrator (seed-compliant wrapper).
+    """Main backup orchestrator (seedgo-compliant wrapper).
 
-    Provides the core backup workflow coordination following seed architecture.
+    Provides the core backup workflow coordination following seedgo architecture.
     Delegates heavy lifting to handler modules rather than implementing logic here.
 
     This class is a thin orchestration layer that:
@@ -587,7 +587,7 @@ class BackupEngine:
 # =============================================
 
 # =============================================
-# STANDALONE ENTRY POINT (SEED PATTERN)
+# STANDALONE ENTRY POINT (SEEDGO PATTERN)
 # =============================================
 
 if __name__ == "__main__":

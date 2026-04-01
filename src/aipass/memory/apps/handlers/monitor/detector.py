@@ -201,7 +201,7 @@ def _get_max_lines(file_path: Path, branch_name: str | None = None) -> int:
 
     # 2. Try branch-level config (if branch_name provided or can be extracted)
     if branch_name is None:
-        # Extract from filename (e.g., SEED.local.json -> SEED)
+        # Extract from filename (e.g., SEEDGO.local.json -> SEEDGO)
         parts = file_path.stem.split('.')
         branch_name = parts[0] if parts else None
 
@@ -360,7 +360,7 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
     should_trigger, current_lines, max_lines, schema_ver, v2_reason = _should_rollover(file_path)
 
     if should_trigger:
-        # Extract branch and type from filename (e.g., SEED.observations.json)
+        # Extract branch and type from filename (e.g., SEEDGO.observations.json)
         parts = file_path.stem.split('.')
         branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
         memory_type = parts[1] if len(parts) > 1 else "unknown"

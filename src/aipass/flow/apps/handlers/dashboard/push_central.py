@@ -9,7 +9,7 @@
 """
 Push to Plans Central Handler
 
-Pushes Flow's plan data to the central PLANS.central.json file at AI_CENTRAL.
+Pushes Flow's plan data to the central PLANS.central.json file at .ai_central.
 This handler follows the 3-tier logging standard (no Prax imports, no logging).
 
 Features:
@@ -192,7 +192,7 @@ def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]
 # =============================================
 
 def push_to_plans_central() -> bool:
-    """Push Flow's plan data to AI_CENTRAL/PLANS.central.json
+    """Push Flow's plan data to .ai_central/PLANS.central.json
 
     Algorithm:
     1. Read fplan_registry.json
@@ -209,7 +209,7 @@ def push_to_plans_central() -> bool:
         True on success, False on failure
     """
     try:
-        # Ensure AI_CENTRAL directory exists
+        # Ensure .ai_central directory exists
         AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
 
         # Load registry

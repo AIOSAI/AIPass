@@ -13,7 +13,7 @@ Connects the file watcher (apps/handlers/watcher/monitor.py) to the
 monitoring event queue (event_queue.py).
 
 Flow:
-1. Load branches from BRANCH_REGISTRY.json
+1. Load branches from AIPASS_REGISTRY.json
 2. Set up BranchFileHandler for each branch
 3. Start watchdog observers
 4. File events -> MonitoringEvent -> MonitoringQueue
@@ -70,12 +70,12 @@ from aipass.prax.apps.handlers.json import json_handler
 
 
 # =============================================================================
-# BRANCH REGISTRY LOADER
+# AIPASS REGISTRY LOADER
 # =============================================================================
 
 def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[str, Path]]:
     """
-    Load branch paths from BRANCH_REGISTRY.json
+    Load branch paths from AIPASS_REGISTRY.json
 
     Args:
         branch_filter: Optional list of branch names to watch (e.g., ['PRAX', 'CLI'])
@@ -90,7 +90,7 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
         registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
         if not registry_path.exists():
-            logger.warning(f"BRANCH_REGISTRY.json not found at {registry_path}")
+            logger.warning(f"AIPASS_REGISTRY.json not found at {registry_path}")
             return []
 
         with open(registry_path, encoding='utf-8') as f:
@@ -98,7 +98,7 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
 
         branches = data.get('branches', [])
         if not branches:
-            logger.warning("No branches found in BRANCH_REGISTRY.json")
+            logger.warning("No branches found in AIPASS_REGISTRY.json")
             return []
 
         # Normalize filter to uppercase
@@ -130,10 +130,10 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
         return branch_paths
 
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in BRANCH_REGISTRY.json: {e}")
+        logger.error(f"Invalid JSON in AIPASS_REGISTRY.json: {e}")
         return []
     except Exception as e:
-        logger.error(f"Error loading BRANCH_REGISTRY.json: {e}")
+        logger.error(f"Error loading AIPASS_REGISTRY.json: {e}")
         return []
 
 

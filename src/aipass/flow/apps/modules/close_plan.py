@@ -57,7 +57,7 @@ from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_lo
 from aipass.flow.apps.handlers.dashboard.push_central import push_to_plans_central
 from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_branch_dashboard
 
-# Internal: Memory bank template check (lightweight, no API calls)
+# Internal: Memory template check (lightweight, no API calls)
 from aipass.flow.apps.handlers.mbank.process import is_template_content
 
 # Internal: Close operations handler (implementation)

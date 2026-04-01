@@ -178,7 +178,7 @@ def setup_handlers():
 
 2. **Cross-Branch Side Effects**
    - Dashboard updates after plan changes
-   - Memory Bank rollover checks on startup
+   - Memory rollover checks on startup
    - Email notifications on errors
 
 3. **State Changes Other Branches Care About**
@@ -250,7 +250,7 @@ Some cross-branch handler imports are intentional in Trigger. Configure in `.see
       "file": "apps/handlers/events/startup.py",
       "standard": "encapsulation",
       "lines": [38],
-      "reason": "Trigger's purpose is centralizing cross-branch calls. Memory Bank has no modules API."
+      "reason": "Trigger's purpose is centralizing cross-branch calls. Memory has no modules API."
     }
   ]
 }

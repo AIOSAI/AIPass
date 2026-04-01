@@ -10,7 +10,7 @@
 Daily Standards Audit Plugin
 
 Wakes @seedgo daily at 04:00 with fresh context to run a full system audit.
-Seed checks BRANCH_REGISTRY completeness, runs drone @seedgo audit @all,
+Seedgo checks AIPASS_REGISTRY completeness, runs drone @seedgo audit @all,
 fixes non-compliance issues, and emails a summary to @devpulse.
 """
 
@@ -27,7 +27,7 @@ PLUGIN_CONFIG = {
     "max_turns": 50,
     "prompt": (
         "Daily maintenance audit. "
-        "1) Read BRANCH_REGISTRY.json - confirm all branches are registered and paths exist. "
+        "1) Read AIPASS_REGISTRY.json - confirm all branches are registered and paths exist. "
         "2) Run drone @seedgo audit @all - check standards compliance across all branches. "
         "3) Fix any non-compliance issues you can fix directly. "
         "4) Email summary to @devpulse with: branches audited, pass/fail counts, "

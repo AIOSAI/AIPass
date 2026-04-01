@@ -10,7 +10,7 @@
 Central File Writer Handler
 
 Updates memory_bank.central.json with current statistics.
-This file is Memory Bank's "API output" - used to populate dashboards.
+This file is memory's "API output" - used to populate dashboards.
 
 Purpose:
     Update central registry when vectors/archives change
@@ -47,7 +47,7 @@ def _find_repo_root() -> Path:
     return Path.cwd()
 
 
-CENTRAL_FILE = _find_repo_root() / ".ai_central" / "MEMORY.central.json"
+CENTRAL_FILE = _find_repo_root() / ".ai_mail" / "MEMORY.central.json"
 CHROMA_DB_PATH = _MEMORY_ROOT / ".chroma"
 ARCHIVE_DIR = _MEMORY_ROOT / ".archive"
 
@@ -149,7 +149,7 @@ def get_last_rollover_timestamp() -> str:
 
 def collect_stats() -> Dict[str, Any]:
     """
-    Collect all Memory Bank statistics
+    Collect all memory statistics
 
     Returns:
         Dict with stats:
@@ -290,7 +290,7 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
 
 def get_current_stats() -> Dict[str, Any]:
     """
-    Get current Memory Bank statistics without writing to file
+    Get current memory statistics without writing to file
 
     Returns:
         Dict with stats or error
@@ -321,7 +321,7 @@ def get_current_stats() -> Dict[str, Any]:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("\n=== Memory Bank Central Writer ===\n")
+    print("\n=== Memory Central Writer ===\n")
 
     # Get current stats
     print("Collecting statistics...")

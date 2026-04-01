@@ -371,8 +371,8 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
         return
 
 
-def _run_memory_bank_check() -> None:
-    """Run Memory Bank rollover check if available.
+def _run_memory_check() -> None:
+    """Run memory rollover check if available.
 
     Uses memory's public modules API to avoid cross-branch handler guard.
     Silent failure - handlers cannot use logger or print.
@@ -383,7 +383,7 @@ def _run_memory_bank_check() -> None:
     except ImportError:
         return  # Memory not available
     except Exception as exc:
-        _log_warning(f"memory bank check failed: {exc}")
+        _log_warning(f"memory check failed: {exc}")
         return
 
 
@@ -397,5 +397,5 @@ def handle_startup(**kwargs: Any) -> None:
     fire_event = kwargs.get('fire_event')
     _run_error_catchup(fire_event)
 
-    # Memory Bank rollover check
-    _run_memory_bank_check()
+    # Memory rollover check
+    _run_memory_check()

@@ -33,10 +33,10 @@ from .branch_detection import detect_branch_from_pwd
 
 def get_current_user() -> Dict:
     """
-    Get current user's information from branch detection (BRANCH_REGISTRY.json)
+    Get current user's information from branch detection (AIPASS_REGISTRY.json)
 
     Uses PWD/CWD to detect which branch is calling, then looks up info
-    in BRANCH_REGISTRY.json. NO FALLBACKS - fails hard if detection fails.
+    in AIPASS_REGISTRY.json. NO FALLBACKS - fails hard if detection fails.
 
     Returns:
         Dict containing user information:
@@ -63,7 +63,7 @@ def get_current_user() -> Dict:
             "No fallback configured - this is intentional to catch bugs."
         )
 
-    # Extract info from branch_info (from BRANCH_REGISTRY.json)
+    # Extract info from branch_info (from AIPASS_REGISTRY.json)
     from .branch_detection import BRANCH_REGISTRY_PATH
     _repo_root = BRANCH_REGISTRY_PATH.parent
 
@@ -80,7 +80,7 @@ def get_current_user() -> Dict:
             f"Branch: {branch_name}\n"
             f"Path: {branch_path}\n"
             f"Email: {email}\n"
-            "Check BRANCH_REGISTRY.json for missing fields."
+            "Check AIPASS_REGISTRY.json for missing fields."
         )
 
     # Construct mailbox path (branch_path guaranteed non-None by check above)
@@ -98,10 +98,10 @@ def get_current_user() -> Dict:
 
 def get_user_by_email(email: str) -> Optional[Dict]:
     """
-    Get user information by email address from BRANCH_REGISTRY.json
+    Get user information by email address from AIPASS_REGISTRY.json
 
     Args:
-        email: Email address (e.g., "@seed")
+        email: Email address (e.g., "@seedgo")
 
     Returns:
         Dict containing user info, or None if not found
@@ -139,7 +139,7 @@ def get_user_by_email(email: str) -> Optional[Dict]:
 
 def get_all_users() -> Dict[str, Dict]:
     """
-    Get all users from BRANCH_REGISTRY.json
+    Get all users from AIPASS_REGISTRY.json
 
     Returns:
         Dict mapping branch emails to user info dicts

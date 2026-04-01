@@ -3,7 +3,7 @@
 # Name: __init__.py - Monitoring Handlers Package
 # Date: 2026-01-30
 # Version: 0.1.0
-# Category: assistant/handlers/monitoring
+# Category: daemon/handlers/monitoring
 #
 # CHANGELOG (Max 5 entries):
 #   - v0.1.0 (2026-01-30): Initial implementation - FPLAN-0266 Phase 1
@@ -14,7 +14,7 @@
 # =============================================
 
 """
-Monitoring handlers for ASSISTANT branch.
+Monitoring handlers for daemon branch.
 
 Provides activity collection and memory health checking
 for the Branch Activity Monitoring System (FPLAN-0266).

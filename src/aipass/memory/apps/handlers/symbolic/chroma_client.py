@@ -7,7 +7,7 @@
 # =============================================
 
 """
-Shared ChromaDB Client Handler - THE canonical singleton for all of Memory Bank
+Shared ChromaDB Client Handler - THE canonical singleton for all of memory
 
 Provides a singleton ChromaDB PersistentClient per database path to prevent
 write contention from multiple competing PersistentClient instances against
@@ -49,7 +49,7 @@ def get_client(db_path: Path | str | None = None):
     """
     Get or create a shared ChromaDB PersistentClient (singleton per path)
 
-    This is THE canonical way to get a ChromaDB client in Memory Bank.
+    This is THE canonical way to get a ChromaDB client in memory.
     All handlers must use this function instead of creating their own
     PersistentClient instances to avoid write contention on .chroma/.
 

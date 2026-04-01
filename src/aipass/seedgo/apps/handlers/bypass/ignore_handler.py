@@ -43,7 +43,7 @@ AUDIT_IGNORE_PATTERNS = [
     '__pycache__',
     '/.archive/',      # Temp archive directories
     '/.backup/',       # Temp backup directories
-    '/backups/',       # Actual backup storage (backup_system/backups/)
+    '/backups/',       # Actual backup storage (backup/backups/)
     '/artifacts/',     # Build artifacts
     '.temp',           # Temp files
     '.old',            # Old files

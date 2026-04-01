@@ -183,7 +183,7 @@ def get_branch_local_chroma_path(branch_name: str) -> Path | None:
     Get local .chroma path for branch
 
     Args:
-        branch_name: Branch name (e.g., "SEED", "AIPASS")
+        branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
 
     Returns:
         Path to branch's local .chroma directory, or None if branch not found

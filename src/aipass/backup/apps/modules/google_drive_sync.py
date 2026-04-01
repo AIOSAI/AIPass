@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: google_drive_sync.py
-# Description: Google Drive Integration for AIPass Backup System
+# Description: Google Drive Integration for AIPass Backup
 # Version: 2.6.0
 # Created: 2025-10-30
 # Modified: 2026-03-09
@@ -253,7 +253,7 @@ def _run_sync_test() -> bool:
 # =============================================
 
 def handle_command(args) -> bool:
-    """Route Google Drive sync commands from backup_system orchestrator.
+    """Route Google Drive sync commands from backup orchestrator.
 
     Args:
         args: Command-line arguments from CLI parser
@@ -483,7 +483,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Google Drive Sync for AIPass Backup System",
+        description="Google Drive Sync for AIPass Backup",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 COMMANDS:

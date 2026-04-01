@@ -9,7 +9,7 @@
 """
 Branch Discovery Handler
 
-Discovers all AIPass branches from BRANCH_REGISTRY.json
+Discovers all AIPass branches from AIPASS_REGISTRY.json
 """
 
 from pathlib import Path

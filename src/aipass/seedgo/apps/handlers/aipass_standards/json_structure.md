@@ -110,7 +110,7 @@ DRONE_JSON_DIR = DRONE_ROOT / "drone_json"
 
 **3. Update TEMPLATES_DIR constant:**
 ```python
-# Point to YOUR branch templates, not SEED's
+# Point to YOUR branch templates, not seedgo's
 JSON_TEMPLATES_DIR = {BRANCH}_ROOT / "apps" / "json_templates"
 ```
 
@@ -666,6 +666,7 @@ ls /branch/branch_json/
 
 #@comments:2025-11-13:claude: Log structure is array (not object with "entries" key) - corrected in examples
 
-#@comments:2026-01-31:claude: Added critical warning about path resolution pattern requirement. Fixed 5 branches (API, DRONE, FLOW, BACKUP_SYSTEM, DEVPULSE) affected by this undocumented requirement.
+#@comments:2026-01-31:claude: Added critical warning about path resolution pattern requirement. Fixed 5 branches (API, DRONE, FLOW, BACKUP, DEVPULSE) affected by this undocumented requirement.
 
-#@comments:2026-03-07:claude: Cleaned Dev-Pass references - seed->seedgo naming, removed /home/aipass/ paths, Cortex->DevPulse, updated imports to aipass.* namespace, Path.home()->Path(__file__).parents[N]
+#@comments:2026-03-07:claude: Cleaned old references - old->seedgo naming, removed /home/aipass/ paths, updated imports to aipass.* namespace, Path.home()->Path(__file__).parents[N]
+#@comments:2026-03-31:claude: Cleaned stale references - old names updated to current (AIPass, backup, seedgo)

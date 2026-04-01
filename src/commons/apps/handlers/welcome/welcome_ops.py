@@ -83,14 +83,6 @@ def run_welcome(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def _get_unwelcomed_branches(conn) -> list:
-    """Return list of branch names that have not been welcomed yet."""
-    rows = conn.execute(
-        "SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'"
-    ).fetchall()
-    return [row["branch_name"] for row in rows if not has_been_welcomed(conn, row["branch_name"])]
-
-
 def _welcome_scan(conn) -> dict:
     """
     Scan for unwelcomed branches and create welcome posts.

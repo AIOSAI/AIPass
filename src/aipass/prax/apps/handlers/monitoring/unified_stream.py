@@ -78,15 +78,14 @@ LEVEL_COLORS = {
 
 # Branch-specific colors for visual distinction
 BRANCH_COLORS = {
-    'SEED': 'green',
+    'SEEDGO': 'green',
     'DRONE': 'cyan',
     'FLOW': 'blue',
     'PRAX': 'magenta',
     'CLI': 'yellow',
-    'CORTEX': 'bright_blue',
     'AI_MAIL': 'bright_cyan',
-    'BACKUP_SYSTEM': 'bright_green',
-    'MEMORY_BANK': 'bright_magenta',
+    'BACKUP': 'bright_green',
+    'MEMORY': 'bright_magenta',
     'DEVPULSE': 'bright_yellow',
     'API': 'bright_red',
     'SECURITY': 'red',
@@ -124,7 +123,7 @@ def print_event(event_type: str, branch: str, message: str, level: str = 'info',
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Get branch color (unique per branch)
-        # For subagent labels like 'DEV_CENTRAL AGENT', use base branch color
+        # For subagent labels like 'DEVPULSE AGENT', use base branch color
         branch_upper = branch.upper()
         base_branch = branch_upper[:-6] if branch_upper.endswith(' AGENT') else branch_upper
         branch_color = BRANCH_COLORS.get(base_branch, 'white')

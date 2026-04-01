@@ -50,10 +50,10 @@ IGNORE_FOLDERS = {
 
     # Backup and archive
     "backup", "backups", ".backup", "archive", ".archive",
-    "backup_system", "archive_temp", "processed_plans",
+    "backup", "archive_temp", "processed_plans",
 
     # Memory and admin
-    "MEMORY_BANK", "admin", "aipass-help",
+    "memory", "admin", "aipass-help",
 
     # User directories
     ".local", "Downloads", "downloads",

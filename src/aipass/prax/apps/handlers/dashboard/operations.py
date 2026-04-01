@@ -148,7 +148,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
         "sections": {
             "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
-            "memory_bank": {"managed_by": "memory_bank", "vectors_stored": 0, "notes": {}, "last_updated": ""},
+            "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
             "commons_activity": {"managed_by": "the_commons", "mentions": 0, "new_posts_since_last_visit": 0, "new_comments_since_last_visit": 0, "last_updated": ""}
         }
     }

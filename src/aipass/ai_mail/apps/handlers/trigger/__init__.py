@@ -10,7 +10,7 @@
 #   - v1.0.0 (2026-02-02): Created - FPLAN-0284 Phase 2
 #
 # CODE STANDARDS:
-#   - Follows AIPass Seed standards
+#   - Follows AIPass seedgo standards
 #   - Package init for trigger event handlers
 # =============================================
 

@@ -147,7 +147,7 @@ def deduplicate_fragment(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://aipass.dev",
-            "X-Title": "AIPass Memory Bank"
+            "X-Title": "AIPass Memory"
         }
     )
     try:

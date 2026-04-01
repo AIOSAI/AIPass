@@ -277,7 +277,7 @@ def _apply_template_to_observations(current: dict, template: dict, branch_name: 
 # =============================================================================
 
 def _load_registry() -> Optional[List[Dict[str, Any]]]:
-    """Load branch registry and return list of active branches."""
+    """Load AIPASS_REGISTRY.json and return list of active branches."""
     if not REGISTRY_PATH.exists():
         return None
     try:
@@ -319,7 +319,7 @@ def _find_memory_files(branch_path: Path) -> Dict[str, List[Path]]:
 # =============================================================================
 
 def _load_templates() -> Optional[Dict[str, dict]]:
-    """Load living templates from Memory Bank templates directory."""
+    """Load living templates from memory templates directory."""
     templates = {}
     for name, path in [("local", LOCAL_TEMPLATE_PATH), ("observations", OBS_TEMPLATE_PATH)]:
         if not path.exists():
@@ -372,7 +372,7 @@ def push_templates(dry_run: bool = False) -> dict:
     branches = _load_registry()
     if branches is None:
         result["success"] = False
-        result["errors"].append("Failed to load branch registry")
+        result["errors"].append("Failed to load AIPASS_REGISTRY.json")
         return result
 
     for branch in branches:

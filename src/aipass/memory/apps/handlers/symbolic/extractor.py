@@ -161,7 +161,7 @@ def extract_context_triggers(chat_history: List[Dict[str, Any]]) -> Dict[str, An
     if not chat_history:
         return {'success': True, 'triggers': [], 'details': {}}
     ac = ' '.join((m.get('content') or '') for m in chat_history).lower()
-    pat = (r'\b(?:module|system|debug|memory|compression|vector|symbolic|cortex|'
+    pat = (r'\b(?:module|system|debug|memory|compression|vector|symbolic|'
            r'registry|toggle|profile|chat|context|api|token|embedding|storage|'
            r'json|function|method|class|import|file|script|error|fix|solution|'
            r'breakthrough|pattern|analysis|extraction|conversation|interaction|'
@@ -399,7 +399,7 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://aipass.dev",
-                "X-Title": "AIPass Memory Bank"
+                "X-Title": "AIPass Memory"
             }
         )
         try:

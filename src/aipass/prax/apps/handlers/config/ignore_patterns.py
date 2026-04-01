@@ -49,7 +49,7 @@ DEFAULT_IGNORE_FOLDERS = {
     '.git', '__pycache__', '.venv', 'vendor', 'node_modules',
     'Archive', 'Backups', 'External_Code_Sources', 'WorkShop',
     '.claude-server-commander-logs',
-    'backup_system', 'backups', 'archive.local'
+    'backup', 'backups', 'archive.local'
 }
 
 # =============================================

@@ -1,11 +1,11 @@
-#!/home/aipass/MEMORY_BANK/.venv/bin/python3
+#!/usr/bin/env python3
 
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: __init__.py - Symbolic Memory Handler Package
 # Date: 2026-02-04
 # Version: 0.1.0
-# Category: memory_bank/handlers/symbolic
+# Category: memory/handlers/symbolic
 #
 # CHANGELOG (Max 5 entries):
 #   - v0.1.0 (2026-02-04): Initial version - Fragmented Memory Phase 1

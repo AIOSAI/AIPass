@@ -163,7 +163,7 @@ def _print_help() -> None:
     console.print('  # Remind Flow to check on a plan in 7 days')
     console.print('  schedule create "Check FPLAN-0290 status" --due 7d --to @flow')
     console.print()
-    console.print('  # Follow up with Seed about code review in 2 weeks')
+    console.print('  # Follow up with Seedgo about code review in 2 weeks')
     console.print('  schedule create "Code review follow-up" --due 2w --to @seedgo --message "Review PR #45"')
     console.print()
     console.print('  # Check all due tasks and send reminder emails')

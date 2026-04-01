@@ -24,19 +24,19 @@ from typing import Any
 from aipass.trigger.apps.handlers.json import json_handler
 
 
-# Path resolution not needed - this handler delegates to Memory Bank's pusher
+# Path resolution not needed - this handler delegates to memory's pusher
 
 
 def handle_memory_template_updated(**kwargs: Any) -> None:
     """
     Handle memory_template_updated event - push templates to all branches.
 
-    Imports and calls push_templates() from Memory Bank's pusher handler.
+    Imports and calls push_templates() from memory's pusher handler.
     All operations are wrapped in try/except for silent failure.
 
     Args:
         **kwargs: Event data (template_name, updated_by, timestamp, etc.)
     """
-    # memory_bank integration (optional, requires memory_bank package)
+    # memory integration (optional, requires memory package)
     json_handler.log_operation("memory_template_event", {"success": True})
     pass

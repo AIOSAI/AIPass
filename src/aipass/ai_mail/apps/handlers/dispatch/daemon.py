@@ -307,7 +307,7 @@ def _remove_pid_file() -> None:
 
 
 def get_registered_branches() -> list:
-    """Load all registered branches from BRANCH_REGISTRY.json."""
+    """Load all registered branches from AIPASS_REGISTRY.json."""
     data = _read_json(BRANCH_REGISTRY)
     if data is None:
         return []

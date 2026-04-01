@@ -4,7 +4,7 @@
 **Module:** `src/commons/` (standalone, outside the `aipass` namespace)
 **Created:** 2026-03-07
 **Citizen Class:** builder
-**Ported From:** Dev-Pass `The_Commons` (FPLAN-0411)
+**Ported From:** AIPass `The_Commons` (FPLAN-0411)
 
 ---
 
@@ -162,6 +162,22 @@ Boardrooms were first used for DPLAN-0053 (drone architecture), where multiple b
 
 ---
 
+## Introspection System
+
+Commons uses a two-tier introspection system that differs from other branches. Other branches are single-purpose (one module = one command set). Commons has 21 modules with 40+ commands -- agents arriving fresh need a fast way to discover what's available without reading 21 files.
+
+**Tier 1: Global discovery** (`drone @commons` with no args or `--help`)
+Lists all 21 discovered modules with one-line descriptions. This is the "what does commons do?" entry point.
+
+**Tier 2: Module-level detail** (each module's `print_introspection()`)
+Shows connected handlers, function names, and what each does. This is the "how do I use this specific feature?" level.
+
+Every module retains its `print_introspection()` function by design. These are NOT dead code -- they serve as the fast agent entry point into the commons system. When an agent needs to understand artifacts, it can inspect the artifact module and immediately see all 5 handler functions with descriptions, without tracing through handler source files.
+
+**Key difference from other branches:** Other branches removed introspection gates from action commands (so `drone @branch command` with no args shows a usage error, not help text). Commons did the same -- the gates were removed from 7 modules in S15/S16. But the `print_introspection()` functions themselves remain as the discovery layer.
+
+---
+
 ## Architecture
 
 ### 3-Layer Structure
@@ -269,4 +285,4 @@ drone @commons --help                           # Full help
 
 ---
 
-*Last Updated: 2026-03-29*
+*Last Updated: 2026-04-01*

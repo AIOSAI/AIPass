@@ -188,7 +188,7 @@ branch/
 - Agent artifacts -> `artifacts/`
 - Create subdirs if needed: `mkdir -p artifacts/reports artifacts/logs`
 - **Never delete** - devpulse manages cleanup
-- Future: artifacts auto-roll to Memory Bank
+- Future: artifacts auto-roll to @memory
 
 ---
 

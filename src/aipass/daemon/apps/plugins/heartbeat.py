@@ -27,7 +27,7 @@ PLUGIN_CONFIG = {
     "schedule": "interval",
     "time": None,
     "interval_minutes": 240,  # Every 4 hours (was 30min -- too fast)
-    "enabled": False,  # Disabled 2026-03-29: @vera not in branch registry. Re-enable when vera is registered.
+    "enabled": False,  # Disabled 2026-03-29: @vera not in AIPASS_REGISTRY. Re-enable when vera is registered.
     "branch": "@vera",
     "fresh": True,  # v2.0: fresh sessions -- no accumulated idle context
     "max_turns": 15,

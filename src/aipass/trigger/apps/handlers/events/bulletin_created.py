@@ -39,7 +39,7 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 
 # Paths
-BRANCH_REGISTRY = _REPO_ROOT / "BRANCH_REGISTRY.json"
+BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 BULLETINS_PATH = _REPO_ROOT / "BULLETINS.central.json"
 
 _HANDLER_LOG = TRIGGER_ROOT / "logs" / "bulletin_handler.log"
@@ -67,7 +67,7 @@ def _load_branch_registry() -> List[Dict]:
     try:
         if not BRANCH_REGISTRY.exists():
             return []
-        data = json.loads(BRANCH_REGISTRY.read_text())
+        data = json.loads(BRANCH_REGISTRY.read_text(encoding='utf-8'))
         return data.get("branches", [])
     except Exception as exc:
         _log_warning(f"load branch registry failed: {exc}")

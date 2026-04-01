@@ -27,7 +27,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 # =============================================================================
-# MODULE PATTERN FUNCTIONS (SEED compliant)
+# MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # =============================================================================
 
 def print_introspection():
@@ -310,7 +310,7 @@ __all__ = [
 
 
 # =============================================================================
-# ENTRY POINT (SEED pattern)
+# ENTRY POINT (SEEDGO pattern)
 # =============================================================================
 
 if __name__ == "__main__":

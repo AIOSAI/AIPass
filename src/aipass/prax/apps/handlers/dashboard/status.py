@@ -29,7 +29,7 @@ def _find_repo_root() -> Path:
     return Path.cwd()
 
 
-BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
+AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def calculate_quick_status(sections: Dict) -> Dict:
@@ -94,14 +94,14 @@ def get_branch_paths() -> List[Path]:
         List of branch paths
 
     Raises:
-        FileNotFoundError: If branch registry doesn't exist
+        FileNotFoundError: If AIPASS_REGISTRY.json doesn't exist
         json.JSONDecodeError: If registry is corrupted
     """
-    if not BRANCH_REGISTRY.exists():
-        raise FileNotFoundError(f"Branch registry not found: {BRANCH_REGISTRY}")
+    if not AIPASS_REGISTRY.exists():
+        raise FileNotFoundError(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
 
     repo_root = _find_repo_root()
-    data = json.loads(BRANCH_REGISTRY.read_text())
+    data = json.loads(AIPASS_REGISTRY.read_text())
     paths = []
     for b in data.get("branches", []):
         raw = Path(b.get("path", ""))
@@ -127,11 +127,11 @@ def resolve_branch_path(branch_ref: str) -> Path:
     """
     name = branch_ref.lstrip("@").upper()
 
-    if not BRANCH_REGISTRY.exists():
+    if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError("AIPASS_REGISTRY.json not found")
 
     repo_root = _find_repo_root()
-    data = json.loads(BRANCH_REGISTRY.read_text())
+    data = json.loads(AIPASS_REGISTRY.read_text())
     for branch in data.get("branches", []):
         if branch.get("name", "").upper() == name:
             raw = Path(branch["path"])

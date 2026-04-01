@@ -244,10 +244,10 @@ class TestHandleCommandArgParsing:
         mock_show = MagicMock(return_value=True)
         monkeypatch.setattr(search_mod, "show_search_results", mock_show)
 
-        search_mod.handle_command("search", ["my", "query", "--branch", "SEED"])
+        search_mod.handle_command("search", ["my", "query", "--branch", "SEEDGO"])
 
         mock_show.assert_called_once_with(
-            "my query", branch="SEED", memory_type=None, n_results=5
+            "my query", branch="SEEDGO", memory_type=None, n_results=5
         )
 
     def test_type_option_parsed(self, monkeypatch):
@@ -302,7 +302,7 @@ class TestHandleCommandArgParsing:
         """Options only, no query text, should call error() and return True."""
         search_mod, mocks = _import_search(monkeypatch)
 
-        result = search_mod.handle_command("search", ["--branch", "SEED"])
+        result = search_mod.handle_command("search", ["--branch", "SEEDGO"])
 
         assert result is True
         mocks["error"].assert_called_once_with("Search query required")
@@ -494,11 +494,11 @@ class TestShowSearchResults:
         search_mod, mocks = _import_search(monkeypatch)
 
         search_mod.show_search_results(
-            "q", branch="SEED", memory_type="local", n_results=3
+            "q", branch="SEEDGO", memory_type="local", n_results=3
         )
 
         mocks["execute_search"].assert_called_once_with(
-            query="q", branch="SEED", memory_type="local", n_results=3
+            query="q", branch="SEEDGO", memory_type="local", n_results=3
         )
 
     def test_handler_timeout_returns_false(self, monkeypatch):

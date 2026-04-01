@@ -270,7 +270,7 @@ External Branch
    - Drone is a CLI router that resolves @ and routes commands to branches
 
 2. **Library Services** - Imported by other code
-   - Prax (logging), CLI (formatting), API (LLM calls), Memory Bank (vectors)
+   - Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
    - You `import aipass.prax` then `from aipass.prax.apps.modules.logger import logger`
    - **NOTE:** Drone is NOT a library service - it's a CLI router, never imported
 
@@ -364,7 +364,7 @@ Each library service defines what it exposes:
 | Prax | logger, watcher | logging/*, watch/* |
 | CLI | header, success, error, warning | output/*, formatting/* |
 | API | get_response | llm/*, cache/* |
-| Memory Bank | vector operations | storage/*, search/* |
+| Memory | vector operations | storage/*, search/* |
 
 **Modules are the contract. Handlers are the implementation.**
 
@@ -471,7 +471,7 @@ def create_plan(project_path: str, name: str):
 - Never import each other
 
 **2. Library Services** - Imported by other code:
-- Prax (logging), CLI (formatting), API (LLM calls), Memory Bank (vectors)
+- Prax (logging), CLI (formatting), API (LLM calls), Memory (vectors)
 - Usage: `from aipass.prax.apps.modules.logger import logger`
 - Communication: Via Python imports
 - Can be imported by any branch
@@ -689,7 +689,7 @@ handlers/
   ├── branch/
   │   ├── file_ops.py       → 845 lines (file operations)
   │   ├── metadata.py       → 119 lines (branch metadata)
-  │   ├── registry.py       → 259 lines (branch registry)
+  │   ├── registry.py       → 259 lines (AIPASS_REGISTRY)
   │   └── placeholders.py   → 234 lines (placeholder handling)
   ├── registry/
   │   ├── meta_ops.py       → 358 lines (registry operations)
@@ -1257,7 +1257,7 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
 
 ```python
 def get_all_branches() -> List[Dict]:
-    """Read branch registry directly for email routing."""
+    """Read AIPASS_REGISTRY.json directly for email routing."""
     registry_file = Path("<project_root>/AIPASS_REGISTRY.json")
 
     if not registry_file.exists():

@@ -9,7 +9,7 @@
 """
 Post-Close Background Runner
 
-Runs memory bank archival as a background process.
+Runs @memory archival as a background process.
 Called by close_plan.py via subprocess.Popen so the close command returns fast.
 
 Uses a lock file to prevent concurrent execution - if another instance is

@@ -11,7 +11,7 @@ Sent/Deleted Auto-Purge Handler
 
 Automatically purges oldest emails when folder exceeds threshold (10).
 Before removal:
-1. Vectorizes content to Memory Bank (via subprocess)
+1. Vectorizes content to @memory (via subprocess)
 2. Archives originals to .archive/
 
 Triggered after send/delete operations.
@@ -32,11 +32,11 @@ from aipass.ai_mail.apps.handlers.paths import find_repo_root
 # Purge configuration
 MAX_EMAILS = 10
 
-# Memory Bank paths for subprocess vectorization (optional external service)
+# Memory branch paths for subprocess vectorization (optional external service)
 # These are resolved relative to repo root if available; vectorization is best-effort
 _REPO_ROOT = find_repo_root()
-MEMORY_BANK_PYTHON = _REPO_ROOT / "MEMORY_BANK" / ".venv" / "bin" / "python3"
-CHROMA_SUBPROCESS_SCRIPT = _REPO_ROOT / "MEMORY_BANK" / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
+MEMORY_PYTHON = _REPO_ROOT / "src" / "aipass" / "memory" / ".venv" / "bin" / "python3"
+CHROMA_SUBPROCESS_SCRIPT = _REPO_ROOT / "src" / "aipass" / "memory" / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
 
 
 def purge_sent_folder(mailbox_path: Path) -> Dict[str, Any]:
@@ -111,7 +111,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
     """
     Purge list of email files (vectorize, then delete originals).
 
-    Vectorizes email content to Memory Bank for long-term retrieval,
+    Vectorizes email content to @memory for long-term retrieval,
     then deletes originals. Only deletes if vectorization succeeds —
     files are preserved on failure.
 
@@ -139,7 +139,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
             logger.warning("[purge] Failed to load email file %s: %s", file_path.name, e)
             load_errors.append(f"{file_path.name}: {e}")
 
-    # Vectorize emails to Memory Bank
+    # Vectorize emails to @memory
     vectorize_result = _vectorize_emails(emails_data, folder_type)
 
     # Only delete originals if vectorization succeeded — no data loss
@@ -153,7 +153,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
             "load_errors": load_errors if load_errors else None,
         }
 
-    # Delete original files (data is safely in Memory Bank)
+    # Delete original files (data is safely in @memory)
     deleted_count = 0
     delete_errors = []
     for file_path in files:
@@ -175,7 +175,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
 
 def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[str, Any]:
     """
-    Vectorize email content and store in Memory Bank.
+    Vectorize email content and store in @memory.
 
     Args:
         emails: List of email data dicts
@@ -208,7 +208,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
                 "archived_at": datetime.now().isoformat()
             })
 
-        # Call Memory Bank vectorization via subprocess (handler independence)
+        # Call @memory vectorization via subprocess (handler independence)
         input_data = {
             'operation': 'vectorize_and_store',
             'branch': 'AI_MAIL',
@@ -218,7 +218,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
         }
 
         result = subprocess.run(
-            [str(MEMORY_BANK_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
+            [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     console.print()
     console.print("WORKFLOW (v2.0):")
     console.print("  1. Check if folder exceeds 10 items")
-    console.print("  2. Vectorize oldest items to Memory Bank")
+    console.print("  2. Vectorize oldest items to @memory")
     console.print("  3. Archive originals to .archive/")
     console.print("  4. Remove from sent/ or deleted/")
     console.print()

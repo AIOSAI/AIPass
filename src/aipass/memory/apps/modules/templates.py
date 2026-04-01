@@ -349,8 +349,8 @@ def _display_diff_results(branch_name: str | None = None) -> None:
     # Load registry to get branch paths
     branches = _load_branches_from_registry()
     if branches is None:
-        error("Failed to load branch registry")
-        logger.error("[templates] Failed to load branch registry for diff")
+        error("Failed to load AIPASS_REGISTRY.json")
+        logger.error("[templates] Failed to load AIPASS_REGISTRY.json for diff")
         console.print()
         return
 
@@ -517,7 +517,7 @@ def _load_branches_from_registry() -> list | None:
             branch['path'] = str(resolved)
         return [b for b in branches if b.get('status') == 'active']
     except Exception as e:
-        logger.error(f"[templates] Failed to load branch registry: {e}")
+        logger.error(f"[templates] Failed to load AIPASS_REGISTRY.json: {e}")
         return None
 
 

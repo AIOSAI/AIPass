@@ -9,7 +9,7 @@
 """
 Chroma Vector Storage Handler
 
-Manages Chroma vector database collections for Memory Bank.
+Manages Chroma vector database collections for memory.
 Stores embeddings with metadata for semantic search.
 
 Purpose:
@@ -108,7 +108,7 @@ class ChromaService:
         Generate collection name using pattern: {branch}_{type}
 
         Args:
-            branch: Branch name (SEED, CLI, etc.)
+            branch: Branch name (SEEDGO, CLI, etc.)
             memory_type: Memory type (observations, local)
 
         Returns:
@@ -278,7 +278,7 @@ def store_vectors(
     Creates or uses existing collection for branch + type combination.
 
     Args:
-        branch: Branch name (SEED, CLI, etc.)
+        branch: Branch name (SEEDGO, CLI, etc.)
         memory_type: Memory type (observations, local)
         embeddings: List of embedding vectors
         documents: List of original text documents
@@ -289,12 +289,12 @@ def store_vectors(
         Dict with storage details
 
     Example:
-        # Store in global Memory Bank
-        result = store_vectors("SEED", "observations", embeddings, texts, metadatas)
+        # Store in global memory
+        result = store_vectors("SEEDGO", "observations", embeddings, texts, metadatas)
 
-        # Store in SEED's local Chroma
-        local_path = Path("path/to/seed/.chroma")
-        result = store_vectors("SEED", "observations", embeddings, texts, metadatas, local_path)
+        # Store in SEEDGO's local Chroma
+        local_path = Path("path/to/seedgo/.chroma")
+        result = store_vectors("SEEDGO", "observations", embeddings, texts, metadatas, local_path)
     """
     # Convert string db_path to Path (subprocess passes strings via JSON)
     if db_path is not None and isinstance(db_path, str):
@@ -433,7 +433,7 @@ def search_vectors(
 
     Example:
         # Search specific branch
-        results = search_vectors(query_emb, branch="SEED", memory_type="observations")
+        results = search_vectors(query_emb, branch="SEEDGO", memory_type="observations")
 
         # Global search across all branches
         results = search_vectors(query_emb, n_results=10)

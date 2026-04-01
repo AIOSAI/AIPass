@@ -10,7 +10,7 @@
 PRAX File Watcher (Handler)
 
 Pure worker that watches for new Python files and updates module registry.
-Memory file handling moved to MEMORY_BANK's own watcher.
+Memory file handling moved to memory branch's own watcher.
 
 No console output - follows 3-tier handler pattern.
 """

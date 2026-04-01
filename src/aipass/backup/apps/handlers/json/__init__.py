@@ -1,4 +1,4 @@
-"""JSON Handlers - Universal JSON operations for Seed branch"""
+"""JSON Handlers - Universal JSON operations for backup branch"""
 
 from aipass.backup.apps.handlers.json.changelog_handler import (
     load_changelog,

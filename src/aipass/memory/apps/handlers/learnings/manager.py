@@ -12,7 +12,7 @@ Memory Sections Management Handler
 Manages key_learnings and recently_completed sections in branch .local.json files:
 - Adds timestamps to entries for age-based pruning
 - Enforces max_entries limit (configurable per section)
-- Vectorizes dropped entries to Memory Bank before removal
+- Vectorizes dropped entries to memory before removal
 - Updates status counts after processing
 
 Purpose:
@@ -145,7 +145,7 @@ def _find_learnings_location(data: Dict[str, Any]) -> Tuple[Dict[str, Any] | Non
     if 'key_learnings' in data:
         return (data, 'root')
 
-    # Check inside active_tasks (legacy DEV_CENTRAL structure)
+    # Check inside active_tasks (legacy devpulse structure)
     if 'active_tasks' in data and isinstance(data['active_tasks'], dict):
         if 'key_learnings' in data['active_tasks']:
             return (data['active_tasks'], 'active_tasks')
@@ -232,7 +232,7 @@ def _find_recently_completed_location(data: Dict[str, Any]) -> Tuple[Dict[str, A
     if 'recently_completed' in data:
         return (data, 'root')
 
-    # Check inside active_tasks (DEV_CENTRAL structure)
+    # Check inside active_tasks (devpulse structure)
     if 'active_tasks' in data and isinstance(data['active_tasks'], dict):
         if 'recently_completed' in data['active_tasks']:
             return (data['active_tasks'], 'active_tasks')
@@ -303,10 +303,10 @@ def _vectorize_learnings(
     learnings: List[Tuple[str, str]]
 ) -> Dict[str, Any]:
     """
-    Vectorize key_learnings entries to Memory Bank
+    Vectorize key_learnings entries to memory
 
     Args:
-        branch: Branch name (e.g., "DEV_CENTRAL")
+        branch: Branch name (e.g., "DEVPULSE")
         learnings: List of (key, value) tuples to vectorize
 
     Returns:
@@ -363,7 +363,7 @@ def _vectorize_learnings(
         'embeddings': embeddings_serializable,
         'documents': texts,
         'metadatas': metadatas,
-        'db_path': None  # Global Memory Bank
+        'db_path': None  # Global memory
     }
 
     try:
@@ -396,10 +396,10 @@ def _vectorize_completed_tasks(
     tasks: List[str]
 ) -> Dict[str, Any]:
     """
-    Vectorize recently_completed entries to Memory Bank.
+    Vectorize recently_completed entries to memory.
 
     Args:
-        branch: Branch name (e.g., "DEV_CENTRAL")
+        branch: Branch name (e.g., "DEVPULSE")
         tasks: List of task strings to vectorize
 
     Returns:
@@ -454,7 +454,7 @@ def _vectorize_completed_tasks(
         'embeddings': embeddings_serializable,
         'documents': document_texts,
         'metadatas': document_metadatas,
-        'db_path': None  # Global Memory Bank
+        'db_path': None  # Global memory
     }
 
     try:
@@ -543,7 +543,7 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
 
     If over limit:
     1. Sort entries by age (oldest first)
-    2. Vectorize oldest entries to Memory Bank
+    2. Vectorize oldest entries to memory
     3. Remove oldest entries until under limit
 
     Args:
@@ -686,7 +686,7 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
 
     If over limit:
     1. Sort entries by age (oldest first)
-    2. Vectorize oldest entries to Memory Bank
+    2. Vectorize oldest entries to memory
     3. Remove oldest entries until under limit
 
     Args:

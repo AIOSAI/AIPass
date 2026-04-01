@@ -48,13 +48,13 @@ class TestCommandRouting:
 
 class TestNoArgs:
 
-    @patch(f"{_MOD}.aggregate_central", return_value=True)
-    def test_no_args_runs_aggregation(self, mock_agg):
-        """No args should run aggregation (default action), not introspection."""
+    @patch(f"{_MOD}.print_introspection")
+    def test_no_args_calls_introspection(self, mock_intro):
+        """No args should show introspection."""
         handle_command = _import_handle_command()
         result = handle_command("aggregate", [])
         assert result is True
-        mock_agg.assert_called_once_with(heal=True)
+        mock_intro.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -192,14 +192,14 @@ class TestOperationLogging:
             {"command": "aggregate", "args": ["run"]},
         )
 
-    @patch(f"{_MOD}.aggregate_central", return_value=True)
+    @patch(f"{_MOD}.print_introspection")
     @patch(f"{_MOD}.json_handler")
-    def test_no_args_does_log_operation(self, mock_jh, mock_agg):
-        """No args runs aggregation which DOES log an operation."""
+    def test_no_logging_on_introspection(self, mock_jh, mock_intro):
+        """Introspection (no args) should not log an operation."""
         handle_command = _import_handle_command()
         result = handle_command("aggregate", [])
         assert result is True
-        mock_jh.log_operation.assert_called_once()
+        mock_jh.log_operation.assert_not_called()
 
     @patch(f"{_MOD}.print_help")
     @patch(f"{_MOD}.json_handler")

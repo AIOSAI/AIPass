@@ -855,7 +855,7 @@ def print_help() -> None:
     console.print("  [dim]drone @memory symbolic extract chat_history.json[/dim]")
     console.print()
     console.print("  # Extract with source branch tag")
-    console.print("  [dim]drone @memory symbolic extract chat_history.json memory_bank[/dim]")
+    console.print("  [dim]drone @memory symbolic extract chat_history.json memory[/dim]")
     console.print()
     console.print("  # Search fragments by query")
     console.print("  [dim]drone @memory symbolic fragments \"debugging frustration\"[/dim]")
@@ -1471,16 +1471,14 @@ def _find_bootstrap_sessions(max_sessions: int = 8) -> List[Path]:
 
     # Priority branch directories (diverse content sources)
     priority_dirs = [
-        '-home-aipass-MEMORY-BANK',
-        '-home-aipass-aipass-os-dev-central',
-        '-home-aipass-seed',
-        '-home-aipass-aipass-core-drone',
-        '-home-aipass-aipass-core-flow',
-        '-home-aipass-The-Commons',
-        '-home-aipass-aipass-core-prax',
-        '-home-aipass-aipass-core-cortex',
-        '-home-aipass-aipass-core-ai-mail',
-        '-home-aipass-aipass-core-api',
+        '-home-patrick-Projects-AIPass-src-aipass-memory',
+        '-home-patrick-Projects-AIPass-src-aipass-devpulse',
+        '-home-patrick-Projects-AIPass-src-aipass-seedgo',
+        '-home-patrick-Projects-AIPass-src-aipass-drone',
+        '-home-patrick-Projects-AIPass-src-aipass-flow',
+        '-home-patrick-Projects-AIPass-src-aipass-prax',
+        '-home-patrick-Projects-AIPass-src-aipass-ai-mail',
+        '-home-patrick-Projects-AIPass-src-aipass-api',
     ]
 
     selected = []
@@ -1565,7 +1563,9 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
     for i, jsonl_path in enumerate(sessions, 1):
         # Derive branch name from parent directory
         branch_dir = jsonl_path.parent.name
-        branch_name = branch_dir.replace('-home-aipass-', '').replace('-', '_').upper()
+        # New layout: -home-patrick-Projects-AIPass-src-aipass-<branch>
+        branch_name = branch_dir.rsplit('-aipass-', 1)[-1].replace('-', '_').upper()
+        # Legacy layout fallback
         if branch_name.startswith('AIPASS_CORE_'):
             branch_name = branch_name.replace('AIPASS_CORE_', '')
         if branch_name.startswith('AIPASS_OS_'):

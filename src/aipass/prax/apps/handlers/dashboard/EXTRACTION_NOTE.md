@@ -1,10 +1,6 @@
-# Dashboard Handlers - Extracted from Dev-Pass
+# Dashboard Handlers - Extracted from AIPass (legacy devpulse)
 
-Extracted from Dev-Pass devpulse on 2026-03-08.
-
-These files need adaptation for AIPass before use.
-
-Original imports use `aipass_os.dev_central.devpulse` -- must be converted to `aipass.prax`.
+Extracted from AIPass devpulse on 2026-03-08. Adapted for `aipass.prax`.
 
 ## Files extracted
 
@@ -19,13 +15,13 @@ Original imports use `aipass_os.dev_central.devpulse` -- must be converted to `a
 - `agent_status_writer.py` - Already adapted for AIPass, pushes agent_status section
 - `__init__.py` - Already wired for agent_status_writer
 
-## Original location
+## Original location (historical)
 
-`/home/aipass/aipass_os/dev_central/devpulse/apps/handlers/dashboard/`
+`/home/aipass/AIPass/devpulse/apps/handlers/dashboard/`
 
 ## Key dependencies to resolve
 
 - `refresh.py` imports `..central.reader` (cross-handler import) -- this handler does not exist in AIPass yet
-- `operations.py` references template file at `Path.home() / "aipass_os" / "dev_central" / "devpulse" / "templates"` -- needs path update
-- `template_pusher.py` and `template_differ.py` use `BRANCH_REGISTRY.json` at `Path.home()` -- needs AIPass registry path
+- `operations.py` references template file via `_PRAX_ROOT / "templates"` -- resolved
+- `template_pusher.py` and `template_differ.py` use `AIPASS_REGISTRY.json` -- resolved
 - All hardcoded `Path.home()` references need conversion to AIPass-appropriate paths

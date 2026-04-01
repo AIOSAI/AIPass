@@ -497,7 +497,7 @@ if __name__ == "__main__":
         print("  wake.py @flow                    # Default: check inbox (resume)")
         print("  wake.py --fresh @flow            # Fresh session, check inbox")
         print("  wake.py @vera \"Review NOTEPAD\"   # Custom prompt (resume)")
-        print("  wake.py --fresh --sender @vera @seed  # Fresh, bounce to @vera")
+        print("  wake.py --fresh --sender @vera @seedgo  # Fresh, bounce to @vera")
         sys.exit(0)
 
     # Parse flags

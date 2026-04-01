@@ -1,6 +1,6 @@
 """
-Flow Handlers - Memory Bank
+Flow Handlers - Memory
 
-Memory bank processing for closed plans.
-Converts closed PLAN files to TRL-compliant memory bank entries.
+Memory processing for closed plans.
+Converts closed PLAN files to TRL-compliant memory entries.
 """

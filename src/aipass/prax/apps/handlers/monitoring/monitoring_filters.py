@@ -11,7 +11,7 @@ Monitoring Filter Patterns
 
 Centralized filter configuration for the prax monitoring system.
 Defines what to watch, ignore, and prioritize during filesystem monitoring.
-Based on backup_system/config_handler.py's excellent pattern organization.
+Based on backup/config_handler.py's excellent pattern organization.
 """
 
 # =============================================
@@ -51,7 +51,7 @@ MONITOR_IGNORE_PATTERNS = [
 
     # Backup directories (prevent circular monitoring)
     "backups",
-    "backup_system/backups",
+    "backup/backups",
     "*/backups",
     "system_snapshot",
     "versioned_backup",

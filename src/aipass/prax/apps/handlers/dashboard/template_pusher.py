@@ -58,7 +58,7 @@ def _find_repo_root() -> Path:
 TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
 VERSION_FILE = TEMPLATE_DIR / ".dashboard_version.json"
-BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
+AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 # Deprecated sections to REMOVE during push
 DEPRECATED_SECTIONS = ["bulletin_board", "devpulse"]
@@ -81,8 +81,8 @@ REQUIRED_SECTIONS = {
         "recently_closed": [],
         "last_updated": ""
     },
-    "memory_bank": {
-        "managed_by": "memory_bank",
+    "memory": {
+        "managed_by": "memory",
         "vectors_stored": 0,
         "notes": {},
         "last_updated": ""
@@ -301,14 +301,14 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         result["errors"].append(f"Invalid template JSON: {e}")
         return result
 
-    # Load branch registry
-    if not BRANCH_REGISTRY.exists():
+    # Load AIPASS registry
+    if not AIPASS_REGISTRY.exists():
         result["success"] = False
-        result["errors"].append(f"Branch registry not found: {BRANCH_REGISTRY}")
+        result["errors"].append(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
         return result
 
     try:
-        registry = json.loads(BRANCH_REGISTRY.read_text())
+        registry = json.loads(AIPASS_REGISTRY.read_text())
     except json.JSONDecodeError as e:
         logger.error("Invalid registry JSON: %s", e)
         result["success"] = False

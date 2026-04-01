@@ -54,7 +54,7 @@ _write_section_loaded = False
 
 
 def _get_write_section() -> Optional[Callable[..., Any]]:
-    """Lazy import write_section from devpulse module API. Returns callable or None."""
+    """Lazy import write_section from prax dashboard module. Returns callable or None."""
     global _write_section_fn, _write_section_loaded
     if not _write_section_loaded:
         _write_section_loaded = True

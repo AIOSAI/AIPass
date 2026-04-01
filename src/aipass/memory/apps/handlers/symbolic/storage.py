@@ -60,7 +60,7 @@ def create_fragment(
     Args:
         analysis: Output from analyze_conversation() with dimensions and metadata
         content: Optional content override (defaults to generated essence)
-        source_branch: Optional branch name for filtering (e.g., 'SEED')
+        source_branch: Optional branch name for filtering (e.g., 'SEEDGO')
 
     Returns:
         Dict with 'success', 'fragment' containing storable fragment
@@ -448,7 +448,7 @@ def store_llm_fragment(
     Args:
         fragment: LLM-extracted fragment dict with summary, insight, type,
             triggers, emotional_tone, technical_domain
-        source_branch: Optional branch name for filtering (e.g., 'SEED')
+        source_branch: Optional branch name for filtering (e.g., 'SEEDGO')
         db_path: Optional ChromaDB path (default: memory/.chroma)
 
     Returns:
@@ -563,7 +563,7 @@ def store_llm_fragments_batch(
 
     Args:
         fragments: List of LLM-extracted fragment dicts
-        source_branch: Optional branch name for filtering (e.g., 'SEED')
+        source_branch: Optional branch name for filtering (e.g., 'SEEDGO')
         db_path: Optional ChromaDB path (default: memory/.chroma)
 
     Returns:

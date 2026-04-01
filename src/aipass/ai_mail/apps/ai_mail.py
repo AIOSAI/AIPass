@@ -83,7 +83,7 @@ EXAMPLES:
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh
 
   # Send mail (no wake)
-  drone @ai_mail email @seed "Subject" "Msg"  # Send to branch
+  drone @ai_mail email @seedgo "Subject" "Msg"  # Send to branch
   drone @ai_mail email @all "Subject" "Msg"   # Broadcast to all
 
   # Check mail
@@ -105,7 +105,7 @@ EXAMPLES:
 # =============================================================================
 
 def print_introspection():
-    """Display discovered modules only (SEED pattern)"""
+    """Display discovered modules only (seedgo pattern)"""
     console.print()
     console.print("[bold cyan]AI_Mail - Branch Communication System[/bold cyan]")
     console.print()

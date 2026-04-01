@@ -1,3 +1,3 @@
 # Plugins
 
-Plugin point for backup system integrations.
+Plugin point for backup integrations.

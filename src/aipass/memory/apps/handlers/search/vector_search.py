@@ -173,7 +173,7 @@ class SearchService:
             collection_name: Name of collection to query
             query_embedding: Query embedding vector
             n_results: Number of results to return
-            where: Metadata filter (e.g., {"branch": "SEED"})
+            where: Metadata filter (e.g., {"branch": "SEEDGO"})
 
         Returns:
             Dict with query results
@@ -272,7 +272,7 @@ def search_collection(
         query_embedding: Pre-encoded query embedding (384-dim list)
         collection_name: Name of collection to search
         n_results: Number of results to return (default: 5)
-        where: Optional metadata filter (e.g., {"branch": "SEED"})
+        where: Optional metadata filter (e.g., {"branch": "SEEDGO"})
         db_path: Path to ChromaDB database (None = global memory/.chroma)
 
     Returns:

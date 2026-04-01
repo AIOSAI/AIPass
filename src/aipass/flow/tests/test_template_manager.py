@@ -71,17 +71,14 @@ class TestSuggestPrefix:
 class TestHandleCommandRouting:
     """Verify handle_command routes to the correct function for each input."""
 
-    def test_no_args_shows_registered_types(self):
-        """templates with no args shows registered types (default action)."""
-        mock_registry = {"types": {"flow_plans": {"prefix": "FPLAN"}}}
-
-        with patch(f"{_MOD}.load_registry", return_value=mock_registry), \
-             patch(f"{_MOD}._display_registered_types") as mock_display:
+    def test_no_args_calls_introspection(self):
+        """templates with no args shows introspection."""
+        with patch(f"{_MOD}.print_introspection") as mock_intro:
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("templates", [])
 
-            mock_display.assert_called_once_with(mock_registry)
+            mock_intro.assert_called_once()
             assert result is True
 
     def test_unknown_command_no_args_returns_false(self):

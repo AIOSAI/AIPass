@@ -10,7 +10,7 @@
 Central Writer Handler
 
 Aggregates per-branch commons activity stats from commons.db and writes to
-AI_CENTRAL/COMMONS.central.json.
+.ai_central/COMMONS.central.json.
 
 This file serves as The Commons' API output for AIPass dashboard integration.
 DevPulse reads this when refreshing branch dashboards.
@@ -18,7 +18,7 @@ DevPulse reads this when refreshing branch dashboards.
 Architecture:
 - Queries commons.db for per-branch mention counts, post/comment counts
 - Uses last_checked from each branch's dashboard for "since last visit" counts
-- Writes aggregated stats to AI_CENTRAL/COMMONS.central.json
+- Writes aggregated stats to .ai_central/COMMONS.central.json
 - Atomic write via temp file + rename
 """
 
@@ -47,7 +47,7 @@ def _find_project_root() -> str:
     return os.path.expanduser("~")
 
 _PROJECT_ROOT = _find_project_root()
-AI_CENTRAL_DIR = os.path.join(_PROJECT_ROOT, "aipass_os", "AI_CENTRAL")
+AI_CENTRAL_DIR = os.path.join(_PROJECT_ROOT, ".ai_central")
 CENTRAL_FILE = os.path.join(AI_CENTRAL_DIR, "COMMONS.central.json")
 BRANCH_REGISTRY_PATH = os.path.join(_PROJECT_ROOT, "AIPASS_REGISTRY.json")
 

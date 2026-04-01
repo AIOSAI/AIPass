@@ -14,7 +14,7 @@ Detects which branch owns an event by analyzing:
 - Log filenames
 - Module names
 
-Uses BRANCH_REGISTRY.json for accurate mapping with caching for performance.
+Uses AIPASS_REGISTRY.json for accurate mapping with caching for performance.
 """
 
 from pathlib import Path
@@ -32,7 +32,7 @@ class BranchDetector:
     Detects branch ownership for files, logs, and modules.
 
     Uses multiple strategies:
-    1. Direct path lookup from BRANCH_REGISTRY.json
+    1. Direct path lookup from AIPASS_REGISTRY.json
     2. Parent directory traversal
     3. Filename pattern matching
     4. Caching for repeated lookups
@@ -72,7 +72,7 @@ class BranchDetector:
         self.branch_map[str(path) + '/'] = branch_name
 
     def _load_registry(self):
-        """Load BRANCH_REGISTRY.json and build lookup tables."""
+        """Load AIPASS_REGISTRY.json and build lookup tables."""
         try:
             registry_path = self._find_repo_root() / "AIPASS_REGISTRY.json"
 
@@ -104,8 +104,8 @@ class BranchDetector:
 
     def _load_fallback_branches(self):
         """Load fallback branch names when registry is unavailable"""
-        fallback = ['SEED', 'CLI', 'FLOW', 'PRAX', 'CORTEX', 'DRONE',
-                   'BACKUP_SYSTEM', 'SECURITY', 'AIPASS']
+        fallback = ['SEEDGO', 'CLI', 'FLOW', 'PRAX', 'DRONE',
+                   'BACKUP', 'SECURITY', 'AIPASS']
         self.known_branches.update(fallback)
         logger.info(f"Using fallback branches: {fallback}")
 
@@ -145,8 +145,8 @@ class BranchDetector:
         return None
 
     def _extract_branch_from_central(self, path_str: str, path: Path) -> Optional[str]:
-        """Extract branch name from AI_CENTRAL filename patterns."""
-        if not ('AI_CENTRAL' in path_str or '.ai_central' in path_str or 'ai_central' in path_str.lower()):
+        """Extract branch name from ai_mail central filename patterns."""
+        if not ('AI_MAIL' in path_str or '.ai_mail' in path_str or 'ai_mail' in path_str.lower()):
             return None
 
         name = path.name
@@ -170,7 +170,7 @@ class BranchDetector:
             file_path: Absolute or relative file path
 
         Returns:
-            Branch name in uppercase (e.g., 'SEED', 'PRAX')
+            Branch name in uppercase (e.g., 'SEEDGO', 'PRAX')
         """
         try:
             path = Path(file_path).resolve()
@@ -201,7 +201,7 @@ class BranchDetector:
                     self.log_map[path_str] = result
                     return result
 
-            # Strategy 4: AI_CENTRAL files - {BRANCH}.central.json or {BRANCH}_central.json
+            # Strategy 4: ai_mail central files - {BRANCH}.central.json or {BRANCH}_central.json
             result = self._extract_branch_from_central(path_str, path)
             if result:
                 self.log_map[path_str] = result
@@ -240,8 +240,8 @@ class BranchDetector:
         Detect branch from log filename.
 
         Supports patterns:
-        - seed_audit.log -> SEED
-        - seed_standards_checklist.log -> SEED
+        - seedgo_audit.log -> SEEDGO
+        - seedgo_standards_checklist.log -> SEEDGO
         - flow_plan.log -> FLOW
         - prax_monitor_20251123.log -> PRAX
 
@@ -260,7 +260,7 @@ class BranchDetector:
                 return self.log_map[name]
 
             # Check known branches first (longest match wins)
-            # Handles compound names like ai_mail, backup_system, memory_bank
+            # Handles compound names like ai_mail, backup, memory
             for branch_name in sorted(self.known_branches, key=len, reverse=True):
                 prefix = branch_name.lower() + '_'
                 if name.lower().startswith(prefix) or name.lower() == branch_name.lower():
@@ -298,7 +298,7 @@ class BranchDetector:
 
         Supports patterns:
         - aipass.prax.apps.handlers.monitoring -> PRAX
-        - seed.core.validator -> SEED
+        - seedgo.core.validator -> SEEDGO
 
         Args:
             module_name: Python module dotted name
@@ -329,7 +329,7 @@ class BranchDetector:
 
     def reload_registry(self):
         """
-        Reload BRANCH_REGISTRY.json.
+        Reload AIPASS_REGISTRY.json.
 
         Clears caches and rebuilds lookup tables.
         Useful when registry is updated during runtime.
@@ -400,7 +400,7 @@ def detect_branch_from_log(log_file: str) -> str:
 
 
 def reload_registry():
-    """Public API - reload BRANCH_REGISTRY.json"""
+    """Public API - reload AIPASS_REGISTRY.json"""
     get_detector().reload_registry()
 
 
@@ -413,7 +413,7 @@ if __name__ == '__main__':
 
     test_paths = [
         "src/aipass/prax/apps/handlers/monitoring/branch_detector.py",
-        "src/aipass/seedgo/core/validator.py",
+        "src/aipass/seedgo/core/validator.py",  # seedgo branch
         "src/aipass/flow/apps/modules/planners.py",
     ]
 
@@ -424,7 +424,7 @@ if __name__ == '__main__':
         print(f"  -> {branch}\n")
 
     test_logs = [
-        "seed_audit.log",
+        "seedgo_audit.log",
         "flow_plan.log",
         "prax_monitor_20251123.log",
     ]
@@ -436,7 +436,7 @@ if __name__ == '__main__':
 
     test_modules = [
         "aipass.prax.apps.handlers.monitoring",
-        "seed.core.validator",
+        "seedgo.core.validator",
         "flow.planners.daily",
     ]
 

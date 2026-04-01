@@ -7,7 +7,7 @@
 # =============================================
 
 """
-Backup System - Main Entry Point
+Backup - Main Entry Point
 
 Modular architecture with explicit module imports.
 Main handles routing, modules implement functionality.
@@ -89,9 +89,9 @@ def route_command(args: argparse.Namespace, modules: Sequence[Any], pre_scanned=
 # =============================================================================
 
 def print_introspection():
-    """Display discovered modules - SEED pattern"""
+    """Display discovered modules - seedgo pattern"""
     console.print()
-    console.print("[bold cyan]Backup System - Automated File Protection[/bold cyan]")
+    console.print("[bold cyan]Backup - Automated File Protection[/bold cyan]")
     console.print()
     console.print("[dim]AIPass backup orchestration and versioning[/dim]")
     console.print()
@@ -124,7 +124,7 @@ def show_version():
 
 
 def main():
-    """Main entry point - follows Seed CLI flags standard."""
+    """Main entry point - follows seedgo CLI flags standard."""
 
     # 1. No args → introspection
     if len(sys.argv) == 1:

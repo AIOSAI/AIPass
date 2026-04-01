@@ -43,7 +43,7 @@ SAMPLE_REGISTRY = {
     "branches": [
         {"name": "DRONE", "path": "src/aipass/drone"},
         {"name": "AIPASS.admin", "path": "src/aipass/admin"},
-        {"name": "BACKUP-SYSTEM", "path": "src/aipass/backup"},
+        {"name": "BACKUP", "path": "src/aipass/backup"},
     ]
 }
 
@@ -67,8 +67,8 @@ def test_derive_email_aipass_hyphen():
 
 
 def test_derive_email_regular_hyphen():
-    """Non-AIPASS hyphen: 'BACKUP-SYSTEM' takes first part."""
-    assert _derive_email_from_branch_name("BACKUP-SYSTEM") == "@backup"
+    """Non-AIPASS hyphen: 'DATA-LAKE' takes first part."""
+    assert _derive_email_from_branch_name("DATA-LAKE") == "@data"
 
 
 def test_derive_email_plain():
@@ -104,7 +104,7 @@ def test_get_all_branches_valid(registry_file):
     # Verify each entry has exactly the expected keys with correct values
     assert result[0] == {"name": "DRONE", "path": "src/aipass/drone", "email": "@drone"}
     assert result[1] == {"name": "AIPASS.admin", "path": "src/aipass/admin", "email": "@admin"}
-    assert result[2] == {"name": "BACKUP-SYSTEM", "path": "src/aipass/backup", "email": "@backup"}
+    assert result[2] == {"name": "BACKUP", "path": "src/aipass/backup", "email": "@backup"}
     for branch in result:
         assert set(branch.keys()) == {"name", "path", "email"}
 

@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: backup_models.py
-# Description: Backup system data models and structures
+# Description: Backup data models and structures
 # Version: 2.0.1
 # Created: 2025-11-16
 # Modified: 2026-03-09
 # =============================================
 
 """
-Backup System Data Models
+Backup Data Models
 
 Shared data structures used across all backup modules.
 Simple data containers with no complex logic or dependencies.
-Implements pure data model pattern following seed architecture standards.
+Implements pure data model pattern following seedgo architecture standards.
 """
 
 # =============================================

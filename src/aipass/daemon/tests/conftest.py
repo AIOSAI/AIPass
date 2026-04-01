@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Date: 2025-11-08
 # Version: 1.0.0
-# Category: cortex/tests
+# Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures

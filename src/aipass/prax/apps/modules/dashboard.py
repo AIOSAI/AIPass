@@ -89,8 +89,8 @@ DASHBOARD_TEMPLATE = {
             "recently_closed": [],
             "last_updated": ""
         },
-        "memory_bank": {
-            "managed_by": "memory_bank",
+        "memory": {
+            "managed_by": "memory",
             "vectors_stored": 0,
             "notes": {},
             "last_updated": ""
@@ -231,7 +231,7 @@ def print_template():
 
 def _resolve_branch_path(branch_ref: str) -> Path:
     """
-    Resolve @branch reference to filesystem path via BRANCH_REGISTRY.json.
+    Resolve @branch reference to filesystem path via AIPASS_REGISTRY.json.
 
     Delegates to handler for file I/O (seedgo modules standard).
 

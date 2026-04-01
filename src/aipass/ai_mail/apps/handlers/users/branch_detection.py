@@ -53,15 +53,15 @@ def detect_branch_from_pwd() -> Optional[Dict]:
     Detect which branch is calling based on current working directory.
 
     Walks up directory tree from PWD to find branch root (directory with .trinity/passport.json).
-    Then looks up branch info in BRANCH_REGISTRY.json.
+    Then looks up branch info in AIPASS_REGISTRY.json.
 
     Returns:
         Dict with branch info if detected:
         {
-            "name": "SEED",
+            "name": "SEEDGO",
             "path": "src/aipass/seedgo",
-            "email": "@seed",
-            "display_name": "Seed (Standards Branch)",
+            "email": "@seedgo",
+            "display_name": "Seedgo (Standards Branch)",
             ...
         }
         None if no branch detected
@@ -162,7 +162,7 @@ def find_branch_root(start_path: Path) -> Optional[Path]:
 
 def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
     """
-    Look up branch information in BRANCH_REGISTRY.json by path.
+    Look up branch information in AIPASS_REGISTRY.json by path.
 
     Args:
         branch_path: Path to branch directory
@@ -222,7 +222,7 @@ if __name__ == "__main__":
     console.print("DETECTION FLOW:")
     console.print("  1. Get current working directory (PWD)")
     console.print("  2. Walk up tree to find .trinity/passport.json")
-    console.print("  3. Look up branch path in BRANCH_REGISTRY.json")
+    console.print("  3. Look up branch path in AIPASS_REGISTRY.json")
     console.print("  4. Return branch info (name, email, path, etc.)")
     console.print()
     console.print("="*70 + "\n")

@@ -144,6 +144,16 @@
       "file": "apps/handlers/operations/drive_sync_client.py",
       "standard": "naming",
       "reason": "build, MediaFileUpload, Request are third-party imports from Google API libraries. Cannot rename external library symbols."
+    },
+    {
+      "file": "apps/modules/backup_core.py",
+      "standard": "modules",
+      "reason": "Thin orchestrator class that delegates all business logic to handlers. Splitting would fragment the backup coordination workflow. Each method is a focused delegator, not monolithic logic. Previously refactored from 2000+ lines."
+    },
+    {
+      "file": "apps/modules/google_drive_sync.py",
+      "standard": "modules",
+      "reason": "Procedural CLI command router that delegates heavy lifting to GoogleDriveSync handler class. Routes 6 drive-sync subcommands with independent validation and error handling. Splitting would fragment the routing for no benefit."
     }
   ],
   "notes": {

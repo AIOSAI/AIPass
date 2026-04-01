@@ -10,7 +10,7 @@
 Email Footer Handler
 
 Generates and appends standard footer to all outgoing emails.
-Reminds branches of process steps: Seed audit, memory update, FPLAN close, confirmation.
+Reminds branches of process steps: seedgo audit, memory update, FPLAN close, confirmation.
 Independent handler - no module dependencies.
 """
 

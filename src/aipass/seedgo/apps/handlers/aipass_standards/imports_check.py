@@ -388,7 +388,7 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
     - from handlers.{name} import ...  (bare handler import, missing namespace)
     - from modules.{name} import ...   (bare module import, missing namespace)
     - from {module}.apps...            (bare module, missing aipass. prefix)
-    - from seed.apps...                (old Dev-Pass namespace, now aipass.seedgo)
+    - from <old>.apps...               (old namespace, now aipass.seedgo)
     - from prax.apps...                (bare, should be from aipass.prax...)
 
     VALID patterns:
@@ -406,7 +406,7 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         'ai_mail', 'api', 'trigger', 'spawn', 'devpulse',
     }
 
-    # Old Dev-Pass namespaces that should not appear
+    # Old namespaces that should not appear
     old_namespaces = {'seed', 'cortex', 'nexus', 'atlas', 'sentinel'}
 
     violations = []
@@ -447,11 +447,11 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
             )
             continue
 
-        # Check 2: Old Dev-Pass namespaces (from seed.apps..., from cortex.apps...)
+        # Check 2: Old namespaces (pre-AIPass imports that should not appear)
         if first_part in old_namespaces and len(parts) > 1:
             violations.append(
                 f'Line {i}: old namespace "from {import_path}" '
-                f'(Dev-Pass namespace, must use aipass.* namespace)'
+                f'(old namespace, must use aipass.* namespace)'
             )
             continue
 

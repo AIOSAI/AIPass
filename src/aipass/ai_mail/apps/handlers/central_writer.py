@@ -72,7 +72,7 @@ def find_all_inbox_files() -> List[Path]:
 
     # Search pattern: any directory ending in .ai_mail.local containing inbox.json
     for ai_mail_dir in _REPO_ROOT.rglob(".ai_mail.local"):
-        # Skip backup/archive directories (but NOT backup_system branch itself)
+        # Skip backup/archive directories (but NOT backup branch itself)
         path_str = str(ai_mail_dir)
         if ".backup" in path_str or ".archive" in path_str or "/backups/" in path_str:
             continue
@@ -88,8 +88,8 @@ def extract_branch_name(inbox_path: Path) -> str:
     """
     Extract branch name from inbox.json path.
 
-    Given: .../seed/.ai_mail.local/inbox.json
-    Returns: SEED
+    Given: .../seedgo/.ai_mail.local/inbox.json
+    Returns: SEEDGO
 
     Given: .../prax/.ai_mail.local/inbox.json
     Returns: PRAX
@@ -133,14 +133,14 @@ def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
 
 def get_valid_branch_names() -> set:
     """
-    Load valid branch names from BRANCH_REGISTRY.json.
+    Load valid branch names from AIPASS_REGISTRY.json.
 
     Returns:
         Set of uppercase branch names that are registered in the system.
 
     Raises:
-        FileNotFoundError: If BRANCH_REGISTRY.json doesn't exist
-        json.JSONDecodeError: If BRANCH_REGISTRY.json is malformed
+        FileNotFoundError: If AIPASS_REGISTRY.json doesn't exist
+        json.JSONDecodeError: If AIPASS_REGISTRY.json is malformed
     """
     with open(BRANCH_REGISTRY, 'r', encoding='utf-8') as f:
         registry_data = stdlib_json.load(f)
@@ -153,12 +153,12 @@ def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:
     Aggregate inbox stats for all branches.
 
     Scans all branch inbox files and compiles per-branch statistics.
-    Only includes branches that are registered in BRANCH_REGISTRY.json.
+    Only includes branches that are registered in AIPASS_REGISTRY.json.
 
     Returns:
         Dict mapping branch names to their stats:
         {
-            "SEED": {"unread": 5, "total": 8},
+            "SEEDGO": {"unread": 5, "total": 8},
             "DRONE": {"unread": 0, "total": 3}
         }
 

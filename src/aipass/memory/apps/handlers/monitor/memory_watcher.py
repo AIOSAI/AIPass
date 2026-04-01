@@ -76,7 +76,7 @@ def _get_rollover_threshold(branch_name: str, file_path: Path | None = None) -> 
     Priority: file metadata > per_branch config > defaults > hardcoded 600
 
     Args:
-        branch_name: Branch name (uppercase, e.g., 'DEV_CENTRAL')
+        branch_name: Branch name (uppercase, e.g., 'DEVPULSE')
         file_path: Optional path to memory file (checks file-level limits first)
 
     Returns:

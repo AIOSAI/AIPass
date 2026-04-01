@@ -61,7 +61,7 @@ def build_backup_path(source_file: Path, source_dir: Path, backup_path: Path, mo
                 file_folder = backup_path / "root" / rel_path.name
                 return file_folder / rel_path.name
             else:
-                # Subfolder file: backup.py -> backup_system/backup.py/backup.py
+                # Subfolder file: backup.py -> backup/backup.py/backup.py
                 file_folder = backup_path / rel_path.parent / rel_path.name
                 return file_folder / rel_path.name
     else:

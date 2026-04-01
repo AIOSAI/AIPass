@@ -23,7 +23,7 @@ Memory is the central memory archive system that:
 **Via Drone (recommended):**
 ```bash
 drone @memory search "error handling"       # Semantic search across all branch memories
-drone @memory search "query" --branch SEED  # Filter search by branch
+drone @memory search "query" --branch SEEDGO  # Filter search by branch
 drone @memory search "query" --n 10         # Limit number of results
 drone @memory rollover                      # Execute memory rollover for files over 600 lines
 drone @memory status                        # Show rollover statistics for all branches

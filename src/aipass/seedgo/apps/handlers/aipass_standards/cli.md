@@ -371,7 +371,7 @@ For modules with many options, use argparse:
 import argparse
 
 parser = argparse.ArgumentParser(
-    description='Backup System CLI',
+    description='Backup CLI',
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 EXAMPLES:

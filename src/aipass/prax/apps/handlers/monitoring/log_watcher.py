@@ -208,18 +208,18 @@ class LogFileWatcher(FileSystemEventHandler):
             if result:
                 return result
 
-        # Pattern 3: Seed audit commands - extract target branch
-        if "[seed]" in log_line.lower() and "audit" in log_line.lower():
+        # Pattern 3: Seedgo audit commands - extract target branch
+        if "[seedgo]" in log_line.lower() and "audit" in log_line.lower():
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
                 target = match.group(1).upper()
-                return {'command': f"seed audit @{target.lower()}", 'caller': None, 'target': target}
+                return {'command': f"seedgo audit @{target.lower()}", 'caller': None, 'target': target}
 
-        # Pattern 4: Seed checklist commands
+        # Pattern 4: Seedgo checklist commands
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
             if match:
-                return {'command': f"seed checklist {match.group(2)}", 'caller': None, 'target': None}
+                return {'command': f"seedgo checklist {match.group(2)}", 'caller': None, 'target': None}
 
         # Pattern 5: AI Mail commands - extract target
         if "[ai_mail]" in log_line.lower():
@@ -238,21 +238,21 @@ class LogFileWatcher(FileSystemEventHandler):
             elif "status" in log_line.lower():
                 return {'command': "prax status", 'caller': None, 'target': None}
 
-        # Pattern 8: Backup system operations (direct python3 calls)
+        # Pattern 8: Backup operations (direct python3 calls)
         if "[backup" in log_line.lower():
             if "snapshot" in log_line.lower() and ("Starting" in log_line or "Running" in log_line or "Complete" in log_line):
-                return {'command': "backup_system snapshot", 'caller': None, 'target': None}
+                return {'command': "backup snapshot", 'caller': None, 'target': None}
             elif "versioned" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {'command': "backup_system versioned", 'caller': None, 'target': None}
+                return {'command': "backup versioned", 'caller': None, 'target': None}
             elif "sync" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {'command': "backup_system sync", 'caller': None, 'target': None}
+                return {'command': "backup sync", 'caller': None, 'target': None}
 
-        # Pattern 9: Memory Bank operations (direct python3 calls)
-        if "[memory_bank]" in log_line.lower() or "memory_bank" in log_line.lower():
+        # Pattern 9: Memory operations (direct python3 calls)
+        if "[memory]" in log_line.lower() or "memory" in log_line.lower():
             if "rollover" in log_line.lower() and ("Starting" in log_line or "Processing" in log_line):
-                return {'command': "memory_bank rollover", 'caller': None, 'target': None}
+                return {'command': "memory rollover", 'caller': None, 'target': None}
             elif "search" in log_line.lower() and "query" in log_line.lower():
-                return {'command': "memory_bank search", 'caller': None, 'target': None}
+                return {'command': "memory search", 'caller': None, 'target': None}
 
         # Pattern 10: Spawn operations (direct python3 calls)
         if "[spawn]" in log_line.lower():
@@ -282,7 +282,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 return {'command': display_cmd, 'caller': caller, 'target': target}
 
         # Pattern 7: ALL drone command executions - HIGH PRIORITY
-        # Format: "Executing command [CALLER:PRAX]: seed.py audit @prax"
+        # Format: "Executing command [CALLER:PRAX]: seedgo.py audit @prax"
         if "Executing" in log_line and "command" in log_line:
             return self._match_executing_command(log_line)
 

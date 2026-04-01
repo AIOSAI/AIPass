@@ -26,7 +26,7 @@ REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 def lookup_branch_alias(branch_name: str) -> Optional[str]:
     """
-    Look up a branch's alias from BRANCH_REGISTRY.json.
+    Look up a branch's alias from AIPASS_REGISTRY.json.
 
     Args:
         branch_name: Branch display name (e.g., "TEAM_1", "VERA")

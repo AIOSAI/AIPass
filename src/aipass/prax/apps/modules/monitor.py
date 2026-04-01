@@ -24,7 +24,7 @@ Purpose:
 Usage:
     drone @prax monitor              # Show introspection
     drone @prax monitor run          # Monitor all branches
-    drone @prax monitor run seed,cli # Monitor specific branches
+    drone @prax monitor run seedgo,cli # Monitor specific branches
 
 Interactive Commands:
     help                      # Show available commands
@@ -393,8 +393,8 @@ def _file_watcher_worker():
     from aipass.prax.apps.handlers.monitoring.filesystem_handler import MonitoringFileHandler
 
     COMMAND_INDICATOR_FILES = {
-        'standards_audit_log.json': 'seed audit',
-        'standards_checklist_log.json': 'seed checklist',
+        'standards_audit_log.json': 'seedgo audit',
+        'standards_checklist_log.json': 'seedgo checklist',
     }
 
     handler = MonitoringFileHandler(
@@ -608,7 +608,7 @@ def print_help():
     console.print()
     console.print("  [cyan]drone @prax monitor run [branches][/cyan]")
     console.print("    Monitor specific branches (comma-separated)")
-    console.print("    Example: drone @prax monitor run seed,cli,flow")
+    console.print("    Example: drone @prax monitor run seedgo,cli,flow")
     console.print()
     console.print("  [cyan]drone @prax monitor --help[/cyan]")
     console.print("    Show this help")
@@ -628,7 +628,7 @@ def print_help():
     console.print("  $ drone @prax monitor run")
     console.print()
     console.print("  [dim]# Monitor specific branches[/dim]")
-    console.print("  $ drone @prax monitor run seed,cli,flow")
+    console.print("  $ drone @prax monitor run seedgo,cli,flow")
     console.print()
 
 

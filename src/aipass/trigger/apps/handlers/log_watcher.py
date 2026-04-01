@@ -109,10 +109,10 @@ SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {
 SYSTEM_LOGS_DIR = AIPASS_PKG_ROOT.parent.parent / "system_logs"
 
 # Known branch prefixes that appear in system_logs filenames (<prefix>_<module>.log).
-# Sorted longest-first so "MEMORY_BANK" matches before "MEMORY", "backup_system" before "backup", etc.
+# Sorted longest-first so longer prefixes match before shorter ones.
 _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted([
-    'ai_mail', 'api', 'backup_system', 'cli', 'cortex', 'drone', 'flow',
-    'prax', 'trigger', 'seed', 'MEMORY_BANK', 'The_Commons',
+    'ai_mail', 'api', 'backup', 'cli', 'drone', 'flow',
+    'prax', 'trigger', 'seedgo', 'memory', 'The_Commons',
     'aipass_os', 'aipass_business',
 ], key=len, reverse=True)
 
@@ -284,7 +284,7 @@ def _detect_branch_from_path(log_path: str) -> str:
             if filename in SYSTEM_LOGS_BRANCH_MAP:
                 return SYSTEM_LOGS_BRANCH_MAP[filename]
             # Match filename prefix against known branch names (longest-first)
-            name_stem = path.stem  # e.g. "MEMORY_BANK_rollover" from "MEMORY_BANK_rollover.log"
+            name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
             for prefix in _SYSTEM_LOGS_BRANCH_PREFIXES:
                 if name_stem.startswith(prefix + '_') or name_stem == prefix:
                     return prefix.upper()

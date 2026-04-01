@@ -4,7 +4,7 @@
 # Name: tests/conftest.py
 # Date: 2025-11-08
 # Version: 1.1.0
-# Category: cortex/tests
+# Category: ai_mail/tests
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures

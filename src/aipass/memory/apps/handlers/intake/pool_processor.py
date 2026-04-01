@@ -39,10 +39,10 @@ AI_MAIL_PATH = _MEMORY_ROOT.parent / "ai_mail" / "apps" / "ai_mail.py"
 
 
 def _notify_failure(subject: str, message: str) -> None:
-    """Send failure notification to @dev_central via ai_mail."""
+    """Send failure notification to @devpulse via ai_mail."""
     try:
         subprocess.run(
-            ["python3", str(AI_MAIL_PATH), "send", "@dev_central", subject, message],
+            ["python3", str(AI_MAIL_PATH), "send", "@devpulse", subject, message],
             capture_output=True,
             text=True,
             timeout=30,
@@ -425,7 +425,7 @@ def process_memory_pool() -> dict:
     if results['errors']:
         results['success'] = False
 
-        # Notify @dev_central about processing failures
+        # Notify @devpulse about processing failures
         error_count = len(results['errors'])
         total_files = results['files_found']
         error_summary = '\n'.join(results['errors'][:10])  # Cap at 10 for readability

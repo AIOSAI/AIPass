@@ -133,7 +133,7 @@ def print_help() -> None:
     console.print("  [cyan]help[/cyan]                Show this help message")
     console.print()
     console.print("[bold]OPTIONS:[/bold]")
-    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SEED, CLI)")
+    console.print("  [cyan]--branch BRANCH[/cyan]    Filter by branch (e.g., SEEDGO, CLI)")
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
@@ -142,7 +142,7 @@ def print_help() -> None:
     console.print("  [dim]drone @memory search \"performance patterns\"[/dim]")
     console.print()
     console.print("  # Search specific branch")
-    console.print("  [dim]drone @memory search \"registry bugs\" --branch SEED[/dim]")
+    console.print("  [dim]drone @memory search \"registry bugs\" --branch SEEDGO[/dim]")
     console.print()
     console.print("  # Search specific memory type")
     console.print("  [dim]drone @memory search \"collaboration\" --type observations --n 10[/dim]")
@@ -320,7 +320,7 @@ def print_introspection() -> None:
     # Next-step hints
     console.print("[yellow]Next:[/yellow]")
     console.print('  [green]drone @memory search "your query"[/green]              [dim]# Semantic search[/dim]')
-    console.print('  [green]drone @memory search "query" --branch SEED[/green]     [dim]# Filter by branch[/dim]')
+    console.print('  [green]drone @memory search "query" --branch SEEDGO[/green]     [dim]# Filter by branch[/dim]')
     console.print("  [green]drone @memory search --help[/green]                    [dim]# Full usage guide[/dim]")
     console.print()
 

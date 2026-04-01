@@ -45,7 +45,7 @@ _TRIGGER_LOADED = False
 
 
 # ============================================================================
-# MODULE PATTERN FUNCTIONS (SEED compliant)
+# MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # ============================================================================
 
 def print_introspection():
@@ -401,7 +401,7 @@ __all__ = [
 ]
 
 # ============================================================================
-# ENTRY POINT (SEED pattern)
+# ENTRY POINT (SEEDGO pattern)
 # ============================================================================
 
 if __name__ == "__main__":

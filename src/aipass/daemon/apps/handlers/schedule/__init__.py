@@ -3,7 +3,7 @@
 # Name: __init__.py - Schedule Handlers Package
 # Date: 2026-02-04
 # Version: 1.0.0
-# Category: assistant/handlers/schedule
+# Category: daemon/handlers/schedule
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.0.0 (2026-02-04): Initial package setup
@@ -14,7 +14,7 @@
 # =============================================
 
 """
-Schedule handlers for ASSISTANT's scheduled follow-ups system.
+Schedule handlers for daemon's scheduled follow-ups system.
 """
 
 from aipass.daemon.apps.handlers.schedule.task_registry import (

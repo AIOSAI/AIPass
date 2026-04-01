@@ -10,7 +10,7 @@
 JSON Handler - Canonical Path
 
 Re-exports json_handler functions from json_utils/ to satisfy
-the Seed architecture standard requiring apps/handlers/json/json_handler.py.
+the seedgo architecture standard requiring apps/handlers/json/json_handler.py.
 """
 
 from pathlib import Path

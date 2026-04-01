@@ -225,7 +225,7 @@ class TestGetContentFilter:
         """*_registry.json files should return keys_only filter."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_content_filter
 
-        result = get_content_filter(Path("branch_registry.json"))
+        result = get_content_filter(Path("AIPASS_REGISTRY.json"))
         assert result is not None
         assert result["filter_mode"] == "keys_only"
 

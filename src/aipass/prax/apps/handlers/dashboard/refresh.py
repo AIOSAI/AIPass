@@ -31,7 +31,7 @@ from ..central.reader import read_all_centrals
 from aipass.prax.apps.handlers.json import json_handler
 
 # Sections managed by the refresh path — everything else is write-through only
-REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory_bank", "commons_activity"}
+REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory", "commons_activity"}
 
 
 def _find_repo_root() -> Path:
@@ -44,7 +44,7 @@ def _find_repo_root() -> Path:
 
 
 # Infrastructure
-BRANCH_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
+AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def _load_branch_paths() -> List[Path]:
@@ -57,11 +57,11 @@ def _load_branch_paths() -> List[Path]:
     Raises:
         FileNotFoundError: If registry doesn't exist
     """
-    if not BRANCH_REGISTRY.exists():
-        raise FileNotFoundError(f"Branch registry not found: {BRANCH_REGISTRY}")
+    if not AIPASS_REGISTRY.exists():
+        raise FileNotFoundError(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
 
     repo_root = _find_repo_root()
-    data = json.loads(BRANCH_REGISTRY.read_text())
+    data = json.loads(AIPASS_REGISTRY.read_text())
     branches = data.get("branches", [])
 
     paths = []
@@ -120,12 +120,12 @@ def _extract_ai_mail_section(centrals: Dict, branch_name: str) -> Dict:
     }
 
 
-def _extract_memory_bank_section(centrals: Dict, branch_path: Path) -> Dict:
+def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     """
-    Extract memory_bank section - LOCAL vectors for this branch.
+    Extract memory section - LOCAL vectors for this branch.
 
     Each branch shows its own .chroma/ vector count, not the global count.
-    Global stats are in MEMORY_BANK.central.json for reference only.
+    Global stats are in MEMORY.central.json for reference only.
     """
     local_vectors = 0
 
@@ -146,11 +146,11 @@ def _extract_memory_bank_section(centrals: Dict, branch_path: Path) -> Dict:
             logger.warning("Failed to read ChromaDB vectors from %s: %s", chroma_dir, e)
 
     # Pull last_updated from central if available
-    mb_data = centrals.get("memory_bank", {})
+    mb_data = centrals.get("memory", {})
     mb_last_updated = mb_data.get("last_updated", datetime.now().isoformat())
 
     return {
-        "managed_by": "memory_bank",
+        "managed_by": "memory",
         "vectors_stored": local_vectors,
         "notes": {},
         "last_updated": mb_last_updated
@@ -304,7 +304,7 @@ def refresh_all_dashboards() -> Dict:
             # Populate sections from centrals
             dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
             dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
-            dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
+            dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
 
             _preserve_commons_section(dashboard, branch_path, branch_name, centrals)
             _preserve_write_through_sections(dashboard, branch_path, branch_name)
@@ -361,7 +361,7 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
 
         dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
         dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name)
-        dashboard["sections"]["memory_bank"] = _extract_memory_bank_section(centrals, branch_path)
+        dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
 
         _preserve_commons_section(dashboard, branch_path, branch_name, centrals)
         _preserve_write_through_sections(dashboard, branch_path, branch_name)

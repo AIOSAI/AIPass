@@ -1,1 +1,1 @@
-# Tests package for assistant
+# Tests package for daemon

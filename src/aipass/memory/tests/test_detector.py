@@ -131,7 +131,7 @@ class TestLoadConfig:
         config_data = {
             "rollover": {
                 "defaults": {"max_lines": 500},
-                "per_branch": {"SEED": {"max_lines": 800}},
+                "per_branch": {"SEEDGO": {"max_lines": 800}},
             }
         }
         config_file.write_text(json.dumps(config_data), encoding="utf-8")
@@ -196,7 +196,7 @@ class TestCheckSingleFile:
 
     def test_file_under_threshold_no_rollover(self, tmp_path: Path):
         """A small file should not trigger rollover."""
-        mem_file = tmp_path / "SEED.observations.json"
+        mem_file = tmp_path / "SEEDGO.observations.json"
         data = {
             "document_metadata": {
                 "schema_version": "1.0.0",
@@ -217,7 +217,7 @@ class TestCheckSingleFile:
 
     def test_file_over_threshold_triggers_rollover(self, tmp_path: Path):
         """A file exceeding max_lines should trigger rollover."""
-        mem_file = tmp_path / "SEED.local.json"
+        mem_file = tmp_path / "SEEDGO.local.json"
         # Build a file with many lines so it exceeds threshold of 10
         data = {
             "document_metadata": {

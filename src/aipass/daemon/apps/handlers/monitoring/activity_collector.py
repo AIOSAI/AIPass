@@ -38,7 +38,7 @@ CODE_FILE_EXTENSION = ".py"
 
 def load_branch_registry() -> Dict[str, Any]:
     """
-    Load the BRANCH_REGISTRY.json file.
+    Load the AIPASS_REGISTRY.json file.
 
     Returns:
         Dict containing registry data with 'metadata' and 'branches' keys.
@@ -51,7 +51,7 @@ def load_branch_registry() -> Dict[str, Any]:
         with open(REGISTRY_PATH, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to load branch registry %s: %s", REGISTRY_PATH, e)
+        logger.warning("Failed to load AIPASS_REGISTRY %s: %s", REGISTRY_PATH, e)
         return {"metadata": {}, "branches": []}
 
 

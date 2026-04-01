@@ -1,4 +1,4 @@
-"""Tests for backup_core — main backup system orchestration module."""
+"""Tests for backup_core — main backup orchestration module."""
 
 import importlib
 import sys

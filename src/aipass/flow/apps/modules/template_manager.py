@@ -59,10 +59,9 @@ MODULE_NAME = "template_manager"
 
 
 def print_introspection():
-    """Display module info and connected handlers"""
-    console.print()
-    console.print("[bold cyan]template_manager Module[/bold cyan]")
-    console.print()
+    """Display module info, registered types, and connected handlers"""
+    registry = load_registry()
+    _display_registered_types(registry)
 
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()
@@ -180,8 +179,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     # ---- templates ----
     if command == "templates":
+        if not args:
+            print_introspection()
+            return True
+
         # Intercept help before arg parsing
-        if args and args[0] in ["--help", "-h", "help"]:
+        if args[0] in ["--help", "-h", "help"]:
             print_help()
             return True
 

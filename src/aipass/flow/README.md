@@ -3,7 +3,7 @@
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types (FPLAN, DPLAN, etc.) via a plugin architecture. Registry-backed state, async post-processing, vector intake on close, and cross-branch aggregation.
 **Module:** `aipass.flow`
 **Created:** 2025-11-15
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-04-01
 
 ---
 
@@ -54,7 +54,7 @@ flow/
 │       ├── registry/            # Load, save, auto-heal
 │       ├── template/            # Plan type loader + template resolution
 │       ├── dashboard/           # Status aggregation
-│       ├── mbank/               # Memory bank archival
+│       ├── mbank/               # Memory archival
 │       └── summary/             # AI-generated plan summaries
 ├── templates/                   # Plan type plugins (DATA, not code)
 │   ├── flow_plans/              # FPLAN config + templates (default, master)
@@ -96,4 +96,4 @@ Plans follow the convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNN
 
 ---
 
-*Last Updated: 2026-03-24*
+*Last Updated: 2026-04-01*

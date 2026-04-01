@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: dashboard_push.py
-# Description: Memory Bank Dashboard Write-Through
+# Description: Memory Dashboard Write-Through
 # Version: 0.2.0
 # Created: 2026-02-25
 # Modified: 2026-03-06
 # =============================================
 
 """
-Memory Bank Dashboard Write-Through Handler
+Memory Dashboard Write-Through Handler
 
 Pushes the memory_bank section to branch dashboards.
 Called after rollover, pool processing, and plans processing to keep dashboards
 showing accurate vector counts, collection stats, and near-rollover warnings.
 
-This is a SYSTEM-WIDE push: Memory Bank data is global, so it pushes to ALL
+This is a SYSTEM-WIDE push: memory data is global, so it pushes to ALL
 branch dashboards (every branch benefits from knowing system memory health).
 """
 
@@ -51,7 +51,7 @@ def _find_repo_root() -> Path:
     return Path.cwd()
 
 
-CENTRAL_FILE = _find_repo_root() / ".ai_central" / "MEMORY.central.json"
+CENTRAL_FILE = _find_repo_root() / ".ai_mail" / "MEMORY.central.json"
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 # Near-rollover threshold: branches with fewer than this many lines remaining
@@ -419,7 +419,7 @@ def push_memory_bank_dashboard() -> bool:
     Push the memory_bank section to ALL branch dashboards.
 
     This is the main entry point called after rollover, pool processing,
-    and plans processing. Memory Bank data is global so all branches
+    and plans processing. Memory data is global so all branches
     benefit from seeing system memory health.
 
     Uses a single subprocess to call devpulse write_section() for all

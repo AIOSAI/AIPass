@@ -165,7 +165,7 @@ def set_send_email_callback(callback: Callable[..., bool]) -> None:
 
 def _get_registered_emails() -> set:
     """
-    Read registered branch emails from BRANCH_REGISTRY.json.
+    Read registered branch emails from AIPASS_REGISTRY.json.
 
     Returns:
         Set of registered email addresses (e.g., {'@flow', '@drone'})
@@ -333,10 +333,10 @@ DECISION TREE:
 - CRITICAL (data loss risk, security, system stability):
   -> STOP immediately, escalate to @devpulse with full context
 
-SEED STANDARDS REMINDER:
-- Any code changes made during this investigation MUST follow Seed standards
-- After fixing, run: drone @seed checklist <modified_file>
-- Fixes scoring below 80% on Seed audit should NOT be shipped - clean up first
+SEEDGO STANDARDS REMINDER:
+- Any code changes made during this investigation MUST follow Seedgo standards
+- After fixing, run: drone @seedgo checklist <modified_file>
+- Fixes scoring below 80% on Seedgo audit should NOT be shipped - clean up first
 
 REPORT TO @devpulse:
   ai_mail email @devpulse "ERROR {error_hash} - [STATUS]" "Findings..."

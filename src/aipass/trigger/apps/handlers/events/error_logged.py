@@ -60,7 +60,7 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 
 TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
-BRANCH_REGISTRY_FILE = _REPO_ROOT / "BRANCH_REGISTRY.json"
+BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
 
 # Legacy rate limiting
@@ -111,7 +111,7 @@ def _is_branch_muted(branch_name: str) -> bool:
 
 
 def _get_registered_emails() -> set:
-    """Read registered branch emails from BRANCH_REGISTRY.json.
+    """Read registered branch emails from AIPASS_REGISTRY.json.
 
     Returns:
         Set of registered email addresses (e.g., {'@flow', '@drone'})

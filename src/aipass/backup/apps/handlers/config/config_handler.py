@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: config_handler.py
-# Description: Backup system configuration — modes and destinations
+# Description: Backup configuration — modes and destinations
 # Version: 3.0.0
 # Created: 2025-11-23
 # Modified: 2026-03-14
 # =============================================
 
 """
-Backup System Configuration Handler
+Backup Configuration Handler
 
-Centralized configuration management for backup system.
+Centralized configuration management for backup.
 Contains backup modes, destinations, and configuration constants.
 
 Ignore patterns and pattern-matching functions have been extracted to

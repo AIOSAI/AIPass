@@ -27,7 +27,7 @@ from aipass.cli.apps.handlers.json import json_handler
 
 
 # ============================================================================
-# MODULE PATTERN FUNCTIONS (SEED compliant)
+# MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # ============================================================================
 
 def print_introspection():
@@ -198,7 +198,7 @@ def operation_complete(success: bool | None = None, **summary) -> None:
 
 
 # ============================================================================
-# ENTRY POINT (SEED pattern)
+# ENTRY POINT (SEEDGO pattern)
 # ============================================================================
 
 if __name__ == "__main__":

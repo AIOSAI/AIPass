@@ -1,24 +1,20 @@
-# Dashboard Module - Extracted from Dev-Pass
+# Dashboard Module - Extracted from AIPass (legacy devpulse)
 
-Extracted from Dev-Pass devpulse on 2026-03-08.
-
-These files need adaptation for AIPass before use.
-
-Original imports use `aipass_os.dev_central.devpulse` -- must be converted to `aipass.prax`.
+Extracted from AIPass devpulse on 2026-03-08. Adapted for `aipass.prax`.
 
 ## Files extracted
 
 - `dashboard.py` - Dashboard Section Utilities (module-level orchestration, CLI interface, schema definition)
 
-## Original location
+## Original location (historical)
 
-`/home/aipass/aipass_os/dev_central/devpulse/apps/modules/dashboard.py`
+`/home/aipass/AIPass/devpulse/apps/modules/dashboard.py`
 
-## Key imports to convert
+## Key imports (converted)
 
-- `from prax.apps.modules.logger import system_logger` - needs AIPass logger path
-- `from cli.apps.modules import console` - needs AIPass CLI console
-- `from aipass_os.dev_central.devpulse.apps.handlers.dashboard import ...` - convert to `from aipass.prax.apps.handlers.dashboard import ...`
-- `from aipass_os.dev_central.devpulse.apps.handlers.dashboard.refresh import ...` - convert similarly
-- `from aipass_os.dev_central.devpulse.apps.handlers.dashboard.template_pusher import ...` - convert similarly
-- `from aipass_os.dev_central.devpulse.apps.handlers.dashboard.template_differ import ...` - convert similarly
+- `from aipass.prax.apps.modules.logger import system_logger`
+- `from aipass.cli.apps.modules import console`
+- `from aipass.prax.apps.handlers.dashboard import ...`
+- `from aipass.prax.apps.handlers.dashboard.refresh import ...`
+- `from aipass.prax.apps.handlers.dashboard.template_pusher import ...`
+- `from aipass.prax.apps.handlers.dashboard.template_differ import ...`

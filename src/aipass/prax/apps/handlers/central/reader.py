@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: reader.py
-# Description: Central file reader — scans .ai_central/*.central.json
+# Description: Central file reader — scans .ai_central/*.central.json (ai_mail central dir)
 # Version: 1.0.0
 # Created: 2026-03-10
 # Modified: 2026-03-10
@@ -9,7 +9,7 @@
 """
 Central File Reader
 
-Reads all .ai_central/*.central.json files from the repo root
+Reads all .ai_central/*.central.json files (ai_mail central dir) from the repo root
 and returns a dict keyed by service name.
 
 Used by dashboard/refresh.py to populate branch dashboards.
@@ -28,7 +28,7 @@ logger = get_direct_logger()
 
 def read_all_centrals() -> Dict:
     """
-    Read all .central.json files from .ai_central/ at repo root.
+    Read all .central.json files from .ai_central/ (ai_mail central dir) at repo root.
 
     Returns:
         Dict keyed by service name (e.g. 'ai_mail', 'plans', 'devpulse').
