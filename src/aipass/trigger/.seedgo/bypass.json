@@ -361,6 +361,18 @@
       "standard": "trigger",
       "pattern": "handle_pr",
       "reason": "PR event handlers (handle_pr_created, handle_pr_merged) are event handlers registered in registry.py, not trigger-specific naming violations."
+    },
+    {
+      "file": "apps/handlers/log_watcher.py",
+      "standard": "silent_catch",
+      "lines": [236],
+      "reason": "Timestamp parsing loop tries multiple formats. except ValueError: continue is intentional \u2014 on failure, tries next format. Logger.warning fires once after ALL formats fail (line 240)."
+    },
+    {
+      "file": "apps/modules/errors.py",
+      "standard": "silent_catch",
+      "lines": [247],
+      "reason": "Exception is handled: calls error() to display user-facing message with suggestion. Not a silent catch \u2014 the user sees the error output."
     }
   ],
   "notes": {

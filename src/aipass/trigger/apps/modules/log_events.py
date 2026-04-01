@@ -17,7 +17,6 @@ Architecture: Module orchestrates handlers
 """
 
 import sys
-from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -102,17 +101,28 @@ def status() -> dict:
 def print_help() -> None:
     """Print module help."""
     from aipass.cli.apps.modules import console
+    from rich.panel import Panel
 
-    console.print("Log Events - Centralized Log Watcher\n")
-    console.print("USAGE:")
-    console.print("  drone @trigger log_events <command>\n")
-    console.print("COMMANDS:")
-    console.print("  start  - Start watching logs for errors/warnings")
-    console.print("  stop   - Stop the log watcher")
-    console.print("  status - Show watcher status\n")
-    console.print("EVENTS FIRED:")
-    console.print("  error_logged   - When ERROR level log detected")
-    console.print("  warning_logged - When WARNING level log detected\n")
+    console.print(Panel("Log Events - Centralized Log Watcher", style="bold"))
+    console.print()
+    console.print("Watches system_logs/ for ERROR and WARNING entries.")
+    console.print("Fires events for downstream handlers to process.")
+    console.print()
+    console.rule("USAGE")
+    console.print()
+    console.print("  drone @trigger log_events <command>")
+    console.print()
+    console.rule("COMMANDS")
+    console.print()
+    console.print("  [bold]start[/bold]   Start watching logs for errors/warnings")
+    console.print("  [bold]stop[/bold]    Stop the log watcher")
+    console.print("  [bold]status[/bold]  Show watcher status")
+    console.print()
+    console.rule("EVENTS FIRED")
+    console.print()
+    console.print("  [bold]error_logged[/bold]     When ERROR level log detected")
+    console.print("  [bold]warning_logged[/bold]   When WARNING level log detected")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:

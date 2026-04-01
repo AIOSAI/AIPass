@@ -228,16 +228,16 @@ def _is_stale_entry(timestamp_str: str) -> bool:
         '%Y-%m-%dT%H:%M:%S',      # ISO simple: 2026-02-13T22:51:25
     ]
 
+    stripped = timestamp_str.strip()
     for fmt in formats:
         try:
-            entry_time = datetime.strptime(timestamp_str.strip(), fmt)
+            entry_time = datetime.strptime(stripped, fmt)
             return entry_time < cutoff
-        except ValueError as exc:
-            logger.warning("Failed to parse timestamp '%s': %s", timestamp_str.strip(), exc)
+        except ValueError:
             continue
 
-    # If we can't parse the timestamp, treat as STALE to avoid re-flagging
-    # garbage or malformed entries as new errors (false positive prevention).
+    # All formats failed — log once and treat as stale
+    logger.warning("Failed to parse timestamp '%s' (no matching format)", stripped)
     return True
 
 

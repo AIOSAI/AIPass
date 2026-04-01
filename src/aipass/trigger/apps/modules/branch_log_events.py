@@ -18,7 +18,6 @@ Architecture: Module orchestrates handlers
 """
 
 import sys
-from pathlib import Path
 
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -116,21 +115,34 @@ def reset_hashes() -> None:
 def print_help() -> None:
     """Print module help."""
     from aipass.cli.apps.modules import console
+    from rich.panel import Panel
 
-    console.print("Branch Log Events - Branch Log Watcher\n")
-    console.print("USAGE:")
-    console.print("  drone @trigger branch_log_events <command>\n")
-    console.print("COMMANDS:")
-    console.print("  start  - Start watching branch logs for errors")
-    console.print("  stop   - Stop the branch log watcher")
-    console.print("  status - Show watcher status")
-    console.print("  reset  - Clear error deduplication hashes\n")
-    console.print("MONITORING:")
-    console.print(f"  Path: {AIPASS_PKG_ROOT}/*/logs/*.log")
-    console.print("  Format: Prax log format (timestamp | module | LEVEL | message)\n")
-    console.print("EVENTS FIRED:")
-    console.print("  error_detected - When ERROR/CRITICAL level log detected")
-    console.print("                   Handled by AI_Mail's error_handler\n")
+    console.print(Panel("Branch Log Events - Branch Log Watcher", style="bold"))
+    console.print()
+    console.print("Watches branch log directories for ERROR entries.")
+    console.print("Fires error_detected events for the Medic dispatch pipeline.")
+    console.print()
+    console.rule("USAGE")
+    console.print()
+    console.print("  drone @trigger branch_log_events <command>")
+    console.print()
+    console.rule("COMMANDS")
+    console.print()
+    console.print("  [bold]start[/bold]   Start watching branch logs for errors")
+    console.print("  [bold]stop[/bold]    Stop the branch log watcher")
+    console.print("  [bold]status[/bold]  Show watcher status")
+    console.print("  [bold]reset[/bold]   Clear error deduplication hashes")
+    console.print()
+    console.rule("MONITORING")
+    console.print()
+    console.print(f"  [dim]Path:[/dim]   {AIPASS_PKG_ROOT}/*/logs/*.log")
+    console.print("  [dim]Format:[/dim] Prax log format (timestamp | module | LEVEL | message)")
+    console.print()
+    console.rule("EVENTS FIRED")
+    console.print()
+    console.print("  [bold]error_detected[/bold]  When ERROR/CRITICAL level log detected")
+    console.print("                   Handled by Medic dispatch pipeline")
+    console.print()
 
 
 def handle_command(command: str, args: list) -> bool:
