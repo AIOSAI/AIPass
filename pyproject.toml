@@ -52,6 +52,7 @@ dev = [
 
 [project.scripts]
 drone = "aipass.drone.cli:main"
+aipass = "aipass.cli:cli_entry"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aipass"]

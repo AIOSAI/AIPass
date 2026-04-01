@@ -13,8 +13,10 @@ import sys
 from io import StringIO
 from unittest.mock import patch
 
+import pytest
 from rich.console import Console
 
+from aipass.cli import cli_entry
 from aipass.cli.apps import cli as cli_module
 from aipass.cli.apps.cli import main
 from aipass.cli.apps.modules import display
@@ -136,3 +138,13 @@ class TestModuleRunnable:
             cwd="/home/patrick/Projects/AIPass/src",
         )
         assert result.returncode == 0
+
+    def test_cli_entry_callable(self):
+        """cli_entry() is the console_scripts entry point — verify it's callable."""
+        cons, _get_output = _make_capture_console()
+        with patch.object(cli_module, "CONSOLE", cons), \
+             patch.object(display, "CONSOLE", cons), \
+             patch("sys.argv", ["aipass", "--version"]), \
+             pytest.raises(SystemExit) as exc_info:
+            cli_entry()
+        assert exc_info.value.code == 0

@@ -66,6 +66,11 @@
       "file": "system_logs",
       "standard": "log_structure",
       "reason": "Prax branch detection bug \u2014 CLI logs land as unknown_branch. Prax confirmed known limitation (2026-03-23), fix pending on prax side."
+    },
+    {
+      "file": "__init__.py",
+      "standard": "unused_function",
+      "reason": "cli_entry() is the console_scripts entry point — called by pyproject.toml [project.scripts] aipass = 'aipass.cli:cli_entry', not from within the codebase"
     }
   ],
   "notes": {
