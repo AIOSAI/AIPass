@@ -61,6 +61,22 @@ def temp_test_dir() -> Generator[Path, None, None]:
 
 
 @pytest.fixture
+def sample_data(temp_test_dir: Path) -> dict:
+    """Provides sample backup data and directory structure for tests."""
+    source = temp_test_dir / "source"
+    dest = temp_test_dir / "dest"
+    source.mkdir()
+    dest.mkdir()
+    (source / "file1.txt").write_text("hello", encoding="utf-8")
+    (source / "file2.txt").write_text("world", encoding="utf-8")
+    return {
+        "source": source,
+        "dest": dest,
+        "files": ["file1.txt", "file2.txt"],
+    }
+
+
+@pytest.fixture
 def mock_json_handler(monkeypatch):
     """Creates a mock json_handler that can be injected into modules."""
     mock = MagicMock()

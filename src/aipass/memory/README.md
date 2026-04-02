@@ -3,7 +3,7 @@
 **Purpose:** Central memory archive with semantic search, rollover, and archival across all AIPass branches.
 **Module:** `aipass.memory`
 **Created:** 2026-03-07
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-04-01
 **Citizen Class:** builder
 
 ---
@@ -119,4 +119,4 @@ The rollover module monitors memory files across all branches registered in `AIP
 
 ---
 
-*Last Updated: 2026-03-24*
+*Last Updated: 2026-04-01*
