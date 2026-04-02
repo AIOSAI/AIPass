@@ -39,6 +39,9 @@ Add these entries to your `~/.claude/settings.json`. These use `git rev-parse` t
   },
   {
     "hooks": [{ "type": "command", "command": "REPO=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f \"$REPO/.claude/hooks/email_notification.py\" ] && python3 \"$REPO/.claude/hooks/email_notification.py\" || true" }]
+  },
+  {
+    "hooks": [{ "type": "command", "command": "echo \"# Current Time: $(date +'%A, %B %-d %Y — %-I:%M %p')\"" }]
   }
 ]
 ```
@@ -121,6 +124,7 @@ See DPLAN-0053 for the full investigation and test results.
 2. **Branch Prompt** — branch-specific instructions based on CWD (`.aipass/aipass_local_prompt.md`)
 3. **Identity** — passport summary: role, traits, purpose (`.trinity/passport.json`)
 4. **Email** — notification only if unread mail exists (`.ai_mail.local/inbox.json`)
+5. **Time Clock** — current date and time for temporal awareness (added S72, inline shell command)
 
 ## Project Settings
 
@@ -136,6 +140,18 @@ Defined in `settings.json` (this directory). These DO fire from subdirectories.
 **Project hooks:**
 - `PostToolUse` — auto-fix diagnostics after file edits (fires in subagents via env var)
 - `SubagentStop` — secondary gate checking modified files against seedgo standards
+
+## Time Clock Hook (S72)
+
+**What:** Injects `# Current Time: Thursday, April 2 2026 — 11:24 AM` as its own system-reminder every turn.
+
+**Why:** Claude has no temporal awareness by default — doesn't know what time it is, how long a session has been running, or whether it's day/night. Patrick requested this in S71 as the first step toward autonomous scheduling, task duration estimation, and personal reminders. A year-old wishlist item finally built.
+
+**How:** Pure inline shell — no script file. Added as a separate entry in `~/.claude/settings.json` UserPromptSubmit array so it gets its own system-reminder block (not buried in the 13.6KB global prompt output).
+
+**Important:** This hook lives ONLY in `~/.claude/settings.json` (global). It's not a repo script — it's a one-liner `echo` with `date`. First attempt put it inside `prompt_inject.sh` but it got truncated by the 2KB preview limit since the global prompt is 13.6KB. Moving it to its own hook entry fixed visibility.
+
+**Future:** This is proof-of-concept for a broader temporal awareness system — session duration tracking, task time estimation, reminders (bedtime, meals), autonomous work scheduling.
 
 ## Adding a New Hook
 

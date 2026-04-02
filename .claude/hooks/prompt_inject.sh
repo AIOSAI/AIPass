@@ -17,3 +17,4 @@ python3 "$REPO/.claude/hooks/identity_injector.py" 2>/dev/null
 
 # 4. Email notification
 python3 "$REPO/.claude/hooks/email_notification.py" 2>/dev/null
+
