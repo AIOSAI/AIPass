@@ -418,13 +418,14 @@ def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
         get_content_filter(Path("test.py"))  # None
     """
     name = path.name
+    name_lower = name.lower()
 
-    # Check content filter patterns
+    # Check content filter patterns (case-insensitive)
     for pattern, config in CONTENT_FILTER_PATTERNS.items():
         bare = pattern.replace('*', '')
-        if pattern.startswith('*') and name.endswith(pattern[1:]):
+        if pattern.startswith('*') and name_lower.endswith(pattern[1:]):
             return config
-        if pattern == name or bare in name:
+        if pattern == name or bare in name_lower:
             return config
 
     return None
