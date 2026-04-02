@@ -416,6 +416,10 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
     spawn_env = os.environ.copy()
     spawn_env["AIPASS_SPAWNED"] = "1"
     spawn_env["AIPASS_SESSION_TYPE"] = "dispatched"
+    # Guarantee venv bin is on PATH so dispatched agents can find drone/claude
+    venv_bin = str(_REPO_ROOT / ".venv" / "bin")
+    if venv_bin not in spawn_env.get("PATH", ""):
+        spawn_env["PATH"] = venv_bin + ":" + spawn_env.get("PATH", "")
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
@@ -464,7 +468,7 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
     notif_body = custom_message[:80] if custom_message else "Manual wake: check inbox"
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
-        send_notification(f"Wake → {email}", notif_body, source=email.lstrip("@"))
+        send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"))
     except Exception:
         logger.info("[wake] Desktop notification unavailable")
 
