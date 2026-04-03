@@ -665,3 +665,84 @@ def test_handle_command_propagates_exception(mock_console, mock_header, mock_jh,
 
     with pytest.raises(RuntimeError, match="handler failed"):
         openrouter_client.handle_command("test", [])
+
+
+# =============================================
+# create_client() — handler-level tests
+# =============================================
+
+_CLIENT_MOD = "aipass.api.apps.handlers.openrouter.client"
+
+
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", False)
+def test_create_client_returns_none_when_sdk_unavailable():
+    """create_client returns None when OpenAI SDK is not installed."""
+    from aipass.api.apps.handlers.openrouter.client import create_client
+
+    result = create_client("sk-or-test-key")
+
+    assert result is None
+
+
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
+def test_create_client_returns_none_for_empty_key():
+    """create_client returns None when api_key is empty string."""
+    from aipass.api.apps.handlers.openrouter.client import create_client
+
+    assert create_client("") is None
+
+
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
+def test_create_client_returns_none_for_none_key():
+    """create_client returns None when api_key is None."""
+    from aipass.api.apps.handlers.openrouter.client import create_client
+
+    assert create_client(None) is None  # type: ignore[arg-type]
+
+
+@patch(f"{_CLIENT_MOD}.json_handler")
+@patch(f"{_CLIENT_MOD}.OpenAI")
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
+def test_create_client_success(mock_openai_cls, mock_jh):
+    """create_client returns an OpenAI client instance on success."""
+    from aipass.api.apps.handlers.openrouter.client import create_client, OPENROUTER_HEADERS
+
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+
+    result = create_client("sk-or-valid-key", base_url="https://openrouter.ai/api/v1", timeout=30)
+
+    assert result is mock_client
+    mock_openai_cls.assert_called_once_with(
+        base_url="https://openrouter.ai/api/v1",
+        api_key="sk-or-valid-key",
+        timeout=30,
+        default_headers=OPENROUTER_HEADERS,
+    )
+
+
+@patch(f"{_CLIENT_MOD}.json_handler")
+@patch(f"{_CLIENT_MOD}.OpenAI")
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
+def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
+    """create_client passes custom timeout to OpenAI constructor."""
+    from aipass.api.apps.handlers.openrouter.client import create_client
+
+    mock_openai_cls.return_value = MagicMock()
+
+    create_client("sk-or-key", timeout=60)
+
+    assert mock_openai_cls.call_args[1]["timeout"] == 60
+
+
+@patch(f"{_CLIENT_MOD}.OpenAI")
+@patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
+def test_create_client_returns_none_on_exception(mock_openai_cls):
+    """create_client returns None when OpenAI constructor raises."""
+    from aipass.api.apps.handlers.openrouter.client import create_client
+
+    mock_openai_cls.side_effect = RuntimeError("connection refused")
+
+    result = create_client("sk-or-key")
+
+    assert result is None

@@ -9,6 +9,7 @@ import pytest
 from rich.console import Console
 
 from aipass.cli.apps.modules import display
+from aipass.cli.apps.modules.display import header, success, error, warning, section, fatal
 
 
 # =============================================================================

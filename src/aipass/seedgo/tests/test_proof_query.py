@@ -106,22 +106,60 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs():
-    """print_introspection executes without raising."""
+    """print_introspection produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.proof_query import print_introspection
-    print_introspection()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    mock_cli.header.reset_mock()
+    result = print_introspection()
+    assert result is None
+    assert mock_cli.console.print.called or mock_cli.header.called, \
+        "print_introspection should produce console output"
 
 
 def test_print_help_runs():
-    """print_help executes without raising."""
+    """print_help produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.proof_query import print_help
-    print_help()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    mock_cli.header.reset_mock()
+    result = print_help()
+    assert result is None
+    assert mock_cli.console.print.called or mock_cli.header.called, \
+        "print_help should produce console output"
 
 
-def test_discover_proof_packs_returns_dict():
-    """_discover_proof_packs returns a dict."""
-    from aipass.seedgo.apps.modules.proof_query import _discover_proof_packs
-    packs = _discover_proof_packs()
+def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
+    """_discover_proof_packs discovers *_proof dirs containing *_content.py files."""
+    # Build: tmp_path/handlers/ with pack subdirectories
+    handlers_dir = tmp_path / "handlers"
+    handlers_dir.mkdir()
+
+    valid_pack = handlers_dir / "code_proof"
+    valid_pack.mkdir()
+    (valid_pack / "triplet_content.py").write_text("# content", encoding="utf-8")
+
+    empty_pack = handlers_dir / "empty_proof"
+    empty_pack.mkdir()  # no *_content.py files -- should be skipped
+
+    not_a_pack = handlers_dir / "random_dir"
+    not_a_pack.mkdir()  # not *_proof -- should be skipped
+
+    import aipass.seedgo.apps.modules.proof_query as pq_mod
+
+    # Patch __file__ so Path(__file__).parent.parent / "handlers" -> handlers_dir
+    fake_file = tmp_path / "modules" / "proof_query.py"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pq_mod, "__file__", str(fake_file))
+
+    packs = pq_mod._discover_proof_packs()
     assert isinstance(packs, dict)
+    assert "code_proof" in packs, "Should discover 'code_proof' from code_proof/"
+    assert packs["code_proof"] == valid_pack
+    assert "empty_proof" not in packs, "Should skip dirs without *_content.py"
+    assert "random_dir" not in packs, "Should skip non-*_proof dirs"
 
 
 def test_discover_proof_content_empty_dir(tmp_path):

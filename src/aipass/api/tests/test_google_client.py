@@ -793,3 +793,285 @@ def test_handle_command_propagates_exception(
 
     with pytest.raises(RuntimeError, match="handler failed"):
         google_client.handle_command("validate", ["google"])
+
+
+# =============================================
+# auth.py — load_credentials tests
+# =============================================
+
+# Base patch path for auth module
+_AUTH = "aipass.api.apps.handlers.google.auth"
+
+
+@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.Credentials")
+@patch(f"{_AUTH}.CREDS_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
+    """load_credentials() returns Credentials when file exists and loads ok."""
+    from aipass.api.apps.handlers.google.auth import load_credentials
+
+    mock_creds_path.exists.return_value = True
+    mock_creds_obj = MagicMock()
+    mock_creds_cls.from_authorized_user_file.return_value = mock_creds_obj
+
+    result = load_credentials()
+
+    assert result is mock_creds_obj
+    mock_creds_cls.from_authorized_user_file.assert_called_once_with(
+        str(mock_creds_path),
+        ["https://www.googleapis.com/auth/drive.file"],
+    )
+    mock_json.log_operation.assert_called_once_with(
+        "credentials_loaded", {"source": str(mock_creds_path)}
+    )
+
+
+@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.Credentials")
+@patch(f"{_AUTH}.CREDS_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_load_credentials_custom_scopes(mock_creds_path, mock_creds_cls, mock_json):
+    """load_credentials() uses custom scopes when provided."""
+    from aipass.api.apps.handlers.google.auth import load_credentials
+
+    mock_creds_path.exists.return_value = True
+    custom_scopes = ["https://www.googleapis.com/auth/calendar.readonly"]
+    mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
+
+    load_credentials(scopes=custom_scopes)
+
+    mock_creds_cls.from_authorized_user_file.assert_called_once_with(
+        str(mock_creds_path),
+        custom_scopes,
+    )
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
+def test_load_credentials_libs_unavailable():
+    """load_credentials() returns None when Google libs are not installed."""
+    from aipass.api.apps.handlers.google.auth import load_credentials
+
+    result = load_credentials()
+
+    assert result is None
+
+
+@patch(f"{_AUTH}.CREDS_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_load_credentials_no_file(mock_creds_path):
+    """load_credentials() returns None when creds file does not exist."""
+    from aipass.api.apps.handlers.google.auth import load_credentials
+
+    mock_creds_path.exists.return_value = False
+
+    result = load_credentials()
+
+    assert result is None
+
+
+@patch(f"{_AUTH}.logger")
+@patch(f"{_AUTH}.json_handler")
+@patch(f"{_AUTH}.Credentials")
+@patch(f"{_AUTH}.CREDS_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json, mock_logger):
+    """load_credentials() returns None and logs error on exception."""
+    from aipass.api.apps.handlers.google.auth import load_credentials
+
+    mock_creds_path.exists.return_value = True
+    mock_creds_cls.from_authorized_user_file.side_effect = ValueError("corrupt file")
+
+    result = load_credentials()
+
+    assert result is None
+    mock_logger.error.assert_called_once()
+    mock_json.log_operation.assert_not_called()
+
+
+# =============================================
+# auth.py — refresh_credentials tests
+# =============================================
+
+
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.Request")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_credentials_success(mock_request_cls, mock_save):
+    """refresh_credentials() returns True and saves when refresh succeeds."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    mock_creds = MagicMock()
+    mock_creds.expired = True
+    mock_creds.refresh_token = "tok_refresh"
+
+    result = refresh_credentials(mock_creds)
+
+    assert result is True
+    mock_creds.refresh.assert_called_once_with(mock_request_cls())
+    mock_save.assert_called_once_with(mock_creds)
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
+def test_refresh_credentials_libs_unavailable():
+    """refresh_credentials() returns False when Google libs are not installed."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    result = refresh_credentials(MagicMock())
+
+    assert result is False
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_credentials_none_creds():
+    """refresh_credentials() returns False when creds is None."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    result = refresh_credentials(None)
+
+    assert result is False
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_credentials_not_expired():
+    """refresh_credentials() returns False when creds are not expired."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    mock_creds = MagicMock()
+    mock_creds.expired = False
+    mock_creds.refresh_token = "tok_refresh"
+
+    result = refresh_credentials(mock_creds)
+
+    assert result is False
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_credentials_no_refresh_token():
+    """refresh_credentials() returns False when no refresh token exists."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    mock_creds = MagicMock()
+    mock_creds.expired = True
+    mock_creds.refresh_token = None
+
+    result = refresh_credentials(mock_creds)
+
+    assert result is False
+
+
+@patch(f"{_AUTH}.logger")
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.Request")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_refresh_credentials_exception(mock_request_cls, mock_save, mock_logger):
+    """refresh_credentials() returns False on refresh exception."""
+    from aipass.api.apps.handlers.google.auth import refresh_credentials
+
+    mock_creds = MagicMock()
+    mock_creds.expired = True
+    mock_creds.refresh_token = "tok_refresh"
+    mock_creds.refresh.side_effect = RuntimeError("network error")
+
+    result = refresh_credentials(mock_creds)
+
+    assert result is False
+    mock_save.assert_not_called()
+    mock_logger.error.assert_called_once()
+
+
+# =============================================
+# auth.py — run_oauth_flow tests
+# =============================================
+
+
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.InstalledAppFlow")
+@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_run_oauth_flow_success(mock_secret_path, mock_flow_cls, mock_save):
+    """run_oauth_flow() returns credentials after successful OAuth flow."""
+    from aipass.api.apps.handlers.google.auth import run_oauth_flow, DEFAULT_SCOPES
+
+    mock_secret_path.exists.return_value = True
+    mock_flow = MagicMock()
+    mock_creds = MagicMock()
+    mock_flow_cls.from_client_secrets_file.return_value = mock_flow
+    mock_flow.run_local_server.return_value = mock_creds
+
+    result = run_oauth_flow()
+
+    assert result is mock_creds
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
+        str(mock_secret_path),
+        DEFAULT_SCOPES["drive"],
+    )
+    mock_flow.run_local_server.assert_called_once_with(port=0, open_browser=True)
+    mock_save.assert_called_once_with(mock_creds)
+
+
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.InstalledAppFlow")
+@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_run_oauth_flow_custom_params(mock_secret_path, mock_flow_cls, mock_save):
+    """run_oauth_flow() passes custom scopes, port, and open_browser."""
+    from aipass.api.apps.handlers.google.auth import run_oauth_flow
+
+    mock_secret_path.exists.return_value = True
+    mock_flow = MagicMock()
+    mock_creds = MagicMock()
+    mock_flow_cls.from_client_secrets_file.return_value = mock_flow
+    mock_flow.run_local_server.return_value = mock_creds
+    custom_scopes = ["https://www.googleapis.com/auth/calendar"]
+
+    result = run_oauth_flow(scopes=custom_scopes, port=8085, open_browser=False)
+
+    assert result is mock_creds
+    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
+        str(mock_secret_path),
+        custom_scopes,
+    )
+    mock_flow.run_local_server.assert_called_once_with(port=8085, open_browser=False)
+
+
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
+def test_run_oauth_flow_libs_unavailable():
+    """run_oauth_flow() returns None when Google libs are not installed."""
+    from aipass.api.apps.handlers.google.auth import run_oauth_flow
+
+    result = run_oauth_flow()
+
+    assert result is None
+
+
+@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_run_oauth_flow_no_client_secret(mock_secret_path):
+    """run_oauth_flow() returns None when client secret file is missing."""
+    from aipass.api.apps.handlers.google.auth import run_oauth_flow
+
+    mock_secret_path.exists.return_value = False
+
+    result = run_oauth_flow()
+
+    assert result is None
+
+
+@patch(f"{_AUTH}.logger")
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.InstalledAppFlow")
+@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save, mock_logger):
+    """run_oauth_flow() returns None and logs error on exception."""
+    from aipass.api.apps.handlers.google.auth import run_oauth_flow
+
+    mock_secret_path.exists.return_value = True
+    mock_flow_cls.from_client_secrets_file.side_effect = OSError("bad secret file")
+
+    result = run_oauth_flow()
+
+    assert result is None
+    mock_save.assert_not_called()
+    mock_logger.error.assert_called_once()

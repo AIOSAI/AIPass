@@ -138,15 +138,29 @@ def test_handle_command_unknown_arg():
 # ---------------------------------------------------------------------------
 
 def test_print_introspection_runs():
-    """print_introspection executes without raising."""
+    """print_introspection produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.diagnostics_audit import print_introspection
-    print_introspection()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    mock_cli.header.reset_mock()
+    result = print_introspection()
+    assert result is None
+    assert mock_cli.console.print.called or mock_cli.header.called, \
+        "print_introspection should produce console output"
 
 
 def test_print_help_runs():
-    """print_help executes without raising."""
+    """print_help produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.diagnostics_audit import print_help
-    print_help()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    mock_cli.header.reset_mock()
+    result = print_help()
+    assert result is None
+    assert mock_cli.console.print.called or mock_cli.header.called, \
+        "print_help should produce console output"
 
 
 # ---------------------------------------------------------------------------

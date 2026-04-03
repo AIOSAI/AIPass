@@ -149,15 +149,27 @@ def test_run_checklist_python_file_no_checkers(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_print_introspection_runs():
-    """print_introspection executes without raising."""
+    """print_introspection produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.checklist import print_introspection
-    print_introspection()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    result = print_introspection()
+    assert result is None
+    assert mock_cli.console.print.called, \
+        "print_introspection should produce console output"
 
 
 def test_print_help_runs():
-    """print_help executes without raising."""
+    """print_help produces console output."""
+    import sys
     from aipass.seedgo.apps.modules.checklist import print_help
-    print_help()
+    mock_cli = sys.modules["aipass.cli"]
+    mock_cli.console.reset_mock()
+    result = print_help()
+    assert result is None
+    assert mock_cli.console.print.called, \
+        "print_help should produce console output"
 
 
 # ---------------------------------------------------------------------------

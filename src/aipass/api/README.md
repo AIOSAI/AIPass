@@ -2,7 +2,7 @@
 
 **Purpose:** Centralized external API gateway — authenticated service clients for all external APIs (OpenRouter, Google, future providers).
 **Module:** `aipass.api`
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-04-03
 
 ---
 
@@ -125,4 +125,4 @@ api/
 
 ---
 
-*Last Updated: 2026-03-24*
+*Last Updated: 2026-04-03*

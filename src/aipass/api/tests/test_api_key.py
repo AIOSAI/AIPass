@@ -518,3 +518,179 @@ def test_handle_command_propagates_exception(mock_header, mock_console, mock_jh,
 
     with pytest.raises(RuntimeError, match="handler failed"):
         api_key.handle_command("get-key", ["openrouter"])
+
+
+# =============================================
+# get_key_from_config tests (auth.keys handler)
+# =============================================
+
+from aipass.api.apps.handlers.auth import keys as auth_keys
+
+
+class TestGetKeyFromConfig:
+    """Tests for auth.keys.get_key_from_config()."""
+
+    def test_returns_key_from_valid_config(self, tmp_path, monkeypatch):
+        """Valid config JSON should return the API key string."""
+        import json
+
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text(json.dumps({
+            "config": {
+                "providers": {
+                    "openrouter": {"api_key": "sk-or-test-key-abc123"}
+                }
+            }
+        }), encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result == "sk-or-test-key-abc123"
+
+    def test_returns_none_when_config_file_missing(self, tmp_path, monkeypatch):
+        """Missing config file should return None."""
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result is None
+
+    def test_returns_none_when_provider_not_in_config(self, tmp_path, monkeypatch):
+        """Config exists but provider not listed should return None."""
+        import json
+
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text(json.dumps({
+            "config": {
+                "providers": {
+                    "openai": {"api_key": "sk-openai-key-123"}
+                }
+            }
+        }), encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result is None
+
+    def test_returns_none_when_api_key_empty(self, tmp_path, monkeypatch):
+        """Provider present but api_key is empty string should return None."""
+        import json
+
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text(json.dumps({
+            "config": {
+                "providers": {
+                    "openrouter": {"api_key": ""}
+                }
+            }
+        }), encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result is None
+
+    def test_returns_none_when_config_missing_config_key(self, tmp_path, monkeypatch):
+        """JSON file without 'config' top-level key should return None."""
+        import json
+
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text(json.dumps({"other": "data"}), encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result is None
+
+    @patch("aipass.api.apps.handlers.auth.keys.logger")
+    def test_returns_none_on_invalid_json(self, mock_logger, tmp_path, monkeypatch):
+        """Malformed JSON should return None and log error."""
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text("not valid json {{{", encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        result = auth_keys.get_key_from_config("openrouter")
+        assert result is None
+        mock_logger.error.assert_called_once()
+
+    def test_reads_different_providers(self, tmp_path, monkeypatch):
+        """Should retrieve keys for different provider names."""
+        import json
+
+        config_dir = tmp_path / "api_json"
+        config_dir.mkdir()
+        config_file = config_dir / "api_connect_config.json"
+        config_file.write_text(json.dumps({
+            "config": {
+                "providers": {
+                    "openrouter": {"api_key": "sk-or-key"},
+                    "openai": {"api_key": "sk-openai-key"},
+                    "anthropic": {"api_key": "sk-ant-key"},
+                }
+            }
+        }), encoding="utf-8")
+
+        monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
+
+        assert auth_keys.get_key_from_config("openrouter") == "sk-or-key"
+        assert auth_keys.get_key_from_config("openai") == "sk-openai-key"
+        assert auth_keys.get_key_from_config("anthropic") == "sk-ant-key"
+
+
+# =============================================
+# get_validation_rules tests (auth.keys handler)
+# =============================================
+
+
+class TestGetValidationRulesAuthKeys:
+    """Tests for auth.keys.get_validation_rules()."""
+
+    def test_openrouter_rules(self):
+        """openrouter should have prefix 'sk-or-' and min_length 20."""
+        rules = auth_keys.get_validation_rules("openrouter")
+        assert rules["prefix"] == "sk-or-"
+        assert rules["min_length"] == 20
+
+    def test_openai_rules(self):
+        """openai should have prefix 'sk-' and min_length 20."""
+        rules = auth_keys.get_validation_rules("openai")
+        assert rules["prefix"] == "sk-"
+        assert rules["min_length"] == 20
+
+    def test_anthropic_rules(self):
+        """anthropic should have prefix 'sk-ant-' and min_length 20."""
+        rules = auth_keys.get_validation_rules("anthropic")
+        assert rules["prefix"] == "sk-ant-"
+        assert rules["min_length"] == 20
+
+    def test_unknown_provider_falls_back_to_generic(self):
+        """Unknown provider should fall back to generic rules."""
+        rules = auth_keys.get_validation_rules("unknown_provider")
+        assert rules["min_length"] == 10
+        assert "prefix" not in rules
+
+    def test_generic_rules_directly(self):
+        """Requesting 'generic' should return generic rules."""
+        rules = auth_keys.get_validation_rules("generic")
+        assert rules["min_length"] == 10
+        assert "prefix" not in rules
+
+    def test_return_type_is_dict(self):
+        """All providers should return a dict."""
+        for provider in ["openrouter", "openai", "anthropic", "generic", "nonexistent"]:
+            rules = auth_keys.get_validation_rules(provider)
+            assert isinstance(rules, dict)

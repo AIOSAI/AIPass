@@ -136,8 +136,10 @@ def test_format_summary_clean_run():
         "total_errors": 0,
         "total_warnings": 2,
     })
-    assert "10" in result
-    assert "0" in result
+    assert "Files analyzed: 10" in result
+    assert "Total errors: 0" in result
+    assert "Total warnings: 2" in result
+    assert "Files with errors: 0" in result
 
 
 # ---------------------------------------------------------------------------

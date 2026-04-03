@@ -26,8 +26,11 @@ from aipass.api.apps.handlers.openrouter.provision import (
     create_caller_config,
     ensure_caller_config,
     get_default_caller_config,
+    get_default_caller_data,
+    get_default_caller_log,
     provision_json_folder,
     read_json,
+    write_json,
 )
 
 
@@ -192,3 +195,127 @@ def test_get_default_caller_config_structure():
     assert "config" in config
     assert isinstance(config["config"], dict)
     assert set(config["config"].keys()) == {"ai_model", "ai_temperature", "ai_max_tokens", "enabled"}
+
+
+# =============================================
+# write_json tests
+# =============================================
+
+
+def test_write_json_creates_file(tmp_path: Path):
+    """write_json writes valid JSON and returns True."""
+    target = tmp_path / "output.json"
+    data = {"key": "value", "number": 42}
+
+    result = write_json(target, data)
+
+    assert result is True
+    assert target.exists()
+    with open(target, "r", encoding="utf-8") as f:
+        loaded = json.load(f)
+    assert loaded == data
+
+
+def test_write_json_creates_parent_dirs(tmp_path: Path):
+    """write_json creates parent directories when they don't exist."""
+    target = tmp_path / "nested" / "deep" / "data.json"
+    data = {"created": True}
+
+    result = write_json(target, data)
+
+    assert result is True
+    assert target.exists()
+    with open(target, "r", encoding="utf-8") as f:
+        loaded = json.load(f)
+    assert loaded == data
+
+
+def test_write_json_uses_indent_and_ensure_ascii(tmp_path: Path):
+    """write_json formats with indent=2 and preserves unicode."""
+    target = tmp_path / "unicode.json"
+    data = {"name": "caf\u00e9"}
+
+    write_json(target, data)
+
+    raw = target.read_text(encoding="utf-8")
+    # indent=2 means keys are indented
+    assert '  "name"' in raw
+    # ensure_ascii=False means unicode is preserved literally
+    assert "caf\u00e9" in raw
+
+
+def test_write_json_overwrites_existing(tmp_path: Path):
+    """write_json overwrites an existing file."""
+    target = tmp_path / "overwrite.json"
+    write_json(target, {"version": 1})
+    write_json(target, {"version": 2})
+
+    with open(target, "r", encoding="utf-8") as f:
+        loaded = json.load(f)
+    assert loaded["version"] == 2
+
+
+def test_write_json_returns_false_on_error(tmp_path: Path):
+    """write_json returns False when writing fails."""
+    # Use a path where the parent is a file, not a directory
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir", encoding="utf-8")
+    target = blocker / "sub" / "data.json"
+
+    result = write_json(target, {"key": "value"})
+
+    assert result is False
+
+
+# =============================================
+# get_default_caller_data tests
+# =============================================
+
+
+def test_get_default_caller_data_structure():
+    """get_default_caller_data returns dict with expected keys and zeroed counters."""
+    data = get_default_caller_data()
+
+    assert data["module_name"] == "openrouter"
+    assert "timestamp" in data
+    assert isinstance(data["data"], dict)
+
+    counters = data["data"]
+    assert counters["total_requests"] == 0
+    assert counters["successful_requests"] == 0
+    assert counters["failed_requests"] == 0
+    assert counters["models_used"] == {}
+    assert counters["last_request"] is None
+
+
+def test_get_default_caller_data_timestamp_is_iso():
+    """Timestamp should be a valid ISO-format string."""
+    from datetime import datetime
+
+    data = get_default_caller_data()
+    # Should not raise
+    datetime.fromisoformat(data["timestamp"])
+
+
+# =============================================
+# get_default_caller_log tests
+# =============================================
+
+
+def test_get_default_caller_log_structure():
+    """get_default_caller_log returns dict with module_name, timestamp, and empty logs."""
+    log = get_default_caller_log()
+
+    assert log["module_name"] == "openrouter"
+    assert "timestamp" in log
+    assert log["logs"] == []
+    assert isinstance(log["logs"], list)
+
+
+def test_get_default_caller_log_timestamp_is_iso():
+    """Timestamp should be a valid ISO-format string."""
+    from datetime import datetime
+
+    log = get_default_caller_log()
+    # Should not raise
+    datetime.fromisoformat(log["timestamp"])

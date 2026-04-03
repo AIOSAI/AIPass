@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _import_config_handler(monkeypatch):
     """Import config_handler after ensuring json_handler is mocked.
@@ -230,5 +232,24 @@ class TestShouldIgnoreReturnTypeContract:
             exceptions=[]
         )
         assert type(result) is bool
+
+
+class TestLoadPatterns:
+    """Tests for load_patterns() from ignore_patterns module."""
+
+    def test_load_patterns_returns_dict(self, monkeypatch):
+        """load_patterns() returns a dict with expected top-level keys."""
+        ip = _import_ignore_patterns(monkeypatch)
+        data = ip.load_patterns()
+        assert isinstance(data, dict)
+        assert "global_ignore_patterns" in data
+        assert "ignore_exceptions" in data
+
+    def test_load_patterns_file_not_found(self, monkeypatch, tmp_path):
+        """load_patterns() raises FileNotFoundError when JSON file is missing."""
+        ip = _import_ignore_patterns(monkeypatch)
+        monkeypatch.setattr(ip, "_PATTERNS_JSON", tmp_path / "nonexistent.json")
+        with pytest.raises(FileNotFoundError):
+            ip.load_patterns()
 
 

@@ -145,3 +145,40 @@ class TestCleanupDeletedFiles:
 
         # files_deleted is incremented once per removed file (a.txt and b.txt = 2)
         assert result.files_deleted == 2
+
+    def test_cleanup_handles_readonly_files(self, tmp_path):
+        """Read-only backup files that should be deleted are handled without crashing.
+
+        The nested handle_remove_readonly callback inside cleanup_deleted_files
+        is exercised when shutil.rmtree encounters read-only directories.
+        """
+        import stat
+        from aipass.backup.apps.handlers.operations import file_cleanup
+
+        source = tmp_path / "source"
+        source.mkdir()
+
+        backup = tmp_path / "backup"
+        backup.mkdir()
+        orphan_dir = backup / "readonly_dir"
+        orphan_dir.mkdir()
+        orphan_file = orphan_dir / "locked.txt"
+        orphan_file.write_text("should be deleted", encoding="utf-8")
+
+        # Make file and directory read-only so handle_remove_readonly is invoked
+        orphan_file.chmod(stat.S_IRUSR)
+        orphan_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
+
+        result = MagicMock()
+        result.files_deleted = 0
+
+        with patch.object(file_cleanup, "json_handler"), \
+             patch.object(file_cleanup, "safe_print"):
+            # Do NOT mock temporarily_writable here — let handle_remove_readonly
+            # in the first-pass shutil.rmtree do the real chmod work.
+            file_cleanup.cleanup_deleted_files(
+                backup, source, should_ignore=lambda p: False, result=result,
+            )
+
+        # The orphan directory and its read-only contents should be gone
+        assert not orphan_dir.exists()

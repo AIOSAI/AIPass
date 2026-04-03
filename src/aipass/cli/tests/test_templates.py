@@ -8,6 +8,7 @@ from rich.console import Console
 
 from aipass.cli.apps.modules import templates
 from aipass.cli.apps.modules import display
+from aipass.cli.apps.modules.templates import operation_start, operation_complete
 
 
 @pytest.fixture

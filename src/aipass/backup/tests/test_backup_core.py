@@ -585,3 +585,195 @@ class TestCliRoutingExtended:
         """Module can be reimported after mocking without errors."""
         mod = backup_core_env["module"]
         importlib.reload(mod)
+
+
+# ===================================================================
+# Tests — scan_source_files (module-level function)
+# ===================================================================
+
+
+class TestScanSourceFiles:
+    """Test the module-level scan_source_files function."""
+
+    def test_scan_source_files_delegates_to_file_scanner(self, backup_core_env, monkeypatch):
+        """scan_source_files calls file_scanner.scan_files with correct args."""
+        mod = backup_core_env["module"]
+
+        fake_file = Path("/fake/source/file.txt")
+        skipped = {"directories": set(), "files": set(), "too_large": set()}
+        mock_scan = MagicMock(return_value=([fake_file], skipped))
+
+        # The function does a local import from file_scanner, so inject it
+        mock_scanner_mod = MagicMock()
+        mock_scanner_mod.scan_files = mock_scan
+        monkeypatch.setitem(
+            sys.modules,
+            "aipass.backup.apps.handlers.operations.file_scanner",
+            mock_scanner_mod,
+        )
+
+        files, skipped_result = mod.scan_source_files()
+
+        assert files == [fake_file]
+        assert skipped_result == skipped
+        mock_scan.assert_called_once()
+
+    def test_scan_source_files_passes_source_whitelist_and_max_size(
+        self, backup_core_env, monkeypatch
+    ):
+        """scan_source_files forwards SOURCE_WHITELIST and MAX_FILE_SIZE_MB."""
+        mod = backup_core_env["module"]
+
+        mock_scan = MagicMock(return_value=([], {"directories": set(), "files": set(), "too_large": set()}))
+        mock_scanner_mod = MagicMock()
+        mock_scanner_mod.scan_files = mock_scan
+        monkeypatch.setitem(
+            sys.modules,
+            "aipass.backup.apps.handlers.operations.file_scanner",
+            mock_scanner_mod,
+        )
+
+        mod.scan_source_files()
+
+        call_kwargs = mock_scan.call_args
+        # Positional args: (source_dir, _should_ignore)
+        assert call_kwargs[0][0] == Path.home()
+        assert callable(call_kwargs[0][1])
+        # Keyword args: whitelist and max_file_size_mb
+        assert "whitelist" in call_kwargs.kwargs
+        assert "max_file_size_mb" in call_kwargs.kwargs
+
+    def test_scan_source_files_returns_empty_on_no_files(
+        self, backup_core_env, monkeypatch
+    ):
+        """scan_source_files returns empty list when no files match."""
+        mod = backup_core_env["module"]
+
+        empty_skipped = {"directories": set(), "files": set(), "too_large": set()}
+        mock_scan = MagicMock(return_value=([], empty_skipped))
+        mock_scanner_mod = MagicMock()
+        mock_scanner_mod.scan_files = mock_scan
+        monkeypatch.setitem(
+            sys.modules,
+            "aipass.backup.apps.handlers.operations.file_scanner",
+            mock_scanner_mod,
+        )
+
+        files, skipped_result = mod.scan_source_files()
+
+        assert files == []
+        assert skipped_result["directories"] == set()
+
+
+# ===================================================================
+# Tests — BackupEngine.ensure_backup_directory / remove_empty_dirs
+# ===================================================================
+
+
+class TestBackupEngineDirectoryOps:
+    """Validate BackupEngine directory management delegation methods."""
+
+    def test_ensure_backup_directory_success(self, backup_core_env):
+        """ensure_backup_directory returns True when directory creation succeeds."""
+        engine = backup_core_env["BackupEngine"]("snapshot")
+
+        # The method does a local import from system_utils which is already mocked.
+        # Use setattr() on the mock module object to satisfy the type checker.
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_ensure = MagicMock(return_value=(True, None))
+        setattr(mock_sys_utils, "ensure_backup_directory", mock_ensure)
+
+        # Use the real _FakeBackupResult from the fixture's mock_models
+        mock_models = sys.modules["aipass.backup.apps.handlers.models.backup_models"]
+        result = mock_models.BackupResult()
+
+        ok = engine.ensure_backup_directory(result)
+
+        assert ok is True
+        assert result.errors == 0
+        assert result.critical_errors == []
+        mock_ensure.assert_called_once_with(
+            engine.backup_dest, engine.backup_path, True  # snapshot behavior == 'dynamic'
+        )
+
+    def test_ensure_backup_directory_failure_adds_critical_error(self, backup_core_env):
+        """ensure_backup_directory returns False and adds critical error on failure."""
+        engine = backup_core_env["BackupEngine"]("snapshot")
+
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_ensure = MagicMock(return_value=(False, "Permission denied"))
+        setattr(mock_sys_utils, "ensure_backup_directory", mock_ensure)
+
+        mock_models = sys.modules["aipass.backup.apps.handlers.models.backup_models"]
+        result = mock_models.BackupResult()
+
+        ok = engine.ensure_backup_directory(result)
+
+        assert ok is False
+        assert result.errors == 1
+        assert "Permission denied" in result.critical_errors[0]
+        assert result.success is False
+
+    def test_ensure_backup_directory_failure_none_error_msg(self, backup_core_env):
+        """ensure_backup_directory uses fallback message when error_msg is None."""
+        engine = backup_core_env["BackupEngine"]("snapshot")
+
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_ensure = MagicMock(return_value=(False, None))
+        setattr(mock_sys_utils, "ensure_backup_directory", mock_ensure)
+
+        mock_models = sys.modules["aipass.backup.apps.handlers.models.backup_models"]
+        result = mock_models.BackupResult()
+
+        ok = engine.ensure_backup_directory(result)
+
+        assert ok is False
+        assert "Unknown error creating backup directory" in result.critical_errors[0]
+
+    def test_ensure_backup_directory_versioned_mode(self, backup_core_env):
+        """ensure_backup_directory passes is_dynamic=False for versioned mode."""
+        engine = backup_core_env["BackupEngine"]("versioned")
+
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_ensure = MagicMock(return_value=(True, None))
+        setattr(mock_sys_utils, "ensure_backup_directory", mock_ensure)
+
+        mock_models = sys.modules["aipass.backup.apps.handlers.models.backup_models"]
+        result = mock_models.BackupResult()
+
+        engine.ensure_backup_directory(result)
+
+        # versioned behavior != 'dynamic', so third arg should be False
+        mock_ensure.assert_called_once_with(
+            engine.backup_dest, engine.backup_path, False
+        )
+
+    def test_remove_empty_dirs_delegates_to_system_utils(self, backup_core_env):
+        """remove_empty_dirs delegates to system_utils.remove_empty_dirs."""
+        engine = backup_core_env["BackupEngine"]("snapshot")
+        test_path = backup_core_env["tmp_path"] / "cleanup_target"
+        test_path.mkdir()
+
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_clean = MagicMock()
+        setattr(mock_sys_utils, "remove_empty_dirs", mock_clean)
+
+        engine.remove_empty_dirs(test_path)
+
+        mock_clean.assert_called_once_with(test_path)
+
+    def test_remove_empty_dirs_passes_path_object(self, backup_core_env):
+        """remove_empty_dirs forwards a Path object, not a string."""
+        engine = backup_core_env["BackupEngine"]("versioned")
+        test_path = backup_core_env["tmp_path"] / "nested" / "empty"
+        test_path.mkdir(parents=True)
+
+        mock_sys_utils = sys.modules["aipass.backup.apps.handlers.utils.system_utils"]
+        mock_clean = MagicMock()
+        setattr(mock_sys_utils, "remove_empty_dirs", mock_clean)
+
+        engine.remove_empty_dirs(test_path)
+
+        called_arg = mock_clean.call_args[0][0]
+        assert isinstance(called_arg, Path)
+        assert called_arg == test_path

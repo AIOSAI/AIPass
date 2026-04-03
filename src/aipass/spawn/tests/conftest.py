@@ -78,8 +78,14 @@ def mock_logger():
 
 @pytest.fixture
 def mock_json_handler():
-    """Mock json_handler to verify log_operation calls."""
-    with patch("aipass.spawn.apps.handlers.json.json_handler.log_operation") as m:
+    """Mock json_handler.log_operation at the call site in file_ops.
+
+    Uses patch.object on the module reference held by file_ops to avoid
+    stale-reference issues when other test suites reload json_handler.
+    """
+    import aipass.spawn.apps.handlers.file_ops as _fo
+
+    with patch.object(_fo.json_handler, "log_operation") as m:
         m.return_value = True
         yield m
 
@@ -87,8 +93,7 @@ def mock_json_handler():
 @pytest.fixture(autouse=True)
 def _isolate_spawn_json(tmp_path):
     """Auto-isolate spawn_json directory to prevent test pollution."""
-    with patch(
-        "aipass.spawn.apps.handlers.json.json_handler._JSON_DIR",
-        tmp_path / "spawn_json",
-    ):
+    import aipass.spawn.apps.handlers.json.json_handler as _jh
+
+    with patch.object(_jh, "_JSON_DIR", tmp_path / "spawn_json"):
         yield
