@@ -107,6 +107,51 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
     return [arg for arg in claude_cmd if arg != "-c"]
 
 
+def _get_jsonl_projects_dir(cwd: str) -> Path:
+    """Get Claude's JSONL projects directory for a branch CWD."""
+    encoded = cwd.replace("/", "-")
+    return Path.home() / ".claude" / "projects" / encoded
+
+
+def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
+    """Snapshot current sizes of all JSONL files in the projects directory."""
+    sizes = {}
+    if not projects_dir.exists():
+        return sizes
+    try:
+        for f in projects_dir.glob("*.jsonl"):
+            try:
+                sizes[f.name] = f.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return sizes
+
+
+def _check_jsonl_activity(projects_dir: Path, initial_sizes: dict) -> bool:
+    """Check if any JSONL file has grown or a new file appeared since snapshot."""
+    if not projects_dir.exists():
+        return False
+    try:
+        for f in projects_dir.glob("*.jsonl"):
+            try:
+                name = f.name
+                current_size = f.stat().st_size
+                if name not in initial_sizes:
+                    # New file appeared
+                    if current_size > 0:
+                        return True
+                elif current_size > initial_sizes[name]:
+                    # Existing file grew
+                    return True
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return False
+
+
 def _kill_process(process: subprocess.Popen, branch_email: str):
     """Kill a subprocess gracefully, then forcefully."""
     try:
@@ -153,31 +198,31 @@ def _run_with_startup_check(claude_cmd: list, stdout_log: str,
             stdout_fh.close()
         return -2, False
 
-    # Phase 1: Startup check — poll stdout for first output within STARTUP_TIMEOUT
-    stdout_path = Path(stdout_log)
+    # Phase 1: Startup check — poll JSONL session files for activity.
+    # stdout is buffered by --output-format json, so we can't use it.
+    # Claude writes to ~/.claude/projects/{encoded-cwd}/*.jsonl continuously.
+    projects_dir = _get_jsonl_projects_dir(cwd)
+    initial_sizes = _snapshot_jsonl_sizes(projects_dir)
     deadline = time.time() + STARTUP_TIMEOUT
     started = False
 
     try:
         while time.time() < deadline:
-            # Check if stdout has any content (agent is producing output)
-            try:
-                if stdout_path.exists() and stdout_path.stat().st_size > 0:
-                    started = True
-                    break
-            except OSError:
-                pass
+            # Check if JSONL files show activity (new file or growth)
+            if _check_jsonl_activity(projects_dir, initial_sizes):
+                started = True
+                break
 
             # Check if process already exited
             if process.poll() is not None:
-                # If zero output was produced, this is a startup failure
+                # If no JSONL activity was detected, this is a startup failure
                 return process.returncode, not started
 
             time.sleep(POLL_INTERVAL)
 
         if not started and process.poll() is None:
-            # Startup timeout — no output after STARTUP_TIMEOUT seconds
-            logger.warning("[monitor] %s zero output after %ds — startup timeout (killing)",
+            # Startup timeout — no JSONL activity after STARTUP_TIMEOUT seconds
+            logger.warning("[monitor] %s no JSONL activity after %ds — startup timeout (killing)",
                            branch_email, STARTUP_TIMEOUT)
             _kill_process(process, branch_email)
             return -3, True
