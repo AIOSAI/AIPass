@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.prax.apps.modules.logger import system_logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.handlers.exceptions import BranchNotFoundError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
@@ -50,7 +50,11 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         if not args:
             logger.warning("resolver resolve requires a branch name")
             return False
-        path = resolve_branch(args[0])
+        try:
+            path = resolve_branch(args[0])
+        except BranchNotFoundError:
+            err_console.print(f"resolver: branch '{args[0]}' not found")
+            return False
         console.print(f"{args[0]} -> {path}")
         return True
     if command == "exists":
@@ -63,7 +67,11 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         if not args:
             logger.warning("resolver info requires a branch name")
             return False
-        info = get_branch_info(args[0])
+        try:
+            info = get_branch_info(args[0])
+        except BranchNotFoundError:
+            err_console.print(f"resolver: branch '{args[0]}' not found")
+            return False
         console.print(f"Branch info: {info}")
         return True
     if command == "list":

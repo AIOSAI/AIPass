@@ -438,6 +438,49 @@ class BackupEngine:
                 max_file_size_mb=MAX_FILE_SIZE_MB
             )
 
+        # QUICK-CHECK: Skip processing if nothing changed (snapshot mode only)
+        if self.mode == 'snapshot' and last_timestamps and not self.dry_run:
+            quick_timestamps = {}
+            quick_check_valid = True
+            for fp in files_to_backup:
+                try:
+                    rel = str(fp.relative_to(self.source_dir))
+                    quick_timestamps[rel] = fp.stat().st_mtime
+                except OSError as e:
+                    logger.info(f"[backup_core] Quick-check stat failed, falling through to full scan: {e}")
+                    quick_check_valid = False
+                    break
+
+            if quick_check_valid and quick_timestamps == last_timestamps:
+                console.print()
+                success("No changes detected — snapshot is current",
+                        files_checked=len(files_to_backup))
+                result.files_checked = len(files_to_backup)
+                result.files_skipped = len(files_to_backup)
+
+                # Still log the operation and update stats
+                execution_time = int((datetime.datetime.now() - result.start_time).total_seconds() * 1000)
+                json_handler.log_operation(
+                    "backup",
+                    {
+                        "mode": self.mode,
+                        "files_copied": 0,
+                        "success": True,
+                        "skipped_reason": "no_changes",
+                        "execution_time_ms": execution_time
+                    },
+                    module_name="backup_core"
+                )
+                logger.info(f"[backup_core] Snapshot quick-check: no changes detected ({len(files_to_backup)} files, {execution_time}ms)")
+
+                from aipass.backup.apps.handlers.reporting.report_formatter import display_backup_results
+                display_backup_results(result, self.mode_config, self.backup_path, skipped_items, filter_tracked_items, self.dry_run)
+
+                from aipass.backup.apps.handlers.json.statistics_handler import update_data_file
+                update_data_file(result)
+
+                return result
+
         # HANDLER: Process files
         from aipass.backup.apps.handlers.operations.path_builder import build_backup_path
         current_timestamps = {}

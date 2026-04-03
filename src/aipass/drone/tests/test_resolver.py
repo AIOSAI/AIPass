@@ -339,13 +339,11 @@ class TestHandleCommand:
     def test_list_command(self, populated_registry):
         assert handle_command("list", []) is True
 
-    def test_resolve_nonexistent_raises(self, populated_registry):
-        with pytest.raises(BranchNotFoundError):
-            handle_command("resolve", ["@NONEXISTENT"])
+    def test_resolve_nonexistent_returns_false(self, populated_registry):
+        assert handle_command("resolve", ["@NONEXISTENT"]) is False
 
-    def test_info_nonexistent_raises(self, populated_registry):
-        with pytest.raises(BranchNotFoundError):
-            handle_command("info", ["@NONEXISTENT"])
+    def test_info_nonexistent_returns_false(self, populated_registry):
+        assert handle_command("info", ["@NONEXISTENT"]) is False
 
     def test_unknown_command(self, populated_registry):
         assert handle_command("bogus", []) is False
