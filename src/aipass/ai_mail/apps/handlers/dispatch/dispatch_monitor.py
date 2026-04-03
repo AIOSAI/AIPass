@@ -109,7 +109,7 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
 
 def _get_jsonl_projects_dir(cwd: str) -> Path:
     """Get Claude's JSONL projects directory for a branch CWD."""
-    encoded = cwd.replace("/", "-")
+    encoded = cwd.replace("/", "-").replace("_", "-")
     return Path.home() / ".claude" / "projects" / encoded
 
 
