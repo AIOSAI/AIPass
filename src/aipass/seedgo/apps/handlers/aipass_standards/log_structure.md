@@ -56,7 +56,7 @@ LOG_DIR = Path(__file__).resolve().parents[3] / 'logs'
 # All handlers write to branch/logs/ -- flat, no locality
 
 # WRONG: Hardcoded absolute paths
-path = '/home/patrick/aipass/system_logs/module.log'
+path = '/home/user/aipass/system_logs/module.log'
 path = Path.home() / 'logs' / 'module.log'
 ```
 

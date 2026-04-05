@@ -185,7 +185,7 @@ def read_central_file() -> Dict[str, Any]:
         if not CENTRAL_FILE.exists():
             # Return default structure
             return {
-                "service": "memory_bank",
+                "service": "memory",
                 "last_updated": "",
                 "stats": {
                     "total_vectors": 0,

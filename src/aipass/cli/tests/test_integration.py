@@ -11,6 +11,7 @@
 import subprocess
 import sys
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -135,7 +136,7 @@ class TestModuleRunnable:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/patrick/Projects/AIPass/src",
+            cwd=str(Path(__file__).resolve().parents[3]),
         )
         assert result.returncode == 0
 

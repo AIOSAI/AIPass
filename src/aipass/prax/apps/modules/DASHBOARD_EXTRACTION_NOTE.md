@@ -8,7 +8,7 @@ Extracted from AIPass devpulse on 2026-03-08. Adapted for `aipass.prax`.
 
 ## Original location (historical)
 
-`/home/aipass/AIPass/devpulse/apps/modules/dashboard.py`
+`<repo>/src/aipass/devpulse/apps/modules/dashboard.py` (pre-reorganization path)
 
 ## Key imports (converted)
 

@@ -17,7 +17,7 @@ Extracted from AIPass devpulse on 2026-03-08. Adapted for `aipass.prax`.
 
 ## Original location (historical)
 
-`/home/aipass/AIPass/devpulse/apps/handlers/dashboard/`
+`<repo>/src/aipass/devpulse/apps/handlers/dashboard/` (pre-reorganization path)
 
 ## Key dependencies to resolve
 

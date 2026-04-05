@@ -11,29 +11,5 @@
     ],
     "defaultMode": "acceptEdits"
   },
-  "skipDangerousModePermissionPrompt": true,
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/patrick/.claude/hooks/auto_fix_diagnostics.py"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/patrick/.claude/hooks/subagent_stop_gate.py",
-            "timeout": 30
-          }
-        ]
-      }
-    ]
-  }
+  "skipDangerousModePermissionPrompt": true
 }

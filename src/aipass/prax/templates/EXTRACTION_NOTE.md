@@ -9,7 +9,7 @@ Extracted from AIPass devpulse on 2026-03-08. Adapted for `aipass.prax`.
 
 ## Original location (historical)
 
-`/home/aipass/AIPass/devpulse/templates/`
+`<repo>/src/aipass/devpulse/templates/` (pre-reorganization path)
 
 ## Notes
 
