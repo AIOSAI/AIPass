@@ -1,13 +1,52 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-# AIPass (UNDER CONSTRUCTION)
+<!-- TODO: Replace with actual AIPass logo when ready -->
+<!-- <p align="center"><img src="docs/logo.png" width="400" alt="AIPass"></p> -->
+
+# AIPass
 
 A multi-agent operating system where AI agents live as citizens in a shared filesystem. Persistent memory, inter-agent messaging, standards enforcement, and CLI routing — no cloud required.
 
-## Setup
+---
 
-### Quick (full setup)
+## Table of Contents
+
+- [What is AIPass](#what-is-aipass)
+- [Quick Start](#quick-start)
+- [Branches](#branches)
+  - [Orchestration](#orchestration)
+  - [Core Infrastructure](#core-infrastructure)
+  - [Intelligence & Planning](#intelligence--planning)
+  - [Communication & Events](#communication--events)
+  - [Services](#services)
+- [How It Works](#how-it-works)
+  - [Memory](#memory)
+  - [Standards](#standards)
+  - [Communication](#communication)
+  - [Structure](#structure)
+- [Compliance & Safety](#compliance--safety)
+- [Project Status](#project-status)
+- [Requirements](#requirements)
+- [License](#license)
+
+---
+
+## What is AIPass
+
+AIPass (**AI Passport**) is a multi-agent framework built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Each agent is a **citizen** — it has an identity (passport), persistent memory, a mailbox, and the ability to communicate with other agents. Citizens live in **branches** (directories), each specializing in a domain. One orchestrator coordinates them all.
+
+You talk to one agent. It dispatches work to specialists and brings results back. Memory persists across sessions — you never re-explain context.
+
+```
+You <-> devpulse (orchestrator) <-> 14 specialist branches
+```
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
+
+## Quick Start
 
 ```bash
 git clone https://github.com/AIOSAI/AIPass.git
@@ -15,103 +54,129 @@ cd AIPass
 ./setup.sh
 ```
 
-`setup.sh` creates a `.venv`, installs the package in editable mode, generates the branch registry (`AIPASS_REGISTRY.json`), bootstraps `.trinity/` identity files for all 15 branches, copies an `.env` template to `~/.secrets/aipass/.env`, installs Claude Code hooks, and creates a global symlink for `drone` (requires `sudo` — will prompt). Idempotent — safe to re-run.
-
-After setup, `drone` is available globally via `/usr/local/bin` symlink. No venv activation needed for CLI use. `seedgo` is accessed via `drone @seedgo`. For development (running tests, importing modules), activate the venv:
-
-```bash
-source .venv/bin/activate
-```
-
-### Manual (dev)
-
-```bash
-git clone https://github.com/AIOSAI/AIPass.git
-cd AIPass
-pip install -e ".[dev]"   # Editable install + dev tools
-./setup.sh                 # Bootstrap registry, identities, hooks
-```
-
-### Add your API keys
-
-```bash
-nano ~/.secrets/aipass/.env
-```
-
-Only needed if using the `api` branch (OpenRouter/OpenAI). Everything else works without API keys.
+`setup.sh` creates a `.venv`, installs the package, generates the branch registry, bootstraps identity files for all 15 branches, copies an `.env` template, installs Claude Code hooks, and creates a global `drone` symlink. Idempotent — safe to re-run.
 
 ### Verify
 
 ```bash
-drone systems          # Should list 15 core branches + 3 internal modules
+drone systems          # Lists 15 branches + internal modules
 ```
 
-### Docker
-
-```bash
-docker build -t aipass .
-docker run -d -p 8080:8080 aipass
-```
-
-Opens a [code-server](https://github.com/coder/code-server) IDE with Python, Node.js, and Claude Code pre-installed. Auth is password-based — check `docker logs <container>` for the generated password.
-
-Inside the container:
-
-```bash
-bash setup-workspace.sh   # Clones repo into workspace and installs
-```
-
-> **Note:** `setup-workspace.sh` clones from a fork by default. Edit the `FORK` variable in the script to point to your own fork, or change it to the upstream `AIOSAI/AIPass` URL.
-
-## Usage
-
-Start with devpulse — the orchestration hub:
+### Start working
 
 ```bash
 cd src/aipass/devpulse
 claude --permission-mode bypassPermissions
 ```
 
-Talk to it. It dispatches to specialist branches and brings results back. You work with one agent, it coordinates the rest.
+Talk to devpulse. It dispatches to specialists and brings results back.
 
-### Core Commands
+### Core commands
 
 ```bash
 drone @branch --help                                       # Any branch's capabilities
-drone systems                                              # List all branches + modules
-drone @ai_mail dispatch @memory "subject" "body"           # Send inter-agent mail + wake target
-drone @seedgo audit aipass                                 # Run standards audit (all branches)
-drone @seedgo audit aipass @branch                         # Audit a single branch
+drone systems                                              # List all branches
+drone @ai_mail dispatch @memory "subject" "body"           # Send mail + wake target
+drone @seedgo audit aipass                                 # Full standards audit
 drone @flow create . "task name" dplan                     # Create a planning doc
-drone @flow create . "task name"                           # Create an execution plan
-drone @git pr "description"                                # Create PR via drone (atomic workflow)
-drone @git status                                          # Git status scoped to your branch
-drone @prax monitor                                        # Real-time log monitoring (interactive — Ctrl+C to exit)
+drone @git pr "description"                                # Atomic PR workflow
 ```
 
 Pattern: `drone @branch command [args]` — single-line, non-interactive.
 
-### Branches
+<details>
+<summary>Docker setup</summary>
 
-15 citizen branches, each an autonomous agent with persistent memory:
+```bash
+docker build -t aipass .
+docker run -d -p 8080:8080 aipass
+```
 
-| Branch | Role | What it does |
-|--------|------|-------------|
-| `devpulse` | Manager | Orchestration hub — start here. Coordinates all other branches. |
-| `drone` | Builder | CLI router — resolves `@name` to paths, routes commands to branches |
-| `seedgo` | Builder | Standards enforcement — 33 automated checks, bypass system |
-| `prax` | Builder | Logging infrastructure and real-time monitoring |
-| `cli` | Builder | Terminal display, formatting, and output services |
-| `flow` | Builder | Workflow management — FPLANs (execution) and DPLANs (planning) |
-| `ai_mail` | Builder | Inter-agent messaging, dispatch, and wake system |
-| `spawn` | Builder | Branch lifecycle — create, update, template management |
-| `trigger` | Builder | Event-driven automation — 12 event types |
-| `api` | Builder | LLM access via OpenRouter (requires API key) |
-| `backup` | Builder | Multi-mode backup — snapshot, versioned, Google Drive |
-| `daemon` | Builder | Background scheduler with plugin system |
-| `memory` | Builder | Vector memory bank (ChromaDB) — search, archival |
-| `commons` | Builder | Social space — posts, reactions, community features |
-| `skills` | Builder | Capability framework for branch skills |
+Opens a [code-server](https://github.com/coder/code-server) IDE with Python, Node.js, and Claude Code pre-installed. Check `docker logs <container>` for the generated password.
+
+Inside the container:
+```bash
+bash setup-workspace.sh   # Clones repo into workspace and installs
+```
+
+> `setup-workspace.sh` clones from a fork by default. Edit the `FORK` variable to point to your own.
+
+</details>
+
+<details>
+<summary>Manual dev setup</summary>
+
+```bash
+git clone https://github.com/AIOSAI/AIPass.git
+cd AIPass
+pip install -e ".[dev]"
+./setup.sh
+```
+
+</details>
+
+<details>
+<summary>API keys (optional)</summary>
+
+```bash
+nano ~/.secrets/aipass/.env
+```
+
+Only needed for the `api` branch (OpenRouter/OpenAI). Everything else works without API keys.
+
+</details>
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
+
+## Branches
+
+15 citizen branches, each autonomous with persistent memory. Click any branch name to read its full documentation.
+
+### Orchestration
+
+| Branch | Purpose | Docs |
+|--------|---------|------|
+| [**devpulse**](src/aipass/devpulse/) | Orchestration hub — start here. Coordinates all other branches. | [README](src/aipass/devpulse/README.md) |
+
+### Core Infrastructure
+
+| Branch | Purpose | Docs |
+|--------|---------|------|
+| [**drone**](src/aipass/drone/) | CLI router — `@name` resolution, command dispatch to all branches | [README](src/aipass/drone/README.md) |
+| [**spawn**](src/aipass/spawn/) | Branch lifecycle — create, update, delete, template management | [README](src/aipass/spawn/README.md) |
+| [**cli**](src/aipass/cli/) | Terminal display, formatting, and output services | [README](src/aipass/cli/README.md) |
+| [**daemon**](src/aipass/daemon/) | Background scheduler with cron and plugin system | [README](src/aipass/daemon/README.md) |
+
+### Intelligence & Planning
+
+| Branch | Purpose | Docs |
+|--------|---------|------|
+| [**memory**](src/aipass/memory/) | Vector memory bank (ChromaDB) — search, archival, rollover | [README](src/aipass/memory/README.md) |
+| [**flow**](src/aipass/flow/) | Workflow management — FPLANs (execution) and DPLANs (planning) | [README](src/aipass/flow/README.md) |
+| [**prax**](src/aipass/prax/) | Logging infrastructure, stack introspection, real-time monitoring | [README](src/aipass/prax/README.md) |
+| [**seedgo**](src/aipass/seedgo/) | Standards enforcement — 33 automated checks, bypass system | [README](src/aipass/seedgo/README.md) |
+
+### Communication & Events
+
+| Branch | Purpose | Docs |
+|--------|---------|------|
+| [**ai_mail**](src/aipass/ai_mail/) | Inter-agent messaging, dispatch, and wake system | [README](src/aipass/ai_mail/README.md) |
+| [**trigger**](src/aipass/trigger/) | Event-driven automation — 14 event types, watchers | [README](src/aipass/trigger/README.md) |
+| [**commons**](src/commons/) | Community space — posts, reactions, shared utilities | [README](src/commons/README.md) |
+
+### Services
+
+| Branch | Purpose | Docs |
+|--------|---------|------|
+| [**api**](src/aipass/api/) | LLM access via OpenRouter (requires API key) | [README](src/aipass/api/README.md) |
+| [**backup**](src/aipass/backup/) | Multi-mode backup — snapshot, versioned, Google Drive sync | [README](src/aipass/backup/README.md) |
+| [**skills**](src/skills/) | Capability framework for branch skills | [README](src/skills/README.md) |
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
 
 ## How It Works
 
@@ -125,19 +190,30 @@ Every branch has `.trinity/` files that persist across sessions:
 .trinity/observations.json   # Collaboration patterns observed over time
 ```
 
-New session starts, branch reads its memories, picks up where it left off. When local files reach capacity, they roll over into the `@memory` branch (ChromaDB vectors). Nothing is lost.
+New session starts, branch reads its memories, picks up where it left off. When local files reach capacity, they roll over into `@memory` (ChromaDB vectors). Nothing is lost.
 
 ### Standards
 
-Every branch is held to 33 automated standards checks via `seedgo`:
+Every branch is held to 33 automated standards via `seedgo`:
 
 ```bash
 drone @seedgo audit aipass              # Full system audit
 drone @seedgo audit aipass @api         # Single branch
-drone @seedgo checklist apps/module.py  # Quick check on a file
 ```
 
-Standards cover: architecture, CLI patterns, error handling, imports, logging, naming, test quality, documentation, and more. Branches can add justified bypasses in `.seedgo/bypass.json`.
+Standards cover: architecture, CLI patterns, error handling, imports, logging, naming, test quality, documentation, and more. Branches add justified bypasses in `.seedgo/bypass.json`.
+
+### Communication
+
+Branches communicate via `ai_mail` — an internal messaging system:
+
+```bash
+drone @ai_mail dispatch @target "Subject" "Body"   # Send + wake target
+drone @ai_mail email @target "Subject" "Body"      # Send without waking
+drone @ai_mail inbox                               # Check your inbox
+```
+
+Dispatch sends a message AND wakes the target branch (starts a Claude Code session in their directory). This is how devpulse coordinates work across the system.
 
 ### Structure
 
@@ -146,48 +222,88 @@ src/aipass/<branch>/
 ├── .trinity/           # Identity & memory (persists across sessions)
 ├── .aipass/            # Branch-specific system prompt
 ├── .ai_mail.local/     # Mailbox (inbox.json, sent/)
-├── .seedgo/            # Standards bypass config
-├── .claude/            # Claude Code settings (deny rules, permissions)
 ├── apps/
-│   ├── <branch>.py     # Entry point (handle_command, introspection)
-│   ├── modules/        # Business logic / orchestration
+│   ├── <branch>.py     # Entry point
+│   ├── modules/        # Business logic
 │   └── handlers/       # Implementation details
 ├── tests/              # Branch test suite
-├── logs/               # Prax log output
 └── README.md
 ```
 
-All branches follow this layout. `drone` resolves `@name` to filesystem paths via `AIPASS_REGISTRY.json`.
+All 15 branches share the same filesystem and git repo. Each owns its directory. A PR lockfile prevents concurrent git operations. Standards enforcement keeps things consistent.
 
-### Communication
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
 
-Branches communicate via `ai_mail` — an internal messaging system:
+---
 
-```bash
-drone @ai_mail dispatch @target "Subject" "Body"   # Send + wake target branch
-drone @ai_mail email @target "Subject" "Body"      # Send without waking (FYI only)
-drone @ai_mail inbox                               # Check your inbox
-```
+## Compliance & Safety
 
-Dispatch sends a message AND wakes the target branch (starts a Claude session in their directory). This is how devpulse coordinates work across the system.
+AIPass is built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and operates fully within Anthropic's usage policies.
 
-### No Isolation
+### How AIPass uses Claude Code
 
-All 15 branches share the same filesystem and git repo. Each owns its directory and doesn't touch others. A PR lockfile prevents concurrent git operations. Standards enforcement keeps things consistent.
+- Every agent session runs the **official `claude` CLI binary** (`claude -p`) as a genuine subprocess
+- Context is injected via [Claude Code hooks](https://code.claude.com/docs/en/hooks) (`settings.json`) and `CLAUDE.md` files — both officially supported, documented features
+- Each branch agent runs as an **independent Claude Code process** with its own working directory
+- No OAuth tokens are extracted, intercepted, or routed through third-party clients
+- No API calls are made to Anthropic outside the official CLI
+- Claude Code's built-in prompt caching and rate limiting are fully preserved
 
-Git workflow is atomic via `drone @git pr` — one command handles: lock acquisition, branch creation, scoped staging, commit, push, PR creation, return to main, and lock release.
+### What AIPass does NOT do
+
+- **No credential wrapping** — we don't extract or redirect subscription OAuth tokens
+- **No API proxying** — we don't intercept communication between Claude Code and Anthropic's servers
+- **No harness impersonation** — we don't spoof the Claude Code client identity
+- **No rate limit bypass** — each session respects Anthropic's built-in limits
+
+### Why this matters
+
+As of April 2026, Anthropic [enforces restrictions](https://venturebeat.com/technology/anthropic-cracks-down-on-unauthorized-claude-usage-by-third-party-harnesses) on third-party tools that extract subscription credentials to route automated workloads outside the official CLI. Tools like OpenClaw bypass Claude Code's prompt caching optimizations, creating unsustainable compute costs.
+
+AIPass is architecturally different: it enhances Claude Code through its own extension points (hooks, CLAUDE.md, settings.json) rather than replacing or bypassing it. Your subscription credentials stay within Anthropic's infrastructure at all times.
+
+> **Using AIPass with your Claude Pro, Max, Team, or Enterprise subscription is compliant with Anthropic's terms.** For server/automated deployments, API key authentication is recommended per [Anthropic's guidance](https://code.claude.com/docs/en/legal-and-compliance).
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
+
+## Project Status
+
+**Beta.** Actively developed. 15 branches, 180+ PRs merged, 4,800+ tests, 100% standards compliance.
+
+| Metric | Value |
+|--------|-------|
+| Branches | 15 |
+| Standards | 33 |
+| Tests | 4,800+ |
+| PRs merged | 180+ |
+| Compliance | 100% |
+| Sessions | 73 |
+
+For detailed progress and session history, see [HERALD.md](HERALD.md).
+
+For per-branch status, see [STATUS.md](STATUS.md).
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
 
 ## Requirements
 
 - Python 3.10+
 - `sudo` access (for global CLI symlinks during setup)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (hooks provide branch identity, email notifications, auto-diagnostics)
 - API keys optional (only needed for `api` branch — OpenRouter/OpenAI)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) recommended (hooks provide branch identity, email notifications, auto-diagnostics)
 
-## Status
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
 
-Beta. 15 branches. 141 PRs merged. 2,900+ tests. 100% compliance across 33 standards. See [HERALD.md](HERALD.md) for detailed progress and session history.
+---
 
 ## License
 
 MIT
+
+---
+
+<p align="center"><a href="#aipass">Back to top</a></p>
