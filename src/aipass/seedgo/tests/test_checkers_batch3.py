@@ -133,7 +133,7 @@ class TestLogStructureCheck:
         # No logs/ dir -- that alone is a violation
         # Plus hardcoded path
         content = textwrap.dedent("""\
-            LOG_FILE = "/home/patrick/myapp.log"
+            LOG_FILE = "/home/user/myapp.log"
         """)
         filepath = _write_temp_py(apps_dir, "bad_module.py", content)
 

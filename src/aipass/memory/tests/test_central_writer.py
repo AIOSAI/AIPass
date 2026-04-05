@@ -252,7 +252,7 @@ class TestReadCentralFile:
 
         result = cw.read_central_file()
 
-        assert result["service"] == "memory_bank"
+        assert result["service"] == "memory"
         assert result["last_updated"] == ""
         assert result["stats"]["total_vectors"] == 0
         assert result["stats"]["total_archives"] == 0
@@ -264,7 +264,7 @@ class TestReadCentralFile:
         central_dir.mkdir(parents=True)
 
         data = {
-            "service": "memory_bank",
+            "service": "memory",
             "last_updated": "2026-03-01T12:00:00",
             "stats": {"total_vectors": 42, "total_archives": 5, "last_rollover": "2026-02-28"},
             "extra_field": "preserved",
@@ -304,7 +304,7 @@ class TestWriteCentralFile:
         """Should create parent directories and write JSON."""
         cw = _import_central_writer(monkeypatch, tmp_path)
 
-        data = {"service": "memory_bank", "stats": {"total_vectors": 10}}
+        data = {"service": "memory", "stats": {"total_vectors": 10}}
 
         cw.write_central_file(data)
 
@@ -381,7 +381,7 @@ class TestUpdateCentral:
         central_dir.mkdir(parents=True)
 
         old_data = {
-            "service": "memory_bank",
+            "service": "memory",
             "last_updated": "",
             "_note": "placeholder - not yet populated",
             "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
@@ -406,7 +406,7 @@ class TestUpdateCentral:
         central_dir.mkdir(parents=True)
 
         old_data = {
-            "service": "memory_bank",
+            "service": "memory",
             "last_updated": "2026-01-01",
             "custom_field": "keep_me",
             "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},

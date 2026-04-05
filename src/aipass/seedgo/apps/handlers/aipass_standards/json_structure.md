@@ -668,5 +668,5 @@ ls /branch/branch_json/
 
 #@comments:2026-01-31:claude: Added critical warning about path resolution pattern requirement. Fixed 5 branches (API, DRONE, FLOW, BACKUP, DEVPULSE) affected by this undocumented requirement.
 
-#@comments:2026-03-07:claude: Cleaned old references - old->seedgo naming, removed /home/aipass/ paths, updated imports to aipass.* namespace, Path.home()->Path(__file__).parents[N]
+#@comments:2026-03-07:claude: Cleaned old references - old->seedgo naming, removed hardcoded home paths, updated imports to aipass.* namespace, Path.home()->Path(__file__).parents[N]
 #@comments:2026-03-31:claude: Cleaned stale references - old names updated to current (AIPass, backup, seedgo)

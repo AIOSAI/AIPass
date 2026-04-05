@@ -1,5 +1,5 @@
 # PRAX Branch-Local Context
-<!-- Source: /home/aipass/aipass_business/AIPass/src/aipass/prax/.aipass/branch_system_prompt.md -->
+<!-- Auto-generated local prompt -->
 
 > Auto-created by aipass init. Customize for your branch.
 

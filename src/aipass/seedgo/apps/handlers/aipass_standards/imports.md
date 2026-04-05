@@ -535,6 +535,6 @@ from aipass.seedgo.apps.handlers.json import json_handler
 #@comments:2025-11-29:claude: Added Service Categories section clarifying Drone is NOT a library service
 #@comments:2025-11-29:claude: Added explicit "Drone: CLI Router Pattern" section with FORBIDDEN import examples
 #@comments:2025-11-29:claude: Clarified that branches should NEVER import from aipass.drone.apps.modules - Drone resolves @ before calling them
-#@comments:2026-03-07:claude: Cleaned old references - updated to AIPass namespace imports, removed sys.path/AIPASS_ROOT patterns, fixed /home/aipass/ paths, old->seedgo naming
+#@comments:2026-03-07:claude: Cleaned old references - updated to AIPass namespace imports, removed sys.path/AIPASS_ROOT patterns, fixed hardcoded home paths, old->seedgo naming
 #@comments:2026-03-08:claude: Resolved patrick's "whole file needs updating" flag - fixed old branch names (3 occurrences), removed stale AIPASS_ROOT reference, corrected handler independence summary to reflect that handlers CAN import cross-branch services, bumped to Draft v2
 #@comments:2026-03-31:claude: Cleaned stale references in comments and docs throughout seedgo standards
