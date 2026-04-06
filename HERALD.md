@@ -28,7 +28,7 @@ Ported Codex and Gemini from Docker prototype into the AIPass repo. Created AGEN
 Proved all three CLIs (Claude Code, Codex gpt-5.4, Gemini flash-preview) work in same Docker container. Hooks, identity, drone, ai_mail, seedgo, sub-agents all functional. Commons discussion with genuine cross-model responses. Git fixed (squash-merge to regular merge). PR #188 merged.
 
 ### S74 — README Overhaul + Research Sprint (2026-04-05)
-Full README restructure: grouped branch tables with README links, collapsible setup sections, navigation (back-to-contents after every section, back-to-README in HERALD/STATUS). Compliance & Safety section added — researched Anthropic's April 4 OpenClaw crackdown, documented AIPass's full compliance (official CLI, hooks, no credential wrapping). Trademark research: Japanese hospitality company "AiPass" exists but different domain, low conflict. AIPL token optimization research: TOON/SNS achieve 30-85% savings, custom compressed language for AIPass internal comms is feasible (40-60% savings on structured content). 25 inbox messages processed from S73 night shift. Herald updated (was stale since S68). Subscription tier discussion: Max 20x to 5x testing.
+Full README restructure: grouped branch tables with README links, collapsible setup sections, navigation. Compliance & Safety section added. AIPL token optimization research. 25 inbox messages processed from S73 night shift. Herald updated.
 
 ### S73 — Night Shift: Test Coverage Push to 100% (2026-04-03)
 13 branches dispatched for 100% module test coverage. 3,745 to 4,865+ tests (+1,120 new). Coverage 69% to 88%. 7 branches at 100% module coverage. Seedgo: 16 tests fixed (assertions, isolation, trivially-true). 4 cross-test failures fixed. PR #181. 71 files (20 modified, 51 new test files).
@@ -82,6 +82,7 @@ Every branch, every standard, 100%. PR #137 (167 files, +12,843 lines).
 
 | Date | Milestone |
 |------|-----------|
+| 2026-04-05 | Multi-CLI integration — Codex + Gemini fully integrated with hooks, skills, prax model tags |
 | 2026-04-05 | README overhaul — grouped branch tables, compliance section, navigation |
 | 2026-04-03 | S73 night shift — 1,120 new tests, 7 branches at 100% module coverage |
 | 2026-04-02 | Dispatch safety net — startup timeout, JSONL monitoring, auto-retry |
@@ -99,23 +100,16 @@ Every branch, every standard, 100%. PR #137 (167 files, +12,843 lines).
 | 2026-03-24 | First autonomous night shift — 6 branches dispatched |
 | 2026-03-22 | Phase 1 diagnostic tools complete — 20 tools reviewed + accepted |
 
-## Known Issues
-
-- **Dispatch JSON output mode**: `--output-format json` buffers stdout. Fix merged (JSONL monitoring) but needs verification at scale.
-- **Trigger timestamp parser**: log_watcher.log — recurring parse failures.
-- **Flow dashboard push**: close_ops.log — push failures to branch dashboard.
-- **Memory bank venv**: vectorization path needs rebuild.
-- **Ruff CI**: lint violations in backlog.
-
 ## System Numbers
 
 ```
 Branches:        15
 Standards:       33
-Tests:           4,907
-PRs merged:      181
-Sessions:        73
+Tests:           4,900+
+PRs merged:      193
+Sessions:        76
 Diagnostic tools: 21
+CLIs supported:  3 (Claude Code, Codex, Gemini)
 ```
 
 ---
