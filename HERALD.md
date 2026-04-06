@@ -4,22 +4,28 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-04-05 | **Session:** 74 | **PRs merged:** 181
+**Last updated:** 2026-04-05 | **Session:** 76 | **PRs merged:** 192
 
 ---
 
 ## Current State
 
 - **15 branches** operational
-- **4,900+ tests** system-wide (4,907 collected)
-- **181 PRs** merged since inception
-- **73 sessions** of development
+- **4,900+ tests** system-wide
+- **192 PRs** merged
+- **76 sessions** of development
+- **Multi-CLI support** — Claude Code, Codex (GPT-5.4), Gemini all integrated with hooks, identity, skills
+- **Prax model tags** — monitor shows [BRANCH/MODEL] for all three CLIs
 - **Sentinel** — AIPass's first external project (Claude Code JSONL analyzer)
-- **Dispatch safety net** — startup timeout, auto-retry, JSONL monitoring (FPLAN-0164)
-- **README overhauled** — grouped branch tables, compliance section, navigation links
 - **Nexus vision** — personal AI companion architecture (co-founded with GPT-4o, March 2025)
 
 ## Recent Sessions
+
+### S76 — Multi-CLI Integration Into Main (2026-04-05)
+Ported Codex and Gemini from Docker prototype into the AIPass repo. Created AGENTS.md, GEMINI.md, .codex/ (hooks + skills), .gemini/ (hooks + skills). Updated setup.sh to detect CLIs and wire hooks automatically. Prax built Codex/Gemini log adapters, model tags ([DEVPULSE/OPUS], [DEVPULSE/GPT-5.4], [DEVPULSE/GEMINI-3-FLASH]), inotify errno-specific messages, and CWD branch detection. Fixed AGENTS.md startup behavior. PRs #189-192.
+
+### S75 — Multi-CLI Proven in Docker (2026-04-05)
+Proved all three CLIs (Claude Code, Codex gpt-5.4, Gemini flash-preview) work in same Docker container. Hooks, identity, drone, ai_mail, seedgo, sub-agents all functional. Commons discussion with genuine cross-model responses. Git fixed (squash-merge to regular merge). PR #188 merged.
 
 ### S74 — README Overhaul + Research Sprint (2026-04-05)
 Full README restructure: grouped branch tables with README links, collapsible setup sections, navigation (back-to-contents after every section, back-to-README in HERALD/STATUS). Compliance & Safety section added — researched Anthropic's April 4 OpenClaw crackdown, documented AIPass's full compliance (official CLI, hooks, no credential wrapping). Trademark research: Japanese hospitality company "AiPass" exists but different domain, low conflict. AIPL token optimization research: TOON/SNS achieve 30-85% savings, custom compressed language for AIPass internal comms is feasible (40-60% savings on structured content). 25 inbox messages processed from S73 night shift. Herald updated (was stale since S68). Subscription tier discussion: Max 20x to 5x testing.

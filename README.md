@@ -34,7 +34,7 @@ A multi-agent operating system where AI agents live as citizens in a shared file
 
 ## What is AIPass
 
-AIPass (**AI Passport**) is a multi-agent framework built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Each agent is a **citizen** — it has an identity (passport), persistent memory, a mailbox, and the ability to communicate with other agents. Citizens live in **branches** (directories), each specializing in a domain. One orchestrator coordinates them all.
+AIPass (**AI Passport**) is a multi-agent framework built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code), with support for [OpenAI Codex](https://github.com/openai/codex) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli). Each agent is a **citizen** — it has an identity (passport), persistent memory, a mailbox, and the ability to communicate with other agents. Citizens live in **branches** (directories), each specializing in a domain. One orchestrator coordinates them all. The system is model-agnostic — hooks, identity, and commands work the same across all three CLIs.
 
 You talk to one agent. It dispatches work to specialists and brings results back. Memory persists across sessions — you never re-explain context.
 
