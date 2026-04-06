@@ -72,6 +72,10 @@ class MonitoringFileHandler(FileSystemEventHandler):
         self._last_agent_action: Dict[str, str] = {}
         # Track model per session file for display tags
         self._session_models: Dict[str, str] = {}
+        # Track detected branch per CLI session file (from session metadata)
+        self._session_branches: Dict[str, str] = {}
+        # Track files we've already warned about for branch detection
+        self._branch_warn_logged: set = set()
 
     # -- public property so the module can swap queues after construction ------
     @property
@@ -190,6 +194,84 @@ class MonitoringFileHandler(FileSystemEventHandler):
             return '📩 User message'
 
         return None
+
+    # =========================================================================
+    # CLI SESSION BRANCH DETECTION
+    # =========================================================================
+
+    @staticmethod
+    def _branch_from_cwd(cwd: str) -> Optional[str]:
+        """Extract branch name from a CWD path like /path/to/src/aipass/devpulse."""
+        if not cwd:
+            return None
+        parts = Path(cwd).parts
+        if 'aipass' in parts:
+            idx = parts.index('aipass')
+            if idx + 1 < len(parts):
+                return parts[idx + 1].upper()
+        # Fallback: check src/{name} for branches outside aipass namespace
+        if 'src' in parts:
+            idx = parts.index('src')
+            if idx + 1 < len(parts):
+                return parts[idx + 1].upper()
+        return None
+
+    def _get_codex_branch(self, file_path, path_key: str) -> str:
+        """Get branch for a Codex session, reading session_meta if needed."""
+        if path_key in self._session_branches:
+            return self._session_branches[path_key]
+
+        # Read first line of JSONL for session_meta
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                first_line = f.readline().strip()
+                if first_line:
+                    meta = _json.loads(first_line)
+                    if meta.get('type') == 'session_meta':
+                        cwd = meta.get('payload', {}).get('cwd', '')
+                        branch = self._branch_from_cwd(cwd)
+                        if branch:
+                            self._session_branches[path_key] = branch
+                            return branch
+        except (OSError, _json.JSONDecodeError) as e:
+            if path_key not in self._branch_warn_logged:
+                logger.info(f"[monitor] Could not read Codex session_meta: {e}")
+                self._branch_warn_logged.add(path_key)
+
+        self._session_branches[path_key] = 'CODEX'
+        return 'CODEX'
+
+    def _get_gemini_branch(self, file_path, path_key: str) -> str:
+        """Get branch for a Gemini session from project slug in path."""
+        if path_key in self._session_branches:
+            return self._session_branches[path_key]
+
+        # Path format: ~/.gemini/tmp/<project-slug>/chats/session-*.json
+        # Project slug maps to a directory via ~/.gemini/projects.json
+        parts = Path(file_path).parts
+        if 'tmp' in parts:
+            idx = parts.index('tmp')
+            if idx + 1 < len(parts):
+                slug = parts[idx + 1]
+                # Try to resolve slug to real branch via projects.json
+                projects_file = Path.home() / '.gemini' / 'projects.json'
+                if projects_file.exists():
+                    try:
+                        data = _json.loads(projects_file.read_text())
+                        for project_path, project_slug in data.get('projects', {}).items():
+                            if project_slug == slug:
+                                branch = self._branch_from_cwd(project_path)
+                                if branch:
+                                    self._session_branches[path_key] = branch
+                                    return branch
+                    except (OSError, _json.JSONDecodeError):
+                        pass
+                # Fallback: use slug as branch name
+                self._session_branches[path_key] = slug.upper()
+                return slug.upper()
+
+        self._session_branches[path_key] = 'GEMINI'
+        return 'GEMINI'
 
     # =========================================================================
     # MODEL TAG HELPERS
@@ -542,13 +624,13 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             # Codex JSONL files: parse agent activity
             if file_path.suffix == '.jsonl' and '.codex/sessions/' in path_str:
-                codex_branch = 'CODEX'
+                codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return
 
             # Gemini JSON session files: parse agent activity
             if file_path.suffix == '.json' and '.gemini/tmp/' in path_str and '/chats/' in path_str:
-                gemini_branch = 'GEMINI'
+                gemini_branch = self._get_gemini_branch(file_path, path_str)
                 if self._parse_gemini_activity(file_path, gemini_branch):
                     return
 

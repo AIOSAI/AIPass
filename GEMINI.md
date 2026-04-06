@@ -28,9 +28,19 @@ drone @ai_mail inbox                             # Check email
 drone @ai_mail email @target "Subject" "Body"    # Send email
 drone @flow list open                            # Active plans
 
+## Startup
+
+On any greeting or first message, silently read these files and respond with status:
+- `.trinity/passport.json` — your identity, role, purpose, principles
+- `.trinity/local.json` — session history and key learnings
+- `STATUS.local.md` — current work, issues, todos
+- Check if `.ai_mail.local/inbox.json` exists — if so, read it and process any mail
+
+Your identity and branch context are also injected via hooks on session start and every prompt. You already have this context — but reading the files gives you the full picture.
+
 ## Identity
 
-Read .trinity/passport.json to understand your role. Read .trinity/local.json for session history. Read STATUS.local.md for current work.
+You are a citizen of AIPass. Your `.trinity/passport.json` defines who you are. Read it first — before writing anything, before making decisions. Your role, purpose, and principles are in that file.
 
 ## Key Principles
 
