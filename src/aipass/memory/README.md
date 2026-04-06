@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # MEMORY
 
 **Purpose:** Central memory archive with semantic search, rollover, and archival across all AIPass branches.
@@ -120,3 +122,6 @@ The rollover module monitors memory files across all branches registered in `AIP
 ---
 
 *Last Updated: 2026-04-01*
+
+---
+[< Back to AIPass](../../../README.md)

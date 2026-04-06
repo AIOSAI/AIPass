@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # DevPulse
 
 **Purpose:** Orchestration hub for the AIPass ecosystem
@@ -164,3 +166,6 @@ drone @spawn delete @branch      # Archive + deregister branch
 DevPulse is a **manager** branch, not a builder. It delegates code tasks to sub-agents and branch agents. Its context window is reserved for coordination, planning, and architecture — not for reading and editing files across the codebase.
 
 The `tools/` directory is DevPulse's "tool shed" — standalone diagnostic scripts for investigating code quality across all branches. These tools surface patterns and create conversations. They're built for AI consumption: run a scanner, get instant visibility, decide what matters.
+
+---
+[< Back to AIPass](../../../README.md)

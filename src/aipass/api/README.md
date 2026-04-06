@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # API
 
 **Purpose:** Centralized external API gateway — authenticated service clients for all external APIs (OpenRouter, Google, future providers).
@@ -126,3 +128,6 @@ api/
 ---
 
 *Last Updated: 2026-04-03*
+
+---
+[< Back to AIPass](../../../README.md)

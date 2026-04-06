@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # Flow
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types (FPLAN, DPLAN, etc.) via a plugin architecture. Registry-backed state, async post-processing, vector intake on close, and cross-branch aggregation.
@@ -97,3 +99,6 @@ Plans follow the convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNN
 ---
 
 *Last Updated: 2026-04-01*
+
+---
+[< Back to AIPass](../../../README.md)

@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # Seedgo
 
 **Purpose:** Standards compliance platform for AIPass modules. Audits Python code against checker packs, scores each file, and reports violations. Ships with the `aipass_standards` pack (32 checkers covering imports, architecture, naming, logging, documentation, and more).
@@ -145,3 +147,6 @@ The `test_map` module and `test_map/` handler directory provide custom function-
 ---
 
 **Last Updated:** 2026-03-29
+
+---
+[< Back to AIPass](../../../README.md)

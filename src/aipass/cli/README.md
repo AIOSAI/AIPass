@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # CLI
 
 **Purpose:** Display and output formatting service for AIPass modules. Provides consistent terminal output — headers, success/error/warning messages, section breaks, and operation templates — so every module looks the same without duplicating Rich formatting code.
@@ -93,3 +95,6 @@ python -m aipass.cli aipass init /path   # Bootstrap directly
 ---
 
 *Last Updated: 2026-03-17*
+
+---
+[< Back to AIPass](../../../README.md)

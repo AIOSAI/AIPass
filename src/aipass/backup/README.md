@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # BACKUP
 
 **Purpose:** Multi-mode backup with Google Drive integration
@@ -122,3 +124,6 @@ drone @backup drive-clear-tracker          # Clear Drive file tracker cache
 - **Session History:** `.trinity/local.json`
 - **Observations:** `.trinity/observations.json`
 - **Branch Prompt:** `.aipass/branch_system_prompt.md`
+
+---
+[< Back to AIPass](../../../README.md)

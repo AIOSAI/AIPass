@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # Drone
 
 **Purpose:** Command router and symbolic addressing for AIPass. Resolves `@branch` names to paths at runtime via `AIPASS_REGISTRY.json`, routes commands to module entry points, and discovers available commands across the system.
@@ -151,4 +153,7 @@ To add: edit `interactive_commands` or `interactive_branches` in `_handle_target
 ---
 
 **Last Updated:** 2026-03-29
+
+---
+[< Back to AIPass](../../../README.md)
 

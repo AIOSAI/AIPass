@@ -1,3 +1,5 @@
+[< Back to AIPass](../../README.md)
+
 # Skills
 
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
@@ -162,3 +164,6 @@ src/skills/
 ---
 
 *Last Updated: 2026-03-28*
+
+---
+[< Back to AIPass](../../README.md)

@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # DAEMON
 
 **Purpose:** Cron-triggered task scheduler with plugin system. Routes commands to modules for scheduled tasks, activity reports, action management, and status digests.
@@ -128,3 +130,6 @@ drone @daemon <command> --help
 ---
 
 *Last Updated: 2026-03-28*
+
+---
+[< Back to AIPass](../../../README.md)

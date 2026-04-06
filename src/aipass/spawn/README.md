@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # SPAWN
 
 **Purpose:** Branch creation, lifecycle management, and citizen class system. Creates new branches from class-scoped templates, manages updates, and grants citizenship.
@@ -156,3 +158,6 @@ spawn/
 ---
 
 *Last Updated: 2026-03-27*
+
+---
+[< Back to AIPass](../../../README.md)

@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # PRAX
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard for AIPass.
@@ -126,3 +128,6 @@ prax/
 ---
 
 *Last Updated: 2026-03-29*
+
+---
+[< Back to AIPass](../../../README.md)

@@ -1,0 +1,47 @@
+name: Feedback
+description: Share feedback, thoughts, or suggestions
+title: "[Feedback]: "
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We'd love to hear from you. Bug reports and feature requests have their own templates — this one is for everything else.
+
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: What should we call you?
+      placeholder: "Your name"
+    validations:
+      required: true
+
+  - type: input
+    id: email
+    attributes:
+      label: Email (optional)
+      description: Only if you'd like us to follow up directly. Never shared.
+      placeholder: "you@example.com"
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: What kind of feedback?
+      options:
+        - General feedback
+        - Something I liked
+        - Something that confused me
+        - Suggestion
+        - Question
+    validations:
+      required: true
+
+  - type: textarea
+    id: message
+    attributes:
+      label: Your feedback
+      description: Tell us what's on your mind.
+      placeholder: "I tried AIPass and..."
+    validations:
+      required: true

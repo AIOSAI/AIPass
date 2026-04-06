@@ -1,3 +1,5 @@
+[< Back to AIPass](../../../README.md)
+
 # AI_MAIL
 
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
@@ -80,3 +82,6 @@ ai_mail/
 ---
 
 *Last Updated: 2026-03-24*
+
+---
+[< Back to AIPass](../../../README.md)
