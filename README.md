@@ -27,6 +27,8 @@ A multi-agent operating system where AI agents live as citizens in a shared file
   - [Structure](#structure)
 - [Compliance & Safety](#compliance--safety)
 - [Project Status](#project-status)
+- [Platform Support](#platform-support)
+  - [CLI Support](#cli-support)
 - [Requirements](#requirements)
 - [License](#license)
 
@@ -34,7 +36,7 @@ A multi-agent operating system where AI agents live as citizens in a shared file
 
 ## What is AIPass
 
-AIPass (**AI Passport**) is a multi-agent framework built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code), with support for [OpenAI Codex](https://github.com/openai/codex) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli). Each agent is a **citizen** — it has an identity (passport), persistent memory, a mailbox, and the ability to communicate with other agents. Citizens live in **branches** (directories), each specializing in a domain. One orchestrator coordinates them all. The system is model-agnostic — hooks, identity, and commands work the same across all three CLIs.
+AIPass (**AI Passport**) is a multi-agent framework built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code), with support for [OpenAI Codex](https://github.com/openai/codex) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli). Each agent is a **citizen** — it has an identity (passport), persistent memory, a mailbox, and the ability to communicate with other agents. Citizens live in **branches** (directories), each specializing in a domain. One orchestrator coordinates them all. The system supports all three CLIs with shared hooks, identity, and commands — though Claude Code is the most tested and Codex/Gemini integration is newer (S76).
 
 You talk to one agent. It dispatches work to specialists and brings results back. Memory persists across sessions — you never re-explain context.
 
@@ -54,7 +56,9 @@ cd AIPass
 ./setup.sh
 ```
 
-`setup.sh` creates a `.venv`, installs the package, generates the branch registry, bootstraps identity files for all 15 branches, copies an `.env` template, installs Claude Code hooks, and creates a global `drone` symlink. Idempotent — safe to re-run.
+> **Note:** setup.sh is tested on Linux. macOS should work but is untested (see [Platform Support](#platform-support)). Windows users should use WSL2.
+
+`setup.sh` creates a `.venv`, installs the package, generates the branch registry, bootstraps identity files for all 15 branches, copies an `.env` template, installs Claude Code hooks (plus Codex/Gemini hooks if those CLIs are detected), and creates a global `drone` symlink. Idempotent — safe to re-run.
 
 ### Verify
 
@@ -238,7 +242,7 @@ All 15 branches share the same filesystem and git repo. Each owns its directory.
 
 ## Compliance & Safety
 
-AIPass is built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and operates fully within Anthropic's usage policies.
+AIPass is built primarily on [Claude Code](https://docs.anthropic.com/en/docs/claude-code), with additional support for [Codex](https://github.com/openai/codex) and [Gemini CLI](https://github.com/google-gemini/gemini-cli). The compliance details below apply specifically to Claude Code usage. Codex and Gemini compliance has not been independently audited.
 
 ### How AIPass uses Claude Code
 
@@ -270,16 +274,17 @@ AIPass is architecturally different: it enhances Claude Code through its own ext
 
 ## Project Status
 
-**Beta.** Actively developed. 15 branches, 180+ PRs merged, 4,800+ tests, 100% standards compliance.
+**Beta.** Actively developed. 15 branches, 192+ PRs merged, 4,900+ tests, 100% standards compliance.
 
 | Metric | Value |
 |--------|-------|
 | Branches | 15 |
 | Standards | 33 |
-| Tests | 4,800+ |
-| PRs merged | 180+ |
+| Tests | 4,900+ |
+| PRs merged | 192+ |
 | Compliance | 100% |
-| Sessions | 73 |
+| Sessions | 76 |
+| CLIs supported | 3 (Claude Code, Codex, Gemini) |
 
 For detailed progress and session history, see [HERALD.md](HERALD.md).
 
@@ -289,11 +294,40 @@ For per-branch status, see [STATUS.md](STATUS.md).
 
 ---
 
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Linux** | Fully tested | Primary development platform. Docker tested. setup.sh, all 15 branches, all 3 CLIs verified. |
+| **Windows (WSL2)** | Expected to work | setup.sh runs in WSL2 with zero changes. Untested but no known blockers. |
+| **Windows (native)** | Partial testing | Tested on Windows 10 — most functionality working. No setup.ps1 yet; manual setup required. |
+| **macOS** | Untested | Should work (bash, Python, Claude Code are native). setup.sh needs minor fix for Apple Silicon Homebrew paths. |
+
+### CLI Support
+
+AIPass supports three AI coding CLIs. Claude Code is the primary and most tested. Codex and Gemini have hooks, skills, and identity integration but less testing.
+
+| CLI | Autonomous Mode | Tested | Notes |
+|-----|----------------|--------|-------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude -p "prompt" --permission-mode bypassPermissions` | Fully tested | Primary CLI. Hooks, dispatch, background agents all proven. |
+| [Codex](https://github.com/openai/codex) | `codex exec "prompt" --approval-mode never` | Docker-tested (S75) | Hooks + skills integrated (S76). Background dispatch untested. |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini -p "prompt" --approval-mode=yolo` | Docker-tested (S75) | Hooks + skills integrated (S76). Background dispatch untested. |
+
+> **Autonomous agent dispatch** (running background agents that do work and report back) is proven with Claude Code. Codex and Gemini have the equivalent flags but this workflow hasn't been tested end-to-end yet.
+
+<p align="right"><a href="#table-of-contents">Back to contents</a></p>
+
+---
+
 ## Requirements
 
 - Python 3.10+
+- Linux recommended (macOS should work; Windows via WSL2 or native with manual setup)
 - `sudo` access (for global CLI symlinks during setup)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (hooks provide branch identity, email notifications, auto-diagnostics)
+- At least one AI coding CLI:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (recommended — most tested, hooks provide branch identity, email notifications, auto-diagnostics)
+  - [Codex](https://github.com/openai/codex) (alternative — hooks and skills supported, less tested)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (alternative — hooks and skills supported, less tested)
 - API keys optional (only needed for `api` branch — OpenRouter/OpenAI)
 
 <p align="right"><a href="#table-of-contents">Back to contents</a></p>

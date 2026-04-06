@@ -45,6 +45,8 @@ drone @git lock                      # Check PR lock status
 
 Read-only git commands are fine: `git status`, `git diff`, `git log`.
 
+**NEVER cd to repo root.** `drone @git system-pr` requires `.trinity/passport.json` in the CWD hierarchy. If you cd to `/home/patrick/Projects/AIPass/`, it fails. Stage files with relative paths from devpulse: `git add ../../../HERALD.md`. Always run drone commands from this directory.
+
 ## Key Commands
 
 ```
