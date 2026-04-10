@@ -16,8 +16,7 @@ build/-
 # Secrets
 .env
 
-# API branch (private infrastructure — contains key handling code)
-src/aipass/api/
+# API keys never leave ~/.secrets/ — gitleaks + pre-commit enforce this
 
 # Plans (managed by flow, local to each installation)
 FPLAN-*.md
