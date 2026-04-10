@@ -1,0 +1,66 @@
+# Gitleaks configuration for AIPass
+# Prevents API keys and secrets from being committed to the repo.
+#
+# Usage: gitleaks runs automatically via pre-commit hook.
+# Manual scan: gitleaks detect --config .gitleaks.toml
+
+title = "AIPass Secret Detection Rules"
+
+[extend]
+useDefault = true
+
+# --- Custom rules for AIPass-specific key formats ---
+
+[[rules]]
+id = "openrouter-api-key"
+description = "OpenRouter API key (sk-or-v1- prefix with 20+ alphanumeric chars)"
+regex = '''sk-or-v1-[a-zA-Z0-9]{20,}'''
+keywords = ["sk-or-v1-"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key (sk- prefix with 20+ chars, not sk-or/sk-ant)"
+regex = '''sk-(?!or|ant)[a-zA-Z0-9]{20,}'''
+keywords = ["sk-"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key (sk-ant- prefix)"
+regex = '''sk-ant-[a-zA-Z0-9]{20,}'''
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "google-api-key"
+description = "Google API key (AIza prefix)"
+regex = '''AIza[0-9A-Za-z\-_]{35,}'''
+keywords = ["AIza"]
+
+[[rules]]
+id = "bearer-token-in-code"
+description = "Bearer token hardcoded in source (not in test assertions)"
+regex = '''Bearer\s+[a-zA-Z0-9_\-\.]{40,}'''
+keywords = ["Bearer"]
+
+[[rules]]
+id = "env-file-key-assignment"
+description = "API key assigned in code with realistic value"
+regex = '''(?:OPENROUTER|OPENAI|ANTHROPIC|GOOGLE)_API_KEY\s*=\s*["']?(?:sk-|AIza)[a-zA-Z0-9\-_]{20,}'''
+keywords = ["API_KEY"]
+
+# --- Allowlists ---
+
+[allowlist]
+# Files that are allowed to contain key-like patterns
+paths = [
+    '''\.gitleaks\.toml$''',
+    '''\.pre-commit-config\.yaml$''',
+]
+
+# Strings that are explicitly allowed (FAKE/NOTREAL test keys, prefix patterns)
+regexes = [
+    '''FAKE-''',
+    '''NOTREAL''',
+    '''your-key-here''',
+    '''sk-or-v1-short''',
+    '''sk-wrong-prefix''',
+]
