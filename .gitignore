@@ -16,6 +16,9 @@ build/-
 # Secrets
 .env
 
+# API branch (private infrastructure — contains key handling code)
+src/aipass/api/
+
 # Plans (managed by flow, local to each installation)
 FPLAN-*.md
 DPLAN-*.md
