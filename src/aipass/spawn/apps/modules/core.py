@@ -154,6 +154,10 @@ def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
 
     # Validate
     if target.exists():
+        # If target has a passport, adopt it (register without re-creating)
+        passport_path = target / ".trinity" / "passport.json"
+        if passport_path.exists():
+            return _adopt_existing(target, purpose, profile, registry_path)
         return _error(f"Target already exists: {target}")
     if not template.exists():
         return _error(f"Template not found: {template}")
@@ -220,6 +224,72 @@ def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
         "registry_path": str(reg_path),
         "citizen_number": citizen_number,
         "validation_issues": issues,
+    }
+
+
+def _adopt_existing(target, purpose, profile, registry_path):
+    """Register an existing directory that already has a passport.
+
+    Used when 'aipass init agent' targets a directory the user already
+    moved code into. Instead of failing with "Target already exists",
+    we register it in the project registry.
+
+    Args:
+        target: Path to the existing directory with .trinity/passport.json
+        purpose: Optional purpose description
+        profile: AIPass profile override
+        registry_path: Path to registry (or None for auto-discover)
+
+    Returns:
+        Result dict matching _spawn_agent return format.
+    """
+    import json as _json
+
+    folder_name = get_branch_name(target)
+    branch_upper = normalize_branch_name(folder_name, "upper")
+    branch_lower = normalize_branch_name(folder_name, "lower")
+    detected_profile = profile or detect_profile(target)
+
+    reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
+
+    # Read purpose from passport if not provided
+    if not purpose:
+        passport_path = target / ".trinity" / "passport.json"
+        try:
+            passport = _json.loads(passport_path.read_text(encoding="utf-8"))
+            purpose = passport.get("identity", {}).get("purpose", "Adopted agent")
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read passport for purpose: %s", e)
+            purpose = "Adopted agent"
+
+    # Store path relative to registry location
+    try:
+        registry_branch_path = str(target.relative_to(reg_path.parent))
+    except ValueError as e:
+        logger.warning("Cannot relativize path %s to registry %s: %s", target, reg_path.parent, e)
+        registry_branch_path = str(target)
+
+    registry_updated = add_to_registry(
+        reg_path, branch_upper, registry_branch_path, detected_profile,
+        f"@{branch_lower}", purpose,
+    )
+
+    json_handler.log_operation("branch_adopted", data={"branch": branch_upper})
+    logger.info("[spawn] Adopted existing branch: %s (registered in %s)", branch_upper, reg_path.name)
+
+    return {
+        "success": True,
+        "branch_name": branch_upper,
+        "path": str(target),
+        "files_copied": 0,
+        "dirs_created": 0,
+        "files_skipped": 0,
+        "renamed": [],
+        "registry_updated": registry_updated,
+        "registry_path": str(reg_path),
+        "citizen_number": 0,
+        "validation_issues": [],
+        "adopted": True,
     }
 
 

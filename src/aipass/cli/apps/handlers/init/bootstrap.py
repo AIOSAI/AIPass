@@ -12,15 +12,15 @@ Init Bootstrap Handler - PRIVATE implementation
 Business logic for `aipass init`. Creates the project scaffold:
    1. {NAME}_REGISTRY.json            — project registry with UUID
    2. .aipass/aipass_global_prompt.md  — global prompt (injected every turn)
-   3. .aipass/aipass_local_prompt.md   — local prompt skeleton
-   4. CLAUDE.md                       — project prompt (Claude Code reads this)
-   5. AGENTS.md                       — Codex equivalent of CLAUDE.md
-   6. GEMINI.md                       — Gemini equivalent of CLAUDE.md
-   7. README.md                       — getting started guide
-   8. STATUS.local.md                 — project status
-   9. .gitignore                      — standard AIPass ignores
-  10. .claude/settings.json           — Claude Code hooks configuration
-  11. hooks/                          — directory for user hooks
+   3. CLAUDE.md                       — project prompt (Claude Code reads this)
+   4. AGENTS.md                       — Codex equivalent of CLAUDE.md
+   5. GEMINI.md                       — Gemini equivalent of CLAUDE.md
+   6. README.md                       — getting started guide
+   7. STATUS.local.md                 — project status
+   8. .gitignore                      — standard AIPass ignores
+   9. .claude/settings.json           — Claude Code hooks configuration
+  10. hooks/                          — directory for user hooks
+  11. src/                            — directory where agents live
 
 Projects are NOT citizens — no .trinity/ directory. Identity lives in the
 registry JSON. Init is re-runnable: existing files are skipped, not errors.
@@ -76,7 +76,8 @@ def _claude_md(name: str) -> str:
         "aipass init agent <name>\n"
         "```\n"
         "\n"
-        "This creates a full agent scaffold (`apps/`, `.trinity/`, `.ai_mail.local/`) "
+        "This creates a full agent scaffold inside `src/<name>/` "
+        "(`apps/`, `.trinity/`, `.ai_mail.local/`) "
         "and registers it in your project registry.\n"
         "\n"
         "## Available Commands\n"
@@ -201,7 +202,8 @@ def _readme_md(name: str) -> str:
         "  AGENTS.md               # Codex instructions\n"
         "  GEMINI.md               # Gemini instructions\n"
         "  STATUS.local.md         # Project status\n"
-        "  <agent_name>/           # Agent directories (created via aipass init agent)\n"
+        "  src/                    # Agent directories live here\n"
+        "    <agent_name>/         # Created via aipass init agent\n"
         "```\n"
         "\n"
         "## What is AIPass?\n"
@@ -260,30 +262,6 @@ def _global_prompt_md(name: str) -> str:
         "- **Standards** — run `drone @seedgo audit` to check compliance.\n"
         "- **Identity** — agents have `.trinity/passport.json`. "
         "Projects use the registry.\n"
-    )
-
-
-def _local_prompt_md(name: str) -> str:
-    """Generate .aipass/aipass_local_prompt.md — starter skeleton."""
-    return (
-        f"# {name} — Local Prompt\n"
-        "<!-- Injected every turn. Customize for your project. -->\n"
-        "\n"
-        "## Project Identity\n"
-        "\n"
-        f"- **Name:** {name}\n"
-        "- **Purpose:** (describe your project)\n"
-        "- **Status:** New\n"
-        "\n"
-        "## How You Work\n"
-        "\n"
-        "- Read the registry and STATUS.local.md on startup for context\n"
-        "- Check the registry for active agents\n"
-        "\n"
-        "## Key Files\n"
-        "\n"
-        f"- `{name}_REGISTRY.json` — agent registry\n"
-        "- `STATUS.local.md` — current status\n"
     )
 
 
@@ -415,11 +393,6 @@ def init_project(target: Path, project_name: str | None = None) -> dict:
         global_prompt_path.write_text(_global_prompt_md(name), encoding="utf-8")
         created.append(str(global_prompt_path))
 
-    prompt_path = aipass_dir / "aipass_local_prompt.md"
-    if not prompt_path.exists():
-        prompt_path.write_text(_local_prompt_md(name), encoding="utf-8")
-        created.append(str(prompt_path))
-
     # 3. CLAUDE.md
     claude_md_path = target / "CLAUDE.md"
     if not claude_md_path.exists():
@@ -479,6 +452,12 @@ def init_project(target: Path, project_name: str | None = None) -> dict:
     if not hooks_dir.exists():
         hooks_dir.mkdir()
         created.append(str(hooks_dir))
+
+    # 11. src/ directory (where agents live)
+    src_dir = target / "src"
+    if not src_dir.exists():
+        src_dir.mkdir()
+        created.append(str(src_dir))
 
     return {
         "registry_id": registry_id,

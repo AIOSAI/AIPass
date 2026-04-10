@@ -4,22 +4,41 @@
 
 > The living record. What happened, what's changing, what matters.
 
-**Last updated:** 2026-04-05 | **Session:** 76 | **PRs merged:** 192
+**Last updated:** 2026-04-09 | **Session:** 82 | **PRs merged:** 205
 
 ---
 
 ## Current State
 
-- **15 branches** operational
+- **10 core agents** operational (streamlined from 15 — backup, daemon, api, commons, skills split to standalone projects)
 - **4,900+ tests** system-wide
-- **192 PRs** merged
-- **76 sessions** of development
+- **205 PRs** merged
+- **82 sessions** of development
 - **Multi-CLI support** — Claude Code, Codex (GPT-5.4), Gemini all integrated with hooks, identity, skills
-- **Prax model tags** — monitor shows [BRANCH/MODEL] for all three CLIs
-- **Sentinel** — AIPass's first external project (Claude Code JSONL analyzer)
-- **Nexus vision** — personal AI companion architecture (co-founded with GPT-4o, March 2025)
+- **Vera Studio** — standalone AI-driven brand studio for promotion (separate from devpulse construction)
+- **aipass init v2** — real templates, next steps, `aipass init agent` command
+- **Goldfish panel** — 7-round multi-model README review process (Claude + Codex + Gemini)
+- **PyPI** — `pip install aipass` works (v2.0.0)
 
 ## Recent Sessions
+
+### S82 — Core 10 Split: Dependency Audit + README Update (2026-04-09)
+Decided to split 5 agents to standalone projects (backup, daemon, api, commons, skills). 6 parallel agents verified zero code dependencies from core 10 → split 5. Updated README from 15 → 10 agents. All agent tables, tree diagrams, TOC, metrics updated. CLI dispatched for src/ directory in init + CWD-aware sync-registry for spawn.
+
+### S81 — aipass init v2 + Vera Studio (2026-04-08)
+TDPLAN-0002: Complete init overhaul. CLI, spawn, drone worked in parallel. Init now creates 10 items with real content (CLAUDE.md, AGENTS.md, GEMINI.md, global prompt, README, .gitignore, hooks, settings). `aipass init agent` routes to spawn. Spawn added --template flag + CLAUDE.md to builder template. Drone added spawn to routing_config.json. Prax fixed watchdog with --daemon mode + statusline indicator. Vera Studio project created. Patrick testing as real first-time user — found .trinity shouldn't be in project root, local prompt is agent-level only. CLI fixed both. DPLAN-0105 (promotion prep), DPLAN-0106 (watchdog v2). PRs #204-205.
+
+### S80 — README Marathon + 14-Branch Audit (2026-04-07/08)
+FPLAN-0165 executed (README 366→279 lines). Goldfish Rounds 5-7: R5 approval (8/8.5/9 ratings), R6 branch deep dive (flow+memory undersold, honest tagging builds credibility), R7 hands-on CLI (routing 100%, nothing broke). 14 branches dispatched simultaneously for state audit — all completed in 15 min, 3,600+ tests, 11/14 at 100% seedgo. README Round 7 update (flow/memory lifecycle, transparency sentence). CLI init bug fixed (double prefix). Watchdog race condition fixed. PyPI 2.0.0 published. ~/.secrets/ blocked across all 3 CLIs. DPLAN-0099 updated through 7 rounds. Gemini free tier dead. PRs #202-203.
+
+### S79 — README Overhaul + Goldfish Panel (2026-04-07)
+README overhaul with 4 Goldfish rounds (Claude+Codex+Gemini reviews). PyPI published (aipass 2.0.0). Security: ~/.secrets/ blocked across all 3 CLIs. Memory central_writer path bug fixed. Breadcrumb architecture + collaboration angle captured. FPLAN-0165 master plan. PR #201 merged.
+
+### S78 — Compass + Navigator + TDPLAN (2026-04-06)
+Compass v0.1 built (25 judgment fragments vectorized). Project-vs-agent distinction discovered (DPLAN-0104). Navigator agent pattern proven (tmux + brief + let work). TDPLAN template created. Global prompt: gitignore rule. PR #199.
+
+### S77 — README Value Prop Research (2026-04-06)
+Cross-platform research (10 agents), README value prop overhaul (7 agents), competitive landscape, fresh outside perspective. DPLAN-0098+0099. PR #195 merged.
 
 ### S76 — Multi-CLI Integration Into Main (2026-04-05)
 Ported Codex and Gemini from Docker prototype into the AIPass repo. Created AGENTS.md, GEMINI.md, .codex/ (hooks + skills), .gemini/ (hooks + skills). Updated setup.sh to detect CLIs and wire hooks automatically. Prax built Codex/Gemini log adapters, model tags ([DEVPULSE/OPUS], [DEVPULSE/GPT-5.4], [DEVPULSE/GEMINI-3-FLASH]), inotify errno-specific messages, and CWD branch detection. Fixed AGENTS.md startup behavior. PRs #189-192.

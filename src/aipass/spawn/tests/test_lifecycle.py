@@ -243,8 +243,7 @@ class TestSyncRegistry:
 
         # The registry has DRONE, SPAWN, DEVPULSE entries but those directories
         # don't exist in our tmp_path repo, so they should be stale
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = sync_registry(fix=False)
 
@@ -266,8 +265,7 @@ class TestSyncRegistry:
             json.dumps({"name": "PHANTOM"}, indent=2)
         )
 
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = sync_registry(fix=False)
 
@@ -277,8 +275,7 @@ class TestSyncRegistry:
         """Branches that exist with passports and are registered should be healthy."""
         from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
 
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = sync_registry(fix=False)
 
@@ -296,8 +293,7 @@ class TestSyncRegistry:
             json.dumps({"name": "PHANTOM"}, indent=2)
         )
 
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = sync_registry(fix=True)
 
@@ -327,14 +323,214 @@ class TestSyncRegistry:
         reg["branches"] = [b for b in reg["branches"] if b["name"] == "TEST_API"]
         mock_registry.write_text(json.dumps(reg, indent=2) + "\n")
 
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = sync_registry(fix=True)
 
         assert result["stale"] == []
         assert result["unregistered"] == []
         assert result["fixed"] is False  # Nothing to fix
+
+
+# ---------------------------------------------------------------------------
+# CWD-AWARE SYNC Tests (external projects)
+# ---------------------------------------------------------------------------
+
+class TestSyncRegistryCwdAware:
+    """Tests for CWD-aware sync_registry — external project support."""
+
+    def test_finds_root_level_agents(self, tmp_path):
+        """Agents at project root (project/agent/) should be discovered."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches
+
+        agent = tmp_path / "my_agent"
+        agent.mkdir()
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text('{"name": "MY_AGENT"}')
+
+        result = _scan_for_branches(tmp_path)
+        assert "my_agent" in result
+        assert result["my_agent"] == agent
+
+    def test_finds_src_level_agents(self, tmp_path):
+        """Agents at src/ level (project/src/agent/) should be discovered."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches
+
+        agent = tmp_path / "src" / "my_agent"
+        agent.mkdir(parents=True)
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text('{"name": "MY_AGENT"}')
+
+        result = _scan_for_branches(tmp_path)
+        assert "my_agent" in result
+
+    def test_finds_nested_src_agents(self, tmp_path):
+        """Agents at src/namespace/agent/ (AIPass-style) should be discovered."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches
+
+        agent = tmp_path / "src" / "aipass" / "drone"
+        agent.mkdir(parents=True)
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text('{"name": "DRONE"}')
+
+        result = _scan_for_branches(tmp_path)
+        assert "drone" in result
+
+    def test_skips_dotdirs_and_dunder(self, tmp_path):
+        """Directories starting with . or __ should be skipped."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches
+
+        for name in [".hidden", "__pycache__"]:
+            d = tmp_path / name
+            d.mkdir()
+            (d / ".trinity").mkdir()
+            (d / ".trinity" / "passport.json").write_text('{}')
+
+        result = _scan_for_branches(tmp_path)
+        assert len(result) == 0
+
+    def test_skips_dirs_without_passport(self, tmp_path):
+        """Directories without .trinity/passport.json should be skipped."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches
+
+        (tmp_path / "no_passport").mkdir()
+        (tmp_path / "no_passport" / "README.md").write_text("# hi")
+
+        result = _scan_for_branches(tmp_path)
+        assert len(result) == 0
+
+    def test_external_project_sync(self, tmp_path):
+        """sync_registry should work with an external project registry."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
+
+        # Set up external project structure
+        registry = {
+            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+            "branches": [],
+        }
+        reg_path = tmp_path / "MYPROJECT_REGISTRY.json"
+        reg_path.write_text(json.dumps(registry, indent=2))
+
+        # Create an agent in src/
+        agent = tmp_path / "src" / "navigator"
+        agent.mkdir(parents=True)
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps({"name": "NAVIGATOR", "identity": {"citizen_class": "builder"}})
+        )
+
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=reg_path):
+            result = sync_registry(fix=False)
+
+        assert "navigator" in result["unregistered"]
+        assert result["stale"] == []
+
+    def test_external_project_fix_registers(self, tmp_path):
+        """sync_registry --fix should register unregistered agents in external project."""
+        from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
+
+        registry = {
+            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+            "branches": [],
+        }
+        reg_path = tmp_path / "DAEMON_REGISTRY.json"
+        reg_path.write_text(json.dumps(registry, indent=2))
+
+        agent = tmp_path / "src" / "daemon"
+        agent.mkdir(parents=True)
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps({"name": "DAEMON", "identity": {"citizen_class": "builder"}})
+        )
+
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=reg_path):
+            result = sync_registry(fix=True)
+
+        assert result["fixed"] is True
+        reg = json.loads(reg_path.read_text())
+        names = [b["name"] for b in reg["branches"]]
+        assert "DAEMON" in names
+
+        # Verify relative path stored
+        daemon_entry = next(b for b in reg["branches"] if b["name"] == "DAEMON")
+        assert daemon_entry["path"] == "src/daemon"
+
+
+# ---------------------------------------------------------------------------
+# ADOPT EXISTING Tests
+# ---------------------------------------------------------------------------
+
+class TestAdoptExisting:
+    """Tests for _spawn_agent adopting existing directories with passports."""
+
+    def test_adopt_existing_with_passport(self, tmp_path):
+        """Target with .trinity/passport.json should be adopted, not rejected."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        # Create existing agent directory with passport
+        agent = tmp_path / "my_agent"
+        agent.mkdir()
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text(json.dumps({
+            "branch_info": {"branch_name": "my_agent"},
+            "identity": {"citizen_class": "builder", "purpose": "Test agent"},
+        }))
+
+        reg_path = tmp_path / "TEST_REGISTRY.json"
+        reg_path.write_text(json.dumps({
+            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+            "branches": [],
+        }))
+
+        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+
+        assert result["success"] is True
+        assert result["adopted"] is True
+        assert result["branch_name"] == "MY_AGENT"
+        assert result["registry_updated"] is True
+
+        # Verify registered in registry
+        reg = json.loads(reg_path.read_text())
+        names = [b["name"] for b in reg["branches"]]
+        assert "MY_AGENT" in names
+
+    def test_existing_without_passport_still_fails(self, tmp_path):
+        """Target that exists but has NO passport should still fail."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        agent = tmp_path / "no_passport"
+        agent.mkdir()
+        (agent / "README.md").write_text("# just a dir")
+
+        result = _spawn_agent(str(agent))
+
+        assert result["success"] is False
+        assert "already exists" in result["error"]
+
+    def test_adopt_reads_purpose_from_passport(self, tmp_path):
+        """Adopted agent should pick up purpose from passport when not provided."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        agent = tmp_path / "smart_agent"
+        agent.mkdir()
+        (agent / ".trinity").mkdir()
+        (agent / ".trinity" / "passport.json").write_text(json.dumps({
+            "branch_info": {"branch_name": "smart_agent"},
+            "identity": {"citizen_class": "builder", "purpose": "Process reports daily"},
+        }))
+
+        reg_path = tmp_path / "TEST_REGISTRY.json"
+        reg_path.write_text(json.dumps({
+            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+            "branches": [],
+        }))
+
+        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+
+        assert result["success"] is True
+        reg = json.loads(reg_path.read_text())
+        entry = next(b for b in reg["branches"] if b["name"] == "SMART_AGENT")
+        assert entry["description"] == "Process reports daily"
 
 
 # ---------------------------------------------------------------------------
@@ -561,8 +757,7 @@ class TestHandleSyncRegistry:
         """No args should produce a report."""
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
-        with patch("aipass.spawn.apps.handlers.sync_registry_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
 
             result = handle_sync_registry([])
 

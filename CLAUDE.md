@@ -10,7 +10,7 @@ On any greeting, silently read these files from CWD and run the commands — no 
 
 **Read:** `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`, `STATUS.local.md`
 **Check:** If `.ai_mail.local/inbox.json` exists, read it. Process any mail — don't ask, 
-**list:** `dropbox` files. Ignore README.md
+**list:** `dropbox` files. Always report dropbox status,Ignore README.md
 **Run:** `git status`
 
 ## Security

@@ -84,7 +84,6 @@ def test_init_project_creates_all_expected_files(tmp_path):
     expected_files = [
         target / "DEMO_REGISTRY.json",
         target / ".aipass" / "aipass_global_prompt.md",
-        target / ".aipass" / "aipass_local_prompt.md",
         target / "CLAUDE.md",
         target / "AGENTS.md",
         target / "GEMINI.md",
@@ -96,13 +95,17 @@ def test_init_project_creates_all_expected_files(tmp_path):
     for f in expected_files:
         assert f.exists(), f"Expected file not created: {f}"
 
-    # hooks/ is a directory, not a file
+    # hooks/ and src/ are directories, not files
     assert (target / "hooks").is_dir(), "Expected hooks/ directory"
+    assert (target / "src").is_dir(), "Expected src/ directory"
 
     # No .trinity/ should be created (projects are not citizens)
     assert not (target / ".trinity").exists(), ".trinity/ should NOT be created"
 
-    # 10 files + 1 directory = 11 created_files entries
+    # No local prompt at project level (belongs in agent dirs only)
+    assert not (target / ".aipass" / "aipass_local_prompt.md").exists()
+
+    # 9 files + 2 directories = 11 created_files entries
     assert len(result["created_files"]) == 11
 
 
@@ -166,17 +169,14 @@ def test_init_project_no_trinity_created(tmp_path):
     assert not (target / ".trinity").exists()
 
 
-def test_init_project_local_prompt_content(tmp_path):
-    """aipass_local_prompt.md contains the project name heading."""
+def test_init_project_no_local_prompt(tmp_path):
+    """Project init does NOT create aipass_local_prompt.md (agent-only file)."""
     target = tmp_path / "proj"
     target.mkdir()
 
     init_project(target, project_name="epsilon")
 
-    prompt_path = target / ".aipass" / "aipass_local_prompt.md"
-    content = prompt_path.read_text(encoding="utf-8")
-    assert content.startswith("# EPSILON")
-    assert "Local Prompt" in content
+    assert not (target / ".aipass" / "aipass_local_prompt.md").exists()
 
 
 def test_init_project_claude_md_content(tmp_path):
@@ -300,6 +300,7 @@ def test_init_project_readme_md_content(tmp_path):
     assert "# ALPHA" in content
     assert "## Quick Start" in content
     assert "aipass init agent" in content
+    assert "src/" in content
 
 
 def test_init_project_auto_creates_target_dir(tmp_path):
@@ -349,10 +350,6 @@ def test_init_project_skips_existing_optional_files(tmp_path):
     (aipass_dir / "aipass_global_prompt.md").write_text(
         "# Custom global\n", encoding="utf-8"
     )
-    (aipass_dir / "aipass_local_prompt.md").write_text(
-        "# Custom prompt\n", encoding="utf-8"
-    )
-
     (target / "CLAUDE.md").write_text("# Custom CLAUDE\n", encoding="utf-8")
     (target / "AGENTS.md").write_text("# Custom AGENTS\n", encoding="utf-8")
     (target / "GEMINI.md").write_text("# Custom GEMINI\n", encoding="utf-8")
@@ -367,17 +364,15 @@ def test_init_project_skips_existing_optional_files(tmp_path):
     hooks_dir = target / "hooks"
     hooks_dir.mkdir()
 
+    src_dir = target / "src"
+    src_dir.mkdir()
+
     result = init_project(target, project_name="eta")
 
     # Only registry should be in created_files (everything else pre-existed)
     assert len(result["created_files"]) == 1
 
     # Verify pre-existing files were NOT overwritten
-    prompt_content = (aipass_dir / "aipass_local_prompt.md").read_text(
-        encoding="utf-8"
-    )
-    assert prompt_content == "# Custom prompt\n"
-
     md_content = (target / "CLAUDE.md").read_text(encoding="utf-8")
     assert md_content == "# Custom CLAUDE\n"
 

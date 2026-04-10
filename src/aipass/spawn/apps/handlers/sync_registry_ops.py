@@ -9,8 +9,11 @@
 """Registry synchronization handler for branch lifecycle management.
 
 Contains the core sync logic: scanning the filesystem, comparing with
-AIPASS_REGISTRY.json, detecting stale/unregistered branches, and
+*_REGISTRY.json, detecting stale/unregistered branches, and
 optionally repairing mismatches.
+
+CWD-aware: finds the local project registry from CWD (walks up parents
+looking for *_REGISTRY.json) so it works for both AIPass and external projects.
 """
 
 import json
@@ -34,8 +37,45 @@ from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Repo root — resolved from spawn package location
-_REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
+
+def _scan_for_branches(project_root: Path) -> dict[str, Path]:
+    """Scan a project directory tree for branches with .trinity/passport.json.
+
+    Searches both the root level and common subdirectories (src/, src/*/):
+    - project_root/*/.trinity/passport.json  (root-level agents)
+    - project_root/src/*/.trinity/passport.json  (src/ agents)
+    - project_root/src/*/*/.trinity/passport.json  (nested src, e.g. src/aipass/*)
+
+    Args:
+        project_root: The project root directory (registry parent).
+
+    Returns:
+        Dict mapping lowercase branch name to its directory Path.
+    """
+    found: dict[str, Path] = {}
+
+    def _check_dir(directory: Path) -> None:
+        if not directory.is_dir():
+            return
+        for child in sorted(directory.iterdir()):
+            if child.is_dir() and not child.name.startswith(".") and not child.name.startswith("__"):
+                passport = child / ".trinity" / "passport.json"
+                if passport.exists():
+                    found[child.name.lower()] = child
+
+    # Level 1: project_root/*/
+    _check_dir(project_root)
+
+    # Level 2: project_root/src/*/
+    src_dir = project_root / "src"
+    if src_dir.is_dir():
+        _check_dir(src_dir)
+        # Level 3: project_root/src/*/*/  (e.g. src/aipass/*)
+        for sub in sorted(src_dir.iterdir()):
+            if sub.is_dir() and not sub.name.startswith(".") and not sub.name.startswith("__"):
+                _check_dir(sub)
+
+    return found
 
 
 # =============================================================================
@@ -43,11 +83,14 @@ _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
 # =============================================================================
 
 def sync_registry(fix: bool = False) -> dict:
-    """Synchronize AIPASS_REGISTRY.json with filesystem.
+    """Synchronize *_REGISTRY.json with filesystem.
+
+    CWD-aware: uses find_registry() which walks up from CWD to find the
+    project's registry. Works for both AIPass and external projects.
 
     Workflow:
-    1. Load AIPASS_REGISTRY.json
-    2. Scan src/aipass/ for directories that have .trinity/passport.json (branch marker)
+    1. Find and load *_REGISTRY.json (CWD-aware)
+    2. Scan project directories for .trinity/passport.json (branch marker)
     3. Compare:
        - Stale entries: registered in JSON but directory missing or no passport
        - Unregistered: directory exists with passport but not in JSON
@@ -60,8 +103,9 @@ def sync_registry(fix: bool = False) -> dict:
     Returns:
         Dict with sync results.
     """
-    # 1. Load registry
+    # 1. Load registry — CWD-aware discovery
     registry_path = find_registry()
+    project_root = registry_path.parent
     registry = load_registry(registry_path)
     branches = _branches_as_list(registry.get("branches", []))
 
@@ -73,15 +117,7 @@ def sync_registry(fix: bool = False) -> dict:
             registered[name] = entry
 
     # 2. Scan filesystem for branch directories with .trinity/passport.json
-    src_aipass = _REPO_ROOT / "src" / "aipass"
-    filesystem_branches: dict[str, Path] = {}
-
-    if src_aipass.is_dir():
-        for child in sorted(src_aipass.iterdir()):
-            if child.is_dir() and not child.name.startswith(".") and not child.name.startswith("__"):
-                passport = child / ".trinity" / "passport.json"
-                if passport.exists():
-                    filesystem_branches[child.name.lower()] = child
+    filesystem_branches = _scan_for_branches(project_root)
 
     # 3. Compare
     stale: list[str] = []
@@ -91,7 +127,7 @@ def sync_registry(fix: bool = False) -> dict:
     # Check registered branches against filesystem
     for name, entry in registered.items():
         rel_path = entry.get("path", "")
-        branch_dir = (_REPO_ROOT / rel_path).resolve() if rel_path else None
+        branch_dir = (project_root / rel_path).resolve() if rel_path else None
 
         if branch_dir and branch_dir.is_dir():
             passport = branch_dir / ".trinity" / "passport.json"
@@ -137,7 +173,7 @@ def sync_registry(fix: bool = False) -> dict:
         today = datetime.now().strftime("%Y-%m-%d")
         for name in unregistered_list:
             branch_path = filesystem_branches[name]
-            rel_path = str(branch_path.relative_to(_REPO_ROOT))
+            rel_path = str(branch_path.relative_to(project_root))
 
             entry = {
                 "name": name.upper(),

@@ -106,15 +106,15 @@ def print_help():
 
   [green]1.[/green]  [yellow]{NAME}_REGISTRY.json[/yellow]            Project registry with UUID
   [green]2.[/green]  [yellow].aipass/aipass_global_prompt.md[/yellow]  Global prompt (injected every turn)
-  [green]3.[/green]  [yellow].aipass/aipass_local_prompt.md[/yellow]   Local prompt skeleton
-  [green]4.[/green]  [yellow]CLAUDE.md[/yellow]                       Project prompt (Claude Code)
-  [green]5.[/green]  [yellow]AGENTS.md[/yellow]                       Codex instructions
-  [green]6.[/green]  [yellow]GEMINI.md[/yellow]                       Gemini instructions
-  [green]7.[/green]  [yellow]README.md[/yellow]                       Getting started guide
-  [green]8.[/green]  [yellow]STATUS.local.md[/yellow]                 Project status
-  [green]9.[/green]  [yellow].gitignore[/yellow]                      Standard AIPass ignores
-  [green]10.[/green] [yellow].claude/settings.json[/yellow]           Claude Code hooks
-  [green]11.[/green] [yellow]hooks/[/yellow]                          User hooks directory"""
+  [green]3.[/green]  [yellow]CLAUDE.md[/yellow]                       Project prompt (Claude Code)
+  [green]4.[/green]  [yellow]AGENTS.md[/yellow]                       Codex instructions
+  [green]5.[/green]  [yellow]GEMINI.md[/yellow]                       Gemini instructions
+  [green]6.[/green]  [yellow]README.md[/yellow]                       Getting started guide
+  [green]7.[/green]  [yellow]STATUS.local.md[/yellow]                 Project status
+  [green]8.[/green]  [yellow].gitignore[/yellow]                      Standard AIPass ignores
+  [green]9.[/green]  [yellow].claude/settings.json[/yellow]           Claude Code hooks
+  [green]10.[/green] [yellow]hooks/[/yellow]                          User hooks directory
+  [green]11.[/green] [yellow]src/[/yellow]                            Agent directories live here"""
 
     console.print(Panel(files_text, border_style="green", padding=(1, 2), box=box.ROUNDED))
     console.print()
@@ -254,7 +254,7 @@ def _handle_init(args: List[str]) -> bool:
     console.print()
     console.print("[bold cyan]Next steps:[/bold cyan]")
     console.print(f"  [green]1.[/green] Create your first agent:  [yellow]aipass init agent <name>[/yellow]")
-    console.print(f"  [green]2.[/green] Start a session:          [dim]cd <name>/ && claude[/dim]")
+    console.print(f"  [green]2.[/green] Start a session:          [dim]cd src/<name>/ && claude[/dim]")
     console.print(f"  [green]3.[/green] Read the docs:            [dim]cat README.md[/dim]")
     console.print()
 
@@ -273,8 +273,8 @@ def _handle_init_agent(args: List[str]) -> bool:
         console.print("  [green]drone @cli aipass init agent <name>[/green]")
         console.print()
         console.print("[bold cyan]What it does:[/bold cyan]")
-        console.print("  Routes to [yellow]drone @spawn create <name>[/yellow]")
-        console.print("  Creates full agent scaffold (apps/, .trinity/, .ai_mail.local/)")
+        console.print("  Routes to [yellow]drone @spawn create src/<name>[/yellow]")
+        console.print("  Creates full agent scaffold in src/<name>/ (apps/, .trinity/, .ai_mail.local/)")
         console.print("  Registers agent in the project registry")
         console.print()
         console.print("[dim]Commands: init agent, init agent --help[/dim]")
@@ -282,11 +282,12 @@ def _handle_init_agent(args: List[str]) -> bool:
         return True
 
     agent_name = args[0]
-    logger.info("Routing 'init agent %s' to drone @spawn create", agent_name)
+    agent_path = f"src/{agent_name}"
+    logger.info("Routing 'init agent %s' to drone @spawn create %s", agent_name, agent_path)
 
     try:
         result = subprocess.run(
-            ["drone", "@spawn", "create", agent_name],
+            ["drone", "@spawn", "create", agent_path],
             check=False,
         )
         if result.returncode != 0:
@@ -339,15 +340,15 @@ def _print_init_help():
 
   [green]1.[/green]  [yellow]{NAME}_REGISTRY.json[/yellow]            Project registry with UUID
   [green]2.[/green]  [yellow].aipass/aipass_global_prompt.md[/yellow]  Global prompt (injected every turn)
-  [green]3.[/green]  [yellow].aipass/aipass_local_prompt.md[/yellow]   Local prompt skeleton
-  [green]4.[/green]  [yellow]CLAUDE.md[/yellow]                       Project prompt (Claude Code)
-  [green]5.[/green]  [yellow]AGENTS.md[/yellow]                       Codex instructions
-  [green]6.[/green]  [yellow]GEMINI.md[/yellow]                       Gemini instructions
-  [green]7.[/green]  [yellow]README.md[/yellow]                       Getting started guide
-  [green]8.[/green]  [yellow]STATUS.local.md[/yellow]                 Project status
-  [green]9.[/green]  [yellow].gitignore[/yellow]                      Standard AIPass ignores
-  [green]10.[/green] [yellow].claude/settings.json[/yellow]           Claude Code hooks
-  [green]11.[/green] [yellow]hooks/[/yellow]                          User hooks directory"""
+  [green]3.[/green]  [yellow]CLAUDE.md[/yellow]                       Project prompt (Claude Code)
+  [green]4.[/green]  [yellow]AGENTS.md[/yellow]                       Codex instructions
+  [green]5.[/green]  [yellow]GEMINI.md[/yellow]                       Gemini instructions
+  [green]6.[/green]  [yellow]README.md[/yellow]                       Getting started guide
+  [green]7.[/green]  [yellow]STATUS.local.md[/yellow]                 Project status
+  [green]8.[/green]  [yellow].gitignore[/yellow]                      Standard AIPass ignores
+  [green]9.[/green]  [yellow].claude/settings.json[/yellow]           Claude Code hooks
+  [green]10.[/green] [yellow]hooks/[/yellow]                          User hooks directory
+  [green]11.[/green] [yellow]src/[/yellow]                            Agent directories live here"""
 
     console.print(Panel(files_text, border_style="green", padding=(1, 2), box=box.ROUNDED))
     console.print()

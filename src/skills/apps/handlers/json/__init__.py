@@ -1,1 +1,0 @@
-"""Skills JSON handler package."""
