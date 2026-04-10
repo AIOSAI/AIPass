@@ -57,7 +57,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    if command != "post_close":
+    if command not in ("post", "post_close_runner"):
         return False
 
     if not args:

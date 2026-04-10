@@ -216,62 +216,67 @@ class MonitoringFileHandler(FileSystemEventHandler):
                 return parts[idx + 1].upper()
         return None
 
+    def _read_codex_cwd(self, file_path) -> Optional[str]:
+        """Read CWD from the first line (session_meta) of a Codex JSONL file."""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                first_line = f.readline().strip()
+            if not first_line:
+                return None
+            meta = _json.loads(first_line)
+            if meta.get('type') != 'session_meta':
+                return None
+            return meta.get('payload', {}).get('cwd', '')
+        except (OSError, _json.JSONDecodeError) as e:
+            logger.info(f"[monitor] Could not read Codex session_meta: {e}")
+            return None
+
     def _get_codex_branch(self, file_path, path_key: str) -> str:
         """Get branch for a Codex session, reading session_meta if needed."""
         if path_key in self._session_branches:
             return self._session_branches[path_key]
 
-        # Read first line of JSONL for session_meta
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                first_line = f.readline().strip()
-                if first_line:
-                    meta = _json.loads(first_line)
-                    if meta.get('type') == 'session_meta':
-                        cwd = meta.get('payload', {}).get('cwd', '')
-                        branch = self._branch_from_cwd(cwd)
-                        if branch:
-                            self._session_branches[path_key] = branch
-                            return branch
-        except (OSError, _json.JSONDecodeError) as e:
-            if path_key not in self._branch_warn_logged:
-                logger.info(f"[monitor] Could not read Codex session_meta: {e}")
-                self._branch_warn_logged.add(path_key)
+        cwd = self._read_codex_cwd(file_path)
+        branch = self._branch_from_cwd(cwd) if cwd else None
+        result = branch or 'CODEX'
+        self._session_branches[path_key] = result
+        return result
 
-        self._session_branches[path_key] = 'CODEX'
-        return 'CODEX'
+    def _resolve_gemini_slug(self, slug: str) -> Optional[str]:
+        """Resolve a Gemini project slug to a branch name via projects.json."""
+        projects_file = Path.home() / '.gemini' / 'projects.json'
+        if not projects_file.exists():
+            return None
+        try:
+            data = _json.loads(projects_file.read_text())
+        except (OSError, _json.JSONDecodeError) as e:
+            logger.info(f"[monitor] Could not read Gemini projects.json: {e}")
+            return None
+        for project_path, project_slug in data.get('projects', {}).items():
+            if project_slug == slug:
+                return self._branch_from_cwd(project_path)
+        return None
 
     def _get_gemini_branch(self, file_path, path_key: str) -> str:
         """Get branch for a Gemini session from project slug in path."""
         if path_key in self._session_branches:
             return self._session_branches[path_key]
 
-        # Path format: ~/.gemini/tmp/<project-slug>/chats/session-*.json
-        # Project slug maps to a directory via ~/.gemini/projects.json
+        # Path: ~/.gemini/tmp/<project-slug>/chats/session-*.json
         parts = Path(file_path).parts
+        slug = None
         if 'tmp' in parts:
             idx = parts.index('tmp')
             if idx + 1 < len(parts):
                 slug = parts[idx + 1]
-                # Try to resolve slug to real branch via projects.json
-                projects_file = Path.home() / '.gemini' / 'projects.json'
-                if projects_file.exists():
-                    try:
-                        data = _json.loads(projects_file.read_text())
-                        for project_path, project_slug in data.get('projects', {}).items():
-                            if project_slug == slug:
-                                branch = self._branch_from_cwd(project_path)
-                                if branch:
-                                    self._session_branches[path_key] = branch
-                                    return branch
-                    except (OSError, _json.JSONDecodeError):
-                        pass
-                # Fallback: use slug as branch name
-                self._session_branches[path_key] = slug.upper()
-                return slug.upper()
 
-        self._session_branches[path_key] = 'GEMINI'
-        return 'GEMINI'
+        if not slug:
+            self._session_branches[path_key] = 'GEMINI'
+            return 'GEMINI'
+
+        branch = self._resolve_gemini_slug(slug) or slug.upper()
+        self._session_branches[path_key] = branch
+        return branch
 
     # =========================================================================
     # MODEL TAG HELPERS
@@ -338,34 +343,31 @@ class MonitoringFileHandler(FileSystemEventHandler):
             return None
 
         if entry_type == 'response_item':
-            item = payload.get('item', payload)
-            item_type = item.get('type', '')
-            if item_type == 'function_call':
-                name = item.get('name', 'tool')
-                args = item.get('arguments', '')
-                if isinstance(args, str) and len(args) > 80:
-                    args = args[:80] + '...'
-                return f"🔧 {name}"
-            if item_type == 'function_call_output':
-                return None  # Skip output events
-            if item_type == 'message':
-                content = item.get('content', [])
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict):
-                            text = part.get('text', '')
-                            if text:
-                                return f"💬 {text[:120]}"
-                return '💬 Agent response'
+            return MonitoringFileHandler._parse_codex_response_item(payload)
+
+        if entry_type in ('session_meta', 'turn_context'):
             return None
 
-        if entry_type == 'session_meta':
-            return None  # Skip metadata
-
-        if entry_type == 'turn_context':
-            return None  # Skip context snapshots
-
         return None
+
+    @staticmethod
+    def _parse_codex_response_item(payload: dict) -> Optional[str]:
+        """Parse a Codex response_item payload into a display string."""
+        item = payload.get('item', payload)
+        item_type = item.get('type', '')
+        if item_type == 'function_call':
+            return f"🔧 {item.get('name', 'tool')}"
+        if item_type == 'function_call_output':
+            return None
+        if item_type != 'message':
+            return None
+        content = item.get('content', [])
+        if not isinstance(content, list):
+            return '💬 Agent response'
+        for part in content:
+            if isinstance(part, dict) and part.get('text'):
+                return f"💬 {part['text'][:120]}"
+        return '💬 Agent response'
 
     # =========================================================================
     # GEMINI AGENT ACTIVITY PARSING (full JSON sessions)
@@ -375,37 +377,31 @@ class MonitoringFileHandler(FileSystemEventHandler):
     def _extract_gemini_action(message: dict) -> Optional[str]:
         """Extract a display action string from a Gemini session message."""
         msg_type = message.get('type', '')
-
         if msg_type == 'user':
             return '📩 User message'
+        if msg_type != 'gemini':
+            return None
 
-        if msg_type == 'gemini':
-            # Check for tool calls first
-            tool_calls = message.get('toolCalls', [])
-            if tool_calls:
-                last_tool = tool_calls[-1]
-                name = last_tool.get('displayName', last_tool.get('name', 'tool'))
-                return f"🔧 {name}"
+        tool_calls = message.get('toolCalls', [])
+        if tool_calls:
+            last_tool = tool_calls[-1]
+            return f"🔧 {last_tool.get('displayName', last_tool.get('name', 'tool'))}"
 
-            # Check for thoughts
-            thoughts = message.get('thoughts', [])
-            if thoughts:
-                return '💭 Thinking'
+        if message.get('thoughts'):
+            return '💭 Thinking'
 
-            # Text response
-            content = message.get('content', [])
-            if isinstance(content, list) and content:
-                for part in content:
-                    if isinstance(part, dict):
-                        text = part.get('text', '').strip()
-                        if text:
-                            return f"💬 {text[:120]}"
-            elif isinstance(content, str) and content.strip():
-                return f"💬 {content.strip()[:120]}"
+        return MonitoringFileHandler._extract_text_from_content(message.get('content', []))
 
-            return '💬 Agent response'
-
-        return None
+    @staticmethod
+    def _extract_text_from_content(content) -> str:
+        """Extract first text snippet from a content field (list or string)."""
+        if isinstance(content, str) and content.strip():
+            return f"💬 {content.strip()[:120]}"
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('text', '').strip():
+                    return f"💬 {part['text'].strip()[:120]}"
+        return '💬 Agent response'
 
     def _parse_gemini_activity(self, file_path, branch):
         """Parse Gemini session JSON to show agent actions.
@@ -458,64 +454,70 @@ class MonitoringFileHandler(FileSystemEventHandler):
             logger.info(f"[monitor] Gemini parse error for {file_path.name}: {e}")
             return False
 
-    def _parse_codex_activity(self, file_path, branch):
-        """Parse Codex session JSONL to show agent actions.
+    def _read_new_jsonl_lines(self, file_path, path_key: str) -> Optional[list]:
+        """Read new lines from a JSONL file since last position. Returns None if no new data."""
+        current_size = file_path.stat().st_size
+        last_pos = self._jsonl_positions.get(path_key, 0)
+        if current_size < last_pos:
+            last_pos = 0
+        if current_size <= last_pos:
+            return None
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(last_pos)
+            new_data = f.read()
+            self._jsonl_positions[path_key] = f.tell()
+        lines = [l for l in new_data.strip().split('\n') if l.strip()]
+        return lines if lines else None
 
-        Same JSONL tail-and-parse approach as Claude Code, but uses
-        _extract_codex_action() for Codex-specific event types.
-        """
+    def _safe_parse_json(self, line: str, label: str) -> Optional[dict]:
+        """Parse a JSON line, logging errors. Returns None on failure."""
+        try:
+            return _json.loads(line)
+        except _json.JSONDecodeError as e:
+            logger.info(f"[monitor] Skipping malformed {label} JSONL: {e}")
+            return None
+
+    def _emit_agent_event(self, path_key: str, branch: str, action_text: str) -> bool:
+        """Emit an agent activity event, deduplicating against last action."""
+        if self._last_agent_action.get(path_key) == action_text:
+            return True
+        self._last_agent_action[path_key] = action_text
+        tagged_branch = self._tag_branch_with_model(path_key, branch)
+        evt = MonitoringEvent(
+            priority=1, event_type='agent', branch=tagged_branch,
+            action='activity', message=action_text, level='info',
+        )
+        if self._event_queue:
+            self._event_queue.enqueue(evt)
+        return True
+
+    def _extract_codex_model(self, entry: dict, path_key: str) -> None:
+        """Extract model from a Codex JSONL entry if present."""
+        entry_type = entry.get('type', '')
+        payload = entry.get('payload', {})
+        model = ''
+        if entry_type == 'turn_context':
+            model = payload.get('model', '')
+        if model:
+            self._session_models[path_key] = self._shorten_model(model)
+
+    def _parse_codex_activity(self, file_path, branch):
+        """Parse Codex session JSONL to show agent actions."""
         try:
             path_key = str(file_path)
-            current_size = file_path.stat().st_size
-            last_pos = self._jsonl_positions.get(path_key, 0)
-
-            if current_size < last_pos:
-                last_pos = 0
-            if current_size <= last_pos:
-                return True
-
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                f.seek(last_pos)
-                new_data = f.read()
-                self._jsonl_positions[path_key] = f.tell()
-
-            lines = [l for l in new_data.strip().split('\n') if l.strip()]
-            if not lines:
+            lines = self._read_new_jsonl_lines(file_path, path_key)
+            if lines is None:
                 return True
 
             for line in reversed(lines):
-                try:
-                    entry = _json.loads(line)
-                except _json.JSONDecodeError as e:
-                    logger.info(f"[monitor] Skipping malformed Codex JSONL: {e}")
+                entry = self._safe_parse_json(line, "Codex")
+                if entry is None:
                     continue
-
-                # Extract model from session_meta or response_item
-                if entry.get('type') == 'session_meta':
-                    model = entry.get('payload', {}).get('model', '')
-                    if model:
-                        self._session_models[path_key] = self._shorten_model(model)
-                elif entry.get('type') == 'response_item':
-                    model = entry.get('payload', {}).get('item', {}).get('model', '')
-                    if model:
-                        self._session_models[path_key] = self._shorten_model(model)
-
+                self._extract_codex_model(entry, path_key)
                 action_text = self._extract_codex_action(entry)
                 if not action_text:
                     continue
-
-                if self._last_agent_action.get(path_key) == action_text:
-                    return True
-                self._last_agent_action[path_key] = action_text
-
-                tagged_branch = self._tag_branch_with_model(path_key, branch)
-                evt = MonitoringEvent(
-                    priority=1, event_type='agent', branch=tagged_branch,
-                    action='activity', message=action_text, level='info',
-                )
-                if self._event_queue:
-                    self._event_queue.enqueue(evt)
-                return True
+                return self._emit_agent_event(path_key, branch, action_text)
 
             return True
         except Exception as e:

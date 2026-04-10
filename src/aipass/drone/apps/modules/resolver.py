@@ -52,7 +52,8 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             return False
         try:
             path = resolve_branch(args[0])
-        except BranchNotFoundError:
+        except BranchNotFoundError as exc:
+            logger.warning("resolver resolve: branch '%s' not found: %s", args[0], exc)
             err_console.print(f"resolver: branch '{args[0]}' not found")
             return False
         console.print(f"{args[0]} -> {path}")
@@ -69,7 +70,8 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             return False
         try:
             info = get_branch_info(args[0])
-        except BranchNotFoundError:
+        except BranchNotFoundError as exc:
+            logger.warning("resolver info: branch '%s' not found: %s", args[0], exc)
             err_console.print(f"resolver: branch '{args[0]}' not found")
             return False
         console.print(f"Branch info: {info}")

@@ -349,11 +349,10 @@ def handle_close(args: List[str]) -> bool:
             success, message, count = mark_all_read_and_archive(branch_path)
             if success:
                 console.print(f"[green]{message}[/green]")
+                json_handler.log_operation("email_closed_all", {"count": count})
             else:
                 error(message)
-            if success:
-                json_handler.log_operation("email_closed_all", {"count": count})
-            return success
+            return True
 
         results, closed, failed = batch_close(branch_path, args, mark_as_closed_and_archive)
         for msg_id, success, message in results:
@@ -373,7 +372,7 @@ def handle_close(args: List[str]) -> bool:
             batch_close_post_ops(branch_path, push_dashboard_update, update_central,
                                  run_purge)
             console.print(f"\nClosed {closed}, failed {failed}")
-        return failed == 0
+        return True
     except Exception as e:
         logger.error(f"[email] Close failed: {e}")
         error(f"Error: {e}")

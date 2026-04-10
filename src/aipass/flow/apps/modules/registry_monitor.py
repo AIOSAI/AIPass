@@ -204,7 +204,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Renumbered: {len(result['renumbered'])}")
 
         if result['healing_performed']:
-            warning(f"Registry healed - {len(result['added']) + len(result['updated']) + len(result['removed'])} changes")
+            change_count = len(result['added']) + len(result['updated']) + len(result['removed'])
+            warning(f"Registry scan found {change_count} mismatch(es) — trigger event handlers not wired, no changes applied")
         else:
             console.print(f"\n[dim]No changes needed - registry is healthy[/dim]")
 
