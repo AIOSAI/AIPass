@@ -1,10 +1,24 @@
 # Pre-commit hooks for AIPass
 # Install: pip install pre-commit && pre-commit install
+<<<<<<< HEAD
 # Manual run: pre-commit run --all-files
 
 repos:
   # Gitleaks — secret detection
+=======
+# Run manually: pre-commit run --all-files
+
+repos:
+>>>>>>> 190d7a4 (feat(system): SECURITY: gitleaks config + pre-commit for API key leak prevention)
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
     hooks:
       - id: gitleaks
+<<<<<<< HEAD
+=======
+        name: gitleaks (secret detection)
+        description: Detect hardcoded secrets using gitleaks
+        entry: gitleaks protect --verbose --redact --staged
+        language: golang
+        pass_filenames: false
+>>>>>>> 190d7a4 (feat(system): SECURITY: gitleaks config + pre-commit for API key leak prevention)
