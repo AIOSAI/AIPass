@@ -1,8 +1,0 @@
-{
-  "module_name": "{{MODULE_NAME}}",
-  "version": "1.0.0",
-  "config": {
-    "enabled": true,
-    "max_log_entries": 100
-  }
-}

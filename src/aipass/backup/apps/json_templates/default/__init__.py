@@ -1,1 +1,0 @@
-"""Default JSON templates package."""

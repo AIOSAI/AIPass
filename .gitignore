@@ -20,7 +20,7 @@ build/
 FPLAN-*.md
 DPLAN-*.md
 RPLAN-*.md
-
+TDPLAN-*.md
 # AIPass runtime state (local to each installation)
 AIPASS_REGISTRY.json
 .trinity/

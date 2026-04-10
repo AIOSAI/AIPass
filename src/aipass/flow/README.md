@@ -141,7 +141,7 @@ On `drone @flow close`:
 
 - **Seedgo:** 100% (all 33 standards)
 - **Tests:** 452 tests, 90/90 public functions covered
-- **Last audit:** 2026-04-07
+- **Last audit:** 2026-04-09
 
 ---
 
