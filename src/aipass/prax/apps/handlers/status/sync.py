@@ -119,7 +119,7 @@ def sync_status() -> Dict:
     in_progress = state_counts.get("in progress", state_counts.get("in-progress", 0))
     not_started = state_counts.get("not started", state_counts.get("not-started", 0))
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now().strftime("%Y-%m-%d")
 
     # Build STATUS.md --------------------------------------------------------
     lines = [
