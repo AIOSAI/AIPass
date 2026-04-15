@@ -189,6 +189,16 @@
       "file": "apps/modules/regenerate_registry.py",
       "standard": "json_structure",
       "reason": "Thin CLI layer — delegates all work to regenerate_registry_ops handler. json_handler imported for log_operation only."
+    },
+    {
+      "file": "tests/test_citizen_classes.py",
+      "standard": "architecture",
+      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
+    },
+    {
+      "file": "tests/test_citizen_classes.py",
+      "standard": "encapsulation",
+      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
     }
   ],
   "notes": {

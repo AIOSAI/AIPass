@@ -1,7 +1,7 @@
 {
   "metadata": {
     "version": "1.0.0",
-    "last_updated": "2026-04-10",
+    "last_updated": "2026-04-15",
     "description": "Template file tracking registry for ID-based updates"
   },
   "files": {
@@ -155,7 +155,7 @@
       "content_hash": "a4cf0a8e3b4f",
       "has_branch_placeholder": false
     },
-    "f044": {
+    "f026": {
       "path": "apps/modules/__init__.py",
       "name": "__init__.py",
       "content_hash": "e3b0c44298fc",
@@ -177,6 +177,12 @@
       "path": "artifacts/README.md",
       "name": "README.md",
       "content_hash": "de20d11e5cfd",
+      "has_branch_placeholder": false
+    },
+    "f029": {
+      "path": "artifacts/birth_certificate.json",
+      "name": "birth_certificate.json",
+      "content_hash": "0b6e4319781e",
       "has_branch_placeholder": false
     },
     "f030": {
@@ -257,13 +263,13 @@
       "content_hash": "28e9ae373563",
       "has_branch_placeholder": false
     },
-    "f029": {
-      "path": "artifacts/birth_certificate.json",
-      "name": "birth_certificate.json",
-      "content_hash": "0b6e4319781e",
+    "f044": {
+      "path": "apps/integrations/README.md",
+      "name": "README.md",
+      "content_hash": "31c09afe1299",
       "has_branch_placeholder": false
     },
-    "f026": {
+    "f045": {
       "path": "apps/plugins/__init__.py",
       "name": "__init__.py",
       "content_hash": "e3b0c44298fc",
@@ -384,6 +390,11 @@
     "d022": {
       "path": "{{BRANCH}}_json/custom_config",
       "name": "custom_config",
+      "has_branch_placeholder": false
+    },
+    "d024": {
+      "path": "apps/integrations",
+      "name": "integrations",
       "has_branch_placeholder": false
     }
   }

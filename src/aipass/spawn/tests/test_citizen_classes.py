@@ -25,38 +25,45 @@ class TestClassRegistry:
     """Tests for apps/handlers/class_registry.py"""
 
     def test_get_available_classes(self):
+        """Returns list containing 'builder' and 'birthright'."""
         from aipass.spawn.apps.handlers.class_registry import get_available_classes
         classes = get_available_classes()
         assert "builder" in classes
         assert "birthright" in classes
 
     def test_validate_class_valid(self):
+        """Known class names validate as True."""
         from aipass.spawn.apps.handlers.class_registry import validate_class
         assert validate_class("builder") is True
         assert validate_class("birthright") is True
 
     def test_validate_class_invalid(self):
+        """Unknown or empty class names validate as False."""
         from aipass.spawn.apps.handlers.class_registry import validate_class
         assert validate_class("nonexistent") is False
         assert validate_class("") is False
 
     def test_get_default_class(self):
+        """Default citizen class is 'builder'."""
         from aipass.spawn.apps.handlers.class_registry import get_default_class
         assert get_default_class() == "builder"
 
     def test_get_template_dir_builder(self):
+        """Builder template directory exists and is named 'builder'."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         path = get_template_dir("builder")
         assert path.name == "builder"
         assert path.exists()
 
     def test_get_template_dir_birthright(self):
+        """Birthright template directory exists and is named 'birthright'."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         path = get_template_dir("birthright")
         assert path.name == "birthright"
         assert path.exists()
 
     def test_get_template_dir_invalid_raises(self):
+        """Requesting an unknown class raises ValueError."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         with pytest.raises(ValueError, match="Unknown citizen class"):
             get_template_dir("nonexistent")
@@ -70,6 +77,7 @@ class TestPassportCommand:
     """Tests for passport granting (birthright citizenship)."""
 
     def test_grant_passport_creates_trinity(self, tmp_path):
+        """Passport grant creates .trinity/ with all identity files."""
         from aipass.spawn.apps.handlers.passport_ops import grant_passport
         target = tmp_path / "test_citizen"
         result = grant_passport(str(target), role="tester", purpose="Testing")
@@ -81,6 +89,7 @@ class TestPassportCommand:
         assert (target / ".trinity" / "observations.json").exists()
 
     def test_grant_passport_creates_aipass(self, tmp_path):
+        """Passport grant creates .aipass/ with local prompt."""
         from aipass.spawn.apps.handlers.passport_ops import grant_passport
         target = tmp_path / "test_citizen"
         result = grant_passport(str(target), role="tester")
@@ -89,6 +98,7 @@ class TestPassportCommand:
         assert (target / ".aipass" / "aipass_local_prompt.md").exists()
 
     def test_grant_passport_creates_readme(self, tmp_path):
+        """Passport grant creates README.md in target directory."""
         from aipass.spawn.apps.handlers.passport_ops import grant_passport
         target = tmp_path / "test_citizen"
         result = grant_passport(str(target))
@@ -172,6 +182,16 @@ class TestClassAwareCreate:
         passport = json.loads((target / ".trinity" / "passport.json").read_text())
         assert passport["identity"]["citizen_class"] == "builder"
 
+    def test_create_builder_includes_integrations_scaffold(self, tmp_path):
+        """Builder creation includes apps/integrations/README.md (DPLAN-0133)."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+        target = tmp_path / "integrations_test"
+        result = _spawn_agent(str(target), citizen_class="builder")
+
+        assert result["success"] is True
+        assert (target / "apps" / "integrations").is_dir()
+        assert (target / "apps" / "integrations" / "README.md").exists()
+
 
 # =============================================================================
 # CLASS-AWARE UPDATE TESTS
@@ -245,6 +265,7 @@ class TestTemplateStructure:
     """Tests verifying template directory structure."""
 
     def test_builder_template_exists(self):
+        """Builder template directory has .trinity/passport.json and apps/."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         builder = get_template_dir("builder")
         assert builder.is_dir()
@@ -252,6 +273,7 @@ class TestTemplateStructure:
         assert (builder / "apps").is_dir()
 
     def test_birthright_template_exists(self):
+        """Birthright template has .trinity/passport.json but no apps/."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         birthright = get_template_dir("birthright")
         assert birthright.is_dir()
@@ -259,12 +281,14 @@ class TestTemplateStructure:
         assert not (birthright / "apps").exists()
 
     def test_builder_passport_has_class(self):
+        """Builder template passport declares citizen_class='builder'."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         builder = get_template_dir("builder")
         passport = json.loads((builder / ".trinity" / "passport.json").read_text())
         assert passport["identity"]["citizen_class"] == "builder"
 
     def test_birthright_passport_has_class(self):
+        """Birthright template passport declares citizen_class='birthright'."""
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
         birthright = get_template_dir("birthright")
         passport = json.loads((birthright / ".trinity" / "passport.json").read_text())
