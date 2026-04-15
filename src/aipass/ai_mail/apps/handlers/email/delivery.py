@@ -36,40 +36,11 @@ _INBOX_LOCK = None
 def _load_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
     """Load branches from the caller's project registry.
 
-    Walks up from caller_cwd to find a *_REGISTRY.json file, then extracts
-    branch email→path mappings. Used when the target branch isn't in the
-    AIPass registry (e.g. @strategy in Vera Studio).
+    Delegates to registry.read.get_caller_project_branches — shared
+    implementation used by both delivery and wake for cross-project resolution.
     """
-    current = Path(caller_cwd).resolve()
-    for _ in range(10):
-        for reg_file in current.glob("*_REGISTRY.json"):
-            try:
-                with open(reg_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                result = {}
-                branches = data.get("branches", [])
-                if isinstance(branches, list):
-                    for b in branches:
-                        email = b.get("email", f"@{b.get('name', '').lower()}")
-                        path = b.get("path", "")
-                        if path and not Path(path).is_absolute():
-                            path = str((reg_file.parent / path).resolve())
-                        result[email] = path
-                elif isinstance(branches, dict):
-                    for name, info in branches.items():
-                        email = info.get("email", f"@{name}")
-                        path = info.get("path", "")
-                        if path and not Path(path).is_absolute():
-                            path = str((reg_file.parent / path).resolve())
-                        result[email] = path
-                return result
-            except Exception as exc:
-                logger.warning("Failed reading caller registry %s: %s", reg_file, exc)
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return {}
+    from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
+    return get_caller_project_branches(caller_cwd)
 
 
 def _auto_register_contact(email: str, branch_path: Path, inbox_file: Path) -> None:

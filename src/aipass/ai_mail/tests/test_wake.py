@@ -508,6 +508,65 @@ class TestFindClaudeBin:
         assert result == "claude"
 
 
+class TestResolveBranchCallerRegistry:
+    """resolve_branch() falls back to caller's project registry for cross-project wake."""
+
+    def test_resolves_from_caller_registry(self, tmp_path, monkeypatch):
+        """Branch not in AIPass registry is found via AIPASS_CALLER_CWD."""
+        # External branch path
+        branch_path = tmp_path / "src" / "strategy"
+        branch_path.mkdir(parents=True)
+        (branch_path / ".ai_mail.local").mkdir()
+
+        # External registry
+        registry = {
+            "branches": [
+                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
+            ]
+        }
+        (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+
+        # AIPass registry has no @strategy
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        result = resolve_branch("@strategy")
+        assert result is not None
+        resolved_path, email = result
+        assert email == "@strategy"
+        assert resolved_path == branch_path
+
+    def test_aipass_registry_takes_precedence(self, tmp_path, monkeypatch):
+        """AIPass registry result is returned before checking caller registry."""
+        branch_path = tmp_path / "src" / "drone"
+        branch_path.mkdir(parents=True)
+
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({
+            "branches": [{"name": "DRONE", "email": "@drone", "path": str(branch_path)}]
+        }), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+        result = resolve_branch("@drone")
+        assert result is not None
+        assert result[1] == "@drone"
+
+    def test_returns_none_when_not_found_anywhere(self, tmp_path, monkeypatch):
+        """Returns None when branch is missing from both registries."""
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        # No *_REGISTRY.json in tmp_path other than the aipass one (which has no @nonexistent)
+
+        result = resolve_branch("@nonexistent")
+        assert result is None
+
+
 class TestWakeBranchSpawnEnv:
     """Ensure wake_branch() spawn_env includes ~/.local/bin for restricted-PATH envs."""
 

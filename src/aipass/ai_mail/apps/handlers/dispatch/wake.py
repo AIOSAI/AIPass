@@ -320,19 +320,39 @@ def _check_pid_alive(pid: int) -> bool:
 # ─── Branch Resolution ──────────────────────────────────
 
 def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
-    """Resolve a branch email to its absolute filesystem path."""
+    """Resolve a branch email to its absolute filesystem path.
+
+    Checks the AIPass registry first, then falls back to the caller's
+    project registry via AIPASS_CALLER_CWD for cross-project dispatch.
+    """
     email = f"@{branch_email.lstrip('@').lower()}"
+
+    # Step 1: AIPass registry (local branches)
     registry = _read_json(BRANCH_REGISTRY)
-    if registry is None:
-        return None
-    for branch in registry.get("branches", []):
-        if branch.get("email", "").lower() == email:
-            path = Path(branch.get("path", ""))
-            if not path.is_absolute():
-                path = _REPO_ROOT / path
-            if path.exists():
-                return path, email
-            return None
+    if registry is not None:
+        for branch in registry.get("branches", []):
+            if branch.get("email", "").lower() == email:
+                path = Path(branch.get("path", ""))
+                if not path.is_absolute():
+                    path = _REPO_ROOT / path
+                if path.exists():
+                    return path, email
+                return None  # Found but path missing — definitive failure
+
+    # Step 2: Caller's project registry (cross-project dispatch)
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
+    if caller_cwd:
+        try:
+            from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
+            caller_branches = get_caller_project_branches(caller_cwd)
+            branch_path_str = caller_branches.get(email, "")
+            if branch_path_str:
+                branch_path = Path(branch_path_str)
+                if branch_path.exists():
+                    return branch_path, email
+        except Exception as e:
+            logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
+
     return None
 
 

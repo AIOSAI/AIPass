@@ -28,7 +28,7 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "deep_nesting",
-      "reason": "2 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type — must check /proc)"
+      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type — must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
     },
     {
       "file": "apps/handlers/email/send.py",
@@ -68,7 +68,7 @@
     {
       "file": "apps/handlers/email/delivery.py",
       "standard": "handlers",
-      "reason": "Imports json_utils.json_handler (load_json, save_json) — shared handler utility for JSON I/O, same-branch cross-handler import. Also imports registry.read.get_all_branches — consolidated from dual implementation per DPLAN-0036. Also lazy-imports email.contacts.register_contact inside _auto_register_contact() and _auto_register_sender() for post-delivery contact registration (DPLAN-0121 Phase 5)."
+      "reason": "Imports json_utils.json_handler (load_json, save_json) — shared handler utility for JSON I/O, same-branch cross-handler import. Also imports registry.read.get_all_branches — consolidated from dual implementation per DPLAN-0036. Also lazy-imports email.contacts.register_contact inside _auto_register_contact() and _auto_register_sender() for post-delivery contact registration (DPLAN-0121 Phase 5). Also lazy-imports registry.read.get_caller_project_branches inside _load_caller_project_branches() to delegate to shared cross-project registry implementation (issue #283)."
     },
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
@@ -98,7 +98,7 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "handlers",
-      "reason": "Imports notify.send_notification — same-branch cross-handler import for wake completion notifications."
+      "reason": "Imports notify.send_notification — same-branch cross-handler import for wake completion notifications. Lazy-imports registry.read.get_caller_project_branches inside resolve_branch() for cross-project branch resolution. Same cross-handler pattern as reply.py, delivery.py, and branch_detection.py."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
@@ -221,6 +221,11 @@
       "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
     },
     {
+      "file": "apps/handlers/registry/read.py",
+      "standard": "deep_nesting",
+      "reason": "get_caller_project_branches() depth 4 — walks directory tree with per-registry-file parsing, list/dict branch format detection, and path resolution. Same pattern as delivery.py _load_caller_project_branches()."
+    },
+    {
       "file": "apps/handlers/email/format.py",
       "standard": "handlers",
       "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
@@ -289,6 +294,36 @@
       "file": "tests/test_identity.py",
       "standard": "encapsulation",
       "reason": "Unit tests must import handlers directly to exercise create_identity, read_identity. Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_registry_read.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_registry_read.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import handlers directly to exercise internal functions (_derive_email_from_branch_name, get_all_branches, get_branch_by_email, get_caller_project_branches). Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_registry_read.py",
+      "standard": "documentation",
+      "reason": "Test fixture functions (registry_file) are private test infrastructure — docstring requirement does not apply to pytest fixtures."
+    },
+    {
+      "file": "tests/test_wake.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_wake.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import handlers directly to exercise internal functions (_read_json, _check_lock, _check_pid_alive, resolve_branch, DispatchStatus, etc.). Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_wake.py",
+      "standard": "documentation",
+      "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
     }
   ],
   "notes": {

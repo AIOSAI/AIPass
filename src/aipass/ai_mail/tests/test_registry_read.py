@@ -18,6 +18,7 @@ from aipass.ai_mail.apps.handlers.registry.read import (
     _derive_email_from_branch_name,
     get_all_branches,
     get_branch_by_email,
+    get_caller_project_branches,
 )
 
 
@@ -148,3 +149,78 @@ def test_get_branch_by_email_not_found(registry_file):
     registry_file.write_text(json.dumps(SAMPLE_REGISTRY), encoding="utf-8")
     result = get_branch_by_email("@nonexistent")
     assert result is None
+
+
+# --- get_caller_project_branches() tests -----------------------------
+
+
+class TestGetCallerProjectBranches:
+    """Tests for get_caller_project_branches()."""
+
+    def test_finds_registry_in_cwd(self, tmp_path):
+        """Returns email->path mapping from a *_REGISTRY.json in caller_cwd."""
+        branch_path = tmp_path / "src" / "strategy"
+        branch_path.mkdir(parents=True)
+        registry = {
+            "branches": [
+                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
+            ]
+        }
+        (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        result = get_caller_project_branches(str(tmp_path))
+        assert result == {"@strategy": str(branch_path)}
+
+    def test_finds_registry_in_parent(self, tmp_path):
+        """Walks up from caller_cwd to find registry in parent."""
+        branch_path = tmp_path / "src" / "strategy"
+        branch_path.mkdir(parents=True)
+        registry = {
+            "branches": [
+                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
+            ]
+        }
+        (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        subdir = tmp_path / "src" / "strategy" / "apps"
+        subdir.mkdir(parents=True)
+        result = get_caller_project_branches(str(subdir))
+        assert result == {"@strategy": str(branch_path)}
+
+    def test_resolves_relative_paths(self, tmp_path):
+        """Resolves relative paths in registry relative to the registry file."""
+        branch_path = tmp_path / "src" / "strategy"
+        branch_path.mkdir(parents=True)
+        registry = {
+            "branches": [
+                {"name": "STRATEGY", "email": "@strategy", "path": "src/strategy"}
+            ]
+        }
+        (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        result = get_caller_project_branches(str(tmp_path))
+        assert result == {"@strategy": str(branch_path)}
+
+    def test_handles_dict_format(self, tmp_path):
+        """Handles dict-format branches (AIPass format)."""
+        branch_path = tmp_path / "src" / "quality"
+        branch_path.mkdir(parents=True)
+        registry = {
+            "branches": {
+                "quality": {"email": "@quality", "path": str(branch_path)}
+            }
+        }
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        result = get_caller_project_branches(str(tmp_path))
+        assert result == {"@quality": str(branch_path)}
+
+    def test_returns_empty_when_no_registry(self, tmp_path):
+        """Returns empty dict when no *_REGISTRY.json exists."""
+        result = get_caller_project_branches(str(tmp_path))
+        assert result == {}
+
+    def test_skips_aipass_registry_name(self, tmp_path):
+        """Also works with AIPASS_REGISTRY.json -- doesn't skip it (delivery uses all)."""
+        branch_path = tmp_path / "branch"
+        branch_path.mkdir()
+        registry = {"branches": [{"name": "TEST", "email": "@test", "path": str(branch_path)}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        result = get_caller_project_branches(str(tmp_path))
+        assert "@test" in result

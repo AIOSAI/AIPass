@@ -21,6 +21,7 @@ Handler Independence:
 """
 
 import json
+from pathlib import Path
 from typing import List, Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -144,6 +145,57 @@ def get_branch_by_email(email: str) -> Optional[Dict]:
             return branch
 
     return None
+
+
+def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
+    """Load branch email→path mappings from the caller's project registry.
+
+    Walks up from caller_cwd to find a *_REGISTRY.json file (e.g.
+    VERA_REGISTRY.json), then extracts branch email→path mappings.
+    Used for cross-project dispatch when the target branch is not in
+    the AIPass registry.
+
+    Args:
+        caller_cwd: Working directory of the calling project (typically
+                    from AIPASS_CALLER_CWD env var).
+
+    Returns:
+        Dict mapping email address to absolute path string.
+        Empty dict if no registry found or on error.
+    """
+    current = Path(caller_cwd).resolve()
+    for _ in range(10):
+        for reg_file in current.glob("*_REGISTRY.json"):
+            try:
+                with open(reg_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                result: Dict[str, str] = {}
+                branches = data.get("branches", [])
+                if isinstance(branches, list):
+                    for b in branches:
+                        email = b.get("email", f"@{b.get('name', '').lower()}")
+                        path = b.get("path", "")
+                        if path and not Path(path).is_absolute():
+                            path = str((reg_file.parent / path).resolve())
+                        if email and path:
+                            result[email] = path
+                elif isinstance(branches, dict):
+                    for name, info in branches.items():
+                        email = info.get("email", f"@{name}")
+                        path = info.get("path", "")
+                        if path and not Path(path).is_absolute():
+                            path = str((reg_file.parent / path).resolve())
+                        if email and path:
+                            result[email] = path
+                if result:
+                    return result
+            except Exception as exc:
+                logger.warning("[registry] get_caller_project_branches: failed reading %s: %s", reg_file, exc)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return {}
 
 
 if __name__ == "__main__":
