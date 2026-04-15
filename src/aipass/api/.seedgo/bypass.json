@@ -79,6 +79,16 @@
       "file": "apps/modules/openrouter_client.py",
       "standard": "modules",
       "reason": "make_call() is a CLI orchestrator — parses args then delegates to client.get_response(). All business logic lives in handlers/openrouter/client.py."
+    },
+    {
+      "file": "apps/integrations/testcontract/driver.py",
+      "standard": "architecture",
+      "reason": "Integration drivers live in apps/integrations/{project}/driver.py — gitignored private space intentionally outside the 3-layer structure. Loaded via importlib, not standard package import. See DPLAN-0133."
+    },
+    {
+      "file": "tests/test_integrations.py",
+      "standard": "architecture",
+      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
     }
   ],
   "notes": {
