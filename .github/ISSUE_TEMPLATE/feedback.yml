@@ -8,21 +8,16 @@ body:
       value: |
         We'd love to hear from you. Bug reports and feature requests have their own templates — this one is for everything else.
 
+        **Note:** Issues are public. Don't include personal info you don't want shared. For private back-and-forth, use [Discussions](https://github.com/AIOSAI/AIPass/discussions) instead.
+
   - type: input
     id: name
     attributes:
-      label: Name
-      description: What should we call you?
-      placeholder: "Your name"
+      label: Name or handle
+      description: What should we call you? Use a handle if you prefer.
+      placeholder: "Your name or @handle"
     validations:
       required: true
-
-  - type: input
-    id: email
-    attributes:
-      label: Email (optional)
-      description: Only if you'd like us to follow up directly. Never shared.
-      placeholder: "you@example.com"
 
   - type: dropdown
     id: type
