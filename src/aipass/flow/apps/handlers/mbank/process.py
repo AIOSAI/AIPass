@@ -168,7 +168,7 @@ def is_template_content(content: str) -> bool:
     exec_match = re.search(r'## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
     if exec_match:
         exec_content = exec_match.group(1).strip()
-        lines = [l.strip() for l in exec_content.split('\n') if l.strip()]
+        lines = [line.strip() for line in exec_content.split('\n') if line.strip()]
         # Template has ~6 lines (date header + checkbox items). More = user added content.
         if len(lines) > 8:
             return False

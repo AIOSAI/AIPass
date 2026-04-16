@@ -107,7 +107,7 @@ class TestOperationStart:
         assert "Simple op" in output
         lines = [line.strip() for line in output.splitlines() if line.strip()]
         # Only the operation line should have content; no "key: value" lines
-        detail_lines = [l for l in lines if ": " in l and "Simple op" not in l]
+        detail_lines = [line for line in lines if ": " in line and "Simple op" not in line]
         assert len(detail_lines) == 0
 
 
@@ -163,11 +163,11 @@ class TestOperationComplete:
         assert "Summary:" in output
         # No key-value summary lines should appear after "Summary:"
         lines = output.splitlines()
-        summary_idx = next(i for i, l in enumerate(lines) if "Summary:" in l)
+        summary_idx = next(i for i, line in enumerate(lines) if "Summary:" in line)
         after_summary = [
-            l.strip() for l in lines[summary_idx + 1:] if l.strip()
+            line.strip() for line in lines[summary_idx + 1:] if line.strip()
         ]
-        kv_lines = [l for l in after_summary if ": " in l]
+        kv_lines = [line for line in after_summary if ": " in line]
         assert len(kv_lines) == 0
 
 
