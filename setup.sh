@@ -380,8 +380,19 @@ settings["hooks"] = {
     ],
 }
 
+# Inject AIPASS_HOME into env block so dispatched agents find AIPass
+import os
+env_block = settings.get("env", {})
+env_block["AIPASS_HOME"] = repo_root
+# Windows: force UTF-8 for Rich output in hook processes
+msys = os.environ.get("MSYSTEM", "") + os.environ.get("OSTYPE", "")
+if "MSYS" in msys or "msys" in msys or "MINGW" in msys:
+    env_block["PYTHONUTF8"] = "1"
+settings["env"] = env_block
+
 settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 print(f"  hooks -> {settings_path}")
+print(f"  AIPASS_HOME -> {repo_root} (in settings.json env)")
 PYEOF
 else
     echo "Skipping hooks (no .claude/hooks/ directory found)"
@@ -484,15 +495,65 @@ else
     echo "Skipping Gemini CLI (not installed)"
 fi
 
+# --- Set AIPASS_HOME + PATH so all services work from any project ---
+echo ""
+echo "Configuring cross-project access ..."
+
+if [ "$IS_WINDOWS" -eq 1 ]; then
+    # Windows (Git Bash): write to ~/.bash_profile
+    PROFILE="$HOME/.bash_profile"
+    touch "$PROFILE"
+
+    # AIPASS_HOME
+    if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
+        echo "" >> "$PROFILE"
+        echo "# AIPass — cross-project access" >> "$PROFILE"
+        echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
+        echo "  AIPASS_HOME added to $PROFILE"
+    else
+        echo "  AIPASS_HOME already in $PROFILE"
+    fi
+
+    # PATH (venv Scripts for Windows)
+    VENV_SCRIPTS="$SCRIPT_DIR/.venv/Scripts"
+    if ! grep -q ".venv/Scripts" "$PROFILE" 2>/dev/null; then
+        echo "export PATH=\"$VENV_SCRIPTS:\$PATH\"" >> "$PROFILE"
+        echo "  PATH updated in $PROFILE (drone available globally)"
+    else
+        echo "  PATH already includes venv in $PROFILE"
+    fi
+
+    # PYTHONUTF8
+    if ! grep -q "PYTHONUTF8" "$PROFILE" 2>/dev/null; then
+        echo "export PYTHONUTF8=1" >> "$PROFILE"
+        echo "  PYTHONUTF8=1 added to $PROFILE"
+    fi
+
+    # Export for current session too
+    export AIPASS_HOME="$SCRIPT_DIR"
+    export PATH="$VENV_SCRIPTS:$PATH"
+    export PYTHONUTF8=1
+else
+    # Linux/macOS: write to ~/.bashrc
+    PROFILE="$HOME/.bashrc"
+
+    # AIPASS_HOME
+    if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
+        echo "" >> "$PROFILE"
+        echo "# AIPass — cross-project access" >> "$PROFILE"
+        echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$PROFILE"
+        echo "  AIPASS_HOME added to $PROFILE"
+    else
+        echo "  AIPASS_HOME already in $PROFILE"
+    fi
+
+    export AIPASS_HOME="$SCRIPT_DIR"
+fi
+
 # --- Create global symlinks for CLI tools (Linux/macOS only) ---
 echo ""
 if [ "$IS_WINDOWS" -eq 1 ]; then
-    echo "Windows detected — skipping symlink (ln/sudo not available on Windows)"
-    echo ""
-    echo "To use drone from any directory, add the venv to your PATH:"
-    echo "  PowerShell: \$env:PATH = \"$SCRIPT_DIR\\.venv\\Scripts;\" + \$env:PATH"
-    echo "  Git Bash:   export PATH=\"$SCRIPT_DIR/.venv/bin:\$PATH\""
-    echo "  (Add to ~/.bash_profile for Git Bash persistence)"
+    echo "Windows: drone available via PATH (set above)"
 else
     echo "Creating global symlinks ..."
     VENV_BIN="$SCRIPT_DIR/.venv/bin"
