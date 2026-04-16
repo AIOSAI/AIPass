@@ -105,6 +105,39 @@ echo "Upgrading pip ..."
 echo "Installing aipass in editable mode (with dev extras) ..."
 "$VENV_PYTHON" -m pip install -e ".[dev]" --quiet
 
+# --- Detect shadowing drone installs (Windows) ---
+# Issues #317 + #321: system-Python pip or legacy npm aipass-drone can shadow venv drone.exe.
+# Warn the user with precise uninstall commands; don't touch anything automatically.
+if [ "$IS_WINDOWS" -eq 1 ]; then
+    echo ""
+    echo "Checking for shadowing drone installs ..."
+
+    # System Python check (#317)
+    for sys_py in "python" "py -3" "python3"; do
+        if command -v $sys_py &>/dev/null; then
+            if $sys_py -m pip show aipass &>/dev/null 2>&1; then
+                # Don't match our own venv python
+                SYS_PY_PATH=$($sys_py -c "import sys; print(sys.executable)" 2>/dev/null || echo "")
+                if [ -n "$SYS_PY_PATH" ] && [[ "$SYS_PY_PATH" != *".venv"* ]]; then
+                    echo "  WARN: aipass is installed in system Python at $SYS_PY_PATH"
+                    echo "  This shadows the venv drone.exe on Windows PATH. To fix:"
+                    echo "    \"$SYS_PY_PATH\" -m pip uninstall aipass -y"
+                    break
+                fi
+            fi
+        fi
+    done
+
+    # Legacy npm aipass-drone check (#321)
+    NPM_BIN="$APPDATA/npm"
+    if [ -d "$NPM_BIN" ] && { [ -f "$NPM_BIN/drone" ] || [ -f "$NPM_BIN/drone.cmd" ] || [ -f "$NPM_BIN/drone.ps1" ]; }; then
+        echo "  WARN: Legacy npm drone scripts found in $NPM_BIN — these shadow venv drone.exe."
+        echo "  To fix:"
+        echo "    npm uninstall -g aipass-drone"
+        echo "    rm -f \"$NPM_BIN/drone\" \"$NPM_BIN/drone.cmd\" \"$NPM_BIN/drone.ps1\""
+    fi
+fi
+
 # --- Verify CLI entry points ---
 FAIL=0
 
