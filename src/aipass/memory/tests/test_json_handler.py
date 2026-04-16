@@ -46,8 +46,8 @@ def _fresh_json_handler(monkeypatch):
     restore the real module for direct testing via importlib.reload.
     """
     saved_json_pkg = sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    saved_jh = sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
-    saved_mf = sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
+    sys.modules.pop("aipass.memory.apps.handlers.json.json_handler", None)
+    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
 
     try:
         pass  # noqa: F811

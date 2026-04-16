@@ -137,7 +137,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["alpha"]),
             patch(f"{_MOD}.get_module_info", return_value=info),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -155,7 +155,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["broken"]),
             patch(f"{_MOD}.get_module_info", return_value=None),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -178,7 +178,7 @@ class TestHandleCommandList:
             patch(f"{_MOD}.list_modules", return_value=["aaa", "bbb"]),
             patch(f"{_MOD}.get_module_info", side_effect=side_effect),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -192,7 +192,7 @@ class TestHandleCommandList:
         with (
             patch(f"{_MOD}.list_modules", return_value=[]),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -229,7 +229,7 @@ class TestHandleCommandInfo:
         """'info' with no args logs a warning and returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -243,7 +243,7 @@ class TestHandleCommandInfo:
         with (
             patch(f"{_MOD}.get_module_info", return_value=None),
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -263,7 +263,7 @@ class TestHandleCommandInfo:
         with (
             patch(f"{_MOD}.get_module_info", return_value=info),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -303,7 +303,7 @@ class TestHandleCommandCheck:
         """'check' with no args logs a warning and returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -317,7 +317,7 @@ class TestHandleCommandCheck:
         with (
             patch(f"{_MOD}.is_module", return_value=True),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -333,7 +333,7 @@ class TestHandleCommandCheck:
         with (
             patch(f"{_MOD}.is_module", return_value=False),
             patch(f"{_MOD}.console") as mock_console,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 
@@ -372,7 +372,7 @@ class TestHandleCommandUnknown:
         """An unrecognized command returns False."""
         with (
             patch(f"{_MOD}.logger") as mock_logger,
-            patch(f"{_MOD}.json_handler") as mock_jh,
+            patch(f"{_MOD}.json_handler"),
         ):
             from aipass.drone.apps.modules.module_registry import handle_command
 

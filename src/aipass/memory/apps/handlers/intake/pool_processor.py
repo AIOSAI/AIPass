@@ -254,7 +254,6 @@ def process_file_to_vectors(file_path: Path, collection_name: str, chunk_size: i
 
         # Generate embeddings and store
         documents = []
-        embeddings_list = []
         ids = []
         metadatas = []
 

@@ -76,7 +76,7 @@ def test_watch_agent_branch_not_found(monkeypatch, tmp_path):
 
 def test_watch_agent_no_active_lock(monkeypatch, tmp_path):
     """No lock file -> agent already idle, returns completed immediately."""
-    branch_path = _build_fake_branch(tmp_path)
+    _build_fake_branch(tmp_path)
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5)

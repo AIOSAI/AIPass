@@ -89,7 +89,7 @@ class TestHandleCommandRouting:
         """Unknown filter arg should default to 'open' and emit a warning."""
         with patch(f"{_MOD}.list_plans") as mock_lp, \
              patch(f"{_MOD}.warning") as mock_warn, \
-             patch(f"{_MOD}.console") as mock_console:
+             patch(f"{_MOD}.console"):
             from aipass.flow.apps.modules.list_plans import handle_command
 
             result = handle_command("list", ["garbage"])

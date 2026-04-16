@@ -78,7 +78,7 @@ class TestListMessages:
             "unread_count": 0,
             "messages": [],
         })
-        list_messages_output = inbox.list_messages()
+        inbox.list_messages()
         # list_messages prints to stderr via Rich Console
         # We just verify it doesn't raise
 

@@ -421,8 +421,8 @@ class TestHandleCommand:
         templates, mocks = _import_templates(monkeypatch)
 
         with (
-            patch.object(templates, "_display_push_results") as mock_display,
-            patch.object(templates, "_display_spawn_push_results") as mock_spawn_display,
+            patch.object(templates, "_display_push_results"),
+            patch.object(templates, "_display_spawn_push_results"),
         ):
             result = templates.handle_command("templates", ["push-templates"])
 
@@ -472,7 +472,7 @@ class TestHandleCommand:
         """'templates template-status' calls status handler."""
         templates, mocks = _import_templates(monkeypatch)
 
-        with patch.object(templates, "_display_status") as mock_display:
+        with patch.object(templates, "_display_status"):
             result = templates.handle_command("templates", ["template-status"])
 
         mocks["pusher"].get_template_status.assert_called_once()

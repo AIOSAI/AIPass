@@ -99,10 +99,9 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
         changes.append("Removed redundant 'auto_compress_at'")
 
     # 4. Remove unused limits fields (max_word_count, max_token_count - no code uses these)
-    # Preserve v2 fields: max_sessions, max_key_learnings, session_summary_max_chars, learning_value_max_chars
+    # Preserve v2 fields: max_sessions, max_key_learnings, session_summary_max_chars, learning_value_max_chars,
+    # max_observations, max_lines, note
     if 'limits' in metadata:
-        v2_fields = {'max_sessions', 'max_key_learnings', 'session_summary_max_chars',
-                      'learning_value_max_chars', 'max_observations', 'max_lines', 'note'}
         for unused_field in ['max_word_count', 'max_token_count']:
             if unused_field in metadata['limits']:
                 del metadata['limits'][unused_field]

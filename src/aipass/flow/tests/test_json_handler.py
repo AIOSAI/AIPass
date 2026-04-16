@@ -387,7 +387,6 @@ class TestInfrastructureMocking:
     def test_reimport_after_mock_preserves_function(self):
         """importlib.reload preserves function availability."""
         handler = _import_handler()
-        original_validate = handler.validate_json_structure
         importlib.reload(handler)
         assert callable(handler.validate_json_structure)
 

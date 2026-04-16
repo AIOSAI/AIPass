@@ -197,7 +197,7 @@ class TestScanPlanFilesImpl:
         mod = _import_monitor_ops()
         new_dir = tmp_path / "new_location"
         new_dir.mkdir()
-        plan = _make_plan_file(new_dir, "0001")
+        _make_plan_file(new_dir, "0001")
 
         registry = {
             "plans": {
