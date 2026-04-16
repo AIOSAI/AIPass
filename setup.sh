@@ -507,13 +507,18 @@ if command -v gemini &>/dev/null; then
         GEMINI_SETTINGS="$HOME/.gemini/settings.json"
         mkdir -p "$HOME/.gemini"
 
-        python3 - "$SCRIPT_DIR" "$GEMINI_SETTINGS" << 'PYEOF'
+        # HOOK_PYTHON was set earlier in the Claude hooks block; reuse it.
+        # Fall back to python3 if this block runs without that setup (defensive).
+        GEMINI_HOOK_PYTHON="${HOOK_PYTHON:-python3}"
+
+        python3 - "$SCRIPT_DIR" "$GEMINI_SETTINGS" "$GEMINI_HOOK_PYTHON" << 'PYEOF'
 import json
 import sys
 from pathlib import Path
 
 repo_root = sys.argv[1]
 settings_path = Path(sys.argv[2])
+hook_python = sys.argv[3]
 hooks_dir = f"{repo_root}/.gemini/hooks"
 
 # Load existing settings or start fresh
