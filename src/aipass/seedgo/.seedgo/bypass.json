@@ -6,6 +6,16 @@
   },
   "bypass": [
     {
+      "file": "tests/test_checkers_batch5.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design."
+    },
+    {
+      "file": "tests/test_checkers_batch5.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch4.py."
+    },
+    {
       "file": "_content.py",
       "reason": "Content files contain Rich markup strings with code examples (print(), python3, imports, logger calls, etc.). These are documentation, not executable code. All code-quality checkers produce false positives on these files."
     },
