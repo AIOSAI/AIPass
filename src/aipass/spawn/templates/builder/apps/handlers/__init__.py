@@ -59,7 +59,7 @@ def _guard_branch_access():
         return
 
     branch_path = "/" + MY_BRANCH.replace(".", "/") + "/"
-    if branch_path in caller_file:
+    if branch_path in caller_file.replace("\\", "/"):
         return
 
     caller_branch = _extract_branch_name(caller_file)

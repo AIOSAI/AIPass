@@ -80,7 +80,7 @@ def _guard_branch_access():
     # Check if caller is from our branch
     # MY_BRANCH is "aipass.prax" (dotted), but filesystem uses "/aipass/prax/"
     branch_path = "/" + MY_BRANCH.replace(".", "/") + "/"
-    if branch_path in caller_file:
+    if branch_path in caller_file.replace("\\", "/"):
         return  # Same branch, allowed
 
     # External caller - block access

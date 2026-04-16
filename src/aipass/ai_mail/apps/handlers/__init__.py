@@ -78,7 +78,7 @@ def _guard_branch_access():
         return  # Allow if truly can't determine
 
     # Check if caller is from our branch
-    if f"/{MY_BRANCH}/" in caller_file:
+    if f"/{MY_BRANCH}/" in caller_file.replace("\\", "/"):
         return  # Same branch, allowed
 
     # External caller - block access

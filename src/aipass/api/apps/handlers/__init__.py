@@ -53,7 +53,7 @@ def _guard_branch_access():
                 return  # Allow command-line Python through
         return
 
-    if f"/{MY_BRANCH}/" in caller_file:
+    if f"/{MY_BRANCH}/" in caller_file.replace("\\", "/"):
         return
 
     caller_branch = _extract_branch_name(caller_file)
