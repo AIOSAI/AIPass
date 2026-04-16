@@ -299,7 +299,7 @@ class BranchDetector:
             agent_name = parts[2].upper()
 
         # Append TESTS suffix when path is clearly test output
-        path_str_lower = str(path).lower()
+        path_str_lower = str(path).replace('\\', '/').lower()
         is_test = ('/tests/' in path_str_lower or '/test_' in path_str_lower
                    or path_str_lower.endswith('_test.py') or path_str_lower.endswith('_test.log'))
         test_suffix = ' TESTS' if is_test else ''
@@ -339,6 +339,10 @@ class BranchDetector:
         try:
             path = Path(file_path).resolve()
             path_str = str(path)
+            # Normalize to forward slashes for all string-based pattern matching.
+            # Path.resolve() returns OS-native separators (backslashes on Windows), which
+            # breaks every hardcoded '/' check. branch_map lookups still use path_str (OS-native).
+            path_str_fwd = path_str.replace('\\', '/')
 
             # Check cache first
             if path_str in self.log_map:
@@ -350,9 +354,9 @@ class BranchDetector:
             # add the project prefix. Check external paths first to return 'AIPL/POLYGLOT TESTS'.
             _repo_root = self._find_repo_root()
             _projects_base = Path.home() / 'Projects'
-            _path_str_lower = path_str.lower()
-            _projects_str = str(_projects_base).lower()
-            _repo_str = str(_repo_root).lower()
+            _path_str_lower = path_str_fwd.lower()
+            _projects_str = str(_projects_base).replace('\\', '/').lower()
+            _repo_str = str(_repo_root).replace('\\', '/').lower()
             _is_external = (
                 _path_str_lower.startswith(_projects_str + '/')
                 and not _path_str_lower.startswith(_repo_str + '/')
@@ -386,8 +390,8 @@ class BranchDetector:
                     return result
 
             # Strategy 3: Claude Code project files
-            if '.claude/projects/' in path_str:
-                result = self._detect_from_claude_project(path_str)
+            if '.claude/projects/' in path_str_fwd:
+                result = self._detect_from_claude_project(path_str_fwd)
                 if result:
                     self.log_map[path_str] = result
                     return result
@@ -405,7 +409,7 @@ class BranchDetector:
                 return 'SYSTEM'
 
             # Strategy 6: Parse path for known branch names
-            path_parts = path_str.lower().split('/')
+            path_parts = path_str_fwd.lower().split('/')
             for part in path_parts:
                 branch_upper = part.upper()
                 if branch_upper in self.known_branches:

@@ -27,7 +27,6 @@ Usage:
 """
 
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -153,7 +152,8 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write('\n')  # Add final newline
 
-            # Atomic replace (os.replace overwrites on both Linux and Windows)
+            # Atomic replace (os.replace works cross-platform, Path.rename fails on Windows)
+            import os
             os.replace(temp_path, file_path)
 
             json_handler.log_operation("write_memory_file", {"file": file_path.name, "success": True})

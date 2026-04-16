@@ -150,6 +150,12 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
             break
         if list(parent.glob("*_REGISTRY.json")):
             return True
+    # AIPASS_HOME fallback — for external projects / global drone usage
+    aipass_home = os.environ.get("AIPASS_HOME")
+    if aipass_home:
+        home = Path(aipass_home)
+        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+            return True
     return False
 
 
@@ -544,15 +550,13 @@ def main() -> int:
     if custom_result != -1:
         return custom_result
 
-    # Unknown command — check if it's a bare branch name missing @
+    # Bare branch name without @ prefix — auto-route to the branch.
+    # This is critical for PowerShell where @ is consumed as a splatting operator,
+    # so `drone @prax` becomes `drone prax`. Also convenient in any shell.
     try:
         from aipass.drone.apps.modules.resolver import branch_exists
         if branch_exists(command):
-            err_console.print(
-                f"drone: branch references require @ prefix. "
-                f"Use '@{command}' instead of '{command}'."
-            )
-            return 1
+            return _handle_target([f"@{command}"] + args[1:])
     except Exception as exc:
         logger.warning("Branch existence check failed for '%s': %s", command, exc)
 

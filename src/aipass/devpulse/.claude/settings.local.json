@@ -1,6 +1,8 @@
 {
   "permissions": {
-    "allow": [],
+    "allow": [
+      "Bash(drone @git system-pr \"fix\\(windows\\): batch fixes for watchdog os.kill \\(#323\\), dispatch monitor JSONL path \\(#324\\), prax atomic write retry \\(#325\\), memory config seed \\(#322\\), PS profile wrapper \\(#319\\)\")"
+    ],
     "deny": [
       "Bash(git reset*)",
       "Bash(git rebase*)",
