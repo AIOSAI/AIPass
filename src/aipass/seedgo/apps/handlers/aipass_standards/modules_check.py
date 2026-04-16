@@ -23,20 +23,21 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
         # Must match standard
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
         # Must match file (check if rule file path is in the full path)
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
         # Check line-specific bypass
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -69,49 +70,49 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'modules', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "modules", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'MODULES'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "MODULES",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'MODULES'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "MODULES",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'MODULES'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "MODULES",
         }
 
     # Only check files in modules/ directory
-    is_module = 'apps/modules/' in module_path
+    is_module = "apps/modules/" in module_path
     if not is_module:
         return {
-            'passed': True,
-            'checks': [{'name': 'Module check', 'passed': True, 'message': 'Not a module file (skipped)'}],
-            'score': 100,
-            'standard': 'MODULES'
+            "passed": True,
+            "checks": [{"name": "Module check", "passed": True, "message": "Not a module file (skipped)"}],
+            "score": 100,
+            "standard": "MODULES",
         }
 
     # Check 1: handle_command pattern (for non-__init__ files)
-    if not path.name == '__init__.py':
+    if not path.name == "__init__.py":
         handle_cmd_check = check_handle_command(content)
         if handle_cmd_check:
             checks.append(handle_cmd_check)
@@ -136,7 +137,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(orchestration_check)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
@@ -144,12 +145,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "modules"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'MODULES'
-    }
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "MODULES"}
 
 
 def _track_docstring_state(stripped: str, in_docstring: bool) -> tuple:
@@ -178,7 +174,7 @@ def check_handle_command(content: str) -> Optional[Dict]:
 
     Modules should have: def handle_command(command: str, args: List[str]) -> bool
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
 
     # Filter out comments and docstrings
     code_lines = []
@@ -193,38 +189,38 @@ def check_handle_command(content: str) -> Optional[Dict]:
             continue
 
         # Skip docstrings and comments
-        if in_docstring or stripped.startswith('#'):
+        if in_docstring or stripped.startswith("#"):
             continue
 
         code_lines.append(line)
 
     # Search only actual code
-    code_only = '\n'.join(code_lines)
+    code_only = "\n".join(code_lines)
 
     # Check for handle_command function
-    has_handle_command = bool(re.search(r'def\s+handle_command\s*\(', code_only))
+    has_handle_command = bool(re.search(r"def\s+handle_command\s*\(", code_only))
 
     if not has_handle_command:
         return {
-            'name': 'handle_command pattern',
-            'passed': False,
-            'message': 'Missing handle_command(command, args) -> bool for drone routing'
+            "name": "handle_command pattern",
+            "passed": False,
+            "message": "Missing handle_command(command, args) -> bool for drone routing",
         }
 
     # Check return type annotation
-    has_bool_return = bool(re.search(r'def\s+handle_command\([^)]*\)\s*->\s*bool', code_only))
+    has_bool_return = bool(re.search(r"def\s+handle_command\([^)]*\)\s*->\s*bool", code_only))
 
     if not has_bool_return:
         return {
-            'name': 'handle_command pattern',
-            'passed': False,
-            'message': 'handle_command exists but missing -> bool return type annotation'
+            "name": "handle_command pattern",
+            "passed": False,
+            "message": "handle_command exists but missing -> bool return type annotation",
         }
 
     return {
-        'name': 'handle_command pattern',
-        'passed': True,
-        'message': 'handle_command(command, args) -> bool pattern implemented'
+        "name": "handle_command pattern",
+        "passed": True,
+        "message": "handle_command(command, args) -> bool pattern implemented",
     }
 
 
@@ -242,34 +238,22 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
     line_count = len(lines)
 
     if line_count < 150:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (simple - perfect size)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (simple - perfect size)"}
     elif line_count < 250:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (standard - good size)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (standard - good size)"}
     elif line_count < 400:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (complex - acceptable, watch it)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (complex - acceptable, watch it)"}
     elif line_count < 600:
         return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (heavy - consider splitting into domains)'
+            "name": "File size",
+            "passed": True,
+            "message": f"{line_count} lines (heavy - consider splitting into domains)",
         }
     else:
         return {
-            'name': 'File size',
-            'passed': False,
-            'message': f'{line_count} lines (too large - split required for AI comprehension)'
+            "name": "File size",
+            "passed": False,
+            "message": f"{line_count} lines (too large - split required for AI comprehension)",
         }
 
 
@@ -290,7 +274,7 @@ def check_no_direct_file_ops(content: str, lines: List[str]) -> Optional[Dict]:
             in_docstring = not in_docstring
 
         # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith('#'):
+        if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
         # Check for direct file operations
@@ -299,41 +283,41 @@ def check_no_direct_file_ops(content: str, lines: List[str]) -> Optional[Dict]:
         # Forbidden: open(), .write_text(), .read_text(), .mkdir(), json.dump(), json.load()
 
         # Skip import lines
-        if stripped.startswith('from ') or stripped.startswith('import '):
+        if stripped.startswith("from ") or stripped.startswith("import "):
             continue
 
         # Check for forbidden operations
         # Match bare open() calls but NOT function names containing "open"
         # e.g. open(file) matches, but _handle_open(args) does NOT
-        if re.search(r'(?<![.\w])open\s*\(', stripped) and '# open(' not in stripped:
+        if re.search(r"(?<![.\w])open\s*\(", stripped) and "# open(" not in stripped:
             # Skip if in a string literal
-            before_pattern = stripped.split('open(')[0]
+            before_pattern = stripped.split("open(")[0]
             single_quotes = before_pattern.count("'")
             double_quotes = before_pattern.count('"')
             if single_quotes % 2 == 1 or double_quotes % 2 == 1:
                 continue
             file_operations.append(f"line {i}: {stripped} (use handler instead)")
 
-        if '.write_text(' in stripped or '.read_text(' in stripped:
+        if ".write_text(" in stripped or ".read_text(" in stripped:
             file_operations.append(f"line {i}: {stripped} (use json_handler instead)")
 
-        if '.mkdir(' in stripped:
+        if ".mkdir(" in stripped:
             file_operations.append(f"line {i}: {stripped} (use handler for file operations)")
 
-        if 'json.dump(' in stripped or 'json.load(' in stripped:
+        if "json.dump(" in stripped or "json.load(" in stripped:
             file_operations.append(f"line {i}: {stripped} (use json_handler instead)")
 
     if file_operations:
         return {
-            'name': 'No direct file operations',
-            'passed': False,
-            'message': f'Module has direct file operations: {file_operations[0]}'
+            "name": "No direct file operations",
+            "passed": False,
+            "message": f"Module has direct file operations: {file_operations[0]}",
         }
 
     return {
-        'name': 'No direct file operations',
-        'passed': True,
-        'message': 'No direct file operations detected (uses handlers)'
+        "name": "No direct file operations",
+        "passed": True,
+        "message": "No direct file operations detected (uses handlers)",
     }
 
 
@@ -382,17 +366,13 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
     """
     # Phase 1: Quick line scan for candidates (module-level only = no leading whitespace)
     # Only match assignments at column 0 (module level)
-    list_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\[')
-    dict_pattern = re.compile(r'^([a-z][a-z0-9_]*)\s*=\s*\{')
+    list_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\[")
+    dict_pattern = re.compile(r"^([a-z][a-z0-9_]*)\s*=\s*\{")
 
     candidates = _scan_candidates(lines, list_pattern, dict_pattern)
 
     if not candidates:
-        return {
-            'name': 'No business logic',
-            'passed': True,
-            'message': 'No hardcoded data structures detected'
-        }
+        return {"name": "No business logic", "passed": True, "message": "No hardcoded data structures detected"}
 
     # Phase 2: AST verification (only module-level assignments)
     violations = []
@@ -425,10 +405,10 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
             element_count = 0
 
             if isinstance(value, ast.List):
-                var_type = 'list'
+                var_type = "list"
                 element_count = len(value.elts)
             elif isinstance(value, ast.Dict):
-                var_type = 'dict'
+                var_type = "dict"
                 element_count = len(value.keys)
             else:
                 continue  # Not a list or dict
@@ -442,12 +422,7 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
                 continue
 
             # This is a confirmed violation
-            violations.append({
-                'line': node.lineno,
-                'var': var_name,
-                'type': var_type,
-                'count': element_count
-            })
+            violations.append({"line": node.lineno, "var": var_name, "type": var_type, "count": element_count})
 
     except SyntaxError:
         logger.info("Skipped business logic check: SyntaxError in %s", module_path)
@@ -460,17 +435,9 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
         # Report first violation
         v = violations[0]
         msg = f"Line {v['line']}: '{v['var']}' has hardcoded {v['type']} with {v['count']} elements (move to config)"
-        return {
-            'name': 'No business logic',
-            'passed': False,
-            'message': msg
-        }
+        return {"name": "No business logic", "passed": False, "message": msg}
 
-    return {
-        'name': 'No business logic',
-        'passed': True,
-        'message': 'No hardcoded data structures detected'
-    }
+    return {"name": "No business logic", "passed": True, "message": "No hardcoded data structures detected"}
 
 
 def check_thin_orchestration(content: str, module_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
@@ -502,30 +469,30 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
     """
     # Standard allowed functions in modules
     ALLOWED_FUNCTIONS = {
-        'handle_command',
-        'print_help',
-        'print_introspection',
-        'main',
+        "handle_command",
+        "print_help",
+        "print_introspection",
+        "main",
     }
 
     # Prefixes that indicate orchestration patterns (not implementation)
     ORCHESTRATION_PREFIXES = (
-        '_',          # Private helpers
-        'print_',     # Display wrappers
-        'handle_',    # Sub-command routing
-        'show_',      # Display/presentation
-        'route_',     # Routing/dispatch
-        'dispatch_',  # Dispatching
-        'list_',      # Query/listing
-        'get_',       # Data queries/getters
-        'load_',      # Loading configs/data
-        'close_',     # Lifecycle orchestration (close plans, sessions)
-        'restore_',   # Lifecycle orchestration (restore plans, state)
-        'create_',    # Lifecycle orchestration (create plans, resources)
-        'delete_',    # Lifecycle orchestration (delete plans, resources)
-        'update_',    # Lifecycle orchestration (update state, records)
-        'send_',      # Dispatch orchestration (send emails, events)
-        'run_',       # Execution orchestration (run tasks, workflows)
+        "_",  # Private helpers
+        "print_",  # Display wrappers
+        "handle_",  # Sub-command routing
+        "show_",  # Display/presentation
+        "route_",  # Routing/dispatch
+        "dispatch_",  # Dispatching
+        "list_",  # Query/listing
+        "get_",  # Data queries/getters
+        "load_",  # Loading configs/data
+        "close_",  # Lifecycle orchestration (close plans, sessions)
+        "restore_",  # Lifecycle orchestration (restore plans, state)
+        "create_",  # Lifecycle orchestration (create plans, resources)
+        "delete_",  # Lifecycle orchestration (delete plans, resources)
+        "update_",  # Lifecycle orchestration (update state, records)
+        "send_",  # Dispatch orchestration (send emails, events)
+        "run_",  # Execution orchestration (run tasks, workflows)
     )
 
     # Max lines for a function to be considered a thin wrapper
@@ -534,12 +501,8 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
     THIN_WRAPPER_MAX_LINES = 40
 
     # Check bypass
-    if is_bypassed(module_path, 'modules', bypass_rules=bypass_rules):
-        return {
-            'name': 'Thin orchestration',
-            'passed': True,
-            'message': 'Bypassed - thin orchestration check skipped'
-        }
+    if is_bypassed(module_path, "modules", bypass_rules=bypass_rules):
+        return {"name": "Thin orchestration", "passed": True, "message": "Bypassed - thin orchestration check skipped"}
 
     try:
         tree = ast.parse(content, filename=module_path)
@@ -568,11 +531,7 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
                 continue
 
             # This is a non-standard function with substantial body - implementation logic
-            non_standard_functions.append({
-                'name': func_name,
-                'line': node.lineno,
-                'lines': func_lines
-            })
+            non_standard_functions.append({"name": func_name, "line": node.lineno, "lines": func_lines})
 
     if non_standard_functions:
         # Report violation
@@ -580,13 +539,13 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
         extra = f" +{len(non_standard_functions) - 5} more" if len(non_standard_functions) > 5 else ""
 
         return {
-            'name': 'Thin orchestration',
-            'passed': False,
-            'message': f"Module has {len(non_standard_functions)} implementation function(s) that belong in handlers: {', '.join(func_list)}{extra}"
+            "name": "Thin orchestration",
+            "passed": False,
+            "message": f"Module has {len(non_standard_functions)} implementation function(s) that belong in handlers: {', '.join(func_list)}{extra}",
         }
 
     return {
-        'name': 'Thin orchestration',
-        'passed': True,
-        'message': 'Module is thin orchestrator (standard functions only)'
+        "name": "Thin orchestration",
+        "passed": True,
+        "message": "Module is thin orchestrator (standard functions only)",
     }

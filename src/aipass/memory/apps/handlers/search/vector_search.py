@@ -47,6 +47,7 @@ from aipass.memory.apps.handlers.storage.chroma import get_client
 # QUERY ENCODING SERVICE (Singleton)
 # =============================================================================
 
+
 class QueryEncoder:
     """
     Query encoding service using same model as embedder.py
@@ -55,7 +56,7 @@ class QueryEncoder:
     Uses all-MiniLM-L6-v2 model with same settings.
     """
 
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         """
         Initialize query encoder
 
@@ -83,10 +84,9 @@ class QueryEncoder:
         # GPU optimization if available
         self.use_gpu = torch.cuda.is_available()
         if self.use_gpu:
-            self.model = self.model.to('cuda')
+            self.model = self.model.to("cuda")
 
         self.dimension = 384  # all-MiniLM-L6-v2 output dimension
-
 
     def encode(self, query: str) -> List[float]:
         """
@@ -105,7 +105,7 @@ class QueryEncoder:
             query,
             convert_to_tensor=False,  # Return numpy
             normalize_embeddings=True,  # Critical for L2 distance
-            show_progress_bar=False
+            show_progress_bar=False,
         )
 
         # Cleanup GPU memory if used
@@ -135,6 +135,7 @@ def _get_encoder() -> QueryEncoder:
 # CHROMA SEARCH SERVICE
 # =============================================================================
 
+
 class SearchService:
     """
     ChromaDB search service
@@ -157,13 +158,12 @@ class SearchService:
         self.client = get_client(db_path)
         self.db_path = db_path
 
-
     def query_collection(
         self,
         collection_name: str,
         query_embedding: List[float],
         n_results: int = 5,
-        where: Dict[str, Any] | None = None
+        where: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """
         Query a specific collection
@@ -178,35 +178,23 @@ class SearchService:
             Dict with query results
         """
         try:
-            collection = self.client.get_collection(
-                collection_name,
-                embedding_function=None
-            )
+            collection = self.client.get_collection(collection_name, embedding_function=None)
         except Exception as e:
             logger.warning(f"[vector_search] Collection lookup failed for '{collection_name}': {e}")
-            return {
-                "collection": collection_name,
-                "exists": False,
-                "error": f"Collection not found: {e}"
-            }
+            return {"collection": collection_name, "exists": False, "error": f"Collection not found: {e}"}
 
         # Query collection
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where
-        )
+        results = collection.query(query_embeddings=[query_embedding], n_results=n_results, where=where)
 
         return {
             "collection": collection_name,
             "exists": True,
-            "ids": results['ids'][0] if results['ids'] else [],
-            "documents": results['documents'][0] if results['documents'] else [],
-            "metadatas": results['metadatas'][0] if results['metadatas'] else [],
-            "distances": results['distances'][0] if results['distances'] else [],
-            "count": len(results['ids'][0]) if results['ids'] else 0
+            "ids": results["ids"][0] if results["ids"] else [],
+            "documents": results["documents"][0] if results["documents"] else [],
+            "metadatas": results["metadatas"][0] if results["metadatas"] else [],
+            "distances": results["distances"][0] if results["distances"] else [],
+            "count": len(results["ids"][0]) if results["ids"] else 0,
         }
-
 
     def list_collections(self) -> List[str]:
         """
@@ -255,12 +243,13 @@ def _get_service(db_path: Path | None = None) -> SearchService:
 # PUBLIC API
 # =============================================================================
 
+
 def search_collection(
     query_embedding: List[float],
     collection_name: str,
     n_results: int = 5,
     where: Dict[str, Any] | None = None,
-    db_path: Path | None = None
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Query a ChromaDB collection with embedding
@@ -297,40 +286,31 @@ def search_collection(
         db_path = Path(db_path)
 
     if not query_embedding:
-        return {
-            'success': False,
-            'error': 'No query embedding provided'
-        }
+        return {"success": False, "error": "No query embedding provided"}
 
     try:
         service = _get_service(db_path)
         result = service.query_collection(
-            collection_name=collection_name,
-            query_embedding=query_embedding,
-            n_results=n_results,
-            where=where
+            collection_name=collection_name, query_embedding=query_embedding, n_results=n_results, where=where
         )
 
         # Check if collection exists
-        if not result.get('exists', False):
+        if not result.get("exists", False):
             return {
-                'success': False,
-                'error': result.get('error', 'Collection not found'),
-                'collection': collection_name
+                "success": False,
+                "error": result.get("error", "Collection not found"),
+                "collection": collection_name,
             }
 
-        json_handler.log_operation("vector_search_collection", {"collection": collection_name, "count": result.get('count', 0), "success": True})
-        return {
-            'success': True,
-            **result
-        }
+        json_handler.log_operation(
+            "vector_search_collection",
+            {"collection": collection_name, "count": result.get("count", 0), "success": True},
+        )
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"[vector_search] Collection search failed for '{collection_name}': {e}")
-        return {
-            'success': False,
-            'error': f"Search failed: {e}"
-        }
+        return {"success": False, "error": f"Search failed: {e}"}
 
 
 def encode_query(query: str) -> Dict[str, Any]:
@@ -353,28 +333,17 @@ def encode_query(query: str) -> Dict[str, Any]:
             dimension = result['dimension']  # 384
     """
     if not query or not query.strip():
-        return {
-            'success': False,
-            'error': 'Empty query string'
-        }
+        return {"success": False, "error": "Empty query string"}
 
     try:
         encoder = _get_encoder()
         embedding = encoder.encode(query)
 
-        return {
-            'success': True,
-            'embedding': embedding,
-            'dimension': len(embedding),
-            'model': encoder.model_name
-        }
+        return {"success": True, "embedding": embedding, "dimension": len(embedding), "model": encoder.model_name}
 
     except Exception as e:
         logger.error(f"[vector_search] Query encoding failed: {e}")
-        return {
-            'success': False,
-            'error': f"Encoding failed: {e}"
-        }
+        return {"success": False, "error": f"Encoding failed: {e}"}
 
 
 def list_collections(db_path: Path | None = None) -> Dict[str, Any]:
@@ -401,26 +370,15 @@ def list_collections(db_path: Path | None = None) -> Dict[str, Any]:
         service = _get_service(db_path)
         collections = service.list_collections()
 
-        return {
-            'success': True,
-            'collections': collections,
-            'count': len(collections),
-            'db_path': str(service.db_path)
-        }
+        return {"success": True, "collections": collections, "count": len(collections), "db_path": str(service.db_path)}
 
     except Exception as e:
         logger.error(f"[vector_search] Failed to list collections: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to list collections: {e}"
-        }
+        return {"success": False, "error": f"Failed to list collections: {e}"}
 
 
 def search_all_collections(
-    query_embedding: List[float],
-    n_results: int = 5,
-    where: Dict[str, Any] | None = None,
-    db_path: Path | None = None
+    query_embedding: List[float], n_results: int = 5, where: Dict[str, Any] | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Search across all collections in database
@@ -456,53 +414,37 @@ def search_all_collections(
         db_path = Path(db_path)
 
     if not query_embedding:
-        return {
-            'success': False,
-            'error': 'No query embedding provided'
-        }
+        return {"success": False, "error": "No query embedding provided"}
 
     try:
         service = _get_service(db_path)
         collections = service.list_collections()
 
         if not collections:
-            return {
-                'success': True,
-                'results': {},
-                'message': 'No collections found'
-            }
+            return {"success": True, "results": {}, "message": "No collections found"}
 
         # Query each collection
         results = {}
         for collection_name in collections:
             coll_result = service.query_collection(
-                collection_name=collection_name,
-                query_embedding=query_embedding,
-                n_results=n_results,
-                where=where
+                collection_name=collection_name, query_embedding=query_embedding, n_results=n_results, where=where
             )
 
-            if coll_result.get('exists', False):
+            if coll_result.get("exists", False):
                 results[collection_name] = {
-                    'documents': coll_result['documents'],
-                    'metadatas': coll_result['metadatas'],
-                    'distances': coll_result['distances'],
-                    'ids': coll_result['ids'],
-                    'count': coll_result['count']
+                    "documents": coll_result["documents"],
+                    "metadatas": coll_result["metadatas"],
+                    "distances": coll_result["distances"],
+                    "ids": coll_result["ids"],
+                    "count": coll_result["count"],
                 }
 
-        total = sum(r['count'] for r in results.values())
-        json_handler.log_operation("vector_search_all", {"collections": len(results), "total_results": total, "success": True})
-        return {
-            'success': True,
-            'results': results,
-            'collections_searched': len(results),
-            'total_results': total
-        }
+        total = sum(r["count"] for r in results.values())
+        json_handler.log_operation(
+            "vector_search_all", {"collections": len(results), "total_results": total, "success": True}
+        )
+        return {"success": True, "results": results, "collections_searched": len(results), "total_results": total}
 
     except Exception as e:
         logger.error(f"[vector_search] Multi-collection search failed: {e}")
-        return {
-            'success': False,
-            'error': f"Multi-collection search failed: {e}"
-        }
+        return {"success": False, "error": f"Multi-collection search failed: {e}"}

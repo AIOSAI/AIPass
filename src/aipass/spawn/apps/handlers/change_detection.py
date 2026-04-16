@@ -21,6 +21,7 @@ from typing import Any
 # CHANGE DETECTION
 # =============================================================================
 
+
 def detect_changes(
     template_registry: dict,
     branch_meta: dict,
@@ -106,11 +107,13 @@ def detect_changes(
         branch_path = b_info.get("current_path", "")
         name = b_info.get("current_name", "")
 
-        pruned.append({
-            "file_id": file_id,
-            "branch_path": branch_path,
-            "name": name,
-        })
+        pruned.append(
+            {
+                "file_id": file_id,
+                "branch_path": branch_path,
+                "name": name,
+            }
+        )
 
     # -----------------------------------------------------------------
     # 3. Detect RENAMES and UPDATES: IDs in both template and branch
@@ -134,24 +137,28 @@ def detect_changes(
             old_info = old_branch_tracking[file_id]
             old_template_name = old_info.get("template_name", "")
             if old_template_name and template_path != old_template_name:
-                renames.append({
-                    "file_id": file_id,
-                    "template_path": template_path,
-                    "branch_path": branch_path,
-                    "old_name": old_template_name,
-                    "new_name": template_path,
-                })
+                renames.append(
+                    {
+                        "file_id": file_id,
+                        "template_path": template_path,
+                        "branch_path": branch_path,
+                        "old_name": old_template_name,
+                        "new_name": template_path,
+                    }
+                )
         else:
             # Fallback: compare against current branch meta
             branch_template_name = b_info.get("template_name", "")
             if branch_template_name and template_path != branch_template_name:
-                renames.append({
-                    "file_id": file_id,
-                    "template_path": template_path,
-                    "branch_path": branch_path,
-                    "old_name": branch_template_name,
-                    "new_name": template_path,
-                })
+                renames.append(
+                    {
+                        "file_id": file_id,
+                        "template_path": template_path,
+                        "branch_path": branch_path,
+                        "old_name": branch_template_name,
+                        "new_name": template_path,
+                    }
+                )
 
         # Check for UPDATE: same ID, same location, content hash changed
         # Only applies to files (directories don't have content hashes)
@@ -160,13 +167,15 @@ def detect_changes(
             branch_hash = b_info.get("content_hash", "")
 
             if template_hash and branch_hash and template_hash != branch_hash:
-                updates.append({
-                    "file_id": file_id,
-                    "template_path": template_path,
-                    "branch_path": branch_path,
-                    "template_hash": template_hash,
-                    "branch_hash": branch_hash,
-                })
+                updates.append(
+                    {
+                        "file_id": file_id,
+                        "template_path": template_path,
+                        "branch_path": branch_path,
+                        "template_hash": template_hash,
+                        "branch_hash": branch_hash,
+                    }
+                )
 
     return {
         "additions": additions,

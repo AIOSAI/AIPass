@@ -20,6 +20,7 @@ import sys
 # HELPERS
 # =============================================
 
+
 def _fresh_import_reader(monkeypatch, tmp_path):
     """Import reader module with a fresh state, patching _find_repo_root to tmp_path.
 
@@ -41,6 +42,7 @@ def _fresh_import_reader(monkeypatch, tmp_path):
 # =============================================
 # TESTS: read_all_centrals
 # =============================================
+
 
 class TestReadAllCentrals:
     """Tests for read_all_centrals()."""
@@ -71,9 +73,7 @@ class TestReadAllCentrals:
         central_dir.mkdir()
 
         payload = {"status": "active", "version": "1.0.0"}
-        (central_dir / "AI_MAIL.central.json").write_text(
-            json.dumps(payload), encoding="utf-8"
-        )
+        (central_dir / "AI_MAIL.central.json").write_text(json.dumps(payload), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "ai_mail" in result
@@ -91,9 +91,7 @@ class TestReadAllCentrals:
             "DEVPULSE": {"type": "monitor", "uptime": 99.9},
         }
         for name, data in services.items():
-            (central_dir / f"{name}.central.json").write_text(
-                json.dumps(data), encoding="utf-8"
-            )
+            (central_dir / f"{name}.central.json").write_text(json.dumps(data), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert len(result) == 3
@@ -107,9 +105,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "MyService.central.json").write_text(
-            json.dumps({"ok": True}), encoding="utf-8"
-        )
+        (central_dir / "MyService.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "myservice" in result
@@ -121,29 +117,21 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "BAD.central.json").write_text(
-            "{not valid json!!", encoding="utf-8"
-        )
+        (central_dir / "BAD.central.json").write_text("{not valid json!!", encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "bad" not in result
         assert result == {}
 
-    def test_malformed_file_does_not_block_valid_files(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path
-    ):
+    def test_malformed_file_does_not_block_valid_files(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """A broken file should not prevent other valid files from loading."""
         reader = _fresh_import_reader(monkeypatch, tmp_path)
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
         good_data = {"healthy": True}
-        (central_dir / "GOOD.central.json").write_text(
-            json.dumps(good_data), encoding="utf-8"
-        )
-        (central_dir / "BAD.central.json").write_text(
-            "<<<broken>>>", encoding="utf-8"
-        )
+        (central_dir / "GOOD.central.json").write_text(json.dumps(good_data), encoding="utf-8")
+        (central_dir / "BAD.central.json").write_text("<<<broken>>>", encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert len(result) == 1
@@ -157,14 +145,10 @@ class TestReadAllCentrals:
         central_dir.mkdir()
 
         # A valid central file
-        (central_dir / "VALID.central.json").write_text(
-            json.dumps({"ok": True}), encoding="utf-8"
-        )
+        (central_dir / "VALID.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
         # Files that should NOT be picked up
         (central_dir / "notes.txt").write_text("just a note", encoding="utf-8")
-        (central_dir / "config.json").write_text(
-            json.dumps({"nope": True}), encoding="utf-8"
-        )
+        (central_dir / "config.json").write_text(json.dumps({"nope": True}), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert len(result) == 1
@@ -176,9 +160,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "BROKEN.central.json").write_text(
-            "not json", encoding="utf-8"
-        )
+        (central_dir / "BROKEN.central.json").write_text("not json", encoding="utf-8")
 
         reader.read_all_centrals()
         reader.logger.warning.assert_called()  # type: ignore[union-attr]
@@ -189,9 +171,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "SVC.central.json").write_text(
-            json.dumps({"ok": True}), encoding="utf-8"
-        )
+        (central_dir / "SVC.central.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
 
         reader.read_all_centrals()
         reader.json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
@@ -204,9 +184,7 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        (central_dir / "EMPTY.central.json").write_text(
-            json.dumps({}), encoding="utf-8"
-        )
+        (central_dir / "EMPTY.central.json").write_text(json.dumps({}), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert "empty" in result
@@ -218,25 +196,14 @@ class TestReadAllCentrals:
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
 
-        nested = {
-            "level1": {
-                "level2": {
-                    "items": [1, 2, 3],
-                    "flag": True
-                }
-            }
-        }
-        (central_dir / "NESTED.central.json").write_text(
-            json.dumps(nested), encoding="utf-8"
-        )
+        nested = {"level1": {"level2": {"items": [1, 2, 3], "flag": True}}}
+        (central_dir / "NESTED.central.json").write_text(json.dumps(nested), encoding="utf-8")
 
         result = reader.read_all_centrals()
         assert result["nested"] == nested
         assert result["nested"]["level1"]["level2"]["items"] == [1, 2, 3]
 
-    def test_no_json_handler_call_when_dir_missing(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path
-    ):
+    def test_no_json_handler_call_when_dir_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """When directory is missing, should return early without calling json_handler."""
         reader = _fresh_import_reader(monkeypatch, tmp_path)
         # No .ai_central directory

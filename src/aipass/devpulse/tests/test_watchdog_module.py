@@ -119,12 +119,14 @@ def test_cancel_requires_handle(capsys):
 
 def test_cancel_handle_routes_to_registry(capsys):
     """`cancel <handle>` calls registry.kill_watch and prints the result."""
-    fake = _fake_registry_module(kill_result={
-        "handle": "agent-abc123",
-        "killed": True,
-        "was_alive": True,
-        "reason": "SIGTERM — pid 1234 exited in 0.1s",
-    })
+    fake = _fake_registry_module(
+        kill_result={
+            "handle": "agent-abc123",
+            "killed": True,
+            "was_alive": True,
+            "reason": "SIGTERM — pid 1234 exited in 0.1s",
+        }
+    )
     with _patch_registry_imports(fake):
         result = wd_mod.handle_command("watchdog", ["cancel", "agent-abc123"])
     assert result is True
@@ -136,10 +138,12 @@ def test_cancel_handle_routes_to_registry(capsys):
 
 def test_cancel_all_routes_to_registry(capsys):
     """`cancel --all` calls registry.kill_all and prints every result line."""
-    fake = _fake_registry_module(kill_all_result=[
-        {"handle": "timer-111111", "killed": True, "was_alive": True, "reason": "ok"},
-        {"handle": "schedule-222222", "killed": True, "was_alive": True, "reason": "ok"},
-    ])
+    fake = _fake_registry_module(
+        kill_all_result=[
+            {"handle": "timer-111111", "killed": True, "was_alive": True, "reason": "ok"},
+            {"handle": "schedule-222222", "killed": True, "was_alive": True, "reason": "ok"},
+        ]
+    )
     with _patch_registry_imports(fake):
         result = wd_mod.handle_command("watchdog", ["cancel", "--all"])
     assert result is True
@@ -270,9 +274,7 @@ def test_agent_subcommand_parses_timeout_flag():
 
 def test_agent_subcommand_invalid_timeout(capsys):
     """Invalid --timeout value reports a clean error."""
-    result = wd_mod.handle_command(
-        "watchdog", ["agent", "@flow", "--timeout", "notanumber"]
-    )
+    result = wd_mod.handle_command("watchdog", ["agent", "@flow", "--timeout", "notanumber"])
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err

@@ -38,10 +38,12 @@ def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     trinity.mkdir()
     passport = trinity / "passport.json"
     passport.write_text(
-        json.dumps({
-            "branch_info": {"branch_name": "devpulse"},
-            "identity": {"name": "devpulse"},
-        }),
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "devpulse"},
+                "identity": {"name": "devpulse"},
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -55,10 +57,12 @@ def seedgo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     trinity.mkdir()
     passport = trinity / "passport.json"
     passport.write_text(
-        json.dumps({
-            "branch_info": {"branch_name": "seedgo"},
-            "identity": {"name": "seedgo"},
-        }),
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "seedgo"},
+                "identity": {"name": "seedgo"},
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -160,9 +164,7 @@ class TestSystemPrNotOnMain:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.pr_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.pr_plugin.subprocess.run")
-    def test_system_pr_not_on_main(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_system_pr_not_on_main(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         # Simulate being on a feature branch

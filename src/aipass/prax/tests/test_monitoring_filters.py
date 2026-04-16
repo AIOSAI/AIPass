@@ -15,10 +15,10 @@ filter_log_content, and apply_content_filter.
 from pathlib import Path
 
 
-
 # =============================================
 # should_monitor TESTS
 # =============================================
+
 
 class TestShouldMonitor:
     """Tests for should_monitor(path)."""
@@ -136,6 +136,7 @@ class TestShouldMonitor:
 # get_priority TESTS
 # =============================================
 
+
 class TestGetPriority:
     """Tests for get_priority(path, event_type)."""
 
@@ -193,6 +194,7 @@ class TestGetPriority:
 # get_content_filter TESTS
 # =============================================
 
+
 class TestGetContentFilter:
     """Tests for get_content_filter(path)."""
 
@@ -232,6 +234,7 @@ class TestGetContentFilter:
 # =============================================
 # filter_log_content TESTS
 # =============================================
+
 
 class TestFilterLogContent:
     """Tests for filter_log_content(content, ...)."""
@@ -307,6 +310,7 @@ class TestFilterLogContent:
 # =============================================
 # apply_content_filter TESTS
 # =============================================
+
 
 class TestApplyContentFilter:
     """Tests for apply_content_filter(path, content, ...)."""

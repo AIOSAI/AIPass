@@ -49,6 +49,7 @@ from aipass.seedgo.apps.handlers.audit.discovery import discover_branches
 # COMMAND HANDLER
 # =============================================================================
 
+
 def print_introspection() -> None:
     """Display module info and connected handlers."""
     console.print()
@@ -135,6 +136,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================================================
 # DISPLAY
 # =============================================================================
+
 
 def _display_coverage_map(result: dict) -> None:
     """Render the coverage map with Rich formatting."""

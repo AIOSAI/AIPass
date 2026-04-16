@@ -46,9 +46,7 @@ _MOD = "aipass.api.apps.modules.google_client"
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_returns_false_no_args(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console
-):
+def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console):
     """handle_command returns False when args=[] and command != 'google'."""
     from aipass.api.apps.modules import google_client
 
@@ -134,9 +132,7 @@ def test_handle_command_routes_reauth_google(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_help_gate(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, mock_console
-):
+def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, mock_console):
     """handle_command prints help when args=['google', '--help'] and returns True."""
     from aipass.api.apps.modules import google_client
 
@@ -205,9 +201,7 @@ def test_handle_command_unknown_command_returns_false(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_drive_service_delegates(
-    _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
-):
+def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_drive_service() delegates to get_google_service('drive', 'v3')."""
     from aipass.api.apps.modules import google_client
 
@@ -235,9 +229,7 @@ def test_get_drive_service_delegates(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_standard(
-    _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
-):
+def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service() returns service via build_service when is_available=True."""
     from aipass.api.apps.modules import google_client
 
@@ -260,9 +252,7 @@ def test_get_google_service_standard(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_thread_safe(
-    _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
-):
+def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service(thread_safe=True) calls build_thread_safe_service."""
     from aipass.api.apps.modules import google_client
 
@@ -285,9 +275,7 @@ def test_get_google_service_thread_safe(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_libs_not_available(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """get_google_service() raises RuntimeError when libraries are not installed."""
     from aipass.api.apps.modules import google_client
 
@@ -306,9 +294,7 @@ def test_get_google_service_libs_not_available(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_auth_failure(
-    _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
-):
+def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service() raises RuntimeError when build_service returns None."""
     from aipass.api.apps.modules import google_client
 
@@ -359,9 +345,7 @@ def test_get_google_service_with_custom_scopes(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_true(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() returns True when credentials are valid."""
     from aipass.api.apps.modules import google_client
 
@@ -382,9 +366,7 @@ def test_validate_google_true(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_false(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() returns False when no valid credentials exist."""
     from aipass.api.apps.modules import google_client
 
@@ -404,9 +386,7 @@ def test_validate_google_false(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_with_scopes(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() passes scopes to validate_credentials."""
     from aipass.api.apps.modules import google_client
 
@@ -433,9 +413,7 @@ def test_validate_google_with_scopes(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_authenticate_google_success(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """authenticate_google() returns True when authenticate returns credentials."""
     from aipass.api.apps.modules import google_client
 
@@ -456,9 +434,7 @@ def test_authenticate_google_success(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_authenticate_google_failure(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """authenticate_google() returns False when authenticate returns None."""
     from aipass.api.apps.modules import google_client
 
@@ -483,9 +459,7 @@ def test_authenticate_google_failure(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_reauth_google_success(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """reauth_google() returns True when reauth returns credentials."""
     from aipass.api.apps.modules import google_client
 
@@ -506,9 +480,7 @@ def test_reauth_google_success(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_reauth_google_failure(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """reauth_google() returns False when reauth returns None."""
     from aipass.api.apps.modules import google_client
 
@@ -533,9 +505,7 @@ def test_reauth_google_failure(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_api_call_with_retry_delegates(
-    _warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console
-):
+def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
     """api_call_with_retry() delegates to google_retry.api_call_with_retry."""
     from aipass.api.apps.modules import google_client
 
@@ -562,9 +532,7 @@ def test_api_call_with_retry_delegates(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_is_ssl_error_delegates(
-    _warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console
-):
+def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
     """is_ssl_error() delegates to google_retry.is_ssl_error."""
     from aipass.api.apps.modules import google_client
 
@@ -591,9 +559,7 @@ def test_is_ssl_error_delegates(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_libs_not_available(
-    _warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows error when Google libs are not installed."""
     from aipass.api.apps.modules import google_client
 
@@ -614,9 +580,7 @@ def test_cmd_validate_libs_not_available(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_no_client_secret(
-    _warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows error when client secret file is missing."""
     from aipass.api.apps.modules import google_client
 
@@ -638,9 +602,7 @@ def test_cmd_validate_no_client_secret(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_valid_creds(
-    _warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows success when credentials are valid."""
     from aipass.api.apps.modules import google_client
 
@@ -651,9 +613,7 @@ def test_cmd_validate_valid_creds(
     google_client._cmd_validate()
 
     mock_succ.assert_called_once_with("Google credentials are valid")
-    mock_json.log_operation.assert_called_once_with(
-        "google_validate", {"status": "valid"}
-    )
+    mock_json.log_operation.assert_called_once_with("google_validate", {"status": "valid"})
     _err.assert_not_called()
 
 
@@ -666,9 +626,7 @@ def test_cmd_validate_valid_creds(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_invalid_creds(
-    mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, mock_console
-):
+def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, mock_console):
     """_cmd_validate shows warning when credentials are invalid."""
     from aipass.api.apps.modules import google_client
 
@@ -679,9 +637,7 @@ def test_cmd_validate_invalid_creds(
     google_client._cmd_validate()
 
     mock_warn.assert_called_once_with("No valid Google credentials found")
-    mock_json.log_operation.assert_called_once_with(
-        "google_validate", {"status": "invalid"}
-    )
+    mock_json.log_operation.assert_called_once_with("google_validate", {"status": "invalid"})
     _succ.assert_not_called()
 
 
@@ -699,9 +655,7 @@ def test_cmd_validate_invalid_creds(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_libs_not_available(
-    _warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows error when Google libs are not installed."""
     from aipass.api.apps.modules import google_client
 
@@ -722,9 +676,7 @@ def test_cmd_reauth_libs_not_available(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_success(
-    _warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows success when reauth returns credentials."""
     from aipass.api.apps.modules import google_client
 
@@ -735,9 +687,7 @@ def test_cmd_reauth_success(
     google_client._cmd_reauth()
 
     mock_succ.assert_called_once_with("Google re-authentication successful")
-    mock_json.log_operation.assert_called_once_with(
-        "google_reauth", {"status": "success"}
-    )
+    mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "success"})
     _err.assert_not_called()
 
 
@@ -750,9 +700,7 @@ def test_cmd_reauth_success(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_failure(
-    _warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
-):
+def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows error when reauth returns None."""
     from aipass.api.apps.modules import google_client
 
@@ -763,9 +711,7 @@ def test_cmd_reauth_failure(
     google_client._cmd_reauth()
 
     mock_err.assert_called_once_with("Google re-authentication failed")
-    mock_json.log_operation.assert_called_once_with(
-        "google_reauth", {"status": "failed"}
-    )
+    mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "failed"})
     _succ.assert_not_called()
 
 
@@ -783,9 +729,7 @@ def test_cmd_reauth_failure(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_propagates_exception(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console
-):
+def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """handle_command re-raises exceptions from downstream handlers."""
     from aipass.api.apps.modules import google_client
 
@@ -822,9 +766,7 @@ def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
         str(mock_creds_path),
         ["https://www.googleapis.com/auth/drive.file"],
     )
-    mock_json.log_operation.assert_called_once_with(
-        "credentials_loaded", {"source": str(mock_creds_path)}
-    )
+    mock_json.log_operation.assert_called_once_with("credentials_loaded", {"source": str(mock_creds_path)})
 
 
 @patch(f"{_AUTH}.json_handler")

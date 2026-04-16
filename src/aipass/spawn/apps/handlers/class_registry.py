@@ -53,9 +53,7 @@ def get_template_dir(citizen_class: str = DEFAULT_CLASS) -> Path:
     """
     if citizen_class not in CITIZEN_CLASSES:
         available = ", ".join(sorted(CITIZEN_CLASSES.keys()))
-        raise ValueError(
-            f"Unknown citizen class '{citizen_class}'. Available: {available}"
-        )
+        raise ValueError(f"Unknown citizen class '{citizen_class}'. Available: {available}")
 
     subdir = CITIZEN_CLASSES[citizen_class]["template_dir"]
     return _TEMPLATES_DIR / subdir

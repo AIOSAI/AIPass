@@ -48,6 +48,7 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
+
 def save_registry(registry: Dict[str, Any], registry_file: str | None = None) -> bool:
     """Save PLAN registry
 
@@ -69,13 +70,16 @@ def save_registry(registry: Dict[str, Any], registry_file: str | None = None) ->
     try:
         FLOW_JSON_DIR.mkdir(parents=True, exist_ok=True)
         registry["last_updated"] = datetime.now(timezone.utc).isoformat()
-        with open(target, 'w', encoding='utf-8') as f:
+        with open(target, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
-        json_handler.log_operation("registry_saved", {
-            "target_file": target.name,
-            "plan_count": len(registry.get("plans", {})),
-            "success": True,
-        })
+        json_handler.log_operation(
+            "registry_saved",
+            {
+                "target_file": target.name,
+                "plan_count": len(registry.get("plans", {})),
+                "success": True,
+            },
+        )
         return True
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to save registry to {target}: {e}")

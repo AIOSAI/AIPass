@@ -5,6 +5,7 @@ Handlers for Google service authentication, credential management,
 and service object factories. Provides authenticated clients for
 Google APIs (Drive, Calendar, etc.) to consuming branches.
 """
+
 __version__ = "1.0.0"
 
 from . import auth as auth

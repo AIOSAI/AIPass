@@ -41,6 +41,7 @@ from aipass.drone.apps.handlers.module_registry_handler import (
 # scan_modules_directory tests
 # =============================================================================
 
+
 class TestScanModulesDirectory:
     """Tests for scan_modules_directory()."""
 
@@ -116,6 +117,7 @@ class TestScanModulesDirectory:
 # parse_help_for_commands tests
 # =============================================================================
 
+
 class TestParseHelpForCommands:
     """Tests for parse_help_for_commands()."""
 
@@ -141,14 +143,7 @@ class TestParseHelpForCommands:
 
     def test_extracts_from_subcommands_section(self):
         """Should recognize 'Subcommands:' as a section marker."""
-        help_text = (
-            "MyTool v1.0\n"
-            "\n"
-            "Subcommands:\n"
-            "  status      Show status\n"
-            "  config      Configure settings\n"
-            "\n"
-        )
+        help_text = "MyTool v1.0\n\nSubcommands:\n  status      Show status\n  config      Configure settings\n\n"
 
         result = parse_help_for_commands(help_text)
 
@@ -157,14 +152,7 @@ class TestParseHelpForCommands:
 
     def test_extracts_from_available_commands_section(self):
         """Should recognize 'Available Commands:' as a section marker."""
-        help_text = (
-            "Usage: app\n"
-            "\n"
-            "Available Commands:\n"
-            "  run         Run the app\n"
-            "  test        Run tests\n"
-            "\n"
-        )
+        help_text = "Usage: app\n\nAvailable Commands:\n  run         Run the app\n  test        Run tests\n\n"
 
         result = parse_help_for_commands(help_text)
 
@@ -173,12 +161,7 @@ class TestParseHelpForCommands:
 
     def test_skips_options_flags(self):
         """Should not include lines starting with - as commands."""
-        help_text = (
-            "Commands:\n"
-            "  start       Start the server\n"
-            "  -v          Verbose mode\n"
-            "  --debug     Debug mode\n"
-        )
+        help_text = "Commands:\n  start       Start the server\n  -v          Verbose mode\n  --debug     Debug mode\n"
 
         result = parse_help_for_commands(help_text)
 
@@ -194,13 +177,7 @@ class TestParseHelpForCommands:
 
     def test_no_commands_section_returns_empty(self):
         """Help text without a commands section should return empty list."""
-        help_text = (
-            "Usage: tool [OPTIONS]\n"
-            "\n"
-            "Options:\n"
-            "  --help      Show help\n"
-            "  --version   Show version\n"
-        )
+        help_text = "Usage: tool [OPTIONS]\n\nOptions:\n  --help      Show help\n  --version   Show version\n"
 
         result = parse_help_for_commands(help_text)
 
@@ -230,6 +207,7 @@ class TestParseHelpForCommands:
 # get_entry_point tests
 # =============================================================================
 
+
 class TestGetEntryPoint:
     """Tests for get_entry_point()."""
 
@@ -255,6 +233,7 @@ class TestGetEntryPoint:
 # =============================================================================
 # handler get_help tests
 # =============================================================================
+
 
 class TestHandlerGetHelp:
     """Tests for discovery_handler.get_help()."""
@@ -346,6 +325,7 @@ class TestHandlerGetHelp:
 # handler discover_modules tests
 # =============================================================================
 
+
 class TestHandlerDiscoverModules:
     """Tests for discovery_handler.discover_modules()."""
 
@@ -424,6 +404,7 @@ class TestHandlerDiscoverModules:
 # orchestration layer: discovery.discover_modules tests
 # =============================================================================
 
+
 class TestOrchestrationDiscoverModules:
     """Tests for discovery.discover_modules() orchestration."""
 
@@ -456,6 +437,7 @@ class TestOrchestrationDiscoverModules:
 # =============================================================================
 # orchestration layer: discovery.get_help tests
 # =============================================================================
+
 
 class TestOrchestrationGetHelp:
     """Tests for discovery.get_help() orchestration."""
@@ -495,6 +477,7 @@ class TestOrchestrationGetHelp:
 # orchestration layer: discovery.get_system_help tests
 # =============================================================================
 
+
 class TestOrchestrationGetSystemHelp:
     """Tests for discovery.get_system_help() orchestration."""
 
@@ -520,6 +503,7 @@ class TestOrchestrationGetSystemHelp:
 # =============================================================================
 # get_module_introspective tests
 # =============================================================================
+
 
 class TestGetModuleIntrospective:
     """Tests for module_registry_handler.get_module_introspective()."""
@@ -560,6 +544,7 @@ class TestGetModuleIntrospective:
 # handle_command routing tests
 # =============================================================================
 
+
 class TestHandleCommand:
     """Tests for discovery.handle_command() routing."""
 
@@ -597,7 +582,10 @@ class TestHandleCommand:
         from aipass.drone.apps.modules.discovery import handle_command
 
         mock_get_help.return_value = HelpResult(
-            branch="branch", command=None, text="help text", commands_found=[],
+            branch="branch",
+            command=None,
+            text="help text",
+            commands_found=[],
         )
 
         result = handle_command("help", ["@branch"])
@@ -611,7 +599,10 @@ class TestHandleCommand:
         from aipass.drone.apps.modules.discovery import handle_command
 
         mock_get_help.return_value = HelpResult(
-            branch="branch", command="subcmd", text="subcmd help", commands_found=[],
+            branch="branch",
+            command="subcmd",
+            text="subcmd help",
+            commands_found=[],
         )
 
         result = handle_command("help", ["@branch", "subcmd"])

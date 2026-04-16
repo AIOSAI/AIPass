@@ -27,25 +27,25 @@ AUDIT_SCOPE = "all_files"
 
 # -- Nesting node types -----------------------------------------------------
 
-_NESTING_NODES = (ast.If, ast.For, ast.While, ast.Try, ast.With,
-                  ast.ExceptHandler)
+_NESTING_NODES = (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.ExceptHandler)
 
 DEPTH_LIMIT = 4
 
 
 # -- Bypass helper -----------------------------------------------------------
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed."""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -53,6 +53,7 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
 
 
 # -- AST depth analysis ------------------------------------------------------
+
 
 def _max_nesting_depth(node: ast.AST, current: int = 0) -> int:
     """
@@ -74,6 +75,7 @@ def _max_nesting_depth(node: ast.AST, current: int = 0) -> int:
 
 # -- File scanning -----------------------------------------------------------
 
+
 def _scan_file(file_path: Path) -> list[dict]:
     """
     Parse a single .py file and return a list of violation dicts.
@@ -83,7 +85,7 @@ def _scan_file(file_path: Path) -> list[dict]:
     violations: list[dict] = []
 
     try:
-        source = file_path.read_text(encoding='utf-8', errors='ignore')
+        source = file_path.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(source, filename=str(file_path))
     except SyntaxError:
         logger.info("Skipped %s: SyntaxError during parse", file_path)
@@ -94,16 +96,19 @@ def _scan_file(file_path: Path) -> list[dict]:
             continue
         depth = _max_nesting_depth(node)
         if depth > DEPTH_LIMIT:
-            violations.append({
-                'func': node.name,
-                'depth': depth,
-                'line': node.lineno,
-            })
+            violations.append(
+                {
+                    "func": node.name,
+                    "depth": depth,
+                    "line": node.lineno,
+                }
+            )
 
     return violations
 
 
 # -- Public checker entry point ----------------------------------------------
+
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
     """
@@ -120,57 +125,58 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'deep_nesting', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "deep_nesting", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'DEEP_NESTING',
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "DEEP_NESTING",
         }
 
     # Skip __init__.py files
-    if path.name == '__init__.py':
+    if path.name == "__init__.py":
         return {
-            'passed': True,
-            'checks': [{'name': 'Deep nesting', 'passed': True, 'message': '__init__.py skipped'}],
-            'score': 100,
-            'standard': 'DEEP_NESTING',
+            "passed": True,
+            "checks": [{"name": "Deep nesting", "passed": True, "message": "__init__.py skipped"}],
+            "score": 100,
+            "standard": "DEEP_NESTING",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'DEEP_NESTING',
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "DEEP_NESTING",
         }
 
     # Scan for deep nesting violations
     violations = _scan_file(path)
 
     if not violations:
-        checks.append({
-            'name': 'Deep nesting',
-            'passed': True,
-            'message': 'All functions within nesting limit (max depth 3)',
-        })
-    else:
-        func_details = ', '.join(
-            f'{v["func"]}() depth {v["depth"]} line {v["line"]}'
-            for v in violations
+        checks.append(
+            {
+                "name": "Deep nesting",
+                "passed": True,
+                "message": "All functions within nesting limit (max depth 3)",
+            }
         )
-        checks.append({
-            'name': 'Deep nesting',
-            'passed': False,
-            'message': (
-                f'{len(violations)} function{"s" if len(violations) != 1 else ""} '
-                f'exceed nesting limit: {func_details}'
-            ),
-        })
+    else:
+        func_details = ", ".join(f"{v['func']}() depth {v['depth']} line {v['line']}" for v in violations)
+        checks.append(
+            {
+                "name": "Deep nesting",
+                "passed": False,
+                "message": (
+                    f"{len(violations)} function{'s' if len(violations) != 1 else ''} "
+                    f"exceed nesting limit: {func_details}"
+                ),
+            }
+        )
 
     # Calculate score
-    passed_checks = sum(1 for c in checks if c['passed'])
+    passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks) * 100) if total_checks > 0 else 0
 
@@ -182,8 +188,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
     )
 
     return {
-        'passed': overall_passed,
-        'score': score,
-        'checks': checks,
-        'standard': 'DEEP_NESTING',
+        "passed": overall_passed,
+        "score": score,
+        "checks": checks,
+        "standard": "DEEP_NESTING",
     }

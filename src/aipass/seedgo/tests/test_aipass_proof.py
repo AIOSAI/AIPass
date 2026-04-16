@@ -17,6 +17,7 @@ from pathlib import Path
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for proof handlers."""
@@ -51,9 +52,11 @@ def _mock_infrastructure(monkeypatch):
 # Tests -- interface.scan
 # ---------------------------------------------------------------------------
 
+
 def test_interface_scan_missing_directory():
     """interface.scan returns passed=False for non-existent directory."""
     from aipass.seedgo.apps.handlers.aipass_proof.interface import scan
+
     result = scan(Path("/nonexistent/directory"))
     assert result["passed"] is False
     assert result["total"] == 0
@@ -63,6 +66,7 @@ def test_interface_scan_missing_directory():
 def test_interface_scan_empty_directory(tmp_path):
     """interface.scan on an empty directory finds no checkers."""
     from aipass.seedgo.apps.handlers.aipass_proof.interface import scan
+
     result = scan(tmp_path)
     assert result["total"] == 0
     assert result["passed"] is False  # 0 checkers => not passed
@@ -73,12 +77,11 @@ def test_interface_scan_compliant_checker(tmp_path):
     """interface.scan detects a fully compliant checker."""
     check_file = tmp_path / "example_check.py"
     check_file.write_text(
-        'AUDIT_SCOPE = "all_files"\n\n'
-        'def check_module(module_path, bypass_rules=None):\n'
-        '    return {"passed": True}\n',
+        'AUDIT_SCOPE = "all_files"\n\ndef check_module(module_path, bypass_rules=None):\n    return {"passed": True}\n',
         encoding="utf-8",
     )
     from aipass.seedgo.apps.handlers.aipass_proof.interface import scan
+
     result = scan(tmp_path)
     assert result["passed"] is True
     assert result["total"] == 1
@@ -90,11 +93,11 @@ def test_interface_scan_missing_scope(tmp_path):
     """interface.scan flags checker without AUDIT_SCOPE."""
     check_file = tmp_path / "bad_check.py"
     check_file.write_text(
-        'def check_module(module_path, bypass_rules=None):\n'
-        '    return {"passed": True}\n',
+        'def check_module(module_path, bypass_rules=None):\n    return {"passed": True}\n',
         encoding="utf-8",
     )
     from aipass.seedgo.apps.handlers.aipass_proof.interface import scan
+
     result = scan(tmp_path)
     assert result["fail_count"] >= 1
     assert any("AUDIT_SCOPE" in issue for issue in result["issues"])
@@ -105,11 +108,12 @@ def test_interface_scan_branch_level_checker(tmp_path):
     check_file = tmp_path / "branch_check.py"
     check_file.write_text(
         'AUDIT_SCOPE = "branch_level"\n\n'
-        'def check_branch(branch_path, bypass_rules=None):\n'
+        "def check_branch(branch_path, bypass_rules=None):\n"
         '    return {"passed": True}\n',
         encoding="utf-8",
     )
     from aipass.seedgo.apps.handlers.aipass_proof.interface import scan
+
     result = scan(tmp_path)
     assert result["passed"] is True
     assert result["pass_count"] == 1
@@ -119,10 +123,12 @@ def test_interface_scan_branch_level_checker(tmp_path):
 # Tests -- interface AST helpers
 # ---------------------------------------------------------------------------
 
+
 def test_extract_audit_scope_from_source():
     """_extract_audit_scope extracts AUDIT_SCOPE value from AST."""
     import ast
     from aipass.seedgo.apps.handlers.aipass_proof.interface import _extract_audit_scope
+
     source = 'AUDIT_SCOPE = "entry_point"\nx = 1\n'
     tree = ast.parse(source)
     assert _extract_audit_scope(tree) == "entry_point"
@@ -132,6 +138,7 @@ def test_extract_audit_scope_none_when_missing():
     """_extract_audit_scope returns None when AUDIT_SCOPE not defined."""
     import ast
     from aipass.seedgo.apps.handlers.aipass_proof.interface import _extract_audit_scope
+
     source = "x = 1\ny = 2\n"
     tree = ast.parse(source)
     assert _extract_audit_scope(tree) is None
@@ -141,6 +148,7 @@ def test_extract_audit_scope_none_when_missing():
 # Tests -- triplet.scan
 # ---------------------------------------------------------------------------
 
+
 def test_triplet_scan_complete_triplet(tmp_path):
     """triplet.scan identifies a complete triplet (check + content + md)."""
     (tmp_path / "naming_check.py").write_text("# check", encoding="utf-8")
@@ -148,6 +156,7 @@ def test_triplet_scan_complete_triplet(tmp_path):
     (tmp_path / "naming.md").write_text("# doc", encoding="utf-8")
 
     from aipass.seedgo.apps.handlers.aipass_proof.triplet import scan
+
     result = scan(tmp_path)
     assert "naming" in result["complete"]
     assert result["total"] >= 1
@@ -158,6 +167,7 @@ def test_triplet_scan_check_only(tmp_path):
     (tmp_path / "orphan_check.py").write_text("# check only", encoding="utf-8")
 
     from aipass.seedgo.apps.handlers.aipass_proof.triplet import scan
+
     result = scan(tmp_path)
     assert "orphan" in result["check_only"]
     assert result["passed"] is False
@@ -166,6 +176,7 @@ def test_triplet_scan_check_only(tmp_path):
 def test_triplet_scan_empty_directory(tmp_path):
     """triplet.scan on empty directory returns passed=True, total=0."""
     from aipass.seedgo.apps.handlers.aipass_proof.triplet import scan
+
     result = scan(tmp_path)
     assert result["total"] == 0
     assert result["passed"] is True

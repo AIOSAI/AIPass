@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for readme_update."""
@@ -78,15 +79,18 @@ def _mock_infrastructure(monkeypatch):
 # Tests — handle_command
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_accepts_readme_name():
     """handle_command recognises 'readme' as its command."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", [])
     assert result is True
 
@@ -94,6 +98,7 @@ def test_handle_command_accepts_readme_name():
 def test_handle_command_accepts_readme_update_name():
     """handle_command recognises 'readme_update' as its command."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme_update", [])
     assert result is True
 
@@ -101,6 +106,7 @@ def test_handle_command_accepts_readme_update_name():
 def test_handle_command_no_args_shows_introspection():
     """No args triggers introspection (returns True)."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", [])
     assert result is True
 
@@ -108,6 +114,7 @@ def test_handle_command_no_args_shows_introspection():
 def test_handle_command_help_flag():
     """--help flag is handled without error."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", ["--help"])
     assert result is True
 
@@ -115,6 +122,7 @@ def test_handle_command_help_flag():
 def test_handle_command_h_flag():
     """-h flag is handled without error."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", ["-h"])
     assert result is True
 
@@ -122,6 +130,7 @@ def test_handle_command_h_flag():
 def test_handle_command_unknown_subcommand():
     """Unknown subcommand returns True (error displayed to user)."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", ["bogus_subcommand"])
     assert result is True
 
@@ -129,6 +138,7 @@ def test_handle_command_unknown_subcommand():
 def test_handle_command_update_subcommand():
     """'update' subcommand is routed without crashing."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", ["update"])
     assert result is True
 
@@ -136,6 +146,7 @@ def test_handle_command_update_subcommand():
 def test_handle_command_check_subcommand():
     """'check' subcommand is routed without crashing."""
     from aipass.seedgo.apps.modules.readme_update import handle_command
+
     result = handle_command("readme", ["check"])
     assert result is True
 
@@ -144,61 +155,68 @@ def test_handle_command_check_subcommand():
 # Tests — introspection / help
 # ---------------------------------------------------------------------------
 
+
 def test_print_introspection_runs():
     """print_introspection produces console output."""
     import sys
     from aipass.seedgo.apps.modules.readme_update import print_introspection
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_introspection should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
 
 
 def test_print_help_runs():
     """print_help produces console output."""
     import sys
     from aipass.seedgo.apps.modules.readme_update import print_help
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_help should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
 
 
 # ---------------------------------------------------------------------------
 # Tests — display helpers
 # ---------------------------------------------------------------------------
 
+
 def test_print_target_error_no_args():
     """_print_target_error handles 'no_args' code without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_target_error
+
     _print_target_error("no_args")
 
 
 def test_print_target_error_no_branches():
     """_print_target_error handles 'no_branches' code without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_target_error
+
     _print_target_error("no_branches")
 
 
 def test_print_target_error_not_found():
     """_print_target_error handles 'not_found:xyz' code without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_target_error
+
     _print_target_error("not_found:some_branch")
 
 
 def test_print_result_empty():
     """_print_result handles empty result dict without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_result
+
     _print_result({"updated": [], "missing_markers": [], "errors": []})
 
 
 def test_print_result_with_errors():
     """_print_result displays errors without raising."""
     from aipass.seedgo.apps.modules.readme_update import _print_result
+
     _print_result({"updated": [], "missing_markers": [], "errors": ["Something went wrong"]})

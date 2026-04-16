@@ -63,14 +63,13 @@ DEPRECATED_SECTIONS = ["bulletin_board", "devpulse"]
 DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
 # Required sections (from template)
-REQUIRED_SECTIONS = [
-    "ai_mail", "flow", "memory", "commons_activity"
-]
+REQUIRED_SECTIONS = ["ai_mail", "flow", "memory", "commons_activity"]
 
 
 # =============================================================================
 # DIFF LOGIC
 # =============================================================================
+
 
 def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[str, Any]:
     """
@@ -90,7 +89,7 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
         "additions": [],
         "removals": [],
         "modifications": [],
-        "status": "up_to_date"
+        "status": "up_to_date",
     }
 
     dashboard_path = branch_path / "DASHBOARD.local.json"
@@ -146,8 +145,7 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
                 result["modifications"].append(f"quick_status: remove {dep_key}")
 
         # Check for missing required quick_status keys
-        required_qs_keys = ["new_mail", "opened_mail", "active_plans",
-                            "commons_mentions", "action_required", "summary"]
+        required_qs_keys = ["new_mail", "opened_mail", "active_plans", "commons_mentions", "action_required", "summary"]
         for key in required_qs_keys:
             if key not in quick_status:
                 result["additions"].append(f"quick_status.{key}")
@@ -162,6 +160,7 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -178,12 +177,7 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
     """
     result: Dict[str, Any] = {
         "branches": [],
-        "summary": {
-            "needs_update": 0,
-            "up_to_date": 0,
-            "missing": 0,
-            "invalid_json": 0
-        }
+        "summary": {"needs_update": 0, "up_to_date": 0, "missing": 0, "invalid_json": 0},
     }
 
     # Load template
@@ -214,11 +208,7 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         target = branch_name.upper()
         branches = [b for b in branches if b.get("name", "").upper() == target]
         if not branches:
-            return {
-                "error": f"Branch '{target}' not found in registry",
-                "branches": [],
-                "summary": {}
-            }
+            return {"error": f"Branch '{target}' not found in registry", "branches": [], "summary": {}}
 
     repo_root = _find_repo_root()
 
@@ -234,7 +224,7 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
                 "additions": [],
                 "removals": [],
                 "modifications": [],
-                "status": "missing"
+                "status": "missing",
             }
         else:
             branch_diff = _diff_branch(bname, bpath, template)
@@ -244,12 +234,15 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         if status in result["summary"]:
             result["summary"][status] += 1
 
-    json_handler.log_operation("template_diffed", {
-        "branch_filter": branch_name,
-        "branches_scanned": len(result["branches"]),
-        "needs_update": result["summary"].get("needs_update", 0),
-        "up_to_date": result["summary"].get("up_to_date", 0),
-    })
+    json_handler.log_operation(
+        "template_diffed",
+        {
+            "branch_filter": branch_name,
+            "branches_scanned": len(result["branches"]),
+            "needs_update": result["summary"].get("needs_update", 0),
+            "up_to_date": result["summary"].get("up_to_date", 0),
+        },
+    )
 
     return result
 
@@ -258,8 +251,9 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
 # CLI INTERFACE
 # =============================================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys as _sys
+
     _out = _sys.stdout.write
 
     args = _sys.argv[1:]

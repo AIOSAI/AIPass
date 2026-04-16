@@ -38,9 +38,7 @@ from aipass.drone.apps.handlers.generic_adapter import capture_main
 @pytest.fixture(autouse=True)
 def _mock_log_operation():
     """Prevent json_handler.log_operation from touching disk."""
-    with patch(
-        "aipass.drone.apps.handlers.generic_adapter.json_handler"
-    ) as mock_jh:
+    with patch("aipass.drone.apps.handlers.generic_adapter.json_handler") as mock_jh:
         mock_jh.log_operation = MagicMock()
         yield
 
@@ -301,9 +299,7 @@ class TestLogOperation:
 
     def test_log_operation_called(self, _fake_module_factory):
         _fake_module_factory("log_mod", lambda: 0)
-        with patch(
-            "aipass.drone.apps.handlers.generic_adapter.json_handler"
-        ) as mock_jh:
+        with patch("aipass.drone.apps.handlers.generic_adapter.json_handler") as mock_jh:
             capture_main("log_mod", "myprog", command="status")
             mock_jh.log_operation.assert_called_once()
             call_args = mock_jh.log_operation.call_args

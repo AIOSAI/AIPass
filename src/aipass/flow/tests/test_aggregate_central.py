@@ -3,22 +3,24 @@
 from unittest.mock import patch
 
 
-
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.aggregate_central"
 
 
 # ─── Helpers ─────────────────────────────────────────────
 
+
 def _import_handle_command():
     """Import handle_command inside each test so autouse mocks are active."""
     from aipass.flow.apps.modules.aggregate_central import handle_command
+
     return handle_command
 
 
 def _import_aggregate_central():
     """Import aggregate_central orchestrator."""
     from aipass.flow.apps.modules.aggregate_central import aggregate_central
+
     return aggregate_central
 
 
@@ -26,8 +28,8 @@ def _import_aggregate_central():
 # 1. Command != "aggregate" -> returns False
 # ═══════════════════════════════════════════════════════════
 
-class TestCommandRouting:
 
+class TestCommandRouting:
     def test_wrong_command_returns_false(self):
         handle_command = _import_handle_command()
         assert handle_command("create", []) is False
@@ -45,8 +47,8 @@ class TestCommandRouting:
 # 2. command == "aggregate" with no args -> introspection
 # ═══════════════════════════════════════════════════════════
 
-class TestNoArgs:
 
+class TestNoArgs:
     @patch(f"{_MOD}.print_introspection")
     def test_no_args_calls_introspection(self, mock_intro):
         """No args should show introspection."""
@@ -60,8 +62,8 @@ class TestNoArgs:
 # 3. command == "aggregate" with --help -> help
 # ═══════════════════════════════════════════════════════════
 
-class TestHelp:
 
+class TestHelp:
     @patch(f"{_MOD}.print_help")
     def test_help_flag(self, mock_help):
         handle_command = _import_handle_command()
@@ -88,8 +90,8 @@ class TestHelp:
 # 4. command == "aggregate" with ["run"] -> calls aggregate_central(heal=True)
 # ═══════════════════════════════════════════════════════════
 
-class TestRunCommand:
 
+class TestRunCommand:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_run_calls_aggregate_with_heal(self, mock_aggregate):
         handle_command = _import_handle_command()
@@ -116,8 +118,8 @@ class TestRunCommand:
 # 5. command == "aggregate" with ["--no-heal"] -> calls aggregate_central(heal=False)
 # ═══════════════════════════════════════════════════════════
 
-class TestNoHealFlag:
 
+class TestNoHealFlag:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     def test_no_heal_flag(self, mock_aggregate):
         handle_command = _import_handle_command()
@@ -137,8 +139,8 @@ class TestNoHealFlag:
 # 6. aggregate_central orchestrator delegates to aggregate_central_impl
 # ═══════════════════════════════════════════════════════════
 
-class TestAggregateCentralOrchestrator:
 
+class TestAggregateCentralOrchestrator:
     @patch(f"{_MOD}.aggregate_central_impl", return_value=True)
     def test_impl_success_returns_true(self, mock_impl):
         aggregate_central = _import_aggregate_central()
@@ -178,8 +180,8 @@ class TestAggregateCentralOrchestrator:
 # 7. json_handler.log_operation is called on valid commands
 # ═══════════════════════════════════════════════════════════
 
-class TestOperationLogging:
 
+class TestOperationLogging:
     @patch(f"{_MOD}.aggregate_central", return_value=True)
     @patch(f"{_MOD}.json_handler")
     def test_logs_operation(self, mock_jh, mock_aggregate):

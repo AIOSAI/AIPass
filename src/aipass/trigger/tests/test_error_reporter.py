@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before error_reporter module loads."""
@@ -37,17 +38,19 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
 
     # -- error_registry -----------------------------------------------------
-    mock_registry_report = MagicMock(return_value={
-        "id": "test-id-123",
-        "fingerprint": "abc123def456",
-        "is_new": True,
-        "count": 1,
-        "first_seen": "2026-04-03 10:00:00",
-        "last_seen": "2026-04-03 10:00:00",
-        "error_type": "ImportError",
-        "message": "No module named foo",
-        "component": "FLOW",
-    })
+    mock_registry_report = MagicMock(
+        return_value={
+            "id": "test-id-123",
+            "fingerprint": "abc123def456",
+            "is_new": True,
+            "count": 1,
+            "first_seen": "2026-04-03 10:00:00",
+            "last_seen": "2026-04-03 10:00:00",
+            "error_type": "ImportError",
+            "message": "No module named foo",
+            "component": "FLOW",
+        }
+    )
     registry_mod = MagicMock()
     registry_mod.report = mock_registry_report
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", registry_mod)
@@ -64,6 +67,7 @@ def _mock_infrastructure(monkeypatch):
 
     # -- trigger config (needed by error_registry import chain) -------------
     from aipass.trigger.apps.config import atomic_write_json
+
     config_mock = MagicMock()
     config_mock.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", config_mock)
@@ -75,6 +79,7 @@ def _mock_infrastructure(monkeypatch):
 def _import_reporter():
     """Import error_reporter module fresh (after mocks are in place)."""
     import aipass.trigger.apps.handlers.error_reporter as mod
+
     return mod
 
 
@@ -88,11 +93,10 @@ def _get_json_handler():
     return sys.modules["aipass.trigger.apps.handlers.json"].json_handler
 
 
-
-
 # ---------------------------------------------------------------------------
 # Tests -- send_source_fix_email
 # ---------------------------------------------------------------------------
+
 
 class TestSendSourceFixEmail:
     """Tests for the send_source_fix_email function."""
@@ -255,6 +259,7 @@ class TestSendSourceFixEmail:
 # Tests -- report_error
 # ---------------------------------------------------------------------------
 
+
 class TestReportError:
     """Tests for the report_error function."""
 
@@ -368,9 +373,7 @@ class TestReportError:
         trigger_mod.trigger = mock_trigger
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
 
-        result = reporter.report_error(
-            "ImportError", "No module foo", "FLOW", fire_event=False
-        )
+        result = reporter.report_error("ImportError", "No module foo", "FLOW", fire_event=False)
 
         mock_trigger.fire.assert_not_called()
         assert result["dispatched"] is False
@@ -474,9 +477,7 @@ class TestReportError:
         reporter.report_error("ImportError", "No module foo", "FLOW")
 
         jh = _get_json_handler()
-        jh.log_operation.assert_called_with(
-            "error_reported", {"branch": "FLOW", "error_type": "ImportError"}
-        )
+        jh.log_operation.assert_called_with("error_reported", {"branch": "FLOW", "error_type": "ImportError"})
 
     def test_does_not_log_operation_when_no_dispatch(self):
         """report_error does NOT log operation when fire_event=False (early return)."""
@@ -489,9 +490,7 @@ class TestReportError:
             "count": 10,
         }
 
-        reporter.report_error(
-            "ImportError", "No module foo", "FLOW", fire_event=False
-        )
+        reporter.report_error("ImportError", "No module foo", "FLOW", fire_event=False)
 
         jh = _get_json_handler()
         jh.log_operation.assert_not_called()
@@ -514,9 +513,7 @@ class TestReportError:
         trigger_mod.trigger = mock_trigger
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
 
-        reporter.report_error(
-            "ValueError", "bad value", "DRONE", log_path="/logs/drone.log"
-        )
+        reporter.report_error("ValueError", "bad value", "DRONE", log_path="/logs/drone.log")
 
         fire_call = mock_trigger.fire.call_args
         assert fire_call[0][0] == "error_detected"
@@ -564,9 +561,7 @@ class TestReportError:
             "custom_field": "preserved",
         }
 
-        result = reporter.report_error(
-            "RuntimeError", "something broke", "BACKUP", fire_event=False
-        )
+        result = reporter.report_error("RuntimeError", "something broke", "BACKUP", fire_event=False)
 
         assert result["id"] == "special-id"
         assert result["fingerprint"] == "fp888"

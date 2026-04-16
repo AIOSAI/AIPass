@@ -33,6 +33,7 @@ from aipass.api.apps.handlers.json import json_handler
 # ENV FILE CREATION
 # ==============================================
 
+
 def create_env_template(provider: str = "openrouter", target_path: Optional[Path] = None) -> bool:
     """
     Create .env template file with default placeholders.
@@ -90,7 +91,7 @@ OPENAI_API_KEY=sk-your-openai-key-here
         os.chmod(env_path.parent, 0o700)
 
         # Write template
-        with open(env_path, 'w', encoding='utf-8') as f:
+        with open(env_path, "w", encoding="utf-8") as f:
             f.write(env_template)
 
         # Restrict file permissions to owner-read/write only
@@ -105,5 +106,3 @@ OPENAI_API_KEY=sk-your-openai-key-here
         # Failed to create .env template
         logger.error(f"Failed to create .env template: {e}")
         return False
-
-

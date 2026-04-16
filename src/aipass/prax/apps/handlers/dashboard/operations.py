@@ -130,9 +130,7 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
             template = json.loads(template_file.read_text())
             now = datetime.now().isoformat()
             # Replace placeholders
-            dashboard = json.loads(
-                json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper())
-            )
+            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
             dashboard["last_updated"] = now
             return dashboard
         except (json.JSONDecodeError, OSError) as e:
@@ -149,17 +147,19 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
             "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
             "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
-            "commons_activity": {"managed_by": "the_commons", "mentions": 0, "new_posts_since_last_visit": 0, "new_comments_since_last_visit": 0, "last_updated": ""}
-        }
+            "commons_activity": {
+                "managed_by": "the_commons",
+                "mentions": 0,
+                "new_posts_since_last_visit": 0,
+                "new_comments_since_last_visit": 0,
+                "last_updated": "",
+            },
+        },
     }
 
 
 def update_section(
-    branch_path: Path,
-    section_name: str,
-    section_data: Dict,
-    template: Dict,
-    calculate_status_func
+    branch_path: Path, section_name: str, section_data: Dict, template: Dict, calculate_status_func
 ) -> bool:
     """
     Update a specific section in branch dashboard (legacy interface).
@@ -242,7 +242,7 @@ def _calculate_quick_status_standalone(sections: Dict) -> Dict:
         "active_plans": active_plans,
         "commons_mentions": mentions,
         "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear"
+        "summary": ", ".join(parts) if parts else "All clear",
     }
 
 
@@ -311,10 +311,13 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
         # Save
         saved = save_dashboard(branch_path, dashboard)
 
-        json_handler.log_operation("section_updated", {
-            "section": section_name,
-            "branch": branch_path.name,
-        })
+        json_handler.log_operation(
+            "section_updated",
+            {
+                "section": section_name,
+                "branch": branch_path.name,
+            },
+        )
 
         return saved
 

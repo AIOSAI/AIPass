@@ -32,145 +32,161 @@ _MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 # v1 REGEX EXTRACTION (fallback)
 # =============================================================================
 
+
 def extract_technical_flow(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Detect problem/debug/breakthrough patterns via keyword matching."""
     if not chat_history:
-        return {'success': True, 'patterns': ['no_conversation'], 'details': {}}
+        return {"success": True, "patterns": ["no_conversation"], "details": {}}
     patterns = []
     indicators = {
-        'problems': ['error', 'bug', 'issue', 'problem', 'broken', 'fail', 'wrong'],
-        'debugging': ['debug', 'trace', 'check', 'test', 'try', 'attempt'],
-        'solutions': ['fix', 'solve', 'work', 'success', 'breakthrough', 'got it'],
-        'struggle': ['stuck', 'confused', 'difficult', 'hard', 'frustrating'],
-        'learning': ['understand', 'learn', 'realize', 'discover', 'insight']
+        "problems": ["error", "bug", "issue", "problem", "broken", "fail", "wrong"],
+        "debugging": ["debug", "trace", "check", "test", "try", "attempt"],
+        "solutions": ["fix", "solve", "work", "success", "breakthrough", "got it"],
+        "struggle": ["stuck", "confused", "difficult", "hard", "frustrating"],
+        "learning": ["understand", "learn", "realize", "discover", "insight"],
     }
     cat_counts = {cat: 0 for cat in indicators}
     for msg in chat_history:
-        content = (msg.get('content') or '').lower()
-        role = msg.get('role', '')
+        content = (msg.get("content") or "").lower()
+        role = msg.get("role", "")
         for cat, kws in indicators.items():
             if any(kw in content for kw in kws):
-                patterns.append(f'{cat}_{role}')
+                patterns.append(f"{cat}_{role}")
                 cat_counts[cat] += 1
-    ps = ' '.join(patterns)
-    if 'problems' in ps and 'solutions' in ps:
-        flow = ['problem_struggle_breakthrough'] if 'struggle' in ps else ['problem_solution_flow']
-    elif 'debugging' in ps:
-        flow = ['debugging_session']
-    elif 'learning' in ps:
-        flow = ['learning_conversation']
+    ps = " ".join(patterns)
+    if "problems" in ps and "solutions" in ps:
+        flow = ["problem_struggle_breakthrough"] if "struggle" in ps else ["problem_solution_flow"]
+    elif "debugging" in ps:
+        flow = ["debugging_session"]
+    elif "learning" in ps:
+        flow = ["learning_conversation"]
     else:
-        flow = ['general_technical']
-    return {'success': True, 'patterns': flow,
-            'details': {'category_counts': cat_counts, 'raw_patterns': patterns[:10]}}
+        flow = ["general_technical"]
+    return {
+        "success": True,
+        "patterns": flow,
+        "details": {"category_counts": cat_counts, "raw_patterns": patterns[:10]},
+    }
 
 
 def extract_emotional_journey(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Detect emotional arc via tone markers."""
     if not chat_history:
-        return {'success': True, 'arc': ['neutral'], 'details': {}}
+        return {"success": True, "arc": ["neutral"], "details": {}}
     markers = {
-        'frustration': ['frustrated', 'annoying', 'difficult', 'stuck', 'ugh', 'damn'],
-        'excitement': ['cool', 'awesome', 'great', 'amazing', 'perfect', 'brilliant'],
-        'confidence': ['sure', 'certain', 'definitely', 'absolutely', 'know'],
-        'uncertainty': ['maybe', 'possibly', 'not sure', 'think', 'guess'],
-        'breakthrough': ['got it', 'understand', 'works', 'success', 'finally'],
-        'curiosity': ['wonder', 'curious', 'interesting', 'what if', 'how']
+        "frustration": ["frustrated", "annoying", "difficult", "stuck", "ugh", "damn"],
+        "excitement": ["cool", "awesome", "great", "amazing", "perfect", "brilliant"],
+        "confidence": ["sure", "certain", "definitely", "absolutely", "know"],
+        "uncertainty": ["maybe", "possibly", "not sure", "think", "guess"],
+        "breakthrough": ["got it", "understand", "works", "success", "finally"],
+        "curiosity": ["wonder", "curious", "interesting", "what if", "how"],
     }
     timeline = []
     for msg in chat_history:
-        content = (msg.get('content') or '').lower()
-        role = msg.get('role', '')
+        content = (msg.get("content") or "").lower()
+        role = msg.get("role", "")
         emos = [e for e, ms in markers.items() if any(m in content for m in ms)]
         if emos:
             timeline.append((role, emos))
     if not timeline:
-        return {'success': True, 'arc': ['neutral_tone'], 'details': {'timeline': []}}
+        return {"success": True, "arc": ["neutral_tone"], "details": {"timeline": []}}
     all_emos = [e for _, es in timeline for e in es]
-    if 'frustration' in all_emos and 'breakthrough' in all_emos:
-        arc = ['frustration_to_breakthrough']
-    elif 'curiosity' in all_emos and 'excitement' in all_emos:
-        arc = ['curiosity_to_excitement']
-    elif 'uncertainty' in all_emos and 'confidence' in all_emos:
-        arc = ['uncertainty_to_confidence']
+    if "frustration" in all_emos and "breakthrough" in all_emos:
+        arc = ["frustration_to_breakthrough"]
+    elif "curiosity" in all_emos and "excitement" in all_emos:
+        arc = ["curiosity_to_excitement"]
+    elif "uncertainty" in all_emos and "confidence" in all_emos:
+        arc = ["uncertainty_to_confidence"]
     else:
         arc = [e for e, _ in Counter(all_emos).most_common(2)]
-    return {'success': True, 'arc': arc,
-            'details': {'timeline': timeline[:10], 'emotion_counts': dict(Counter(all_emos))}}
+    return {
+        "success": True,
+        "arc": arc,
+        "details": {"timeline": timeline[:10], "emotion_counts": dict(Counter(all_emos))},
+    }
 
 
 def extract_collaboration_patterns(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Identify interaction dynamics (user-directed, balanced, teaching, etc.)."""
     if not chat_history:
-        return {'success': True, 'patterns': ['no_interaction'], 'details': {}}
-    u_msgs = [m for m in chat_history if m.get('role') == 'user']
-    a_msgs = [m for m in chat_history if m.get('role') == 'assistant']
+        return {"success": True, "patterns": ["no_interaction"], "details": {}}
+    u_msgs = [m for m in chat_history if m.get("role") == "user"]
+    a_msgs = [m for m in chat_history if m.get("role") == "assistant"]
     if not u_msgs or not a_msgs:
-        return {'success': True, 'patterns': ['one_sided_conversation'], 'details': {}}
+        return {"success": True, "patterns": ["one_sided_conversation"], "details": {}}
     patterns = []
-    avg_u = sum(len(m.get('content', '')) for m in u_msgs) / len(u_msgs)
-    avg_a = sum(len(m.get('content', '')) for m in a_msgs) / len(a_msgs)
+    avg_u = sum(len(m.get("content", "")) for m in u_msgs) / len(u_msgs)
+    avg_a = sum(len(m.get("content", "")) for m in a_msgs) / len(a_msgs)
     if avg_u > avg_a * 1.5:
-        patterns.append('user_directed')
+        patterns.append("user_directed")
     elif avg_a > avg_u * 1.5:
-        patterns.append('assistant_detailed')
+        patterns.append("assistant_detailed")
     else:
-        patterns.append('balanced_exchange')
-    u_qs = sum(1 for m in u_msgs if '?' in m.get('content', ''))
+        patterns.append("balanced_exchange")
+    u_qs = sum(1 for m in u_msgs if "?" in m.get("content", ""))
     if u_qs > len(u_msgs) * 0.6:
-        patterns.append('question_heavy')
-    uc = ' '.join(m.get('content', '').lower() for m in u_msgs)
-    ac = ' '.join(m.get('content', '').lower() for m in a_msgs)
-    if any(i in uc for i in ['try', "let's", 'what if', 'how about', 'consider']):
-        patterns.append('user_coaching')
-    if any(i in ac for i in ['explain', 'show', 'understand', 'learn', 'because']):
-        patterns.append('assistant_teaching')
-    if any(i in uc + ac for i in ["let's build", 'we can', 'together', 'collaborate']):
-        patterns.append('collaborative_building')
-    return {'success': True, 'patterns': patterns or ['standard_interaction'],
-            'details': {'avg_user_length': int(avg_u), 'avg_assistant_length': int(avg_a),
-                        'user_questions': u_qs, 'total_user_messages': len(u_msgs)}}
+        patterns.append("question_heavy")
+    uc = " ".join(m.get("content", "").lower() for m in u_msgs)
+    ac = " ".join(m.get("content", "").lower() for m in a_msgs)
+    if any(i in uc for i in ["try", "let's", "what if", "how about", "consider"]):
+        patterns.append("user_coaching")
+    if any(i in ac for i in ["explain", "show", "understand", "learn", "because"]):
+        patterns.append("assistant_teaching")
+    if any(i in uc + ac for i in ["let's build", "we can", "together", "collaborate"]):
+        patterns.append("collaborative_building")
+    return {
+        "success": True,
+        "patterns": patterns or ["standard_interaction"],
+        "details": {
+            "avg_user_length": int(avg_u),
+            "avg_assistant_length": int(avg_a),
+            "user_questions": u_qs,
+            "total_user_messages": len(u_msgs),
+        },
+    }
 
 
 def extract_key_learnings(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Extract insight categories (discovery, problem_solving, etc.)."""
     if not chat_history:
-        return {'success': True, 'insights': ['no_insights'], 'details': {}}
+        return {"success": True, "insights": ["no_insights"], "details": {}}
     insights = []
-    lp = {'discovery': ['discovered', 'found out', 'realized', 'learned'],
-          'problem_solving': ['solution', 'approach', 'method', 'way to'],
-          'understanding': ['understand', 'makes sense', 'clear', 'see'],
-          'improvement': ['better', 'improve', 'optimize', 'enhance'],
-          'mistakes': ['wrong', 'mistake', 'error', 'incorrect']}
-    ac = ' '.join((m.get('content') or '').lower() for m in chat_history)
+    lp = {
+        "discovery": ["discovered", "found out", "realized", "learned"],
+        "problem_solving": ["solution", "approach", "method", "way to"],
+        "understanding": ["understand", "makes sense", "clear", "see"],
+        "improvement": ["better", "improve", "optimize", "enhance"],
+        "mistakes": ["wrong", "mistake", "error", "incorrect"],
+    }
+    ac = " ".join((m.get("content") or "").lower() for m in chat_history)
     for cat, inds in lp.items():
         if any(i in ac for i in inds):
             insights.append(cat)
-    if 'module' in ac and 'toggle' in ac:
-        insights.append('module_system_learning')
-    if 'memory' in ac and 'compression' in ac:
-        insights.append('memory_system_learning')
-    if 'debug' in ac and 'fix' in ac:
-        insights.append('debugging_skills')
-    return {'success': True, 'insights': insights or ['general_conversation'],
-            'details': {'content_length': len(ac)}}
+    if "module" in ac and "toggle" in ac:
+        insights.append("module_system_learning")
+    if "memory" in ac and "compression" in ac:
+        insights.append("memory_system_learning")
+    if "debug" in ac and "fix" in ac:
+        insights.append("debugging_skills")
+    return {"success": True, "insights": insights or ["general_conversation"], "details": {"content_length": len(ac)}}
 
 
 def extract_context_triggers(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Extract keyword triggers for future memory recall."""
     if not chat_history:
-        return {'success': True, 'triggers': [], 'details': {}}
-    ac = ' '.join((m.get('content') or '') for m in chat_history).lower()
-    pat = (r'\b(?:module|system|debug|memory|compression|vector|symbolic|'
-           r'registry|toggle|profile|chat|context|api|token|embedding|storage|'
-           r'json|function|method|class|import|file|script|error|fix|solution|'
-           r'breakthrough|pattern|analysis|extraction|conversation|interaction|'
-           r'collaboration|learning|insight|discovery|handler|branch|rollover)\b')
+        return {"success": True, "triggers": [], "details": {}}
+    ac = " ".join((m.get("content") or "") for m in chat_history).lower()
+    pat = (
+        r"\b(?:module|system|debug|memory|compression|vector|symbolic|"
+        r"registry|toggle|profile|chat|context|api|token|embedding|storage|"
+        r"json|function|method|class|import|file|script|error|fix|solution|"
+        r"breakthrough|pattern|analysis|extraction|conversation|interaction|"
+        r"collaboration|learning|insight|discovery|handler|branch|rollover)\b"
+    )
     terms = re.findall(pat, ac)
     tc = Counter(terms)
     triggers = [t for t, c in tc.most_common(10) if c > 1]
-    return {'success': True, 'triggers': triggers,
-            'details': {'term_counts': dict(tc.most_common(15))}}
+    return {"success": True, "triggers": triggers, "details": {"term_counts": dict(tc.most_common(15))}}
 
 
 def extract_symbolic_dimensions(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -181,38 +197,51 @@ def extract_symbolic_dimensions(chat_history: List[Dict[str, Any]]) -> Dict[str,
     learn = extract_key_learnings(chat_history)
     trig = extract_context_triggers(chat_history)
     return {
-        'success': True,
-        'dimensions': {
-            'technical': tech.get('patterns', []), 'emotional': emo.get('arc', []),
-            'collaboration': collab.get('patterns', []),
-            'learnings': learn.get('insights', []), 'triggers': trig.get('triggers', [])},
-        'details': {
-            'technical': tech.get('details', {}), 'emotional': emo.get('details', {}),
-            'collaboration': collab.get('details', {}),
-            'learnings': learn.get('details', {}), 'triggers': trig.get('details', {})}}
+        "success": True,
+        "dimensions": {
+            "technical": tech.get("patterns", []),
+            "emotional": emo.get("arc", []),
+            "collaboration": collab.get("patterns", []),
+            "learnings": learn.get("insights", []),
+            "triggers": trig.get("triggers", []),
+        },
+        "details": {
+            "technical": tech.get("details", {}),
+            "emotional": emo.get("details", {}),
+            "collaboration": collab.get("details", {}),
+            "learnings": learn.get("details", {}),
+            "triggers": trig.get("details", {}),
+        },
+    }
 
 
 def analyze_conversation(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """v1 entry point: symbolic dimensions + conversation metadata."""
     if not chat_history:
-        return {'success': True, 'message_count': 0, 'dimensions': {}, 'metadata': {}}
+        return {"success": True, "message_count": 0, "dimensions": {}, "metadata": {}}
     dims = extract_symbolic_dimensions(chat_history)
-    total_chars = sum(len(m.get('content') or '') for m in chat_history)
-    total_words = sum(len((m.get('content') or '').split()) for m in chat_history)
+    total_chars = sum(len(m.get("content") or "") for m in chat_history)
+    total_words = sum(len((m.get("content") or "").split()) for m in chat_history)
     if total_words > 2000 and len(chat_history) > 20:
-        depth = 'deep_extended'
+        depth = "deep_extended"
     elif total_words > 1000 and len(chat_history) > 10:
-        depth = 'substantial'
+        depth = "substantial"
     elif total_words > 500:
-        depth = 'moderate'
+        depth = "moderate"
     else:
-        depth = 'light'
+        depth = "light"
     return {
-        'success': True, 'message_count': len(chat_history),
-        'dimensions': dims.get('dimensions', {}),
-        'metadata': {'timestamp': datetime.now().isoformat(), 'total_chars': total_chars,
-                     'total_words': total_words, 'depth': depth},
-        'details': dims.get('details', {})}
+        "success": True,
+        "message_count": len(chat_history),
+        "dimensions": dims.get("dimensions", {}),
+        "metadata": {
+            "timestamp": datetime.now().isoformat(),
+            "total_chars": total_chars,
+            "total_words": total_words,
+            "depth": depth,
+        },
+        "details": dims.get("details", {}),
+    }
 
 
 # =============================================================================
@@ -220,9 +249,9 @@ def analyze_conversation(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
 # =============================================================================
 
 LLM_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-CHUNK_THRESHOLD = 25   # messages before chunking
-CHUNK_SIZE = 20        # messages per chunk
-CHUNK_OVERLAP = 5      # overlap between chunks
+CHUNK_THRESHOLD = 25  # messages before chunking
+CHUNK_SIZE = 20  # messages per chunk
+CHUNK_OVERLAP = 5  # overlap between chunks
 
 EXTRACTION_SYSTEM_PROMPT = (
     "You are a memory extraction system for an AI collaboration platform.\n"
@@ -272,13 +301,13 @@ def _format_conversation_for_prompt(messages: List[Dict[str, Any]]) -> str:
     """Format conversation messages into readable text for the LLM prompt."""
     lines = []
     for msg in messages:
-        role = msg.get('role', 'unknown')
-        content = (msg.get('content') or '').strip()
+        role = msg.get("role", "unknown")
+        content = (msg.get("content") or "").strip()
         if content:
             if len(content) > 1500:
                 content = content[:1500] + "... [truncated]"
             lines.append(f"{role}: {content}")
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def _chunk_messages(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
@@ -293,7 +322,7 @@ def _chunk_messages(messages: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]
         next_start = start + CHUNK_SIZE - CHUNK_OVERLAP
         remaining = len(messages) - next_start
         if 0 < remaining < CHUNK_OVERLAP:
-            chunks[-1] = messages[start:len(messages)]
+            chunks[-1] = messages[start : len(messages)]
             break
         start = next_start
     return chunks
@@ -312,7 +341,7 @@ def _parse_llm_json(raw_text: str) -> Optional[List[Dict[str, Any]]]:
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning(f"[extractor] Direct JSON parse failed, trying fallback: {e}")
     # Attempt 2: Strip markdown fences
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     if match:
         try:
             result = json.loads(match.group(1).strip())
@@ -327,14 +356,14 @@ def _validate_fragment(fragment: Any) -> bool:
     """Check fragment dict has required fields with valid enum values."""
     if not isinstance(fragment, dict):
         return False
-    required = {'summary', 'insight', 'type', 'triggers', 'emotional_tone'}
+    required = {"summary", "insight", "type", "triggers", "emotional_tone"}
     if not required.issubset(fragment.keys()):
         return False
-    if fragment.get('type') not in {'episodic', 'procedural', 'semantic', 'emotional'}:
+    if fragment.get("type") not in {"episodic", "procedural", "semantic", "emotional"}:
         return False
-    if fragment.get('emotional_tone') not in {'neutral', 'frustrated', 'excited', 'curious', 'confident'}:
+    if fragment.get("emotional_tone") not in {"neutral", "frustrated", "excited", "curious", "confident"}:
         return False
-    if not isinstance(fragment.get('triggers'), list):
+    if not isinstance(fragment.get("triggers"), list):
         return False
     return True
 
@@ -344,7 +373,7 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     Extract memory fragments via OpenRouter LLM (Llama 3.3 70B).
     Chunks long conversations. Returns status dict with 'fragments' list.
     """
-    empty = {'success': True, 'fragments': [], 'chunk_count': 0, 'error': None}
+    empty = {"success": True, "fragments": [], "chunk_count": 0, "error": None}
     if not chat_history:
         return empty
 
@@ -355,14 +384,19 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Load API key via api branch's key management
     try:
         from aipass.api.apps.handlers.auth.keys import get_api_key
+
         api_key = get_api_key("openrouter")
     except ImportError as e:
         logger.warning(f"[extractor] api branch not available for key loading: {e}")
         api_key = None
 
     if not api_key:
-        return {'success': False, 'fragments': [], 'chunk_count': 0,
-                'error': "No OpenRouter API key found (api branch unavailable or key missing)"}
+        return {
+            "success": False,
+            "fragments": [],
+            "chunk_count": 0,
+            "error": "No OpenRouter API key found (api branch unavailable or key missing)",
+        }
 
     chunks = _chunk_messages(chat_history)
     all_fragments = []
@@ -372,16 +406,10 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         conv_text = _format_conversation_for_prompt(chunk)
         if not conv_text.strip():
             continue
-        messages = [
-            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-            {"role": "user", "content": conv_text}
-        ]
-        payload = json.dumps({
-            "model": LLM_MODEL,
-            "messages": messages,
-            "temperature": 0.3,
-            "max_tokens": 2000
-        }).encode("utf-8")
+        messages = [{"role": "system", "content": EXTRACTION_SYSTEM_PROMPT}, {"role": "user", "content": conv_text}]
+        payload = json.dumps({"model": LLM_MODEL, "messages": messages, "temperature": 0.3, "max_tokens": 2000}).encode(
+            "utf-8"
+        )
         req = urllib.request.Request(
             "https://openrouter.ai/api/v1/chat/completions",
             data=payload,
@@ -389,17 +417,17 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://aipass.dev",
-                "X-Title": "AIPass Memory"
-            }
+                "X-Title": "AIPass Memory",
+            },
         )
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         except (urllib.error.URLError, json.JSONDecodeError, KeyError, IndexError) as e:
-            err_msg = f"Chunk {i+1}/{len(chunks)}: {type(e).__name__}: {e}"
+            err_msg = f"Chunk {i + 1}/{len(chunks)}: {type(e).__name__}: {e}"
             chunk_errors.append(err_msg)
-            logger.warning(f"[extractor] LLM extraction failed for chunk {i+1}/{len(chunks)}: {e}")
+            logger.warning(f"[extractor] LLM extraction failed for chunk {i + 1}/{len(chunks)}: {e}")
             continue
         if not content:
             continue
@@ -409,18 +437,18 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         chunks_succeeded += 1
         for frag in parsed:
             if _validate_fragment(frag):
-                frag.setdefault('technical_domain', '')
+                frag.setdefault("technical_domain", "")
                 all_fragments.append(frag)
 
     all_failed = len(chunks) > 0 and chunks_succeeded == 0 and len(chunk_errors) > 0
     return {
-        'success': not all_failed,
-        'fragments': all_fragments,
-        'chunk_count': len(chunks),
-        'chunks_succeeded': chunks_succeeded,
-        'chunks_failed': len(chunk_errors),
-        'error': '; '.join(chunk_errors) if all_failed else None,
-        'chunk_errors': chunk_errors
+        "success": not all_failed,
+        "fragments": all_fragments,
+        "chunk_count": len(chunks),
+        "chunks_succeeded": chunks_succeeded,
+        "chunks_failed": len(chunk_errors),
+        "error": "; ".join(chunk_errors) if all_failed else None,
+        "chunk_errors": chunk_errors,
     }
 
 
@@ -430,21 +458,25 @@ def analyze_conversation_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, An
     Returns status dict with 'fragments', 'metadata', 'message_count'.
     """
     if not chat_history:
-        return {'success': True, 'fragments': [], 'metadata': {},
-                'message_count': 0, 'error': None}
+        return {"success": True, "fragments": [], "metadata": {}, "message_count": 0, "error": None}
     llm = extract_fragments_llm(chat_history)
     reg = analyze_conversation(chat_history)
     result = {
-        'success': llm.get('success', False),
-        'fragments': llm.get('fragments', []),
-        'metadata': {
-            'timestamp': reg.get('metadata', {}).get('timestamp', datetime.now().isoformat()),
-            'total_chars': reg.get('metadata', {}).get('total_chars', 0),
-            'total_words': reg.get('metadata', {}).get('total_words', 0),
-            'depth': reg.get('metadata', {}).get('depth', 'unknown'),
-            'dimensions': reg.get('dimensions', {}),
-            'chunk_count': llm.get('chunk_count', 0)},
-        'message_count': reg.get('message_count', len(chat_history)),
-        'error': llm.get('error')}
-    json_handler.log_operation("symbolic_extract", {"fragments": len(result['fragments']), "messages": result['message_count'], "success": True})
+        "success": llm.get("success", False),
+        "fragments": llm.get("fragments", []),
+        "metadata": {
+            "timestamp": reg.get("metadata", {}).get("timestamp", datetime.now().isoformat()),
+            "total_chars": reg.get("metadata", {}).get("total_chars", 0),
+            "total_words": reg.get("metadata", {}).get("total_words", 0),
+            "depth": reg.get("metadata", {}).get("depth", "unknown"),
+            "dimensions": reg.get("dimensions", {}),
+            "chunk_count": llm.get("chunk_count", 0),
+        },
+        "message_count": reg.get("message_count", len(chat_history)),
+        "error": llm.get("error"),
+    }
+    json_handler.log_operation(
+        "symbolic_extract",
+        {"fragments": len(result["fragments"]), "messages": result["message_count"], "success": True},
+    )
     return result

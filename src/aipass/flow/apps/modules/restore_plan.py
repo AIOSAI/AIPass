@@ -45,7 +45,7 @@ from aipass.flow.apps.handlers.plan.display import (
     format_restore_header,
     format_restore_error,
     format_restore_success,
-    format_restore_usage_error
+    format_restore_usage_error,
 )
 
 # Internal: Dashboard handlers
@@ -68,6 +68,7 @@ MODULE_NAME = "restore_plan"
 # DISPLAY HELPERS
 # =============================================
 
+
 def _display_messages(messages: List[Dict[str, Any]]):
     """Render handler result messages to console
 
@@ -84,7 +85,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(format_restore_error(error_type, plan_key, details=details))
 
         elif msg_type == "warning":
-            warning(msg['text'])
+            warning(msg["text"])
 
         elif msg_type == "dim":
             console.print(f"[dim]{msg['text']}[/dim]")
@@ -98,9 +99,11 @@ def _display_messages(messages: List[Dict[str, Any]]):
         elif msg_type == "restore_success":
             console.print(format_restore_success(msg["plan_key"], msg.get("location")))
 
+
 # =============================================
 # INTROSPECTION
 # =============================================
+
 
 def print_introspection():
     """Display module info and connected handlers"""
@@ -131,6 +134,7 @@ def print_introspection():
     console.print("[dim]Run 'drone @flow restore --help' for usage[/dim]")
     console.print()
 
+
 def print_help():
     """Print help information for restore_plan module"""
     console.print()
@@ -152,6 +156,7 @@ def print_help():
 # RECOVERY FUNCTIONS
 # =============================================
 
+
 def recover_plan_from_backup(plan_key: str) -> tuple[bool, str]:
     """
     Attempt to recover a plan from processed_plans backup (thin orchestrator)
@@ -170,9 +175,11 @@ def recover_plan_from_backup(plan_key: str) -> tuple[bool, str]:
         save_registry=save_registry,
     )
 
+
 # =============================================
 # RESTORE PLAN WORKFLOW
 # =============================================
+
 
 def restore_plan(plan_num: str | None) -> bool:
     """
@@ -241,10 +248,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     from aipass.flow.apps.handlers.plan.command_parser import parse_restore_command_args
 
     # Log the operation
-    json_handler.log_operation(
-        "plan_restored",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("plan_restored", {"command": command, "args": args})
 
     # 1. PARSE ARGS: Use command_parser handler
     plan_num, error = parse_restore_command_args(args)
@@ -274,10 +278,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         import argparse
+
         PARSER = argparse.ArgumentParser(
-            description='Restore PLAN file to open status',
+            description="Restore PLAN file to open status",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 COMMANDS:
@@ -298,7 +303,7 @@ NOTES:
   - Plan must be closed to restore
   - Plan file must exist at registered location
   - Only updates registry metadata (does not move files)
-            """
+            """,
         )
         PARSER.print_help()
         sys.exit(0)
@@ -307,10 +312,7 @@ NOTES:
     logger.info("Prax logger connected to restore_plan")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "plan_restored",
-        {"command": "standalone"}
-    )
+    json_handler.log_operation("plan_restored", {"command": "standalone"})
 
     # Call handle_command with default
     args = sys.argv[1:] if len(sys.argv) > 1 else []
@@ -321,8 +323,8 @@ NOTES:
         sys.exit(1)
 
     # If first arg is not command, assume it's plan number (backward compatibility)
-    if args[0] not in ['restore', 'restore_plan']:
-        args.insert(0, 'restore')
+    if args[0] not in ["restore", "restore_plan"]:
+        args.insert(0, "restore")
 
     result = handle_command(args[0], args[1:])
     # Result is True on success, False on failure

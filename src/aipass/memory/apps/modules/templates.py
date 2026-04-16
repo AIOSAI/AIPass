@@ -87,18 +87,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     # Top-level help (backward compat -- entry point may send these)
-    if command in ('--help', '-h', 'help'):
+    if command in ("--help", "-h", "help"):
         print_help()
         return True
 
-    if command == 'templates':
+    if command == "templates":
         # No args -> introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
         # --help / -h / help -> full help
-        if args[0] in ('--help', '-h', 'help'):
+        if args[0] in ("--help", "-h", "help"):
             print_help()
             return True
 
@@ -106,8 +106,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         sub = args[0]
         remaining = args[1:]
 
-        if sub == 'push-templates':
-            dry_run = '--dry-run' in remaining
+        if sub == "push-templates":
+            dry_run = "--dry-run" in remaining
             try:
                 _display_push_results(push_templates(dry_run=dry_run), dry_run)
             except Exception as e:
@@ -121,11 +121,11 @@ def handle_command(command: str, args: List[str]) -> bool:
                 logger.error(f"[templates] spawn push crashed: {e}")
             return True
 
-        if sub == 'diff-templates':
+        if sub == "diff-templates":
             branch_name: str | None = None
             i = 0
             while i < len(remaining):
-                if remaining[i] == '--branch' and i + 1 < len(remaining):
+                if remaining[i] == "--branch" and i + 1 < len(remaining):
                     branch_name = remaining[i + 1]
                     i += 2
                 else:
@@ -133,7 +133,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             _display_diff_results(branch_name)
             return True
 
-        if sub == 'template-status':
+        if sub == "template-status":
             try:
                 _display_status(get_template_status())
             except Exception as e:
@@ -149,8 +149,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Backward-compatible top-level commands (entry point still routes these)
-    if command == 'push-templates':
-        dry_run = '--dry-run' in args
+    if command == "push-templates":
+        dry_run = "--dry-run" in args
         try:
             _display_push_results(push_templates(dry_run=dry_run), dry_run)
         except Exception as e:
@@ -164,11 +164,11 @@ def handle_command(command: str, args: List[str]) -> bool:
             logger.error(f"[templates] spawn push crashed: {e}")
         return True
 
-    elif command == 'diff-templates':
+    elif command == "diff-templates":
         branch_name = None
         i = 0
         while i < len(args):
-            if args[i] == '--branch' and i + 1 < len(args):
+            if args[i] == "--branch" and i + 1 < len(args):
                 branch_name = args[i + 1]
                 i += 2
             else:
@@ -176,7 +176,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         _display_diff_results(branch_name)
         return True
 
-    elif command == 'template-status':
+    elif command == "template-status":
         try:
             _display_status(get_template_status())
         except Exception as e:
@@ -190,11 +190,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 def print_help() -> None:
     """Display templates module help"""
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Templates Module - Living Template Management[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]Templates Module - Living Template Management[/bold cyan]", border_style="cyan", box=box.ROUNDED
+        )
+    )
     console.print()
     console.print("[bold]USAGE:[/bold]")
     console.print("  drone @memory templates <command>")
@@ -213,24 +213,23 @@ def print_help() -> None:
 # DISPLAY: PUSH RESULTS
 # =============================================================================
 
+
 def _display_push_results(result: dict, dry_run: bool) -> None:
     """Format and display push_templates() handler result."""
     console.print()
     mode_label = "DRY RUN" if dry_run else "Push"
-    console.print(Panel.fit(
-        f"[bold cyan]Memory - Template {mode_label}[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(
+        Panel.fit(f"[bold cyan]Memory - Template {mode_label}[/bold cyan]", border_style="cyan", box=box.ROUNDED)
+    )
     console.print()
 
     if dry_run:
         console.print("[yellow]DRY RUN MODE[/yellow] - no files will be modified")
         console.print()
 
-    if not result.get('success'):
+    if not result.get("success"):
         error("Template push failed")
-        for err in result.get('errors', []):
+        for err in result.get("errors", []):
             error(err)
         logger.error(f"[templates] Push failed: {result.get('errors')}")
         console.print()
@@ -243,14 +242,14 @@ def _display_push_results(result: dict, dry_run: bool) -> None:
     console.print()
 
     # Change details per branch/file
-    changes = result.get('changes', [])
+    changes = result.get("changes", [])
     if changes:
         console.print(f"[yellow]Changes ({len(changes)} files):[/yellow]")
         console.print()
         for entry in changes:
-            branch = entry.get('branch', 'UNKNOWN')
-            file_name = entry.get('file', 'unknown')
-            file_changes = entry.get('changes', [])
+            branch = entry.get("branch", "UNKNOWN")
+            file_name = entry.get("file", "unknown")
+            file_changes = entry.get("changes", [])
             console.print(f"  [bold]{branch}[/bold]/{file_name}:")
             for chg in file_changes:
                 console.print(f"    [green]+[/green] {chg}")
@@ -260,7 +259,7 @@ def _display_push_results(result: dict, dry_run: bool) -> None:
         console.print()
 
     # Errors
-    errors = result.get('errors', [])
+    errors = result.get("errors", [])
     if errors:
         console.print(f"[red]Errors ({len(errors)}):[/red]")
         for err in errors:
@@ -269,16 +268,13 @@ def _display_push_results(result: dict, dry_run: bool) -> None:
         logger.error(f"[templates] Push completed with {len(errors)} errors")
 
     # Final status
-    if result['branches_updated'] > 0 and not dry_run:
+    if result["branches_updated"] > 0 and not dry_run:
         console.print(
             f"[green]Template push complete:[/green] "
             f"{result['branches_updated']}/{result['branches_scanned']} branches updated"
         )
     elif dry_run and changes:
-        console.print(
-            f"[yellow]Dry run complete:[/yellow] "
-            f"{result['branches_updated']} branches would be updated"
-        )
+        console.print(f"[yellow]Dry run complete:[/yellow] {result['branches_updated']} branches would be updated")
     else:
         console.print("[green]No updates needed.[/green]")
 
@@ -287,13 +283,16 @@ def _display_push_results(result: dict, dry_run: bool) -> None:
         f"{result['branches_updated']}/{result['branches_scanned']} branches, "
         f"{result['files_modified']} files"
     )
-    json_handler.log_operation("templates_push", {"branches_updated": result['branches_updated'], "files_modified": result['files_modified']})
+    json_handler.log_operation(
+        "templates_push", {"branches_updated": result["branches_updated"], "files_modified": result["files_modified"]}
+    )
     console.print()
 
 
 # =============================================================================
 # DISPLAY: SPAWN PUSH RESULTS
 # =============================================================================
+
 
 def _display_spawn_push_results(result: dict, dry_run: bool) -> None:
     """Format and display spawn template push results."""
@@ -311,14 +310,10 @@ def _display_spawn_push_results(result: dict, dry_run: bool) -> None:
         return
 
     mode = "would update" if dry_run else "updated"
-    console.print(
-        f"[cyan]Spawn templates:[/cyan] {sets_updated}/{len(sets_found)} sets {mode}, "
-        f"{files_mod} files"
-    )
+    console.print(f"[cyan]Spawn templates:[/cyan] {sets_updated}/{len(sets_found)} sets {mode}, {files_mod} files")
     for change in result.get("changes", []):
         console.print(
-            f"  [green]+[/green] {change.get('template_set')}/{change.get('file')} "
-            f"[dim]({change.get('action')})[/dim]"
+            f"  [green]+[/green] {change.get('template_set')}/{change.get('file')} [dim]({change.get('action')})[/dim]"
         )
 
     logger.info(
@@ -331,6 +326,7 @@ def _display_spawn_push_results(result: dict, dry_run: bool) -> None:
 # DISPLAY: DIFF RESULTS
 # =============================================================================
 
+
 def _display_diff_results(branch_name: str | None = None) -> None:
     """
     Call differ handler for all/specific branches, display results.
@@ -339,11 +335,7 @@ def _display_diff_results(branch_name: str | None = None) -> None:
         branch_name: Optional branch name filter (None = all branches)
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Template Diff[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Template Diff[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     # Load registry to get branch paths
@@ -356,10 +348,7 @@ def _display_diff_results(branch_name: str | None = None) -> None:
 
     # Filter if branch specified
     if branch_name:
-        branches = [
-            b for b in branches
-            if b.get('name', '').upper() == branch_name.upper()
-        ]
+        branches = [b for b in branches if b.get("name", "").upper() == branch_name.upper()]
         if not branches:
             error(f"Branch not found: {branch_name}")
             console.print()
@@ -373,8 +362,8 @@ def _display_diff_results(branch_name: str | None = None) -> None:
     total_errors = 0
 
     for branch in branches:
-        name = branch.get('name', 'UNKNOWN')
-        path = branch.get('path', '')
+        name = branch.get("name", "UNKNOWN")
+        path = branch.get("path", "")
 
         if not path or not Path(path).exists():
             error(f"{name}: path not found ({path})")
@@ -391,9 +380,9 @@ def _display_diff_results(branch_name: str | None = None) -> None:
             total_errors += 1
             continue
 
-        local_diffs = result.get('local', [])
-        obs_diffs = result.get('observations', [])
-        errors = result.get('errors', [])
+        local_diffs = result.get("local", [])
+        obs_diffs = result.get("observations", [])
+        errors = result.get("errors", [])
         branch_has_diffs = bool(local_diffs or obs_diffs)
 
         if branch_has_diffs:
@@ -426,7 +415,9 @@ def _display_diff_results(branch_name: str | None = None) -> None:
             console.print(f"[red]{total_errors} errors encountered[/red]")
 
     logger.info(f"[templates] Diff complete: {total_diffs} branches with diffs, {total_errors} errors")
-    json_handler.log_operation("templates_diff", {"branches_compared": len(branches), "branches_with_diffs": total_diffs})
+    json_handler.log_operation(
+        "templates_diff", {"branches_compared": len(branches), "branches_with_diffs": total_diffs}
+    )
     console.print()
 
 
@@ -434,14 +425,14 @@ def _display_file_diffs(file_diffs: list) -> None:
     """Display diff entries for a list of files."""
     for entry in file_diffs:
         console.print(f"    [dim]{entry['file']}:[/dim]")
-        if entry.get('additions'):
-            for a in entry['additions']:
+        if entry.get("additions"):
+            for a in entry["additions"]:
                 console.print(f"      [green]+ {a}[/green]")
-        if entry.get('removals'):
-            for r in entry['removals']:
+        if entry.get("removals"):
+            for r in entry["removals"]:
                 console.print(f"      [red]- {r}[/red]")
-        if entry.get('modifications'):
-            for m in entry['modifications']:
+        if entry.get("modifications"):
+            for m in entry["modifications"]:
                 console.print(f"      [yellow]~ {m}[/yellow]")
 
 
@@ -449,19 +440,16 @@ def _display_file_diffs(file_diffs: list) -> None:
 # DISPLAY: STATUS
 # =============================================================================
 
+
 def _display_status(status: dict) -> None:
     """Format and display get_template_status() handler result."""
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Template Status[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Template Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     # Template files
-    local_icon = "[green]found[/green]" if status.get('local_template_exists') else "[red]MISSING[/red]"
-    obs_icon = "[green]found[/green]" if status.get('observations_template_exists') else "[red]MISSING[/red]"
+    local_icon = "[green]found[/green]" if status.get("local_template_exists") else "[red]MISSING[/red]"
+    obs_icon = "[green]found[/green]" if status.get("observations_template_exists") else "[red]MISSING[/red]"
 
     console.print(f"[cyan]Templates directory:[/cyan]  {status.get('templates_dir', 'unknown')}")
     console.print(f"[cyan]LOCAL template:[/cyan]      {local_icon}")
@@ -469,16 +457,16 @@ def _display_status(status: dict) -> None:
     console.print()
 
     # Version info
-    version = status.get('version') or 'unknown'
-    last_push = status.get('last_push') or 'never'
+    version = status.get("version") or "unknown"
+    last_push = status.get("last_push") or "never"
     console.print(f"[cyan]Schema version:[/cyan]     {version}")
     console.print(f"[cyan]Last push:[/cyan]          {last_push}")
 
     # Branches pushed
-    pushed = status.get('last_push_branches', [])
+    pushed = status.get("last_push_branches", [])
     if pushed:
-        preview = ', '.join(pushed[:8])
-        suffix = f'... (+{len(pushed) - 8} more)' if len(pushed) > 8 else ''
+        preview = ", ".join(pushed[:8])
+        suffix = f"... (+{len(pushed) - 8} more)" if len(pushed) > 8 else ""
         console.print(f"[cyan]Branches pushed:[/cyan]    {len(pushed)} ({preview}{suffix})")
     else:
         console.print("[cyan]Branches pushed:[/cyan]    none")
@@ -491,6 +479,7 @@ def _display_status(status: dict) -> None:
 # =============================================================================
 # HELPERS
 # =============================================================================
+
 
 def _load_branches_from_registry() -> list | None:
     """
@@ -507,15 +496,15 @@ def _load_branches_from_registry() -> list | None:
         data = read_memory_file_data(REGISTRY_PATH)
         if data is None:
             return None
-        branches = data.get('branches', [])
+        branches = data.get("branches", [])
         # Resolve relative paths against repo root
         for branch in branches:
-            raw_path = branch.get('path', '')
+            raw_path = branch.get("path", "")
             resolved = Path(raw_path)
             if not resolved.is_absolute():
                 resolved = _REPO_ROOT / raw_path
-            branch['path'] = str(resolved)
-        return [b for b in branches if b.get('status') == 'active']
+            branch["path"] = str(resolved)
+        return [b for b in branches if b.get("status") == "active"]
     except Exception as e:
         logger.error(f"[templates] Failed to load AIPASS_REGISTRY.json: {e}")
         return None
@@ -524,6 +513,7 @@ def _load_branches_from_registry() -> list | None:
 # =============================================================================
 # INTROSPECTION
 # =============================================================================
+
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Auto-discover handler directories and their Python files.
@@ -541,10 +531,7 @@ def _discover_handlers() -> dict[str, list[str]]:
     for d in sorted(handlers_dir.iterdir()):
         if not d.is_dir() or d.name.startswith("__"):
             continue
-        py_files = sorted(
-            f.name for f in d.iterdir()
-            if f.is_file() and f.suffix == ".py" and f.name != "__init__.py"
-        )
+        py_files = sorted(f.name for f in d.iterdir() if f.is_file() and f.suffix == ".py" and f.name != "__init__.py")
         if py_files:
             result[d.name] = py_files
     return result
@@ -597,12 +584,12 @@ if __name__ == "__main__":
 
     # No args -> introspection (seedgo standard)
     if len(sys.argv) < 2:
-        handle_command('templates', [])
+        handle_command("templates", [])
         sys.exit(0)
 
     # --help -> full help
-    if sys.argv[1] in ('--help', '-h', 'help'):
-        handle_command('templates', ['--help'])
+    if sys.argv[1] in ("--help", "-h", "help"):
+        handle_command("templates", ["--help"])
         sys.exit(0)
 
     # Execute command via handle_command

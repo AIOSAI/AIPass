@@ -371,9 +371,7 @@ def test_init_project_skips_existing_optional_files(tmp_path):
     # Pre-create optional files
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir()
-    (aipass_dir / "aipass_global_prompt.md").write_text(
-        "# Custom global\n", encoding="utf-8"
-    )
+    (aipass_dir / "aipass_global_prompt.md").write_text("# Custom global\n", encoding="utf-8")
     (target / "CLAUDE.md").write_text("# Custom CLAUDE\n", encoding="utf-8")
     (target / "AGENTS.md").write_text("# Custom AGENTS\n", encoding="utf-8")
     (target / "GEMINI.md").write_text("# Custom GEMINI\n", encoding="utf-8")
@@ -562,6 +560,7 @@ def test_update_project_creates_missing_managed_dirs(tmp_path):
 
     # Delete only the managed subdirectories (not root files like CLAUDE.md)
     import shutil
+
     shutil.rmtree(target / ".aipass")
     shutil.rmtree(target / ".claude")
 

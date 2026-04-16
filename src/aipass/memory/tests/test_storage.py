@@ -26,6 +26,7 @@ from unittest.mock import MagicMock
 # Import helper -- chromadb must be mocked before importing chroma module
 # ---------------------------------------------------------------------------
 
+
 def _import_chroma(monkeypatch):
     """Import chroma module with mocked chromadb dependency."""
     mock_chromadb = MagicMock()
@@ -52,6 +53,7 @@ def _reset_globals(chroma):
 # ===========================================================================
 # Tests: ChromaService class
 # ===========================================================================
+
 
 class TestChromaServiceCollectionName:
     """Test ChromaService.get_collection_name."""
@@ -184,6 +186,7 @@ class TestChromaServiceListCollections:
 # Tests: Public API — store_vectors
 # ===========================================================================
 
+
 class TestPublicStoreVectors:
     """Test public store_vectors function."""
 
@@ -201,7 +204,8 @@ class TestPublicStoreVectors:
         _reset_globals(chroma)
 
         result = chroma.store_vectors(
-            "SEEDGO", "observations",
+            "SEEDGO",
+            "observations",
             embeddings=[[0.1, 0.2]],
             documents=["doc1", "doc2"],
             metadatas=[{"k": "v"}],
@@ -222,7 +226,8 @@ class TestPublicStoreVectors:
         mock_chromadb.PersistentClient.return_value = mock_client
 
         result = chroma.store_vectors(
-            "SEEDGO", "observations",
+            "SEEDGO",
+            "observations",
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
             documents=["doc1", "doc2"],
             metadatas=[{"branch": "SEEDGO"}, {"branch": "SEEDGO"}],
@@ -246,7 +251,8 @@ class TestPublicStoreVectors:
 
         str_path = str(tmp_path / ".chroma")
         result = chroma.store_vectors(
-            "CLI", "local",
+            "CLI",
+            "local",
             embeddings=[[0.1]],
             documents=["doc1"],
             metadatas=[{"branch": "CLI"}],
@@ -264,7 +270,8 @@ class TestPublicStoreVectors:
         mock_chromadb.PersistentClient.side_effect = RuntimeError("DB error")
 
         result = chroma.store_vectors(
-            "SEEDGO", "observations",
+            "SEEDGO",
+            "observations",
             embeddings=[[0.1]],
             documents=["doc1"],
             metadatas=[{"k": "v"}],
@@ -277,6 +284,7 @@ class TestPublicStoreVectors:
 # ===========================================================================
 # Tests: Public API — get_collection_stats
 # ===========================================================================
+
 
 class TestPublicGetCollectionStats:
     """Test public get_collection_stats function."""
@@ -322,6 +330,7 @@ class TestPublicGetCollectionStats:
 # Tests: Public API — list_all_collections
 # ===========================================================================
 
+
 class TestPublicListAllCollections:
     """Test public list_all_collections function."""
 
@@ -348,6 +357,7 @@ class TestPublicListAllCollections:
 # ===========================================================================
 # Tests: Public API — get_database_info
 # ===========================================================================
+
 
 class TestPublicGetDatabaseInfo:
     """Test public get_database_info function."""
@@ -379,6 +389,7 @@ class TestPublicGetDatabaseInfo:
 # ===========================================================================
 # Tests: Public API — search_vectors
 # ===========================================================================
+
 
 class TestPublicSearchVectors:
     """Test public search_vectors function."""
@@ -529,7 +540,9 @@ class TestPublicSearchVectors:
         setattr(chroma, "_chroma_service", chroma.ChromaService(db_path=db_path))
 
         result = chroma.search_vectors(
-            [0.1] * 384, branch="test", memory_type="local",
+            [0.1] * 384,
+            branch="test",
+            memory_type="local",
         )
 
         assert result["success"] is True
@@ -540,6 +553,7 @@ class TestPublicSearchVectors:
 # ===========================================================================
 # Tests: Singleton / get_client
 # ===========================================================================
+
 
 class TestGetClient:
     """Test get_client singleton behaviour."""

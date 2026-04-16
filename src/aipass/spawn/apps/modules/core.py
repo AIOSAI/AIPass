@@ -29,13 +29,24 @@ try:
 except ImportError as e:
     logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
     from rich.console import Console
+
     console = Console()
 
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, validate_no_placeholders
-from aipass.spawn.apps.handlers.file_ops import copy_template, rename_placeholder_paths, regenerate_template_registry, ensure_directory
+from aipass.spawn.apps.handlers.file_ops import (
+    copy_template,
+    rename_placeholder_paths,
+    regenerate_template_registry,
+    ensure_directory,
+)
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
-from aipass.spawn.apps.handlers.registry import find_registry, add_to_registry, get_next_citizen_number, fix_passport_registry_id
+from aipass.spawn.apps.handlers.registry import (
+    find_registry,
+    add_to_registry,
+    get_next_citizen_number,
+    fix_passport_registry_id,
+)
 from aipass.spawn.apps.handlers.class_registry import (
     get_template_dir as _get_template_dir,
     validate_class as validate_class,
@@ -58,10 +69,18 @@ def print_introspection():
     console.print("  handlers/")
     console.print("    - metadata.py (get_branch_name, normalize_branch_name, detect_profile — branch identity)")
     console.print("    - placeholders.py (build_replacements_dict, validate_no_placeholders — template substitution)")
-    console.print("    - file_ops.py (copy_template, rename_placeholder_paths, regenerate_template_registry, ensure_directory — filesystem ops)")
-    console.print("    - meta_ops.py (load_template_registry, generate_branch_meta, save_branch_meta — branch metadata)")
-    console.print("    - registry.py (find_registry, add_to_registry, get_next_citizen_number — AIPASS_REGISTRY management)")
-    console.print("    - class_registry.py (validate_class, get_default_class, get_available_classes, get_template_dir — citizen class lookup)")
+    console.print(
+        "    - file_ops.py (copy_template, rename_placeholder_paths, regenerate_template_registry, ensure_directory — filesystem ops)"
+    )
+    console.print(
+        "    - meta_ops.py (load_template_registry, generate_branch_meta, save_branch_meta — branch metadata)"
+    )
+    console.print(
+        "    - registry.py (find_registry, add_to_registry, get_next_citizen_number — AIPASS_REGISTRY management)"
+    )
+    console.print(
+        "    - class_registry.py (validate_class, get_default_class, get_available_classes, get_template_dir — citizen class lookup)"
+    )
     console.print()
 
 
@@ -121,8 +140,16 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
 
-def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
-                 template_dir=None, registry_path=None, citizen_class="builder"):
+def _spawn_agent(
+    target_path,
+    role="",
+    traits="",
+    purpose="",
+    profile=None,
+    template_dir=None,
+    registry_path=None,
+    citizen_class="builder",
+):
     """
     Create a new AIPass agent from template.
 
@@ -174,9 +201,13 @@ def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
 
     # Build placeholder replacements
     replacements = build_replacements_dict(
-        target, folder_name,
-        role=role, traits=traits, purpose=purpose or "New agent - purpose TBD",
-        profile=detected_profile, citizen_number=citizen_number,
+        target,
+        folder_name,
+        role=role,
+        traits=traits,
+        purpose=purpose or "New agent - purpose TBD",
+        profile=detected_profile,
+        citizen_number=citizen_number,
     )
 
     # Step 1: Copy template with placeholder replacement in content
@@ -203,8 +234,12 @@ def _spawn_agent(target_path, role="", traits="", purpose="", profile=None,
         logger.warning("Cannot relativize path %s to registry %s: %s", target, reg_path.parent, e)
         registry_branch_path = str(target)
     registry_updated = add_to_registry(
-        reg_path, branch_upper, registry_branch_path, detected_profile,
-        f"@{branch_lower}", purpose or "New agent - purpose TBD",
+        reg_path,
+        branch_upper,
+        registry_branch_path,
+        detected_profile,
+        f"@{branch_lower}",
+        purpose or "New agent - purpose TBD",
     )
 
     # Step 5: Validate no unreplaced placeholders
@@ -277,8 +312,12 @@ def _adopt_existing(target, purpose, profile, registry_path):
         registry_branch_path = str(target)
 
     registry_updated = add_to_registry(
-        reg_path, branch_upper, registry_branch_path, detected_profile,
-        f"@{branch_lower}", purpose,
+        reg_path,
+        branch_upper,
+        registry_branch_path,
+        detected_profile,
+        f"@{branch_lower}",
+        purpose,
     )
 
     json_handler.log_operation("branch_adopted", data={"branch": branch_upper})
@@ -290,6 +329,7 @@ def _adopt_existing(target, purpose, profile, registry_path):
     update_additions = 0
     try:
         from aipass.spawn.apps.handlers.update_ops import update_branch
+
         update_result = update_branch(branch_lower)
         update_additions = update_result.get("additions", 0)
         if update_result.get("errors"):

@@ -39,7 +39,7 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
         return None
 
     try:
-        with open(inbox_file, 'r', encoding='utf-8') as f:
+        with open(inbox_file, "r", encoding="utf-8") as f:
             inbox_data = json.load(f)
 
         for msg in inbox_data.get("messages", []):
@@ -52,11 +52,7 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
         return None
 
 
-def send_reply(
-    from_branch_path: Path,
-    original_email: Dict,
-    reply_message: str
-) -> Tuple[bool, str, Optional[str]]:
+def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str) -> Tuple[bool, str, Optional[str]]:
     """
     Send a reply to an email's original sender.
 
@@ -71,7 +67,9 @@ def send_reply(
     Returns:
         Tuple of (success: bool, message: str, reply_id: str or None)
     """
-    json_handler.log_operation("send_reply", {"from_branch": str(from_branch_path), "reply_to": original_email.get("from", "unknown")})
+    json_handler.log_operation(
+        "send_reply", {"from_branch": str(from_branch_path), "reply_to": original_email.get("from", "unknown")}
+    )
     # Import here to avoid circular imports
     from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
     from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
@@ -91,7 +89,7 @@ def send_reply(
     # Normalize dispatched_to to email format if it's a path
     # DRONE's preprocess_args converts @branch to paths, so we may receive
     # a filesystem path instead of "@trigger"
-    if dispatched_to and not dispatched_to.startswith('@'):
+    if dispatched_to and not dispatched_to.startswith("@"):
         # It's a path - look up email in registry
         dispatch_info = get_branch_info_from_registry(Path(dispatched_to))
         if dispatch_info:
@@ -121,7 +119,7 @@ def send_reply(
         "subject": reply_subject,
         "message": reply_message,
         "timestamp": timestamp,
-        "in_reply_to": original_email.get("id")  # Link to original message
+        "in_reply_to": original_email.get("id"),  # Link to original message
     }
 
     # Find recipient branch
@@ -136,9 +134,7 @@ def send_reply(
         # Fallback: cross-project delivery via reply_path stored at receive time
         stored_reply_path = original_email.get("reply_path")
         if stored_reply_path:
-            return _deliver_via_reply_path(
-                stored_reply_path, reply_email_data, from_branch_path, original_email
-            )
+            return _deliver_via_reply_path(stored_reply_path, reply_email_data, from_branch_path, original_email)
         return False, f"Could not find branch for {reply_destination}", None
 
     # Deliver the reply (pass email address, not path)
@@ -153,7 +149,7 @@ def send_reply(
     reply_id = str(uuid.uuid4())[:8]
     reply_email_data["id"] = reply_id
     sent_file = sent_folder / f"{reply_id}.json"
-    with open(sent_file, 'w', encoding='utf-8') as f:
+    with open(sent_file, "w", encoding="utf-8") as f:
         json.dump(reply_email_data, f, indent=2)
 
     # Auto-close the original email
@@ -204,8 +200,7 @@ def _deliver_via_reply_path(
 
     inbox_data.setdefault("messages", []).insert(0, reply_email_data)
     inbox_data["total_messages"] = len(inbox_data["messages"])
-    new_count = sum(1 for m in inbox_data["messages"]
-                    if m.get("status") == "new" or not m.get("read", False))
+    new_count = sum(1 for m in inbox_data["messages"] if m.get("status") == "new" or not m.get("read", False))
     inbox_data["unread_count"] = new_count
 
     try:
@@ -229,6 +224,7 @@ def _deliver_via_reply_path(
 
     # Auto-close the original email
     from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_closed_and_archive
+
     original_id = original_email.get("id")
     if original_id:
         close_success, close_msg = mark_as_closed_and_archive(from_branch_path, original_id)
@@ -241,9 +237,10 @@ def _deliver_via_reply_path(
 
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
-    console.print("\n" + "="*70)
+
+    console.print("\n" + "=" * 70)
     console.print("EMAIL REPLY HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Sends reply to email's original sender and auto-closes original")
     console.print()
@@ -258,4 +255,4 @@ if __name__ == "__main__":
     console.print("  4. Save to sender's sent folder")
     console.print("  5. Auto-close original email")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

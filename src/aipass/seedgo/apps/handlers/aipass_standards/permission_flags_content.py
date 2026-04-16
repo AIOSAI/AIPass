@@ -14,6 +14,7 @@ Provides Rich-formatted reference text for the permission flags standard.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_permission_flags_standards() -> str:
     """Return Rich-formatted permission flags standards text"""
     json_handler.log_operation("standard_content_queried", {"standard": "permission_flags"})

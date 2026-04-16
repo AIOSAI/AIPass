@@ -45,7 +45,7 @@ def _get_caller_module_name() -> str:
             module_name = caller_path.stem
 
             # Validate module name
-            if module_name and not module_name.startswith('_'):
+            if module_name and not module_name.startswith("_"):
                 return module_name
 
         # Fallback
@@ -63,7 +63,7 @@ def load_template(json_type: str, module_name: str) -> Any:
         return None
 
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             template = json.load(f)
 
         # Replace placeholders
@@ -111,7 +111,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             if validate_json_structure(data, json_type):
@@ -124,7 +124,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         return False
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(template, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -140,7 +140,7 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.warning("[json] Failed to load JSON for %s: %s", module_name, e)
@@ -158,7 +158,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
         data["last_updated"] = datetime.now().date().isoformat()
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -208,10 +208,7 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         log = []
 
     # Create new entry
-    entry: Dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation
-    }
+    entry: Dict[str, Any] = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
     if data:
         entry["data"] = data
@@ -257,9 +254,9 @@ def update_data_metrics(module_name: str, **metrics) -> bool:
 
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("JSON HANDLER - AI_MAIL Working Implementation")
-    print("="*70)
+    print("=" * 70)
     print("\n[TESTING] Creating AI_MAIL JSONs...")
 
     # Test auto-creation
@@ -271,4 +268,4 @@ if __name__ == "__main__":
     print("  - ai_mail_config.json")
     print("  - ai_mail_data.json")
     print("  - ai_mail_log.json")
-    print("\n" + "="*70 + "\n")
+    print("\n" + "=" * 70 + "\n")

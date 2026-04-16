@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 # HELPERS
 # =============================================
 
+
 def _fresh_import_registry_load(monkeypatch, tmp_path):
     """Import registry load module with paths redirected to tmp_path."""
     for key in list(sys.modules.keys()):
@@ -71,6 +72,7 @@ def _fresh_import_registry_save(monkeypatch, tmp_path):
 # TESTS: load_module_registry
 # =============================================
 
+
 class TestLoadModuleRegistry:
     """Tests for load_module_registry()."""
 
@@ -99,9 +101,7 @@ class TestLoadModuleRegistry:
             "modules": modules,
             "statistics": {"total_modules": 2},
         }
-        load_mod.REGISTRY_FILE.write_text(
-            json.dumps(registry), encoding="utf-8"
-        )
+        load_mod.REGISTRY_FILE.write_text(json.dumps(registry), encoding="utf-8")
 
         result = load_mod.load_module_registry()
         assert len(result) == 2
@@ -116,26 +116,18 @@ class TestLoadModuleRegistry:
         result = load_mod.load_module_registry()
         assert result == {}
 
-    def test_empty_dict_when_modules_key_missing(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path
-    ):
+    def test_empty_dict_when_modules_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry without 'modules' key should return empty dict."""
         load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
-        load_mod.REGISTRY_FILE.write_text(
-            json.dumps({"registry_version": "1.0.0"}), encoding="utf-8"
-        )
+        load_mod.REGISTRY_FILE.write_text(json.dumps({"registry_version": "1.0.0"}), encoding="utf-8")
 
         result = load_mod.load_module_registry()
         assert result == {}
 
-    def test_empty_modules_returns_empty_dict(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path
-    ):
+    def test_empty_modules_returns_empty_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry with empty modules dict should return empty dict."""
         load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
-        load_mod.REGISTRY_FILE.write_text(
-            json.dumps({"modules": {}}), encoding="utf-8"
-        )
+        load_mod.REGISTRY_FILE.write_text(json.dumps({"modules": {}}), encoding="utf-8")
 
         result = load_mod.load_module_registry()
         assert result == {}
@@ -147,9 +139,7 @@ class TestLoadModuleRegistry:
         registry = {
             "modules": {"mod_a": {"path": "a"}, "mod_b": {"path": "b"}},
         }
-        load_mod.REGISTRY_FILE.write_text(
-            json.dumps(registry), encoding="utf-8"
-        )
+        load_mod.REGISTRY_FILE.write_text(json.dumps(registry), encoding="utf-8")
 
         load_mod.load_module_registry()
         load_mod.json_handler.log_operation.assert_called_once_with(  # type: ignore[union-attr]
@@ -168,6 +158,7 @@ class TestLoadModuleRegistry:
 # =============================================
 # TESTS: save_module_registry
 # =============================================
+
 
 class TestSaveModuleRegistry:
     """Tests for save_module_registry()."""
@@ -197,9 +188,7 @@ class TestSaveModuleRegistry:
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
         assert isinstance(data, dict)
 
-    def test_saved_structure_has_required_keys(
-        self, mock_prax_infrastructure, monkeypatch, tmp_path
-    ):
+    def test_saved_structure_has_required_keys(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saved JSON should contain registry_version, timestamp, modules, statistics."""
         save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
         modules = {"alpha": {"relative_path": "src/alpha.py"}}
@@ -306,6 +295,7 @@ class TestSaveModuleRegistry:
 # TESTS: round-trip (save then load)
 # =============================================
 
+
 class TestRegistryRoundTrip:
     """Integration-style tests: save then load."""
 
@@ -313,10 +303,12 @@ class TestRegistryRoundTrip:
         """Data saved by save_module_registry should be loadable by load_module_registry."""
         # Import both with the same tmp_path
         save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
-        save_mod.save_module_registry({
-            "alpha": {"relative_path": "src/alpha.py", "size": 100},
-            "beta": {"relative_path": "src/beta.py", "size": 200},
-        })
+        save_mod.save_module_registry(
+            {
+                "alpha": {"relative_path": "src/alpha.py", "size": 100},
+                "beta": {"relative_path": "src/beta.py", "size": 200},
+            }
+        )
 
         # Now import load pointing at the same directory
         load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)

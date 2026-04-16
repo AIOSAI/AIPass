@@ -39,6 +39,7 @@ from aipass.drone.apps.handlers.exceptions import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def registry_dir() -> Generator[Path, None, None]:
     """Isolated temp directory for registry tests; cleaned up after."""
@@ -93,8 +94,8 @@ def _minimal_registry(*, metadata_id: str | None = None, branches: list | None =
 # 1. load_registry() — valid registry
 # ===================================================================
 
-class TestLoadRegistry:
 
+class TestLoadRegistry:
     def test_branches_normalised_to_dict(self, registry_dir: Path):
         """List-format branches are converted to a dict keyed by lowercased name."""
         reg = _minimal_registry()
@@ -263,8 +264,8 @@ class TestLoadRegistry:
 # 4 & 5. get_all_branches()
 # ===================================================================
 
-class TestGetAllBranches:
 
+class TestGetAllBranches:
     @pytest.fixture(autouse=True)
     def _isolate_home(self, monkeypatch):
         """Prevent real AIPASS_HOME from leaking into test results."""
@@ -340,8 +341,8 @@ class TestGetAllBranches:
 # 6 & 7. find_registry() / _first_registry_in()
 # ===================================================================
 
-class TestFindRegistry:
 
+class TestFindRegistry:
     def test_first_registry_in_finds_file(self, registry_dir: Path):
         """_first_registry_in returns path when *_REGISTRY.json exists."""
         _write_registry(registry_dir, _minimal_registry())
@@ -391,16 +392,14 @@ class TestFindRegistry:
 # 8, 9, 10. _verify_registry_credential()
 # ===================================================================
 
-class TestVerifyRegistryCredential:
 
+class TestVerifyRegistryCredential:
     def test_passes_when_ids_match(self, registry_dir: Path, monkeypatch):
         """No error when passport.citizenship.registry_id == registry.metadata.id."""
         shared_id = "reg-abc-123"
         registry_data = _minimal_registry(metadata_id=shared_id)
         registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(registry_dir, {
-            "citizenship": {"registry_id": shared_id}
-        })
+        _write_passport(registry_dir, {"citizenship": {"registry_id": shared_id}})
 
         monkeypatch.chdir(registry_dir)
         # Should not raise
@@ -410,9 +409,7 @@ class TestVerifyRegistryCredential:
         """No error when registry has no metadata.id (migration period)."""
         registry_data = _minimal_registry()  # no metadata_id
         registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(registry_dir, {
-            "citizenship": {"registry_id": "some-id"}
-        })
+        _write_passport(registry_dir, {"citizenship": {"registry_id": "some-id"}})
 
         monkeypatch.chdir(registry_dir)
         _verify_registry_credential(registry_path, registry_data)
@@ -422,9 +419,12 @@ class TestVerifyRegistryCredential:
         shared_id = "reg-xyz-789"
         registry_data = _minimal_registry(metadata_id=shared_id)
         registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(registry_dir, {
-            "citizenship": {}  # no registry_id
-        })
+        _write_passport(
+            registry_dir,
+            {
+                "citizenship": {}  # no registry_id
+            },
+        )
 
         monkeypatch.chdir(registry_dir)
         _verify_registry_credential(registry_path, registry_data)
@@ -443,9 +443,7 @@ class TestVerifyRegistryCredential:
         """RegistryMismatchError raised when IDs differ -- security-critical."""
         registry_data = _minimal_registry(metadata_id="registry-AAA")
         registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(registry_dir, {
-            "citizenship": {"registry_id": "registry-BBB"}
-        })
+        _write_passport(registry_dir, {"citizenship": {"registry_id": "registry-BBB"}})
 
         monkeypatch.chdir(registry_dir)
         with pytest.raises(RegistryMismatchError, match="mismatch"):
@@ -457,9 +455,7 @@ class TestVerifyRegistryCredential:
         passport_id = "registry-DEV"
         registry_data = _minimal_registry(metadata_id=reg_id)
         registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(registry_dir, {
-            "citizenship": {"registry_id": passport_id}
-        })
+        _write_passport(registry_dir, {"citizenship": {"registry_id": passport_id}})
 
         monkeypatch.chdir(registry_dir)
         with pytest.raises(RegistryMismatchError) as exc_info:
@@ -482,8 +478,8 @@ class TestVerifyRegistryCredential:
 # 11. Metadata parsing
 # ===================================================================
 
-class TestMetadataParsing:
 
+class TestMetadataParsing:
     def test_metadata_id_preserved(self, registry_dir: Path, monkeypatch):
         """Registry metadata.id field is available after loading."""
         reg = _minimal_registry(metadata_id="my-unique-id")
@@ -510,8 +506,8 @@ class TestMetadataParsing:
 # Registry path management
 # ===================================================================
 
-class TestRegistryPathManagement:
 
+class TestRegistryPathManagement:
     def test_set_and_get_registry_path(self, registry_dir: Path):
         """set_registry_path() overrides get_registry_path()."""
         custom = registry_dir / "CUSTOM_REGISTRY.json"

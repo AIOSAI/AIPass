@@ -50,6 +50,7 @@ def print_introspection():
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()

@@ -31,6 +31,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 # MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # =============================================================================
 
+
 def print_introspection():
     """Display aipass command info — available subcommands and connected handlers."""
     from rich.table import Table
@@ -97,7 +98,9 @@ def print_help():
     console.print("  [green]drone @cli aipass init[/green]                  [dim]Bootstrap in current directory[/dim]")
     console.print("  [green]drone @cli aipass init /path[/green]            [dim]Bootstrap in target directory[/dim]")
     console.print("  [green]drone @cli aipass init /path MyProj[/green]     [dim]Bootstrap with custom name[/dim]")
-    console.print("  [green]drone @cli aipass init agent <name>[/green]     [dim]Create an agent in current project[/dim]")
+    console.print(
+        "  [green]drone @cli aipass init agent <name>[/green]     [dim]Create an agent in current project[/dim]"
+    )
     console.print("  [green]drone @cli aipass init update[/green]           [dim]Refresh managed scaffold files[/dim]")
     console.print("  [green]drone @cli aipass --help[/green]                [dim]This help message[/dim]")
     console.print()
@@ -266,11 +269,14 @@ def _handle_init(args: List[str]) -> bool:
         console.print("[dim]For terminal usage, add to your shell profile:[/dim]")
         console.print(f"  [green]export AIPASS_HOME={result['aipass_home']}[/green]")
 
-    json_handler.log_operation("aipass_init", {
-        "project_name": result["project_name"],
-        "target": result["target"],
-        "files_created": len(result["created_files"]),
-    })
+    json_handler.log_operation(
+        "aipass_init",
+        {
+            "project_name": result["project_name"],
+            "target": result["target"],
+            "files_created": len(result["created_files"]),
+        },
+    )
 
     # Next steps
     console.print()
@@ -387,9 +393,7 @@ def _handle_init_update(args: List[str]) -> bool:
 
     # Updated files table (only show if something changed)
     if result["updated_files"]:
-        updated_table = Table(
-            show_header=True, header_style="bold cyan", border_style="dim", title="Updated"
-        )
+        updated_table = Table(show_header=True, header_style="bold cyan", border_style="dim", title="Updated")
         updated_table.add_column("#", style="green", width=3)
         updated_table.add_column("File", style="yellow")
         for i, f in enumerate(result["updated_files"], 1):
@@ -398,9 +402,7 @@ def _handle_init_update(args: List[str]) -> bool:
 
     # Already current table
     if already_current:
-        current_table = Table(
-            show_header=True, header_style="bold cyan", border_style="dim", title="Already current"
-        )
+        current_table = Table(show_header=True, header_style="bold cyan", border_style="dim", title="Already current")
         current_table.add_column("#", style="dim", width=3)
         current_table.add_column("File", style="dim")
         for i, f in enumerate(already_current, 1):
@@ -408,9 +410,7 @@ def _handle_init_update(args: List[str]) -> bool:
         console.print(current_table)
 
     # Skipped files table
-    skipped_table = Table(
-        show_header=True, header_style="bold cyan", border_style="dim", title="User-owned (skipped)"
-    )
+    skipped_table = Table(show_header=True, header_style="bold cyan", border_style="dim", title="User-owned (skipped)")
     skipped_table.add_column("#", style="dim", width=3)
     skipped_table.add_column("File", style="dim")
     for i, f in enumerate(result["skipped_files"], 1):
@@ -423,13 +423,16 @@ def _handle_init_update(args: List[str]) -> bool:
     else:
         success("All files already up to date")
 
-    json_handler.log_operation("aipass_init_update", {
-        "project_name": result["project_name"],
-        "target": result["target"],
-        "files_updated": len(result["updated_files"]),
-        "files_already_current": len(already_current),
-        "files_skipped": len(result["skipped_files"]),
-    })
+    json_handler.log_operation(
+        "aipass_init_update",
+        {
+            "project_name": result["project_name"],
+            "target": result["target"],
+            "files_updated": len(result["updated_files"]),
+            "files_already_current": len(already_current),
+            "files_skipped": len(result["skipped_files"]),
+        },
+    )
 
     return True
 

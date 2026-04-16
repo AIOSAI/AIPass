@@ -72,12 +72,12 @@ def _display_audit(files: list, summary: dict) -> None:
     console.print("[bold cyan]System Log Audit[/bold cyan]")
     console.print(f"  Total files: {summary['total_files']}")
     console.print(f"  Total lines: {summary['total_lines']:,}")
-    if summary.get('largest_file'):
+    if summary.get("largest_file"):
         console.print(f"  Largest: {summary['largest_file']} ({summary.get('largest_lines', 0):,} lines)")
     else:
         console.print("  Largest: (no log files found)")
 
-    if summary['healthy']:
+    if summary["healthy"]:
         console.print("[green]  Status: HEALTHY — all logs within limits[/green]")
     else:
         error(f"Status: {summary['oversized_count']} oversized, {summary['critical_count']} critical")
@@ -109,14 +109,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command was handled
     """
-    if command != 'log-audit':
+    if command != "log-audit":
         return False
 
     if not args:
         print_introspection()
         return True
 
-    if args[0] in ('--help', '-h', 'help'):
+    if args[0] in ("--help", "-h", "help"):
         print_help()
         return True
 
@@ -128,13 +128,13 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcmd = args[0]
     json_handler.log_operation("log_audit_executed", {"mode": subcmd})
 
-    if subcmd == 'audit':
+    if subcmd == "audit":
         files = scan_log_files()
         summary = log_health_summary()
         _display_audit(files, summary)
         return True
 
-    if subcmd == 'enforce':
+    if subcmd == "enforce":
         _run_enforce()
         return True
 
@@ -171,9 +171,9 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    if '--help' in sys.argv:
+    if "--help" in sys.argv:
         print_help()
         sys.exit(0)
 
-    args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
-    handle_command('log-audit', args)
+    args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+    handle_command("log-audit", args)

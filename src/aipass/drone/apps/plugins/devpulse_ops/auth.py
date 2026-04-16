@@ -52,10 +52,7 @@ def verify_caller() -> str:
                     logger.error(msg)
                     raise PermissionError(msg)
                 if name not in ALLOWED_CALLERS:
-                    msg = (
-                        f"Branch '{name}' is not authorized for system-pr. "
-                        f"Allowed callers: {ALLOWED_CALLERS}"
-                    )
+                    msg = f"Branch '{name}' is not authorized for system-pr. Allowed callers: {ALLOWED_CALLERS}"
                     logger.error(msg)
                     raise PermissionError(msg)
                 json_handler.log_operation(
@@ -68,9 +65,7 @@ def verify_caller() -> str:
                 raise
             except Exception as exc:
                 logger.error("Failed to read passport at %s: %s", passport_path, exc)
-                raise PermissionError(
-                    f"Failed to read passport at {passport_path}: {exc}"
-                ) from exc
+                raise PermissionError(f"Failed to read passport at {passport_path}: {exc}") from exc
         parent = current.parent
         if parent == current:
             break

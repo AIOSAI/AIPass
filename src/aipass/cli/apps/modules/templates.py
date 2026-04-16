@@ -30,6 +30,7 @@ from aipass.cli.apps.handlers.json import json_handler
 # MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # ============================================================================
 
+
 def print_introspection():
     """Display module info and connected handlers"""
     CONSOLE.print()
@@ -155,6 +156,7 @@ def run_demo():
 # PUBLIC API FUNCTIONS (Keep existing - don't break compatibility)
 # ============================================================================
 
+
 def operation_start(operation: str, **details) -> None:
     """
     Display standard operation start template with Rich styling
@@ -191,7 +193,7 @@ def operation_complete(**summary) -> None:
     for key, value in summary.items():
         CONSOLE.print(f"  {key}: {value}")
 
-    if summary.get('time'):
+    if summary.get("time"):
         CONSOLE.print(f"  [dim]Completed in {summary['time']}[/dim]")
     CONSOLE.print()
 
@@ -207,7 +209,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Handle help flag (drone compliance)
-    if sys.argv[1] in ['--help', '-h', 'help']:
+    if sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

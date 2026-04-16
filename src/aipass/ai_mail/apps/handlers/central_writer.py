@@ -24,8 +24,8 @@ import importlib.util
 
 # Remove current directory from sys.path temporarily to import stdlib json
 _saved_path = sys.path.copy()
-sys.path = [p for p in sys.path if 'handlers' not in p]
-spec = importlib.util.find_spec('json')
+sys.path = [p for p in sys.path if "handlers" not in p]
+spec = importlib.util.find_spec("json")
 if spec is None or spec.loader is None:
     raise ImportError("Failed to find stdlib json module")
 stdlib_json = importlib.util.module_from_spec(spec)
@@ -54,6 +54,7 @@ BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 # =============================================================================
 # CORE FUNCTIONS
 # =============================================================================
+
 
 def find_all_inbox_files() -> List[Path]:
     """
@@ -122,7 +123,7 @@ def read_inbox_stats(inbox_path: Path) -> Tuple[int, int]:
         json.JSONDecodeError: If inbox.json is malformed
         KeyError: If required fields are missing
     """
-    with open(inbox_path, 'r', encoding='utf-8') as f:
+    with open(inbox_path, "r", encoding="utf-8") as f:
         inbox_data = stdlib_json.load(f)
 
     unread = inbox_data.get("unread_count", 0)
@@ -142,7 +143,7 @@ def get_valid_branch_names() -> set:
         FileNotFoundError: If AIPASS_REGISTRY.json doesn't exist
         json.JSONDecodeError: If AIPASS_REGISTRY.json is malformed
     """
-    with open(BRANCH_REGISTRY, 'r', encoding='utf-8') as f:
+    with open(BRANCH_REGISTRY, "r", encoding="utf-8") as f:
         registry_data = stdlib_json.load(f)
 
     return {branch["name"].upper() for branch in registry_data.get("branches", [])}
@@ -181,10 +182,7 @@ def aggregate_branch_stats() -> Dict[str, Dict[str, int]]:
 
             unread, total = read_inbox_stats(inbox_path)
 
-            branch_stats[branch_name] = {
-                "unread": unread,
-                "total": total
-            }
+            branch_stats[branch_name] = {"unread": unread, "total": total}
         except (FileNotFoundError, stdlib_json.JSONDecodeError, KeyError) as e:
             # Skip branches with missing/malformed inbox files
             # Continue processing other branches
@@ -211,10 +209,7 @@ def calculate_system_totals(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str
     total_unread = sum(stats["unread"] for stats in branch_stats.values())
     total_messages = sum(stats["total"] for stats in branch_stats.values())
 
-    return {
-        "total_unread": total_unread,
-        "total_messages": total_messages
-    }
+    return {"total_unread": total_unread, "total_messages": total_messages}
 
 
 def build_central_data(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
@@ -233,7 +228,7 @@ def build_central_data(branch_stats: Dict[str, Dict[str, int]]) -> Dict[str, Any
         "service": "ai_mail",
         "last_updated": datetime.now().date().isoformat(),  # Date only - avoids phantom git changes
         "branch_stats": branch_stats,
-        "system_totals": system_totals
+        "system_totals": system_totals,
     }
 
 
@@ -251,13 +246,14 @@ def write_central_file(data: Dict[str, Any]) -> None:
     # Ensure AI_CENTRAL directory exists
     AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(CENTRAL_FILE, 'w', encoding='utf-8') as f:
+    with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
         stdlib_json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def update_central() -> Dict[str, Any]:
     """
@@ -314,10 +310,7 @@ if __name__ == "__main__":
     console = Console()
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]AI_MAIL Central Writer[/bold cyan]",
-        border_style="bright_blue"
-    ))
+    console.print(Panel.fit("[bold cyan]AI_MAIL Central Writer[/bold cyan]", border_style="bright_blue"))
     console.print()
 
     try:
@@ -334,18 +327,14 @@ if __name__ == "__main__":
         table.add_column("Total", justify="right", style="blue")
 
         for branch, data in sorted(stats["branch_stats"].items()):
-            table.add_row(
-                branch,
-                str(data["unread"]),
-                str(data["total"])
-            )
+            table.add_row(branch, str(data["unread"]), str(data["total"]))
 
         # Add totals row
         table.add_section()
         table.add_row(
             "[bold]SYSTEM TOTALS[/bold]",
             f"[bold yellow]{stats['system_totals']['total_unread']}[/bold yellow]",
-            f"[bold blue]{stats['system_totals']['total_messages']}[/bold blue]"
+            f"[bold blue]{stats['system_totals']['total_messages']}[/bold blue]",
         )
 
         console.print(table)

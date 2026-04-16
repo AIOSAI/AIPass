@@ -28,6 +28,7 @@ from typing import Any, Dict, List
 from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json
 from aipass.trigger.apps.handlers.json import json_handler
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -35,6 +36,7 @@ def _find_repo_root() -> Path:
         if (parent / "AIPASS_REGISTRY.json").exists():
             return parent
     return Path.cwd()
+
 
 _REPO_ROOT = _find_repo_root()
 
@@ -50,7 +52,7 @@ def _log_warning(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass
@@ -67,7 +69,7 @@ def _load_branch_registry() -> List[Dict]:
     try:
         if not BRANCH_REGISTRY.exists():
             return []
-        data = json.loads(BRANCH_REGISTRY.read_text(encoding='utf-8'))
+        data = json.loads(BRANCH_REGISTRY.read_text(encoding="utf-8"))
         return data.get("branches", [])
     except Exception as exc:
         _log_warning(f"load branch registry failed: {exc}")
@@ -122,11 +124,7 @@ def _load_dashboard(branch_path: Path) -> Dict:
             if "sections" not in data:
                 data["sections"] = {}
             if "bulletin_board" not in data["sections"]:
-                data["sections"]["bulletin_board"] = {
-                    "managed_by": "aipass",
-                    "active_bulletins": [],
-                    "pending_ack": []
-                }
+                data["sections"]["bulletin_board"] = {"managed_by": "aipass", "active_bulletins": [], "pending_ack": []}
             return data
         except Exception as exc:
             _log_warning(f"parse dashboard JSON for {branch_path}: {exc}")
@@ -134,13 +132,7 @@ def _load_dashboard(branch_path: Path) -> Dict:
     # Create minimal dashboard structure
     return {
         "last_refreshed": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "sections": {
-            "bulletin_board": {
-                "managed_by": "aipass",
-                "active_bulletins": [],
-                "pending_ack": []
-            }
-        }
+        "sections": {"bulletin_board": {"managed_by": "aipass", "active_bulletins": [], "pending_ack": []}},
     }
 
 
@@ -205,7 +197,7 @@ def _propagate_bulletins_to_branches() -> None:
                 dashboard["sections"]["bulletin_board"] = {
                     "managed_by": "aipass",
                     "active_bulletins": active_bulletins,
-                    "pending_ack": []
+                    "pending_ack": [],
                 }
 
                 # Save dashboard
@@ -225,7 +217,7 @@ def handle_bulletin_created(
     _priority: str | None = None,
     _created_by: str | None = None,
     _timestamp: str | None = None,
-    **_kwargs: Any
+    **_kwargs: Any,
 ) -> None:
     """
     Handle bulletin_created event - propagate bulletin to all branch dashboards.

@@ -25,6 +25,7 @@ def print_introspection():
         from aipass.cli.apps.modules.display import console
     except ImportError:
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -35,7 +36,6 @@ def print_introspection():
     console.print("  handlers/events/")
     console.print("    - registry.py (setup_handlers — auto-register all event handlers on first use)")
     console.print()
-
 
 
 class Trigger:
@@ -58,6 +58,7 @@ class Trigger:
         if not cls._initialized:
             try:
                 from aipass.trigger.apps.handlers.events.registry import setup_handlers
+
                 setup_handlers()
             except ImportError as e:
                 logger.warning(f"[TRIGGER] Handlers not available: {e}")
@@ -100,7 +101,7 @@ class Trigger:
         """Fire a single event to its registered handlers."""
         handlers = cls._handlers.get(event, [])
         data = dict(data)  # Copy to avoid mutating caller's dict
-        data['fire_event'] = cls.fire
+        data["fire_event"] = cls.fire
         for handler in handlers:
             if handler in cls._disabled_handlers:
                 continue
@@ -198,7 +199,7 @@ def handle_command(command: str, args: list) -> bool:
         if not args:
             print_introspection()
             return True
-        if args[0] in ['--help', '-h', 'help']:
+        if args[0] in ["--help", "-h", "help"]:
             _print_help(console)
             return True
         return handle_command(args[0], args[1:])
@@ -206,7 +207,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["fire", "status", "list"]:
         return False
 
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         _print_help(console)
         return True
 
@@ -241,8 +242,7 @@ def handle_command(command: str, args: list) -> bool:
         for event, count in sorted(handler_map.items()):
             console.print(f"  [green]{event:30}[/green] {count} handler(s)")
         console.print()
-        console.print(f"[dim]Total: {len(handler_map)} events, "
-                       f"{sum(handler_map.values())} handlers[/dim]")
+        console.print(f"[dim]Total: {len(handler_map)} events, {sum(handler_map.values())} handlers[/dim]")
         return True
 
     return False

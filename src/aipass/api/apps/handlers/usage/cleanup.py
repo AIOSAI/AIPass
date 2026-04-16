@@ -36,7 +36,7 @@ def _read_json(file_path: Path) -> Optional[Dict]:
     try:
         if not file_path.exists():
             return None
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to read JSON from {file_path}: {e}")
@@ -47,7 +47,7 @@ def _write_json(file_path: Path, data: Dict) -> bool:
     """Write JSON file with error handling."""
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -76,10 +76,7 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         data_content = data.get("data", data)
 
         # Identify and remove old generation tracking entries
-        old_generations = _identify_old_generations(
-            data_content.get("generation_tracking", {}),
-            cutoff_date
-        )
+        old_generations = _identify_old_generations(data_content.get("generation_tracking", {}), cutoff_date)
 
         if not old_generations:
             return 0
@@ -95,7 +92,9 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         _write_json(data_file_path, data)
         logger.info(f"Cleaned up {len(old_generations)} generation entries")
         logger.info(f"Cleaned up {len(old_generations)} generation entries older than {retention_days} days")
-        json_handler.log_operation("usage_cleanup", {"generations_removed": len(old_generations), "retention_days": retention_days})
+        json_handler.log_operation(
+            "usage_cleanup", {"generations_removed": len(old_generations), "retention_days": retention_days}
+        )
 
         return len(old_generations)
 

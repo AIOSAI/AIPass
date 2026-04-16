@@ -1,4 +1,5 @@
 """Shared pytest fixtures for drone tests."""
+
 import os
 import tempfile
 

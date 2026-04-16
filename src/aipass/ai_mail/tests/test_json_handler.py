@@ -48,11 +48,7 @@ def template_dir(tmp_path):
 @pytest.fixture
 def config_template(template_dir, monkeypatch):
     """Write a config template and point JSON_TEMPLATES_DIR at it."""
-    tpl = {
-        "module_name": "{{MODULE_NAME}}",
-        "version": "1.0.0",
-        "config": {"max_log_entries": 50}
-    }
+    tpl = {"module_name": "{{MODULE_NAME}}", "version": "1.0.0", "config": {"max_log_entries": 50}}
     tpl_file = template_dir / "config.json"
     tpl_file.write_text(json.dumps(tpl))
     monkeypatch.setattr(jh_mod, "JSON_TEMPLATES_DIR", template_dir.parent)

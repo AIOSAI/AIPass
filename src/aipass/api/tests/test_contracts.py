@@ -34,9 +34,7 @@ _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = (
-        Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    )
+    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -76,6 +74,7 @@ def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # Default factory helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_default_for_type(json_type: str, module_name: str = "test_mod") -> Any:
     for fn_name in ("_create_default", "_get_default_template", "_get_default"):
         fn = getattr(_mod, fn_name, None)
@@ -102,9 +101,11 @@ def _default_factory_raises_on_unknown() -> bool:
 # Group 1 — Return type contracts
 # ============================================================================
 
+
 def test_handle_command_returns_bool() -> None:
     """handle_command must return a bool."""
     from aipass.api.apps.modules import api_key
+
     result = api_key.handle_command("get-key", ["--help"])
     assert isinstance(result, bool)
 
@@ -131,6 +132,7 @@ def test_load_json_returns_dict_for_config(tmp_path: Path) -> None:
 # ============================================================================
 # Group 2 — Exception contracts
 # ============================================================================
+
 
 def test_create_default_unknown_raises_value_error() -> None:
     """_create_default must raise ValueError for unknown type."""
@@ -159,6 +161,7 @@ def test_validate_rejects_invalid_mode() -> None:
 # Group 3 — Data structure contracts
 # ============================================================================
 
+
 def test_config_has_required_keys(tmp_path: Path) -> None:
     """Config must contain module_name and version."""
     json_handler.ensure_json_exists("struct_mod", "config")
@@ -180,6 +183,7 @@ def test_data_has_date_keys(tmp_path: Path) -> None:
 def test_reimport_after_mock(tmp_path: Path) -> None:
     """Module can be reloaded after mocking (reimport_after_mock contract)."""
     import importlib
+
     # Reload the json_handler module to verify it survives reimport
     reloaded = importlib.reload(_mod)
     assert hasattr(reloaded, "load_json")

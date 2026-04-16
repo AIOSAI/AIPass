@@ -28,6 +28,7 @@ CONTACTS_FILE = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.j
 # INTERNAL HELPERS
 # =============================================
 
+
 def _load_contacts() -> Dict:
     """Load contacts.json from disk with fallback to empty structure.
 
@@ -38,7 +39,8 @@ def _load_contacts() -> Dict:
         return {"contacts": {}}
     try:
         import json
-        with open(CONTACTS_FILE, 'r', encoding='utf-8') as f:
+
+        with open(CONTACTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict) or "contacts" not in data:
             return {"contacts": {}}
@@ -59,8 +61,9 @@ def _save_contacts(data: Dict) -> bool:
     """
     try:
         import json
+
         CONTACTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CONTACTS_FILE, 'w', encoding='utf-8') as f:
+        with open(CONTACTS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -71,6 +74,7 @@ def _save_contacts(data: Dict) -> bool:
 # =============================================
 # PUBLIC API
 # =============================================
+
 
 def get_contact(branch_name: str) -> Optional[Dict]:
     """Look up a contact by branch name.

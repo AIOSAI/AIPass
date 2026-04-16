@@ -56,12 +56,16 @@ def temp_branch(tmp_path):
     branch_dir = tmp_path / "src" / "aipass" / "test_branch"
     trinity = branch_dir / ".trinity"
     trinity.mkdir(parents=True)
-    (trinity / "passport.json").write_text(json.dumps({
-        "branch_info": {
-            "branch_name": "test_branch",
-            "branch_email": "@test_branch",
-        }
-    }))
+    (trinity / "passport.json").write_text(
+        json.dumps(
+            {
+                "branch_info": {
+                    "branch_name": "test_branch",
+                    "branch_email": "@test_branch",
+                }
+            }
+        )
+    )
     return branch_dir
 
 
@@ -73,21 +77,29 @@ def two_branches(tmp_path):
         branch_dir = tmp_path / "src" / "aipass" / name
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "passport.json").write_text(json.dumps({
-            "branch_info": {"branch_name": name, "branch_email": f"@{name}"}
-        }))
+        (trinity / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": name, "branch_email": f"@{name}"}})
+        )
         branches[name] = branch_dir
 
-    registry = {"branches": {
-        "alpha": {
-            "name": "ALPHA", "path": str(branches["alpha"]),
-            "email": "@alpha", "status": "active", "description": "Test A",
-        },
-        "beta": {
-            "name": "BETA", "path": str(branches["beta"]),
-            "email": "@beta", "status": "active", "description": "Test B",
-        },
-    }}
+    registry = {
+        "branches": {
+            "alpha": {
+                "name": "ALPHA",
+                "path": str(branches["alpha"]),
+                "email": "@alpha",
+                "status": "active",
+                "description": "Test A",
+            },
+            "beta": {
+                "name": "BETA",
+                "path": str(branches["beta"]),
+                "email": "@beta",
+                "status": "active",
+                "description": "Test B",
+            },
+        }
+    }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2))
     return branches, registry_path
@@ -140,30 +152,36 @@ def list_format_registry(tmp_path):
     branch_dir = tmp_path / "src" / "aipass" / "test_cwd_branch"
     trinity = branch_dir / ".trinity"
     trinity.mkdir(parents=True)
-    (trinity / "passport.json").write_text(json.dumps({
-        "branch_info": {
-            "branch_name": "test_cwd_branch",
-            "branch_email": "@test_cwd_branch",
-        }
-    }))
+    (trinity / "passport.json").write_text(
+        json.dumps(
+            {
+                "branch_info": {
+                    "branch_name": "test_cwd_branch",
+                    "branch_email": "@test_cwd_branch",
+                }
+            }
+        )
+    )
 
     # List format — matches production AIPASS_REGISTRY.json
-    registry = {"branches": [
-        {
-            "name": "TEST_CWD_BRANCH",
-            "path": str(branch_dir),
-            "email": "@test_cwd_branch",
-            "status": "active",
-            "description": "CWD detection test branch",
-        },
-        {
-            "name": "SPAWN",
-            "path": str(tmp_path / "src" / "aipass" / "spawn"),
-            "email": "@spawn",
-            "status": "active",
-            "description": "Mock spawn for identity testing",
-        },
-    ]}
+    registry = {
+        "branches": [
+            {
+                "name": "TEST_CWD_BRANCH",
+                "path": str(branch_dir),
+                "email": "@test_cwd_branch",
+                "status": "active",
+                "description": "CWD detection test branch",
+            },
+            {
+                "name": "SPAWN",
+                "path": str(tmp_path / "src" / "aipass" / "spawn"),
+                "email": "@spawn",
+                "status": "active",
+                "description": "Mock spawn for identity testing",
+            },
+        ]
+    }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2))
     return branch_dir, registry_path
@@ -407,9 +425,7 @@ class TestSendArgsFromFlag:
 
     def test_from_flag_with_dispatch(self):
         """--from and --dispatch should both work together."""
-        result = parse_send_args([
-            "@ai_mail", "Subject", "Body", "--from", "@backup", "--dispatch"
-        ])
+        result = parse_send_args(["@ai_mail", "Subject", "Body", "--from", "@backup", "--dispatch"])
         assert result["from_branch"] == "@backup"
         assert result["auto_execute"] is True
 
@@ -432,6 +448,7 @@ class TestResolveSenderInfo:
 
     def test_explicit_from_branch_resolves(self, tmp_path):
         """Explicit from_branch should use registry lookup, not CWD."""
+
         def mock_get_branch_by_email(email):
             if email == "@spawn":
                 return {
@@ -522,16 +539,10 @@ class TestDispatchEnvIsolation:
     @staticmethod
     def _load_active_source():
         """Load dispatch_monitor.py source with comment lines filtered out."""
-        monitor_path = (
-            Path(__file__).resolve().parents[1]
-            / "apps" / "handlers" / "dispatch" / "dispatch_monitor.py"
-        )
+        monitor_path = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "dispatch" / "dispatch_monitor.py"
         source = monitor_path.read_text()
-        active_lines = [
-            line for line in source.splitlines()
-            if not line.strip().startswith('#')
-        ]
-        return '\n'.join(active_lines)
+        active_lines = [line for line in source.splitlines() if not line.strip().startswith("#")]
+        return "\n".join(active_lines)
 
     def test_dispatch_monitor_sets_branch_name_in_env(self):
         """dispatch_monitor.py must set AIPASS_BRANCH_NAME from branch_email.
@@ -540,8 +551,9 @@ class TestDispatchEnvIsolation:
         Comment lines are filtered out — a commented-out line won't pass.
         """
         active_source = self._load_active_source()
-        assert 'spawn_env["AIPASS_BRANCH_NAME"] = branch_email.lstrip("@")' in active_source, \
+        assert 'spawn_env["AIPASS_BRANCH_NAME"] = branch_email.lstrip("@")' in active_source, (
             "dispatch_monitor.py must set AIPASS_BRANCH_NAME = branch_email.lstrip('@') in spawn_env"
+        )
 
     def test_dispatch_monitor_strips_caller_vars(self):
         """dispatch_monitor.py must strip AIPASS_CALLER_BRANCH and AIPASS_CALLER_CWD.
@@ -550,10 +562,12 @@ class TestDispatchEnvIsolation:
         Checks full pop() calls including the None default.
         """
         active_source = self._load_active_source()
-        assert 'spawn_env.pop("AIPASS_CALLER_BRANCH", None)' in active_source, \
+        assert 'spawn_env.pop("AIPASS_CALLER_BRANCH", None)' in active_source, (
             "dispatch_monitor.py must strip AIPASS_CALLER_BRANCH from spawn_env"
-        assert 'spawn_env.pop("AIPASS_CALLER_CWD", None)' in active_source, \
+        )
+        assert 'spawn_env.pop("AIPASS_CALLER_CWD", None)' in active_source, (
             "dispatch_monitor.py must strip AIPASS_CALLER_CWD from spawn_env"
+        )
 
     def test_dispatch_monitor_passes_spawn_env_to_subprocess(self):
         """dispatch_monitor.py must pass env=spawn_env to subprocess.run.
@@ -562,8 +576,7 @@ class TestDispatchEnvIsolation:
         would inherit os.environ instead of the cleaned spawn_env.
         """
         active_source = self._load_active_source()
-        assert 'env=spawn_env' in active_source, \
-            "dispatch_monitor.py must pass env=spawn_env to subprocess.run"
+        assert "env=spawn_env" in active_source, "dispatch_monitor.py must pass env=spawn_env to subprocess.run"
 
     def test_detect_resolves_identity_when_cwd_is_wrong(self, clean_env, tmp_path, list_format_registry):
         """When AIPASS_CALLER_BRANCH is set but CWD is outside any branch,
@@ -598,8 +611,9 @@ class TestAntiRegression:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
             result = detect_branch_from_pwd()
-            assert result is None, \
+            assert result is None, (
                 "With CWD outside any branch, detection must return None, not silently detect a branch"
+            )
 
     def test_invalid_caller_cwd_doesnt_crash(self, clean_env, tmp_path, temp_registry):
         """Stale or nonexistent AIPASS_CALLER_CWD should return None, not crash."""
@@ -620,18 +634,25 @@ class TestAntiRegression:
             os.environ["AIPASS_CALLER_CWD"] = str(branch_dir)
             result = detect_branch_from_pwd()
             assert result is not None, "Empty AIPASS_CALLER_BRANCH should fall through to CWD"
-            assert result["email"] == "@test_cwd_branch", \
+            assert result["email"] == "@test_cwd_branch", (
                 "CWD points to test_cwd_branch, so after fallthrough, it should be detected"
+            )
 
     def test_send_args_all_flags_combined(self):
         """All flags together should parse without interference."""
-        result = parse_send_args([
-            "@spawn", "Subject", "Body",
-            "--from", "@backup",
-            "--dispatch",
-            "--no-memory-save",
-            "--reply-to", "@flow",
-        ])
+        result = parse_send_args(
+            [
+                "@spawn",
+                "Subject",
+                "Body",
+                "--from",
+                "@backup",
+                "--dispatch",
+                "--no-memory-save",
+                "--reply-to",
+                "@flow",
+            ]
+        )
         assert result["from_branch"] == "@backup"
         assert result["auto_execute"] is True
         assert result["no_memory_save"] is True
@@ -663,8 +684,10 @@ class TestFindCallerRegistry:
         registry.write_text('{"branches": []}', encoding="utf-8")
 
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
-        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-                   tmp_path / "other" / "AIPASS_REGISTRY.json"):
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
             result = _find_caller_registry()
 
         assert result == registry
@@ -677,8 +700,10 @@ class TestFindCallerRegistry:
         nested.mkdir(parents=True)
 
         os.environ["AIPASS_CALLER_CWD"] = str(nested)
-        with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
-                   tmp_path / "other" / "AIPASS_REGISTRY.json"):
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
             result = _find_caller_registry()
 
         assert result == registry
@@ -704,9 +729,12 @@ class TestCallerRegistryFallback:
     def test_lookup_by_name_falls_back_to_caller_registry(self, clean_env, tmp_path):
         """_lookup_branch_by_name finds external branch via caller registry."""
         caller_registry = tmp_path / "AIPASS_REGISTRY.json"
-        caller_registry.write_text(json.dumps({"branches": [
-            {"name": "VERA", "path": str(tmp_path / "vera"), "email": "@vera", "status": "active"}
-        ]}), encoding="utf-8")
+        caller_registry.write_text(
+            json.dumps(
+                {"branches": [{"name": "VERA", "path": str(tmp_path / "vera"), "email": "@vera", "status": "active"}]}
+            ),
+            encoding="utf-8",
+        )
 
         empty_aipass = tmp_path / "other" / "AIPASS_REGISTRY.json"
         empty_aipass.parent.mkdir(parents=True)
@@ -723,16 +751,35 @@ class TestCallerRegistryFallback:
     def test_lookup_by_name_prefers_aipass_registry(self, clean_env, tmp_path):
         """_lookup_branch_by_name returns AIPass result first when branch exists in both."""
         aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_registry.write_text(json.dumps({"branches": [
-            {"name": "SPAWN", "path": str(tmp_path / "spawn"), "email": "@spawn-aipass", "status": "active"}
-        ]}), encoding="utf-8")
+        aipass_registry.write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {"name": "SPAWN", "path": str(tmp_path / "spawn"), "email": "@spawn-aipass", "status": "active"}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
 
         caller_dir = tmp_path / "external"
         caller_dir.mkdir()
         caller_registry = caller_dir / "AIPASS_REGISTRY.json"
-        caller_registry.write_text(json.dumps({"branches": [
-            {"name": "SPAWN", "path": str(tmp_path / "other_spawn"), "email": "@spawn-external", "status": "active"}
-        ]}), encoding="utf-8")
+        caller_registry.write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {
+                            "name": "SPAWN",
+                            "path": str(tmp_path / "other_spawn"),
+                            "email": "@spawn-external",
+                            "status": "active",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
 
         os.environ["AIPASS_CALLER_CWD"] = str(caller_dir)
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", aipass_registry):
@@ -747,9 +794,10 @@ class TestCallerRegistryFallback:
         vera_dir.mkdir(parents=True)
 
         caller_registry = tmp_path / "vera_studio" / "AIPASS_REGISTRY.json"
-        caller_registry.write_text(json.dumps({"branches": [
-            {"name": "VERA", "path": str(vera_dir), "email": "@vera", "status": "active"}
-        ]}), encoding="utf-8")
+        caller_registry.write_text(
+            json.dumps({"branches": [{"name": "VERA", "path": str(vera_dir), "email": "@vera", "status": "active"}]}),
+            encoding="utf-8",
+        )
 
         empty_aipass = tmp_path / "AIPASS_REGISTRY.json"
         empty_aipass.write_text('{"branches": []}', encoding="utf-8")

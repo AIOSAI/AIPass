@@ -11,6 +11,7 @@
 Provides infrastructure mocking so test modules can import prax code
 without triggering real logging, file watching, or CLI dependencies.
 """
+
 import os
 import tempfile
 
@@ -29,6 +30,7 @@ collect_ignore_glob = [".archive/*"]
 # =============================================
 # INFRASTRUCTURE MOCKS
 # =============================================
+
 
 @pytest.fixture(autouse=True)
 def mock_prax_infrastructure(monkeypatch):

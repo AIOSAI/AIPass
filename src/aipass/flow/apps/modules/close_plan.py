@@ -49,7 +49,7 @@ from aipass.flow.apps.handlers.plan.display import (
     format_plan_error,
     format_plan_deletion_success,
     format_deletion_cancelled,
-    format_delete_usage_error
+    format_delete_usage_error,
 )
 
 # Internal: Dashboard handlers
@@ -74,6 +74,7 @@ MODULE_NAME = "close_plan"
 # DISPLAY HELPERS
 # =============================================
 
+
 def _display_messages(messages: List[Dict[str, Any]]):
     """Render handler result messages to console
 
@@ -90,7 +91,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(format_plan_error(error_text, plan_num, details=details))
 
         elif msg_type == "warning":
-            warning(msg['text'])
+            warning(msg["text"])
 
         elif msg_type == "dim":
             console.print(f"[dim]{msg['text']}[/dim]")
@@ -102,10 +103,12 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(f"[green]{msg['text']}[/green]")
 
         elif msg_type == "error_text":
-            error(msg['text'])
+            error(msg["text"])
 
         elif msg_type == "header":
-            console.print(format_plan_deletion_header(msg["plan_key"], msg["plan_info"], prefix=msg.get("prefix", "FPLAN")))
+            console.print(
+                format_plan_deletion_header(msg["plan_key"], msg["plan_info"], prefix=msg.get("prefix", "FPLAN"))
+            )
 
         elif msg_type == "cancelled":
             console.print(format_deletion_cancelled())
@@ -141,6 +144,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
 # INTROSPECTION
 # =============================================
 
+
 def print_introspection():
     """Display module info and connected handlers"""
     console.print()
@@ -174,6 +178,7 @@ def print_introspection():
     console.print("[dim]Run 'drone @flow close --help' for usage[/dim]")
     console.print()
 
+
 def print_help():
     """Print help information for close_plan module"""
     console.print()
@@ -199,7 +204,14 @@ def print_help():
 # CLOSE PLAN WORKFLOW (thin orchestrator)
 # =============================================
 
-def close_plan(plan_num: str | None = None, confirm: bool = False, all_plans: bool = False, spawn_background: bool = True, dry_run: bool = False) -> bool:
+
+def close_plan(
+    plan_num: str | None = None,
+    confirm: bool = False,
+    all_plans: bool = False,
+    spawn_background: bool = True,
+    dry_run: bool = False,
+) -> bool:
     """
     Orchestrate plan closure workflow (thin orchestrator)
 
@@ -313,10 +325,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
     # Log the operation
-    json_handler.log_operation(
-        "plan_closed",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("plan_closed", {"command": command, "args": args})
 
     # 1. PARSE ARGS: Use command_parser handler
     plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(args)
@@ -346,10 +355,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         import argparse
+
         PARSER = argparse.ArgumentParser(
-            description='Close PLAN file',
+            description="Close PLAN file",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
 COMMANDS:
@@ -376,7 +386,7 @@ EXAMPLES:
 
   # Close all open plans (auto-confirms)
   drone @flow close --all
-            """
+            """,
         )
         PARSER.print_help()
         sys.exit(0)
@@ -385,10 +395,7 @@ EXAMPLES:
     logger.info("Prax logger connected to close_plan")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "plan_closed",
-        {"command": "standalone"}
-    )
+    json_handler.log_operation("plan_closed", {"command": "standalone"})
 
     # Call handle_command with default
     args = sys.argv[1:] if len(sys.argv) > 1 else []
@@ -399,8 +406,8 @@ EXAMPLES:
         sys.exit(1)
 
     # If first arg is not command, assume it's plan number (backward compatibility)
-    if args[0] not in ['close', 'close_plan']:
-        args.insert(0, 'close')
+    if args[0] not in ["close", "close_plan"]:
+        args.insert(0, "close")
 
     result = handle_command(args[0], args[1:])
     # Result is True on success, False on failure

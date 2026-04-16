@@ -74,14 +74,17 @@ def calculate_quick_status(sections: Dict) -> Dict:
         "active_plans": active_plans,
         "commons_mentions": mentions,
         "action_required": action_required,
-        "summary": ", ".join(summary_parts) if summary_parts else "All clear"
+        "summary": ", ".join(summary_parts) if summary_parts else "All clear",
     }
 
-    json_handler.log_operation("status_calculated", {
-        "action_required": action_required,
-        "new_mail": new_mail,
-        "active_plans": active_plans,
-    })
+    json_handler.log_operation(
+        "status_calculated",
+        {
+            "action_required": action_required,
+            "new_mail": new_mail,
+            "active_plans": active_plans,
+        },
+    )
 
     return result
 

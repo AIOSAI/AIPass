@@ -7,6 +7,7 @@
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
+
 import os
 import tempfile
 

@@ -126,6 +126,7 @@ def test_send_via_dbus_returns_false_on_nonzero_exit(monkeypatch):
 
 def test_send_via_dbus_returns_false_on_subprocess_error(monkeypatch):
     """Returns False on SubprocessError."""
+
     def raise_error(*a, **kw):
         raise subprocess.SubprocessError("timeout")
 
@@ -137,6 +138,7 @@ def test_send_via_dbus_returns_false_on_subprocess_error(monkeypatch):
 
 def test_send_via_dbus_returns_false_on_file_not_found(monkeypatch):
     """Returns False when python binary not found."""
+
     def raise_error(*a, **kw):
         raise FileNotFoundError("python3")
 
@@ -178,6 +180,7 @@ def test_send_via_notify_send_passes_correct_args(monkeypatch):
 
 def test_send_via_notify_send_returns_false_on_file_not_found(monkeypatch):
     """Returns False when notify-send is not installed."""
+
     def raise_error(*a, **kw):
         raise FileNotFoundError("notify-send")
 
@@ -188,6 +191,7 @@ def test_send_via_notify_send_returns_false_on_file_not_found(monkeypatch):
 
 def test_send_via_notify_send_returns_false_on_subprocess_error(monkeypatch):
     """Returns False on SubprocessError."""
+
     def raise_error(*a, **kw):
         raise subprocess.SubprocessError("broken pipe")
 

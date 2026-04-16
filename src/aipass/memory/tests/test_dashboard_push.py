@@ -33,6 +33,7 @@ from unittest.mock import MagicMock
 # Import helper
 # ---------------------------------------------------------------------------
 
+
 def _import_dashboard_push(monkeypatch):
     """Import dashboard_push with mocked dependencies."""
     sys.modules.pop("aipass.memory.apps.handlers.dashboard_push", None)
@@ -49,6 +50,7 @@ def _import_dashboard_push(monkeypatch):
 # Tests: _read_central_stats
 # ===========================================================================
 
+
 class TestReadCentralStats:
     """Test _read_central_stats helper."""
 
@@ -63,13 +65,12 @@ class TestReadCentralStats:
     def test_reads_valid_central_file(self, monkeypatch, tmp_path):
         mod = _import_dashboard_push(monkeypatch)
         central = tmp_path / "MEMORY.central.json"
-        central.write_text(json.dumps({
-            "stats": {
-                "total_vectors": 1500,
-                "total_archives": 12,
-                "last_rollover": "2026-03-15T10:30:00"
-            }
-        }), encoding="utf-8")
+        central.write_text(
+            json.dumps(
+                {"stats": {"total_vectors": 1500, "total_archives": 12, "last_rollover": "2026-03-15T10:30:00"}}
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(mod, "CENTRAL_FILE", central)
 
         result = mod._read_central_stats()
@@ -92,6 +93,7 @@ class TestReadCentralStats:
 # ===========================================================================
 # Tests: _get_collections_count
 # ===========================================================================
+
 
 class TestGetCollectionsCount:
     """Test _get_collections_count helper."""
@@ -130,6 +132,7 @@ class TestGetCollectionsCount:
 # Tests: _get_rollover_config
 # ===========================================================================
 
+
 class TestGetRolloverConfig:
     """Test _get_rollover_config helper."""
 
@@ -144,14 +147,17 @@ class TestGetRolloverConfig:
     def test_loads_valid_config(self, monkeypatch, tmp_path):
         mod = _import_dashboard_push(monkeypatch)
         config_file = tmp_path / "memory_bank.config.json"
-        config_file.write_text(json.dumps({
-            "rollover": {
-                "defaults": {"max_lines": 800, "buffer": 150},
-                "per_branch": {
-                    "NEXUS": {"max_lines": 1200}
+        config_file.write_text(
+            json.dumps(
+                {
+                    "rollover": {
+                        "defaults": {"max_lines": 800, "buffer": 150},
+                        "per_branch": {"NEXUS": {"max_lines": 1200}},
+                    }
                 }
-            }
-        }), encoding="utf-8")
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(mod, "CONFIG_PATH", config_file)
 
         result = mod._get_rollover_config()
@@ -175,6 +181,7 @@ class TestGetRolloverConfig:
 # Tests: _get_max_lines_for_branch
 # ===========================================================================
 
+
 class TestGetMaxLinesForBranch:
     """Test _get_max_lines_for_branch helper."""
 
@@ -188,10 +195,7 @@ class TestGetMaxLinesForBranch:
 
     def test_returns_override_when_present(self, monkeypatch):
         mod = _import_dashboard_push(monkeypatch)
-        config = {
-            "defaults": {"max_lines": 600},
-            "per_branch": {"NEXUS": {"max_lines": 1200}}
-        }
+        config = {"defaults": {"max_lines": 600}, "per_branch": {"NEXUS": {"max_lines": 1200}}}
 
         result = mod._get_max_lines_for_branch("NEXUS", config)
 
@@ -199,10 +203,7 @@ class TestGetMaxLinesForBranch:
 
     def test_falls_back_to_default_when_override_missing_max_lines(self, monkeypatch):
         mod = _import_dashboard_push(monkeypatch)
-        config = {
-            "defaults": {"max_lines": 600},
-            "per_branch": {"DRONE": {"buffer": 200}}
-        }
+        config = {"defaults": {"max_lines": 600}, "per_branch": {"DRONE": {"buffer": 200}}}
 
         result = mod._get_max_lines_for_branch("DRONE", config)
 
@@ -212,6 +213,7 @@ class TestGetMaxLinesForBranch:
 # ===========================================================================
 # Tests: _find_branches_near_rollover
 # ===========================================================================
+
 
 class TestFindBranchesNearRollover:
     """Test _find_branches_near_rollover helper."""
@@ -231,27 +233,22 @@ class TestFindBranchesNearRollover:
         branch_dir = tmp_path / "src" / "aipass" / "test_branch"
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "local.json").write_text(json.dumps({
-            "document_metadata": {
-                "schema_version": "1.0.0",
-                "status": {"current_lines": 550}
-            }
-        }), encoding="utf-8")
+        (trinity / "local.json").write_text(
+            json.dumps({"document_metadata": {"schema_version": "1.0.0", "status": {"current_lines": 550}}}),
+            encoding="utf-8",
+        )
 
         # Registry pointing to branch
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "TEST_BRANCH", "path": str(branch_dir)}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "TEST_BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
 
         # Config: max_lines=600, so 600-550=50 remaining (<100 threshold)
-        monkeypatch.setattr(mod, "_get_rollover_config", lambda: {
-            "defaults": {"max_lines": 600, "buffer": 100},
-            "per_branch": {}
-        })
+        monkeypatch.setattr(
+            mod, "_get_rollover_config", lambda: {"defaults": {"max_lines": 600, "buffer": 100}, "per_branch": {}}
+        )
         monkeypatch.setattr(mod, "NEAR_ROLLOVER_THRESHOLD", 100)
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -269,24 +266,19 @@ class TestFindBranchesNearRollover:
         branch_dir = tmp_path / "src" / "aipass" / "safe_branch"
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "local.json").write_text(json.dumps({
-            "document_metadata": {
-                "schema_version": "1.0.0",
-                "status": {"current_lines": 200}
-            }
-        }), encoding="utf-8")
+        (trinity / "local.json").write_text(
+            json.dumps({"document_metadata": {"schema_version": "1.0.0", "status": {"current_lines": 200}}}),
+            encoding="utf-8",
+        )
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "SAFE_BRANCH", "path": str(branch_dir)}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "SAFE_BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
-        monkeypatch.setattr(mod, "_get_rollover_config", lambda: {
-            "defaults": {"max_lines": 600, "buffer": 100},
-            "per_branch": {}
-        })
+        monkeypatch.setattr(
+            mod, "_get_rollover_config", lambda: {"defaults": {"max_lines": 600, "buffer": 100}, "per_branch": {}}
+        )
         monkeypatch.setattr(mod, "NEAR_ROLLOVER_THRESHOLD", 100)
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -300,26 +292,28 @@ class TestFindBranchesNearRollover:
         branch_dir = tmp_path / "src" / "aipass" / "v2_branch"
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "local.json").write_text(json.dumps({
-            "document_metadata": {
-                "schema_version": "2.0.0",
-                "limits": {"max_sessions": 20, "max_key_learnings": 25}
-            },
-            "sessions": [{"id": i} for i in range(19)],  # 19 of 20 sessions
-            "key_learnings": {"k1": "v1"}
-        }), encoding="utf-8")
+        (trinity / "local.json").write_text(
+            json.dumps(
+                {
+                    "document_metadata": {
+                        "schema_version": "2.0.0",
+                        "limits": {"max_sessions": 20, "max_key_learnings": 25},
+                    },
+                    "sessions": [{"id": i} for i in range(19)],  # 19 of 20 sessions
+                    "key_learnings": {"k1": "v1"},
+                }
+            ),
+            encoding="utf-8",
+        )
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "V2_BRANCH", "path": str(branch_dir)}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "V2_BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
-        monkeypatch.setattr(mod, "_get_rollover_config", lambda: {
-            "defaults": {"max_lines": 600, "buffer": 100},
-            "per_branch": {}
-        })
+        monkeypatch.setattr(
+            mod, "_get_rollover_config", lambda: {"defaults": {"max_lines": 600, "buffer": 100}, "per_branch": {}}
+        )
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
         result = mod._find_branches_near_rollover()
@@ -337,26 +331,28 @@ class TestFindBranchesNearRollover:
         branch_dir = tmp_path / "src" / "aipass" / "kl_branch"
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
-        (trinity / "local.json").write_text(json.dumps({
-            "document_metadata": {
-                "schema_version": "2.0.0",
-                "limits": {"max_sessions": 20, "max_key_learnings": 5}
-            },
-            "sessions": [{"id": 1}],
-            "key_learnings": {f"k{i}": f"v{i}" for i in range(4)}  # 4 of 5
-        }), encoding="utf-8")
+        (trinity / "local.json").write_text(
+            json.dumps(
+                {
+                    "document_metadata": {
+                        "schema_version": "2.0.0",
+                        "limits": {"max_sessions": 20, "max_key_learnings": 5},
+                    },
+                    "sessions": [{"id": 1}],
+                    "key_learnings": {f"k{i}": f"v{i}" for i in range(4)},  # 4 of 5
+                }
+            ),
+            encoding="utf-8",
+        )
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "KL_BRANCH", "path": str(branch_dir)}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "KL_BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
-        monkeypatch.setattr(mod, "_get_rollover_config", lambda: {
-            "defaults": {"max_lines": 600, "buffer": 100},
-            "per_branch": {}
-        })
+        monkeypatch.setattr(
+            mod, "_get_rollover_config", lambda: {"defaults": {"max_lines": 600, "buffer": 100}, "per_branch": {}}
+        )
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
         result = mod._find_branches_near_rollover()
@@ -370,16 +366,13 @@ class TestFindBranchesNearRollover:
         mod = _import_dashboard_push(monkeypatch)
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "GHOST", "path": str(tmp_path / "nonexistent")}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "GHOST", "path": str(tmp_path / "nonexistent")}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
-        monkeypatch.setattr(mod, "_get_rollover_config", lambda: {
-            "defaults": {"max_lines": 600, "buffer": 100},
-            "per_branch": {}
-        })
+        monkeypatch.setattr(
+            mod, "_get_rollover_config", lambda: {"defaults": {"max_lines": 600, "buffer": 100}, "per_branch": {}}
+        )
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
         result = mod._find_branches_near_rollover()
@@ -390,6 +383,7 @@ class TestFindBranchesNearRollover:
 # ===========================================================================
 # Tests: _get_template_version
 # ===========================================================================
+
 
 class TestGetTemplateVersion:
     """Test _get_template_version helper."""
@@ -426,6 +420,7 @@ class TestGetTemplateVersion:
 # ===========================================================================
 # Tests: _get_last_rollover_info
 # ===========================================================================
+
 
 class TestGetLastRolloverInfo:
     """Test _get_last_rollover_info helper."""
@@ -467,6 +462,7 @@ class TestGetLastRolloverInfo:
 # Tests: _get_all_branch_paths
 # ===========================================================================
 
+
 class TestGetAllBranchPaths:
     """Test _get_all_branch_paths helper."""
 
@@ -487,13 +483,18 @@ class TestGetAllBranchPaths:
         branch_b.mkdir()
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "A", "path": str(branch_a)},
-                {"name": "B", "path": str(branch_b)},
-                {"name": "C", "path": str(tmp_path / "nonexistent")}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps(
+                {
+                    "branches": [
+                        {"name": "A", "path": str(branch_a)},
+                        {"name": "B", "path": str(branch_b)},
+                        {"name": "C", "path": str(tmp_path / "nonexistent")},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -510,11 +511,9 @@ class TestGetAllBranchPaths:
         branch_dir.mkdir(parents=True)
 
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text(json.dumps({
-            "branches": [
-                {"name": "TEST", "path": "src/aipass/test_branch"}
-            ]
-        }), encoding="utf-8")
+        registry.write_text(
+            json.dumps({"branches": [{"name": "TEST", "path": "src/aipass/test_branch"}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(mod, "AIPASS_REGISTRY", registry)
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -528,20 +527,23 @@ class TestGetAllBranchPaths:
 # Tests: build_memory_bank_section (public)
 # ===========================================================================
 
+
 class TestBuildMemoryBankSection:
     """Test build_memory_bank_section with mocked helpers."""
 
     def test_assembles_section_data(self, monkeypatch):
         mod = _import_dashboard_push(monkeypatch)
 
-        monkeypatch.setattr(mod, "_read_central_stats", lambda: {
-            "total_vectors": 2500,
-            "total_archives": 15,
-            "last_rollover": "2026-03-20T12:00:00"
-        })
-        monkeypatch.setattr(mod, "_find_branches_near_rollover", lambda: [
-            {"branch": "NEXUS", "file_type": "local", "lines_remaining": 30}
-        ])
+        monkeypatch.setattr(
+            mod,
+            "_read_central_stats",
+            lambda: {"total_vectors": 2500, "total_archives": 15, "last_rollover": "2026-03-20T12:00:00"},
+        )
+        monkeypatch.setattr(
+            mod,
+            "_find_branches_near_rollover",
+            lambda: [{"branch": "NEXUS", "file_type": "local", "lines_remaining": 30}],
+        )
         monkeypatch.setattr(mod, "_get_last_rollover_info", lambda s: {"date": "2026-03-20"})
         monkeypatch.setattr(mod, "_get_template_version", lambda: "2.0.4")
         monkeypatch.setattr(mod, "_get_collections_count", lambda: 8)
@@ -560,6 +562,7 @@ class TestBuildMemoryBankSection:
 # ===========================================================================
 # Tests: push_memory_bank_dashboard (public)
 # ===========================================================================
+
 
 class TestPushMemoryBankDashboard:
     """Test push_memory_bank_dashboard."""
@@ -599,17 +602,12 @@ class TestPushMemoryBankDashboard:
 
         mod.push_memory_bank_dashboard()
 
-        mock_jh.log_operation.assert_called_once_with(
-            "dashboard_push",
-            {"branches_updated": 3, "success": True}
-        )
+        mock_jh.log_operation.assert_called_once_with("dashboard_push", {"branches_updated": 3, "success": True})
 
     def test_returns_false_on_exception(self, monkeypatch):
         mod = _import_dashboard_push(monkeypatch)
 
-        monkeypatch.setattr(mod, "build_memory_bank_section", MagicMock(
-            side_effect=RuntimeError("boom")
-        ))
+        monkeypatch.setattr(mod, "build_memory_bank_section", MagicMock(side_effect=RuntimeError("boom")))
 
         result = mod.push_memory_bank_dashboard()
 

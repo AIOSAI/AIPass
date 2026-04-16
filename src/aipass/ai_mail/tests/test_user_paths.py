@@ -46,29 +46,31 @@ def relative_path_registry(tmp_path):
 
     Returns (registry_path, expected_repo_root).
     """
-    registry = {"branches": [
-        {
-            "name": "AI_MAIL",
-            "path": "src/aipass/ai_mail",
-            "email": "@ai_mail",
-            "status": "active",
-            "description": "Agent-to-agent messaging system",
-        },
-        {
-            "name": "SPAWN",
-            "path": "src/aipass/spawn",
-            "email": "@spawn",
-            "status": "active",
-            "description": "Branch spawner",
-        },
-        {
-            "name": "TRIGGER",
-            "path": "src/aipass/trigger",
-            "email": "@trigger",
-            "status": "active",
-            "description": "Event trigger system",
-        },
-    ]}
+    registry = {
+        "branches": [
+            {
+                "name": "AI_MAIL",
+                "path": "src/aipass/ai_mail",
+                "email": "@ai_mail",
+                "status": "active",
+                "description": "Agent-to-agent messaging system",
+            },
+            {
+                "name": "SPAWN",
+                "path": "src/aipass/spawn",
+                "email": "@spawn",
+                "status": "active",
+                "description": "Branch spawner",
+            },
+            {
+                "name": "TRIGGER",
+                "path": "src/aipass/trigger",
+                "email": "@trigger",
+                "status": "active",
+                "description": "Event trigger system",
+            },
+        ]
+    }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path, tmp_path
@@ -82,15 +84,17 @@ def absolute_path_registry(tmp_path):
     Returns (registry_path, branch_dir).
     """
     branch_dir = tmp_path / "src" / "aipass" / "solo_branch"
-    registry = {"branches": [
-        {
-            "name": "SOLO",
-            "path": str(branch_dir),
-            "email": "@solo",
-            "status": "active",
-            "description": "Branch with absolute path",
-        },
-    ]}
+    registry = {
+        "branches": [
+            {
+                "name": "SOLO",
+                "path": str(branch_dir),
+                "email": "@solo",
+                "status": "active",
+                "description": "Branch with absolute path",
+            },
+        ]
+    }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path, branch_dir
@@ -103,22 +107,24 @@ def dict_format_registry(tmp_path):
     Tests that the dict->list normalization via _get_branches_list still
     produces absolute paths.
     """
-    registry = {"branches": {
-        "devpulse": {
-            "name": "DEVPULSE",
-            "path": "src/aipass/devpulse",
-            "email": "@devpulse",
-            "status": "active",
-            "description": "DevPulse branch",
-        },
-        "backup": {
-            "name": "BACKUP",
-            "path": "src/aipass/backup",
-            "email": "@backup",
-            "status": "active",
-            "description": "Backup branch",
-        },
-    }}
+    registry = {
+        "branches": {
+            "devpulse": {
+                "name": "DEVPULSE",
+                "path": "src/aipass/devpulse",
+                "email": "@devpulse",
+                "status": "active",
+                "description": "DevPulse branch",
+            },
+            "backup": {
+                "name": "BACKUP",
+                "path": "src/aipass/backup",
+                "email": "@backup",
+                "status": "active",
+                "description": "Backup branch",
+            },
+        }
+    }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path, tmp_path
@@ -137,9 +143,7 @@ class TestGetUserByEmailPaths:
             result = get_user_by_email("@ai_mail")
             assert result is not None
             mailbox = Path(result["mailbox_path"])
-            assert mailbox.is_absolute(), (
-                f"mailbox_path must be absolute, got: {result['mailbox_path']}"
-            )
+            assert mailbox.is_absolute(), f"mailbox_path must be absolute, got: {result['mailbox_path']}"
 
     def test_path_rooted_at_repo_root(self, relative_path_registry):
         """Resolved path should start from the repo root (registry parent)."""
@@ -158,9 +162,7 @@ class TestGetUserByEmailPaths:
             assert result is not None
             path = result["mailbox_path"]
             # Count occurrences of the relative segment
-            assert path.count("src/aipass/trigger") == 1, (
-                f"Path contains doubled segment: {path}"
-            )
+            assert path.count("src/aipass/trigger") == 1, f"Path contains doubled segment: {path}"
 
     def test_absolute_path_preserved(self, absolute_path_registry):
         """Registry entries with absolute paths should not be re-rooted."""
@@ -185,9 +187,7 @@ class TestGetUserByEmailPaths:
             result = get_user_by_email("@devpulse")
             assert result is not None
             mailbox = Path(result["mailbox_path"])
-            assert mailbox.is_absolute(), (
-                f"mailbox_path must be absolute (dict format), got: {result['mailbox_path']}"
-            )
+            assert mailbox.is_absolute(), f"mailbox_path must be absolute (dict format), got: {result['mailbox_path']}"
             expected = str((repo_root / "src" / "aipass" / "devpulse" / ".ai_mail.local").resolve())
             assert result["mailbox_path"] == expected
 
@@ -206,9 +206,7 @@ class TestGetAllUsersPaths:
             assert len(users) == 3, f"Expected 3 users, got {len(users)}"
             for email, info in users.items():
                 mailbox = Path(info["mailbox_path"])
-                assert mailbox.is_absolute(), (
-                    f"mailbox_path for {email} must be absolute, got: {info['mailbox_path']}"
-                )
+                assert mailbox.is_absolute(), f"mailbox_path for {email} must be absolute, got: {info['mailbox_path']}"
 
     def test_all_paths_end_with_ai_mail_local(self, relative_path_registry):
         """Every mailbox_path should end with .ai_mail.local."""
@@ -217,8 +215,7 @@ class TestGetAllUsersPaths:
             users = get_all_users()
             for email, info in users.items():
                 assert info["mailbox_path"].endswith(".ai_mail.local"), (
-                    f"mailbox_path for {email} should end with .ai_mail.local, "
-                    f"got: {info['mailbox_path']}"
+                    f"mailbox_path for {email} should end with .ai_mail.local, got: {info['mailbox_path']}"
                 )
 
     def test_no_doubled_paths_in_any_entry(self, relative_path_registry):
@@ -229,9 +226,7 @@ class TestGetAllUsersPaths:
             for email, info in users.items():
                 path = info["mailbox_path"]
                 # The relative prefix "src/aipass" should appear exactly once
-                assert path.count("src/aipass") == 1, (
-                    f"Path for {email} contains doubled 'src/aipass': {path}"
-                )
+                assert path.count("src/aipass") == 1, f"Path for {email} contains doubled 'src/aipass': {path}"
 
     def test_paths_resolve_against_repo_root(self, relative_path_registry):
         """Resolved paths should be rooted at the registry's parent dir."""
@@ -240,8 +235,7 @@ class TestGetAllUsersPaths:
             users = get_all_users()
             for email, info in users.items():
                 assert info["mailbox_path"].startswith(str(repo_root)), (
-                    f"Path for {email} should start with repo root {repo_root}, "
-                    f"got: {info['mailbox_path']}"
+                    f"Path for {email} should start with repo root {repo_root}, got: {info['mailbox_path']}"
                 )
 
     def test_absolute_paths_preserved(self, absolute_path_registry):
@@ -262,8 +256,7 @@ class TestGetAllUsersPaths:
             for email, info in users.items():
                 mailbox = Path(info["mailbox_path"])
                 assert mailbox.is_absolute(), (
-                    f"mailbox_path for {email} must be absolute (dict format), "
-                    f"got: {info['mailbox_path']}"
+                    f"mailbox_path for {email} must be absolute (dict format), got: {info['mailbox_path']}"
                 )
 
     def test_empty_registry_returns_empty_dict(self, tmp_path):

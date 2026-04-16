@@ -4,18 +4,20 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-
 # ─── Helpers ─────────────────────────────────────────────
+
 
 def _import_restore_plan_impl():
     """Import restore_plan_impl inside test scope."""
     from aipass.flow.apps.handlers.plan.restore_ops import restore_plan_impl
+
     return restore_plan_impl
 
 
 def _import_recover_plan_from_backup():
     """Import recover_plan_from_backup inside test scope."""
     from aipass.flow.apps.handlers.plan.restore_ops import recover_plan_from_backup
+
     return recover_plan_from_backup
 
 
@@ -23,22 +25,24 @@ def _make_deps(**overrides):
     """Build a default set of injected dependencies, with optional overrides."""
     deps = {
         "normalize_plan_number": MagicMock(side_effect=lambda x: x.zfill(4)),
-        "load_registry": MagicMock(return_value={
-            "plans": {
-                "0001": {
-                    "status": "closed",
-                    "file_path": "/tmp/FPLAN-0001.md",
-                    "location": "/tmp",
-                    "relative_path": "flow",
-                    "subject": "Test plan",
-                    "closed": "2026-03-19",
-                    "closed_reason": "completed",
-                    "memory_created": True,
-                    "memory_created_date": "2026-03-19",
-                    "memory_file": "/tmp/memory.md",
-                },
+        "load_registry": MagicMock(
+            return_value={
+                "plans": {
+                    "0001": {
+                        "status": "closed",
+                        "file_path": "/tmp/FPLAN-0001.md",
+                        "location": "/tmp",
+                        "relative_path": "flow",
+                        "subject": "Test plan",
+                        "closed": "2026-03-19",
+                        "closed_reason": "completed",
+                        "memory_created": True,
+                        "memory_created_date": "2026-03-19",
+                        "memory_file": "/tmp/memory.md",
+                    },
+                }
             }
-        }),
+        ),
         "save_registry": MagicMock(),
         "validate_plan_exists": MagicMock(return_value=(True, "")),
         "recover_plan_from_backup_fn": MagicMock(return_value=(False, "not found")),
@@ -54,8 +58,8 @@ def _make_deps(**overrides):
 # 1. restore_plan_impl -- no plan number
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreNoPlanNumber:
 
+class TestRestoreNoPlanNumber:
     def test_none_returns_error(self):
         fn = _import_restore_plan_impl()
         result = fn(plan_num=None, **_make_deps())
@@ -72,8 +76,8 @@ class TestRestoreNoPlanNumber:
 # 2. restore_plan_impl -- success path
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreSuccess:
 
+class TestRestoreSuccess:
     def test_successful_restore(self, tmp_path):
         fn = _import_restore_plan_impl()
         plan_file = tmp_path / "FPLAN-0001.md"
@@ -186,8 +190,8 @@ class TestRestoreSuccess:
 # 3. restore_plan_impl -- plan already open
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreAlreadyOpen:
 
+class TestRestoreAlreadyOpen:
     def test_open_plan_returns_error(self, tmp_path):
         fn = _import_restore_plan_impl()
         plan_file = tmp_path / "FPLAN-0001.md"
@@ -215,8 +219,8 @@ class TestRestoreAlreadyOpen:
 # 4. restore_plan_impl -- plan not found + recovery
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreNotFound:
 
+class TestRestoreNotFound:
     def test_not_found_no_backup(self):
         fn = _import_restore_plan_impl()
         deps = _make_deps(
@@ -246,10 +250,12 @@ class TestRestoreNotFound:
                 },
             }
         }
-        load_mock = MagicMock(side_effect=[
-            {"plans": {}},  # first load: empty
-            recovered_registry,  # second load: after recovery
-        ])
+        load_mock = MagicMock(
+            side_effect=[
+                {"plans": {}},  # first load: empty
+                recovered_registry,  # second load: after recovery
+            ]
+        )
         deps = _make_deps(
             validate_plan_exists=MagicMock(return_value=(False, "not found")),
             recover_plan_from_backup_fn=MagicMock(return_value=(True, "Recovered FPLAN-9999")),
@@ -267,8 +273,8 @@ class TestRestoreNotFound:
 # 5. restore_plan_impl -- file missing
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreFileMissing:
 
+class TestRestoreFileMissing:
     def test_file_not_at_location(self):
         fn = _import_restore_plan_impl()
         registry = {
@@ -293,8 +299,8 @@ class TestRestoreFileMissing:
 # 6. restore_plan_impl -- ValueError (invalid number)
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreValueError:
 
+class TestRestoreValueError:
     def test_invalid_plan_number_raises_value_error(self):
         fn = _import_restore_plan_impl()
         deps = _make_deps(
@@ -318,8 +324,8 @@ class TestRestoreValueError:
 # 7. restore_plan_impl -- generic exception
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreGenericException:
 
+class TestRestoreGenericException:
     def test_unexpected_error(self):
         fn = _import_restore_plan_impl()
         deps = _make_deps(
@@ -336,8 +342,8 @@ class TestRestoreGenericException:
 # 8. restore_plan_impl -- dashboard failures
 # ═══════════════════════════════════════════════════════════
 
-class TestRestoreDashboardFailures:
 
+class TestRestoreDashboardFailures:
     def test_dashboard_failure_does_not_block_success(self, tmp_path):
         fn = _import_restore_plan_impl()
         plan_file = tmp_path / "FPLAN-0001.md"
@@ -396,8 +402,8 @@ class TestRestoreDashboardFailures:
 # 9. recover_plan_from_backup
 # ═══════════════════════════════════════════════════════════
 
-class TestRecoverPlanFromBackup:
 
+class TestRecoverPlanFromBackup:
     def test_no_backup_dir(self):
         fn = _import_recover_plan_from_backup()
         load = MagicMock(return_value={"plans": {}})
@@ -422,9 +428,11 @@ class TestRecoverPlanFromBackup:
         load = MagicMock(return_value=registry)
         save = MagicMock()
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"):
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
             ok, msg = fn("0042", load_registry=load, save_registry=save)
 
         assert ok is True
@@ -449,9 +457,11 @@ class TestRecoverPlanFromBackup:
         load = MagicMock(return_value=registry)
         save = MagicMock()
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", flow_root):
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", flow_root),
+        ):
             ok, msg = fn("0010", load_registry=load, save_registry=save)
 
         assert ok is True
@@ -470,6 +480,7 @@ class TestRecoverPlanFromBackup:
         old_file.write_text("# Old\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
 
         import time
+
         time.sleep(0.05)
 
         new_file = backup_dir / "DPLAN-0005.md"
@@ -479,9 +490,11 @@ class TestRecoverPlanFromBackup:
         load = MagicMock(return_value=registry)
         save = MagicMock()
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path), \
-             patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"):
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
             ok, msg = fn("0005", load_registry=load, save_registry=save)
 
         assert ok is True

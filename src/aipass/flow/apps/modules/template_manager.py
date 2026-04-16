@@ -229,7 +229,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         if registered:
             success(f"Registered '{dir_name}' with prefix {prefix}")
             console.print()
-            console.print(f"[dim]Create plans with: drone @flow create . \"subject\" {prefix.lower()}[/dim]")
+            console.print(f'[dim]Create plans with: drone @flow create . "subject" {prefix.lower()}[/dim]')
             console.print()
         else:
             error(f"Failed to register '{dir_name}' — check logs for details")

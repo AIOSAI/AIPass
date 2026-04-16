@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure so the module loads in isolation."""
@@ -87,6 +88,7 @@ def trigger_cls():
 # Tests -- on() registration
 # ---------------------------------------------------------------------------
 
+
 def test_on_registers_handler(trigger_cls):
     """on() stores the handler in _handlers under the given event key."""
     handler = MagicMock()
@@ -111,6 +113,7 @@ def test_on_multiple_events(trigger_cls):
 # ---------------------------------------------------------------------------
 # Tests -- fire()
 # ---------------------------------------------------------------------------
+
 
 def test_fire_calls_registered_handler(trigger_cls):
     """fire() invokes every handler registered for that event."""
@@ -202,6 +205,7 @@ def test_fire_handler_exception_does_not_block_others(trigger_cls):
 # Tests -- off() unregistration
 # ---------------------------------------------------------------------------
 
+
 def test_off_removes_handler(trigger_cls):
     """off() removes a previously registered handler so it no longer fires."""
     handler = MagicMock()
@@ -253,6 +257,7 @@ def test_off_only_removes_target_handler(trigger_cls):
 # Tests -- status()
 # ---------------------------------------------------------------------------
 
+
 def test_status_empty(trigger_cls):
     """status() returns empty dict when no handlers are registered."""
     result = trigger_cls.status()
@@ -282,6 +287,7 @@ def test_status_returns_dict(trigger_cls):
 # ---------------------------------------------------------------------------
 # Tests -- edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_duplicate_handler_registration(trigger_cls):
     """on() with the same handler twice registers it twice (both fire)."""
@@ -383,9 +389,11 @@ def test_fire_only_triggers_matching_event(trigger_cls):
 # Tests -- contract gaps
 # ---------------------------------------------------------------------------
 
+
 def test_fire_none_event_name(trigger_cls):
     """fire(None) handles None event gracefully -- no handlers match, returns None."""
     from typing import Any
+
     none_event: Any = None
     result = trigger_cls.fire(none_event)
     assert result is None

@@ -53,19 +53,11 @@ from aipass.prax.apps.handlers.dashboard.status import (
 )
 
 # Import refresh handler - exposed as public API
-from aipass.prax.apps.handlers.dashboard.refresh import (
-    refresh_all_dashboards,
-    refresh_single_dashboard
-)
+from aipass.prax.apps.handlers.dashboard.refresh import refresh_all_dashboards, refresh_single_dashboard
 
 # Import template handlers
-from aipass.prax.apps.handlers.dashboard.template_pusher import (
-    push_dashboard_template,
-    get_template_status
-)
-from aipass.prax.apps.handlers.dashboard.template_differ import (
-    diff_dashboard_template
-)
+from aipass.prax.apps.handlers.dashboard.template_pusher import push_dashboard_template, get_template_status
+from aipass.prax.apps.handlers.dashboard.template_differ import diff_dashboard_template
 from aipass.prax.apps.handlers.json import json_handler
 
 
@@ -76,32 +68,16 @@ DASHBOARD_TEMPLATE = {
     "branch": "",
     "last_updated": "",
     "sections": {
-        "ai_mail": {
-            "managed_by": "ai_mail",
-            "new": 0,
-            "opened": 0,
-            "total": 0,
-            "last_updated": ""
-        },
-        "flow": {
-            "managed_by": "flow",
-            "active_plans": 0,
-            "recently_closed": [],
-            "last_updated": ""
-        },
-        "memory": {
-            "managed_by": "memory",
-            "vectors_stored": 0,
-            "notes": {},
-            "last_updated": ""
-        },
+        "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
+        "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
+        "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
         "commons_activity": {
             "managed_by": "the_commons",
             "mentions": 0,
             "new_posts_since_last_visit": 0,
             "new_comments_since_last_visit": 0,
-            "last_updated": ""
-        }
+            "last_updated": "",
+        },
     },
     "quick_status": {
         "new_mail": 0,
@@ -109,19 +85,15 @@ DASHBOARD_TEMPLATE = {
         "active_plans": 0,
         "commons_mentions": 0,
         "action_required": False,
-        "summary": ""
-    }
+        "summary": "",
+    },
 }
 
 
 # ============================================
 # MODULE-LEVEL WRAPPER FUNCTIONS
 # ============================================
-def update_section(
-    branch_path: Path,
-    section_name: str,
-    section_data: Dict
-) -> bool:
+def update_section(branch_path: Path, section_name: str, section_data: Dict) -> bool:
     """
     Update a specific section in branch dashboard (legacy wrapper).
 
@@ -139,11 +111,7 @@ def update_section(
     """
     try:
         return handler_update_section(
-            branch_path,
-            section_name,
-            section_data,
-            DASHBOARD_TEMPLATE,
-            calculate_quick_status
+            branch_path, section_name, section_data, DASHBOARD_TEMPLATE, calculate_quick_status
         )
     except Exception as e:
         logger.error(f"Failed to update section {section_name}: {e}")
@@ -381,7 +349,7 @@ def _handle_diff_template(args: List[str]) -> None:
     result = diff_dashboard_template(branch_name=branch_name)
 
     if "error" in result:
-        error(result['error'])
+        error(result["error"])
         return
 
     summary = result.get("summary", {})
@@ -391,7 +359,7 @@ def _handle_diff_template(args: List[str]) -> None:
     console.print(f"  Needs update: {summary.get('needs_update', 0)}")
     console.print(f"  Up to date:   {summary.get('up_to_date', 0)}")
     console.print(f"  Missing:      {summary.get('missing', 0)}")
-    invalid_json_count = summary.get('invalid_json', 0)
+    invalid_json_count = summary.get("invalid_json", 0)
     if invalid_json_count:
         error(f"Invalid JSON: {invalid_json_count}")
 
@@ -467,7 +435,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ('--help', '-h', 'help'):
+    if args[0] in ("--help", "-h", "help"):
         print_help()
         return True
 

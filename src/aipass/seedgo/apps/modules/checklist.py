@@ -50,6 +50,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # PATH HELPERS
 # =============================================================================
 
+
 def _get_repo_root() -> Path | None:
     """Return the git repo root derived from this file's location.
 
@@ -68,14 +69,15 @@ def _get_repo_root() -> Path | None:
 # CHECKER APPLICABILITY
 # =============================================================================
 
+
 def _is_entry_point(file_path: str) -> bool:
     """Check if file is an entry point: apps/{name}.py (directly in apps/, not subdirectory)."""
     p = Path(file_path)
-    if not p.name.endswith('.py'):
+    if not p.name.endswith(".py"):
         return False
-    if 'apps/' not in file_path:
+    if "apps/" not in file_path:
         return False
-    return p.parent.name == 'apps'
+    return p.parent.name == "apps"
 
 
 def _is_applicable(checker, file_path: str) -> bool:
@@ -97,7 +99,7 @@ def _is_applicable(checker, file_path: str) -> bool:
         return False
 
     if scope == "all_files":
-        return file_path.endswith('.py')
+        return file_path.endswith(".py")
 
     # Default: entry_point scope
     return _is_entry_point(file_path)
@@ -106,6 +108,7 @@ def _is_applicable(checker, file_path: str) -> bool:
 # =============================================================================
 # CORE LOGIC
 # =============================================================================
+
 
 def run_checklist(file_path: str, pack_name: str = "aipass") -> List[Dict]:
     """Run applicable standards checkers against a single file.
@@ -122,7 +125,7 @@ def run_checklist(file_path: str, pack_name: str = "aipass") -> List[Dict]:
     if not Path(resolved).exists():
         return [{"standard": "(error)", "passed": False, "detail": f"File not found: {resolved}"}]
 
-    if not resolved.endswith('.py'):
+    if not resolved.endswith(".py"):
         return [{"standard": "(skip)", "passed": True, "detail": "Not a Python file"}]
 
     # Discover pack path
@@ -209,6 +212,7 @@ def _format_failure(result: Dict) -> str:
 # OUTPUT FORMATTING
 # =============================================================================
 
+
 def _print_results(results: List[Dict], file_path: str) -> None:
     """Print concise pass/fail output for hook consumption."""
     p = Path(file_path)
@@ -234,6 +238,7 @@ def _print_results(results: List[Dict], file_path: str) -> None:
 # =============================================================================
 # COMMAND HANDLER
 # =============================================================================
+
 
 def handle_command(command: str, args: List[str]) -> bool:
     """
@@ -323,6 +328,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # INTROSPECTION & HELP
 # =============================================================================
 
+
 def print_introspection() -> None:
     """Display module info and connected handlers."""
     console.print()
@@ -375,8 +381,12 @@ def print_help() -> None:
 
     console.print("[yellow]USAGE:[/yellow]")
     console.print("  [green]drone @seedgo checklist <file>[/green]                    [dim]# Check single file[/dim]")
-    console.print("  [green]drone @seedgo checklist <directory>[/green]               [dim]# Check all .py files in directory[/dim]")
-    console.print("  [green]drone @seedgo checklist --pack <pack> <file>[/green]      [dim]# Check with specific pack[/dim]")
+    console.print(
+        "  [green]drone @seedgo checklist <directory>[/green]               [dim]# Check all .py files in directory[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo checklist --pack <pack> <file>[/green]      [dim]# Check with specific pack[/dim]"
+    )
     console.print("  [green]drone @seedgo checklist --help[/green]                    [dim]# This help message[/dim]")
     console.print()
 
@@ -386,9 +396,9 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]SCOPE RULES:[/yellow]")
-    console.print("  Checkers with [cyan]AUDIT_SCOPE = \"entry_point\"[/cyan] only run on apps/{name}.py files")
-    console.print("  Checkers with [cyan]AUDIT_SCOPE = \"all_files\"[/cyan] run on any .py file")
-    console.print("  Checkers with [cyan]AUDIT_SCOPE = \"branch_level\"[/cyan] are skipped (need full branch)")
+    console.print('  Checkers with [cyan]AUDIT_SCOPE = "entry_point"[/cyan] only run on apps/{name}.py files')
+    console.print('  Checkers with [cyan]AUDIT_SCOPE = "all_files"[/cyan] run on any .py file')
+    console.print('  Checkers with [cyan]AUDIT_SCOPE = "branch_level"[/cyan] are skipped (need full branch)')
     console.print()
 
     console.print("[yellow]EXAMPLES:[/yellow]")
@@ -411,7 +421,7 @@ def print_help() -> None:
 
 if __name__ == "__main__":
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

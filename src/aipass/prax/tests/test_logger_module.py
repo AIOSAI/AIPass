@@ -94,9 +94,13 @@ def _build_handler_mocks():
 
     # registry/load.py exports
     registry = mocks["aipass.prax.apps.handlers.registry.load"]
-    registry.load_module_registry = MagicMock(return_value=[
-        {"name": "mod_a"}, {"name": "mod_b"}, {"name": "mod_c"},
-    ])
+    registry.load_module_registry = MagicMock(
+        return_value=[
+            {"name": "mod_a"},
+            {"name": "mod_b"},
+            {"name": "mod_c"},
+        ]
+    )
 
     # config/load.py exports
     config = mocks["aipass.prax.apps.handlers.config.load"]
@@ -142,6 +146,7 @@ def _inject_and_import(monkeypatch):
     # Now import — the module-level imports will resolve to our mocks
     import aipass.prax.apps.modules.logger as logger_mod
     import importlib
+
     importlib.reload(logger_mod)
 
     return logger_mod, mocks
@@ -150,6 +155,7 @@ def _inject_and_import(monkeypatch):
 # =============================================
 # get_system_logger
 # =============================================
+
 
 class TestGetSystemLogger:
     """Tests for get_system_logger() — returns a logger with standard methods."""
@@ -209,6 +215,7 @@ class TestGetSystemLogger:
 # =============================================
 # get_system_status
 # =============================================
+
 
 class TestGetSystemStatus:
     """Tests for get_system_status() — returns a dict with system info."""
@@ -296,6 +303,7 @@ class TestGetSystemStatus:
 # handle_command
 # =============================================
 
+
 class TestHandleCommand:
     """Tests for handle_command() — introspection gate and routing."""
 
@@ -346,9 +354,7 @@ class TestHandleCommand:
         mod.handle_command("logger", ["--help"])
 
         json_handler = mocks["aipass.prax.apps.handlers.json"].json_handler
-        json_handler.log_operation.assert_called_once_with(
-            "logger_handle_command", {"args": ["--help"]}
-        )
+        json_handler.log_operation.assert_called_once_with("logger_handle_command", {"args": ["--help"]})
 
     def test_no_args_logs_operation(self, monkeypatch):
         """handle_command with no args still logs the operation."""
@@ -357,14 +363,13 @@ class TestHandleCommand:
         mod.handle_command("logger", [])
 
         json_handler = mocks["aipass.prax.apps.handlers.json"].json_handler
-        json_handler.log_operation.assert_called_once_with(
-            "logger_handle_command", {"args": []}
-        )
+        json_handler.log_operation.assert_called_once_with("logger_handle_command", {"args": []})
 
 
 # =============================================
 # initialize_logging_system
 # =============================================
+
 
 class TestInitializeLoggingSystem:
     """Tests for initialize_logging_system() — delegates to lifecycle handler."""
@@ -376,9 +381,11 @@ class TestInitializeLoggingSystem:
         # The lifecycle handler is lazy-imported inside the function,
         # so we need to mock it in sys.modules
         mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(return_value={
-            "modules_count": 42,
-        })
+        mock_lifecycle.run_initialize = MagicMock(
+            return_value={
+                "modules_count": 42,
+            }
+        )
         monkeypatch.setitem(
             sys.modules,
             "aipass.prax.apps.handlers.logging.lifecycle",
@@ -394,9 +401,11 @@ class TestInitializeLoggingSystem:
         mod, mocks = _inject_and_import(monkeypatch)
 
         mock_lifecycle = MagicMock()
-        mock_lifecycle.run_initialize = MagicMock(return_value={
-            "modules_count": 10,
-        })
+        mock_lifecycle.run_initialize = MagicMock(
+            return_value={
+                "modules_count": 10,
+            }
+        )
         monkeypatch.setitem(
             sys.modules,
             "aipass.prax.apps.handlers.logging.lifecycle",
@@ -414,6 +423,7 @@ class TestInitializeLoggingSystem:
 # =============================================
 # shutdown_logging_system
 # =============================================
+
 
 class TestShutdownLoggingSystem:
     """Tests for shutdown_logging_system() — delegates to lifecycle handler."""
@@ -458,6 +468,7 @@ class TestShutdownLoggingSystem:
 # enable_terminal_output / disable_terminal_output
 # =============================================
 
+
 class TestTerminalOutputControl:
     """Tests for enable/disable terminal output pass-through functions."""
 
@@ -483,6 +494,7 @@ class TestTerminalOutputControl:
 # =============================================
 # SystemLogger class
 # =============================================
+
 
 class TestSystemLogger:
     """Tests for the SystemLogger class — auto-routing logger proxy."""
@@ -551,6 +563,7 @@ class TestSystemLogger:
 # Module constants
 # =============================================
 
+
 class TestModuleConstants:
     """Tests for module-level constants."""
 
@@ -576,6 +589,7 @@ class TestModuleConstants:
 # =============================================
 # print_introspection
 # =============================================
+
 
 class TestPrintIntrospection:
     """Tests for print_introspection() — displays module info."""
@@ -620,6 +634,7 @@ class TestPrintIntrospection:
             sys.modules.pop(MODULE_NAME, None)
             import importlib
             import aipass.prax.apps.modules.logger as fresh_mod
+
             importlib.reload(fresh_mod)
 
             fresh_mod.print_introspection()

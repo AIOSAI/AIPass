@@ -46,6 +46,7 @@ REGISTRY_FILE: Path = _BRANCH_ROOT / "drone_command_registry.json"
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _today() -> str:
     """Return today's date as ISO string."""
     return datetime.now().date().isoformat()
@@ -75,6 +76,7 @@ def _registry_path() -> Path:
 # ---------------------------------------------------------------------------
 # Core CRUD
 # ---------------------------------------------------------------------------
+
 
 def load_registry() -> dict[str, Any]:
     """Load the command registry from disk, auto-creating if missing.

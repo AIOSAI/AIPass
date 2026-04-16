@@ -78,37 +78,37 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     # Top-level help (backward compat — entry point may send these)
-    if command in ('--help', '-h', 'help'):
+    if command in ("--help", "-h", "help"):
         print_help()
         return True
 
-    if command == 'rollover':
+    if command == "rollover":
         # No args → introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
         # --help / -h / help → full help
-        if args[0] in ('--help', '-h', 'help'):
+        if args[0] in ("--help", "-h", "help"):
             print_help()
             return True
 
         # Subcommand routing
         sub = args[0]
 
-        if sub == 'run':
+        if sub == "run":
             run_rollover()
             return True
 
-        if sub == 'status':
+        if sub == "status":
             show_status()
             return True
 
-        if sub == 'check':
+        if sub == "check":
             check_triggers()
             return True
 
-        if sub == 'sync-lines':
+        if sub == "sync-lines":
             sync_line_counts()
             return True
 
@@ -120,19 +120,19 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Backward-compatible top-level commands (entry point still routes these)
-    if command == 'status':
+    if command == "status":
         show_status()
         return True
 
-    elif command == 'check':
+    elif command == "check":
         check_triggers()
         return True
 
-    elif command == 'sync-lines':
+    elif command == "sync-lines":
         sync_line_counts()
         return True
 
-    elif command == 'process-plans':
+    elif command == "process-plans":
         process_plans_command()
         return True
 
@@ -142,11 +142,13 @@ def handle_command(command: str, args: List[str]) -> bool:
 def print_help() -> None:
     """Display rollover module help"""
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Rollover Module - Memory Rollover Orchestration[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]Rollover Module - Memory Rollover Orchestration[/bold cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
     console.print()
     console.print("[bold]USAGE:[/bold]")
     console.print("  drone @memory rollover <command>")
@@ -174,6 +176,7 @@ def print_help() -> None:
 # ROLLOVER ORCHESTRATION
 # =============================================================================
 
+
 def run_rollover() -> bool:
     """
     Execute rollover workflow for all triggered branches.
@@ -181,11 +184,7 @@ def run_rollover() -> bool:
     Delegates to handler and renders results with Rich.
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Rollover Execution[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print("[cyan]Checking for rollover triggers... (first run may take 30s for model loading)[/cyan]")
@@ -197,11 +196,11 @@ def run_rollover() -> bool:
         error(f"Rollover failed: {e}")
         return False
 
-    if not result.get('success') and result.get('error'):
-        error(result['error'])
+    if not result.get("success") and result.get("error"):
+        error(result["error"])
         return False
 
-    triggers_count = result.get('triggers_count', 0)
+    triggers_count = result.get("triggers_count", 0)
     if triggers_count == 0:
         console.print("[green]>[/green] No files need rollover")
         return True
@@ -210,16 +209,16 @@ def run_rollover() -> bool:
     console.print()
 
     # Display individual results
-    for item in result.get('results', []):
-        local_status = "> local" if item.get('local_stored') else "x local"
+    for item in result.get("results", []):
+        local_status = "> local" if item.get("local_stored") else "x local"
         console.print(
             f"  [green]>[/green] Rolled over {item['memories_count']} items -> {item['global_collection']} "
             f"({item['old_lines']} -> {item['new_lines']} lines, global: {item['global_total']} vectors, {local_status})"
         )
 
     # Report results
-    success_count = result.get('success_count', 0)
-    failed = result.get('failed', [])
+    success_count = result.get("success_count", 0)
+    failed = result.get("failed", [])
 
     console.print()
     if success_count > 0:
@@ -238,6 +237,7 @@ def run_rollover() -> bool:
 # PLAN VECTORIZATION
 # =============================================================================
 
+
 def process_plans_command() -> None:
     """
     Process pending plan files into vector storage.
@@ -245,11 +245,7 @@ def process_plans_command() -> None:
     Batches all chunks from all files into a single embed + store call.
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Process Plans[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Process Plans[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print("[cyan]Processing plan files into vector storage...[/cyan]")
@@ -257,22 +253,23 @@ def process_plans_command() -> None:
 
     try:
         from ..handlers.intake.plans_processor import process_plans
+
         result = process_plans()
     except Exception as e:
         logger.error(f"[rollover] Plan processing failed: {e}")
         error(f"Plan processing failed: {e}")
         return
 
-    if not result.get('success'):
-        error(result.get('error', 'Unknown error'))
-        if result.get('errors'):
-            for err in result['errors']:
+    if not result.get("success"):
+        error(result.get("error", "Unknown error"))
+        if result.get("errors"):
+            for err in result["errors"]:
                 error(err)
         return
 
-    files_processed = result.get('files_processed', 0)
-    total_chunks = result.get('total_chunks', 0)
-    reason = result.get('reason', '')
+    files_processed = result.get("files_processed", 0)
+    total_chunks = result.get("total_chunks", 0)
+    reason = result.get("reason", "")
 
     if files_processed == 0 and reason:
         console.print(f"[green]>[/green] {reason}")
@@ -281,18 +278,21 @@ def process_plans_command() -> None:
     else:
         console.print(f"[green]>[/green] Processed {files_processed} files ({total_chunks} chunks vectorized)")
 
-    if result.get('errors'):
+    if result.get("errors"):
         console.print()
-        for err in result['errors']:
+        for err in result["errors"]:
             error(err)
 
     console.print()
-    json_handler.log_operation("process_plans_command", {"files_processed": files_processed, "total_chunks": total_chunks})
+    json_handler.log_operation(
+        "process_plans_command", {"files_processed": files_processed, "total_chunks": total_chunks}
+    )
 
 
 # =============================================================================
 # LINE COUNT SYNC
 # =============================================================================
+
 
 def sync_line_counts() -> None:
     """
@@ -301,11 +301,7 @@ def sync_line_counts() -> None:
     Delegates to handler and renders results with Rich.
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Sync Line Counts[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Sync Line Counts[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     console.print("[cyan]Updating line counts for all memory files...[/cyan]")
@@ -313,13 +309,13 @@ def sync_line_counts() -> None:
 
     result = _handler_sync_line_counts()
 
-    if result['success']:
+    if result["success"]:
         console.print(f"[green]>[/green] Updated {result['updated']} files")
-        if result['failed'] > 0:
+        if result["failed"] > 0:
             warning(f"{result['failed']} files failed")
-            for branch, mem_type, err_msg in result.get('failures', []):
+            for branch, mem_type, err_msg in result.get("failures", []):
                 error(f"{branch}.{mem_type}: {err_msg}")
-        json_handler.log_operation("rollover_sync_lines", {"updated": result['updated'], "failed": result['failed']})
+        json_handler.log_operation("rollover_sync_lines", {"updated": result["updated"], "failed": result["failed"]})
     else:
         error("Failed to sync line counts")
 
@@ -329,6 +325,7 @@ def sync_line_counts() -> None:
 # =============================================================================
 # STATUS & CHECKING
 # =============================================================================
+
 
 def show_status() -> None:
     """
@@ -340,17 +337,13 @@ def show_status() -> None:
     - Per-branch status (current/max lines)
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Rollover Status[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Rollover Status[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     # Get stats from detector
     stats_result = detector.get_rollover_stats()
 
-    if not stats_result['success']:
+    if not stats_result["success"]:
         error(f"Failed to get status: {stats_result.get('error', 'Unknown error')}")
         logger.error(f"[rollover] Failed to get status: {stats_result.get('error')}")
         return
@@ -364,35 +357,35 @@ def show_status() -> None:
     console.print()
 
     # Per-branch details
-    if stats['branches']:
+    if stats["branches"]:
         console.print("[bold cyan]Branch Details:[/bold cyan]")
         console.print()
 
-        for branch_name, branch_stats in stats['branches'].items():
+        for branch_name, branch_stats in stats["branches"].items():
             console.print(f"  [bold]{branch_name}[/bold]")
 
             for memory_type, file_stats in branch_stats.items():
-                current = file_stats['current']
-                max_val = file_stats['max']
-                ready = file_stats['ready']
-                remaining = file_stats['remaining']
-                schema_ver = file_stats.get('schema_version', '1.0.0')
-                v2_reason = file_stats.get('v2_reason', '')
+                current = file_stats["current"]
+                max_val = file_stats["max"]
+                ready = file_stats["ready"]
+                remaining = file_stats["remaining"]
+                schema_ver = file_stats.get("schema_version", "1.0.0")
+                v2_reason = file_stats.get("v2_reason", "")
 
                 status_marker = "[red]![/red]" if ready else "[green]OK[/green]"
 
-                if schema_ver.startswith('2'):
+                if schema_ver.startswith("2"):
                     status_text = f"READY ({v2_reason})" if ready else "OK (v2)"
                     console.print(f"    {status_marker} {memory_type}: {status_text}")
                 else:
                     status_text = "READY" if ready else f"{remaining} remaining"
-                    console.print(
-                        f"    {status_marker} {memory_type}: {current}/{max_val} lines ({status_text})"
-                    )
+                    console.print(f"    {status_marker} {memory_type}: {current}/{max_val} lines ({status_text})")
 
             console.print()
 
-    json_handler.log_operation("rollover_status", {"branches_checked": stats['total_branches'], "files_ready": stats['files_ready']})
+    json_handler.log_operation(
+        "rollover_status", {"branches_checked": stats["total_branches"], "files_ready": stats["files_ready"]}
+    )
 
 
 def check_triggers() -> None:
@@ -402,21 +395,17 @@ def check_triggers() -> None:
     Displays list of files that hit rollover threshold
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Rollover Check[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     triggers_result = detector.check_all_branches()
 
-    if not triggers_result['success']:
+    if not triggers_result["success"]:
         error(f"Failed to check triggers: {triggers_result.get('error', 'Unknown error')}")
         logger.error(f"[rollover] Failed to check triggers: {triggers_result.get('error')}")
         return
 
-    triggers = triggers_result.get('triggers', [])
+    triggers = triggers_result.get("triggers", [])
 
     if not triggers:
         console.print("[green]>[/green] No files need rollover")
@@ -439,6 +428,7 @@ def check_triggers() -> None:
 # INTROSPECTION
 # =============================================================================
 
+
 def _discover_handlers() -> dict[str, list[str]]:
     """Auto-discover handler directories and their Python files.
 
@@ -455,10 +445,7 @@ def _discover_handlers() -> dict[str, list[str]]:
     for d in sorted(handlers_dir.iterdir()):
         if not d.is_dir() or d.name.startswith("__"):
             continue
-        py_files = sorted(
-            f.name for f in d.iterdir()
-            if f.is_file() and f.suffix == ".py" and f.name != "__init__.py"
-        )
+        py_files = sorted(f.name for f in d.iterdir() if f.is_file() and f.suffix == ".py" and f.name != "__init__.py")
         if py_files:
             result[d.name] = py_files
     return result
@@ -511,12 +498,12 @@ if __name__ == "__main__":
 
     # No args → introspection (seedgo standard)
     if len(sys.argv) < 2:
-        handle_command('rollover', [])
+        handle_command("rollover", [])
         sys.exit(0)
 
     # --help → full help
-    if sys.argv[1] in ('--help', '-h', 'help'):
-        handle_command('rollover', ['--help'])
+    if sys.argv[1] in ("--help", "-h", "help"):
+        handle_command("rollover", ["--help"])
         sys.exit(0)
 
     # Execute command via handle_command

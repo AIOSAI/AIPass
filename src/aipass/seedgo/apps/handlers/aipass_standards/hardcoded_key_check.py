@@ -78,9 +78,15 @@ _PLACEHOLDER_SUFFIX_RE = re.compile(
 )
 
 # Words on the line (outside the key literal) that signal example context.
-_EXAMPLE_CONTEXT_WORDS = frozenset({
-    "example", "template", "placeholder", "sample", "demo",
-})
+_EXAMPLE_CONTEXT_WORDS = frozenset(
+    {
+        "example",
+        "template",
+        "placeholder",
+        "sample",
+        "demo",
+    }
+)
 
 # Pure comment line.
 _PAT_COMMENT = re.compile(r"^\s*#")
@@ -90,6 +96,7 @@ _PAT_REGEX_CONTEXT = re.compile(r"""re\.compile|r["']|\\[dws\^]""")
 
 
 # -- Helpers ----------------------------------------------------------------
+
 
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed."""
@@ -118,6 +125,7 @@ def _is_placeholder(key_value: str) -> bool:
 
 
 # -- Core detection ---------------------------------------------------------
+
 
 def _scan_line(lineno: int, line: str) -> list[tuple[int, str]]:
     """
@@ -187,6 +195,7 @@ def _scan_file(file_path: Path) -> list[tuple[int, str]]:
 
 
 # -- Public entry point -----------------------------------------------------
+
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
     """
@@ -276,17 +285,21 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
         line_numbers = [f[0] for f in findings]
         preview = ", ".join(str(ln) for ln in line_numbers[:3])
         suffix = f" (and {len(line_numbers) - 3} more)" if len(line_numbers) > 3 else ""
-        checks.append({
-            "name": "Hardcoded API keys",
-            "passed": False,
-            "message": f"Found {len(findings)} hardcoded key(s) on lines {preview}{suffix}",
-        })
+        checks.append(
+            {
+                "name": "Hardcoded API keys",
+                "passed": False,
+                "message": f"Found {len(findings)} hardcoded key(s) on lines {preview}{suffix}",
+            }
+        )
     else:
-        checks.append({
-            "name": "Hardcoded API keys",
-            "passed": True,
-            "message": "No hardcoded API keys detected",
-        })
+        checks.append(
+            {
+                "name": "Hardcoded API keys",
+                "passed": True,
+                "message": "No hardcoded API keys detected",
+            }
+        )
 
     # Score
     passed_checks = sum(1 for c in checks if c["passed"])

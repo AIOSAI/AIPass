@@ -41,8 +41,10 @@ def _guard_branch_access():
     caller_file, import_line = _find_real_caller()
 
     import os
+
     if os.environ.get("AIPASS_DEBUG_GUARD"):
         import sys
+
         print(f"[GUARD DEBUG] caller_file = {caller_file}", file=sys.stderr)
         print(f"[GUARD DEBUG] import_line = {import_line}", file=sys.stderr)
 
@@ -61,16 +63,16 @@ def _guard_branch_access():
     blocked_import = import_line if import_line else "unknown"
 
     raise ImportError(
-        f"\n{'='*60}\n"
+        f"\n{'=' * 60}\n"
         f"ACCESS DENIED: Cross-branch handler import blocked\n"
-        f"{'='*60}\n"
+        f"{'=' * 60}\n"
         f"  Caller branch: {caller_branch}\n"
         f"  Caller file:   {caller_filename}\n"
         f"  Blocked:       {blocked_import}\n\n"
         f"  Handlers are internal to their branch.\n"
         f"  Use the module API instead:\n"
         f"    from aipass.trigger.apps.modules.<module> import <function>\n"
-        f"{'='*60}"
+        f"{'=' * 60}"
     )
 
 

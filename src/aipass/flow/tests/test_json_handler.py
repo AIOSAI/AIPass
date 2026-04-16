@@ -18,9 +18,11 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _import_handler():
     """Import json_handler inside test so autouse mocks are active."""
     from aipass.flow.apps.handlers.json import json_handler
+
     return json_handler
 
 
@@ -38,15 +40,14 @@ def sample_data():
             "created": "2026-03-27",
             "last_updated": "2026-03-27",
         },
-        "log": [
-            {"timestamp": "2026-03-27T10:00:00", "operation": "test"}
-        ],
+        "log": [{"timestamp": "2026-03-27T10:00:00", "operation": "test"}],
     }
 
 
 # ═══════════════════════════════════════════════════════════
 # 1. _default_template -- default factory for JSON types
 # ═══════════════════════════════════════════════════════════
+
 
 class TestDefaultTemplate:
     """Tests for _create_default template factory."""
@@ -85,6 +86,7 @@ class TestDefaultTemplate:
 # 2. validate_json_structure
 # ═══════════════════════════════════════════════════════════
 
+
 class TestValidateJsonStructure:
     """Tests for validate_json_structure."""
 
@@ -121,6 +123,7 @@ class TestValidateJsonStructure:
 # 3. get_json_path -- path construction
 # ═══════════════════════════════════════════════════════════
 
+
 class TestGetJsonPath:
     """Tests for get_json_path -- returns pathlib.Path."""
 
@@ -144,13 +147,16 @@ class TestGetJsonPath:
 # 4. ensure_json_exists -- auto-creates files and dirs
 # ═══════════════════════════════════════════════════════════
 
+
 class TestEnsureJsonExists:
     """Tests for ensure_json_exists -- auto_creates_dir, no_overwrite."""
 
     def test_creates_new_file(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "test_config.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "test_config.json"),
+        ):
             result = handler.ensure_json_exists("test", "config")
             assert result is True
             assert (tmp_path / "test_config.json").exists()
@@ -158,8 +164,10 @@ class TestEnsureJsonExists:
     def test_auto_creates_dir_via_mkdir(self, tmp_path):
         handler = _import_handler()
         new_dir = tmp_path / "new_subdir"
-        with patch.object(handler, "FLOW_JSON_DIR", new_dir), \
-             patch.object(handler, "get_json_path", return_value=new_dir / "test_config.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", new_dir),
+            patch.object(handler, "get_json_path", return_value=new_dir / "test_config.json"),
+        ):
             result = handler.ensure_json_exists("test", "config")
             assert result is True
             # mkdir was called (dir now exists)
@@ -169,14 +177,13 @@ class TestEnsureJsonExists:
         """already_exists valid file is not overwritten."""
         handler = _import_handler()
         existing = tmp_path / "test_config.json"
-        original_data = {
-            "module_name": "test", "version": "1.0.0",
-            "config": {"custom": True}, "created": "2026-01-01"
-        }
+        original_data = {"module_name": "test", "version": "1.0.0", "config": {"custom": True}, "created": "2026-01-01"}
         existing.write_text(json.dumps(original_data), encoding="utf-8")
 
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=existing):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=existing),
+        ):
             result = handler.ensure_json_exists("test", "config")
             assert result is True
             # Verify original data preserved (no overwrite)
@@ -185,8 +192,10 @@ class TestEnsureJsonExists:
 
     def test_returns_false_for_unknown_type(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "test_bad.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "test_bad.json"),
+        ):
             # nonexistent type has no template
             result = handler.ensure_json_exists("test", "nonexistent")
             assert result is False
@@ -196,27 +205,34 @@ class TestEnsureJsonExists:
 # 5. load_json -- loads with auto-create
 # ═══════════════════════════════════════════════════════════
 
+
 class TestLoadJson:
     """Tests for load_json -- returns dict or list."""
 
     def test_load_config_returns_dict(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "t_config.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "t_config.json"),
+        ):
             result = handler.load_json("t", "config")
             assert isinstance(result, dict)
 
     def test_load_log_returns_list(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "t_log.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "t_log.json"),
+        ):
             result = handler.load_json("t", "log")
             assert isinstance(result, list)
 
     def test_load_returns_none_for_bad_type(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "t_bad.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "t_bad.json"),
+        ):
             result = handler.load_json("t", "nonexistent")
             assert result is None
 
@@ -224,6 +240,7 @@ class TestLoadJson:
 # ═══════════════════════════════════════════════════════════
 # 6. save_json -- validation and persistence
 # ═══════════════════════════════════════════════════════════
+
 
 class TestSaveJson:
     """Tests for save_json -- validates before writing."""
@@ -257,13 +274,16 @@ class TestSaveJson:
 # 7. ensure_module_jsons -- ensures all 3 types
 # ═══════════════════════════════════════════════════════════
 
+
 class TestEnsureModuleJsons:
     """Tests for ensure_module_jsons."""
 
     def test_returns_true(self, tmp_path):
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "ensure_json_exists", return_value=True) as mock_ensure:
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "ensure_json_exists", return_value=True) as mock_ensure,
+        ):
             result = handler.ensure_module_jsons("test_mod")
             assert result is True
             assert mock_ensure.call_count == 3
@@ -273,6 +293,7 @@ class TestEnsureModuleJsons:
 # 8. Error resilience
 # ═══════════════════════════════════════════════════════════
 
+
 class TestErrorResilience:
     """Tests for error handling across JSON operations."""
 
@@ -281,8 +302,10 @@ class TestErrorResilience:
         handler = _import_handler()
         target = tmp_path / "missing_config.json"
         assert not target.exists()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=target):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=target),
+        ):
             result = handler.load_json("missing", "config")
             assert result is not None
 
@@ -291,8 +314,10 @@ class TestErrorResilience:
         handler = _import_handler()
         target = tmp_path / "corrupt_config.json"
         target.write_text("{invalid json content", encoding="utf-8")
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=target):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=target),
+        ):
             result = handler.ensure_json_exists("corrupt", "config")
             assert result is True
 
@@ -301,8 +326,10 @@ class TestErrorResilience:
         handler = _import_handler()
         target = tmp_path / "empty_config.json"
         target.write_text("", encoding="utf-8")
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=target):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=target),
+        ):
             result = handler.ensure_json_exists("empty", "config")
             assert result is True
 
@@ -311,8 +338,10 @@ class TestErrorResilience:
         handler = _import_handler()
         deep_dir = tmp_path / "nonexistent" / "subdir"
         target = deep_dir / "test_config.json"
-        with patch.object(handler, "FLOW_JSON_DIR", deep_dir), \
-             patch.object(handler, "get_json_path", return_value=target):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", deep_dir),
+            patch.object(handler, "get_json_path", return_value=target),
+        ):
             result = handler.ensure_json_exists("test", "config")
             assert result is True
             assert deep_dir.exists()
@@ -321,6 +350,7 @@ class TestErrorResilience:
 # ═══════════════════════════════════════════════════════════
 # 9. Return type contracts
 # ═══════════════════════════════════════════════════════════
+
 
 class TestReturnTypeContracts:
     """Verify return types match contracts."""
@@ -334,8 +364,10 @@ class TestReturnTypeContracts:
     def test_load_json_returns_correct_type(self, tmp_path):
         """load_correct_type -- loaded config is a dict."""
         handler = _import_handler()
-        with patch.object(handler, "FLOW_JSON_DIR", tmp_path), \
-             patch.object(handler, "get_json_path", return_value=tmp_path / "t_config.json"):
+        with (
+            patch.object(handler, "FLOW_JSON_DIR", tmp_path),
+            patch.object(handler, "get_json_path", return_value=tmp_path / "t_config.json"),
+        ):
             data = handler.load_json("t", "config")
             assert isinstance(data, dict)
 
@@ -343,6 +375,7 @@ class TestReturnTypeContracts:
 # ═══════════════════════════════════════════════════════════
 # 10. Exception contracts
 # ═══════════════════════════════════════════════════════════
+
 
 class TestExceptionContracts:
     """Verify exception behavior."""
@@ -362,10 +395,7 @@ class TestExceptionContracts:
     def test_save_json_write_error_raises_handling(self, tmp_path):
         """pytest.raises contract: save_json handles write errors gracefully."""
         handler = _import_handler()
-        valid_config = {
-            "module_name": "t", "version": "1.0.0",
-            "config": {}, "created": "2026-01-01"
-        }
+        valid_config = {"module_name": "t", "version": "1.0.0", "config": {}, "created": "2026-01-01"}
         bad_path = tmp_path / "no_exist_dir" / "sub" / "x.json"
         with patch.object(handler, "get_json_path", return_value=bad_path):
             result = handler.save_json("t", "config", valid_config)
@@ -375,6 +405,7 @@ class TestExceptionContracts:
 # ═══════════════════════════════════════════════════════════
 # 11. Infrastructure mocking -- module reload patterns
 # ═══════════════════════════════════════════════════════════
+
 
 class TestInfrastructureMocking:
     """Tests demonstrating sys.modules and importlib.reload patterns."""
@@ -394,6 +425,7 @@ class TestInfrastructureMocking:
 # ═══════════════════════════════════════════════════════════
 # 12. Output capture
 # ═══════════════════════════════════════════════════════════
+
 
 class TestOutputCapture:
     """Tests using capsys for output verification."""

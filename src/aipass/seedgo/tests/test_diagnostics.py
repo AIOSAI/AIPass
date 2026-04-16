@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for diagnostics handlers."""
@@ -53,21 +54,25 @@ def _mock_infrastructure(monkeypatch):
 # Tests -- should_ignore_file
 # ---------------------------------------------------------------------------
 
+
 def test_should_ignore_file_matches():
     """should_ignore_file returns True when pattern is in the path."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
+
     assert should_ignore_file("/some/__pycache__/mod.py", ["__pycache__"]) is True
 
 
 def test_should_ignore_file_no_match():
     """should_ignore_file returns False when no pattern matches."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
+
     assert should_ignore_file("/some/apps/mod.py", ["__pycache__"]) is False
 
 
 def test_should_ignore_file_empty_patterns():
     """should_ignore_file returns False with empty patterns list."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
+
     assert should_ignore_file("/anything.py", []) is False
 
 
@@ -75,9 +80,11 @@ def test_should_ignore_file_empty_patterns():
 # Tests -- check_file (non-existent / non-python)
 # ---------------------------------------------------------------------------
 
+
 def test_check_file_nonexistent():
     """check_file returns zero errors for a file that does not exist."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_file
+
     result = check_file("/nonexistent/file.py")
     assert result["errors"] == 0
     assert "error" in result  # should have an error message
@@ -88,6 +95,7 @@ def test_check_file_not_python(tmp_path):
     txt_file = tmp_path / "file.txt"
     txt_file.write_text("hello", encoding="utf-8")
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_file
+
     result = check_file(str(txt_file))
     assert result["errors"] == 0
     assert "skipped" in result
@@ -97,9 +105,11 @@ def test_check_file_not_python(tmp_path):
 # Tests -- check_branch (no apps dir)
 # ---------------------------------------------------------------------------
 
+
 def test_check_branch_no_apps_dir(tmp_path):
     """check_branch returns score=100 when no apps/ directory exists."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_branch
+
     result = check_branch(str(tmp_path))
     assert result["passed"] is True
     assert result["score"] == 100
@@ -109,6 +119,7 @@ def test_check_branch_no_apps_dir(tmp_path):
 def test_check_branch_returns_expected_keys(tmp_path):
     """check_branch returns all expected keys in the output dict."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_branch
+
     result = check_branch(str(tmp_path))
     for key in ("passed", "score", "total_files", "total_errors", "checks", "standard"):
         assert key in result, f"Missing key: {key}"
@@ -118,23 +129,29 @@ def test_check_branch_returns_expected_keys(tmp_path):
 # Tests -- format_summary
 # ---------------------------------------------------------------------------
 
+
 def test_format_summary_with_error():
     """format_summary returns the error message when present."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import format_summary
-    result = format_summary({"error": "Pyright timed out", "total_files": 0,
-                             "files_with_errors": 0, "total_errors": 0, "total_warnings": 0})
+
+    result = format_summary(
+        {"error": "Pyright timed out", "total_files": 0, "files_with_errors": 0, "total_errors": 0, "total_warnings": 0}
+    )
     assert "Pyright timed out" in result
 
 
 def test_format_summary_clean_run():
     """format_summary formats a clean run correctly."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import format_summary
-    result = format_summary({
-        "total_files": 10,
-        "files_with_errors": 0,
-        "total_errors": 0,
-        "total_warnings": 2,
-    })
+
+    result = format_summary(
+        {
+            "total_files": 10,
+            "files_with_errors": 0,
+            "total_errors": 0,
+            "total_warnings": 2,
+        }
+    )
     assert "Files analyzed: 10" in result
     assert "Total errors: 0" in result
     assert "Total warnings: 2" in result
@@ -145,9 +162,11 @@ def test_format_summary_clean_run():
 # Tests -- _get_enabled_runners_from_config
 # ---------------------------------------------------------------------------
 
+
 def test_get_enabled_runners_simple():
     """_get_enabled_runners_from_config handles boolean format."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import _get_enabled_runners_from_config
+
     config = {"runners": {"python": True, "typescript": False}}
     result = _get_enabled_runners_from_config(config)
     assert "python" in result
@@ -157,6 +176,7 @@ def test_get_enabled_runners_simple():
 def test_get_enabled_runners_detailed():
     """_get_enabled_runners_from_config handles detailed format."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import _get_enabled_runners_from_config
+
     config = {"runners": {"python": {"enabled": True}, "rust": {"enabled": False}}}
     result = _get_enabled_runners_from_config(config)
     assert "python" in result
@@ -166,5 +186,6 @@ def test_get_enabled_runners_detailed():
 def test_get_enabled_runners_empty():
     """_get_enabled_runners_from_config returns empty for no runners."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import _get_enabled_runners_from_config
+
     assert _get_enabled_runners_from_config({}) == []
     assert _get_enabled_runners_from_config({"runners": {}}) == []

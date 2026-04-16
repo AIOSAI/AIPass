@@ -59,6 +59,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 # MAIN ENTRY POINT
 # =============================================================================
 
+
 def main():
     """Main entry point - routes commands or shows help."""
     modules = discover_modules()

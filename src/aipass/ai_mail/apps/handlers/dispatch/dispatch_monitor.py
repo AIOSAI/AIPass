@@ -41,15 +41,14 @@ HARD_TIMEOUT = 7200  # 2 hours
 POLL_INTERVAL = 5
 
 
-def _send_bounce(branch_email: str, reason: str, sender: str,
-                 lock_file: str, stderr_log: str) -> bool:
+def _send_bounce(branch_email: str, reason: str, sender: str, lock_file: str, stderr_log: str) -> bool:
     """Send return-to-sender bounce email via drone."""
     subject = f"BOUNCE: Dispatch to {branch_email} failed"
 
     # Read last few lines of stderr log for diagnostics
     stderr_tail = ""
     try:
-        with open(stderr_log, 'r', encoding='utf-8') as f:
+        with open(stderr_log, "r", encoding="utf-8") as f:
             lines = f.readlines()
         stderr_tail = "".join(lines[-20:]).strip()
     except (OSError, FileNotFoundError) as e:
@@ -68,8 +67,10 @@ def _send_bounce(branch_email: str, reason: str, sender: str,
     try:
         result = subprocess.run(
             ["drone", "@ai_mail", "send", sender, subject, body],
-            capture_output=True, text=True, timeout=30,
-            cwd=str(Path(lock_file).parent.parent)
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=str(Path(lock_file).parent.parent),
         )
         return result.returncode == 0
     except (subprocess.SubprocessError, OSError) as e:
@@ -77,14 +78,18 @@ def _send_bounce(branch_email: str, reason: str, sender: str,
         # Fallback: write bounce to a file if email fails
         try:
             bounce_file = Path(lock_file).parent / "last_bounce.json"
-            with open(bounce_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "branch": branch_email,
-                    "reason": reason,
-                    "sender": sender,
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                    "stderr_tail": stderr_tail
-                }, f, indent=2)
+            with open(bounce_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "branch": branch_email,
+                        "reason": reason,
+                        "sender": sender,
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "stderr_tail": stderr_tail,
+                    },
+                    f,
+                    indent=2,
+                )
         except OSError:
             logger.info("[monitor] Failed to write bounce file fallback")
         return False
@@ -93,11 +98,10 @@ def _send_bounce(branch_email: str, reason: str, sender: str,
 def _check_rate_limited(stderr_log: str) -> bool:
     """Check if stderr indicates API rate limiting or overload."""
     try:
-        with open(stderr_log, 'r', encoding='utf-8') as f:
+        with open(stderr_log, "r", encoding="utf-8") as f:
             content = f.read()
         lower = content.lower()
-        return ("rate_limit" in lower or "429" in content or
-                "overloaded" in lower or "529" in content)
+        return "rate_limit" in lower or "429" in content or "overloaded" in lower or "529" in content
     except OSError as e:
         logger.warning("[monitor] _check_rate_limited failed reading %s: %s", stderr_log, e)
         return False
@@ -114,11 +118,7 @@ def _get_jsonl_projects_dir(cwd: str) -> Path:
     Claude encodes the cwd by replacing path separators and ':' with '-'.
     Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
     """
-    encoded = (cwd.replace("\\", "-")
-                  .replace("/", "-")
-                  .replace(":", "-")
-                  .replace("_", "-")
-                  .replace(".", "-"))
+    encoded = cwd.replace("\\", "-").replace("/", "-").replace(":", "-").replace("_", "-").replace(".", "-")
     return Path.home() / ".claude" / "projects" / encoded
 
 
@@ -175,9 +175,9 @@ def _kill_process(process: subprocess.Popen, branch_email: str):
             logger.warning("[monitor] %s SIGKILL didn't work", branch_email)
 
 
-def _run_with_startup_check(claude_cmd: list, stdout_log: str,
-                            stderr_fh, cwd: str, spawn_env: dict,
-                            branch_email: str) -> tuple:
+def _run_with_startup_check(
+    claude_cmd: list, stdout_log: str, stderr_fh, cwd: str, spawn_env: dict, branch_email: str
+) -> tuple:
     """
     Run claude with startup timeout check.
 
@@ -189,7 +189,7 @@ def _run_with_startup_check(claude_cmd: list, stdout_log: str,
     # Open stdout fresh for this attempt (truncate — max_turns detection reads whole file)
     stdout_fh = None
     try:
-        stdout_fh = open(stdout_log, 'w', encoding='utf-8')
+        stdout_fh = open(stdout_log, "w", encoding="utf-8")
     except OSError as e:
         logger.warning("[monitor] Failed to open stdout log %s: %s", stdout_log, e)
 
@@ -199,7 +199,7 @@ def _run_with_startup_check(claude_cmd: list, stdout_log: str,
             stdout=stdout_fh if stdout_fh is not None else subprocess.DEVNULL,
             stderr=stderr_fh,
             cwd=cwd,
-            env=spawn_env
+            env=spawn_env,
         )
     except Exception as e:
         logger.warning("[monitor] Failed to spawn %s: %s", branch_email, e)
@@ -231,8 +231,9 @@ def _run_with_startup_check(claude_cmd: list, stdout_log: str,
 
         if not started and process.poll() is None:
             # Startup timeout — no JSONL activity after STARTUP_TIMEOUT seconds
-            logger.warning("[monitor] %s no JSONL activity after %ds — startup timeout (killing)",
-                           branch_email, STARTUP_TIMEOUT)
+            logger.warning(
+                "[monitor] %s no JSONL activity after %ds — startup timeout (killing)", branch_email, STARTUP_TIMEOUT
+            )
             _kill_process(process, branch_email)
             return -3, True
 
@@ -265,7 +266,7 @@ def main():
     lock_file = sys.argv[2]
     sender = sys.argv[3]
     stderr_log = sys.argv[4]
-    claude_cmd = sys.argv[sep_idx + 1:]
+    claude_cmd = sys.argv[sep_idx + 1 :]
 
     if not claude_cmd:
         logger.warning("[monitor] No claude command after --")
@@ -278,11 +279,13 @@ def main():
     try:
         stderr_path = Path(stderr_log)
         if stderr_path.exists() and stderr_path.stat().st_size > 512_000:
-            rotated = stderr_path.with_suffix('.log.1')
+            rotated = stderr_path.with_suffix(".log.1")
             stderr_path.replace(rotated)
-        stderr_fh = open(stderr_log, 'a', encoding='utf-8')
-        stderr_fh.write(f"\n--- Monitor for {branch_email} started at "
-                        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} (PID {os.getpid()}) ---\n")
+        stderr_fh = open(stderr_log, "a", encoding="utf-8")
+        stderr_fh.write(
+            f"\n--- Monitor for {branch_email} started at "
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} (PID {os.getpid()}) ---\n"
+        )
         stderr_fh.flush()
     except OSError as e:
         logger.warning("[monitor] Failed to open stderr log %s: %s", stderr_log, e)
@@ -293,6 +296,7 @@ def main():
     spawn_env["AIPASS_SESSION_TYPE"] = "dispatched"
     # Guarantee venv bin is on PATH so agents can find drone/claude
     from aipass.ai_mail.apps.handlers.paths import find_repo_root
+
     _repo_root = find_repo_root()
     venv_bin = str(_repo_root / ".venv" / "bin")
     if venv_bin not in spawn_env.get("PATH", ""):
@@ -324,7 +328,7 @@ def main():
     try:
         stdout_path = Path(stdout_log)
         if stdout_path.exists() and stdout_path.stat().st_size > 512_000:
-            rotated = stdout_path.with_suffix('.log.1')
+            rotated = stdout_path.with_suffix(".log.1")
             stdout_path.replace(rotated)
     except OSError as e:
         logger.warning("[monitor] Failed to rotate stdout log: %s", e)
@@ -350,21 +354,14 @@ def main():
             mode = "resume" if has_resume else "fresh"
 
         if stderr_fh is not None:
-            stderr_fh.write(f"\n--- Attempt {attempt}/3 ({mode}) at "
-                            f"{time.strftime('%H:%M:%S')} ---\n")
+            stderr_fh.write(f"\n--- Attempt {attempt}/3 ({mode}) at {time.strftime('%H:%M:%S')} ---\n")
             stderr_fh.flush()
 
         exit_code, startup_failed = _run_with_startup_check(
-            cmd, stdout_log, stderr_fh if stderr_fh is not None else subprocess.DEVNULL,
-            cwd, spawn_env, branch_email
+            cmd, stdout_log, stderr_fh if stderr_fh is not None else subprocess.DEVNULL, cwd, spawn_env, branch_email
         )
 
-        attempts.append({
-            "attempt": attempt,
-            "exit_code": exit_code,
-            "startup_failed": startup_failed,
-            "mode": mode
-        })
+        attempts.append({"attempt": attempt, "exit_code": exit_code, "startup_failed": startup_failed, "mode": mode})
 
         # Success — done
         if exit_code == 0:
@@ -374,11 +371,14 @@ def main():
 
         # Log failure
         if startup_failed:
-            logger.warning("[monitor] %s attempt %d/3: startup timeout (zero output after %ds)",
-                           branch_email, attempt, STARTUP_TIMEOUT)
+            logger.warning(
+                "[monitor] %s attempt %d/3: startup timeout (zero output after %ds)",
+                branch_email,
+                attempt,
+                STARTUP_TIMEOUT,
+            )
         else:
-            logger.warning("[monitor] %s attempt %d/3: exit code %d",
-                           branch_email, attempt, exit_code)
+            logger.warning("[monitor] %s attempt %d/3: exit code %d", branch_email, attempt, exit_code)
 
         # No more retries
         if attempt >= 3:
@@ -386,8 +386,7 @@ def main():
 
         # Rate limit — longer delay before retry
         if _check_rate_limited(stderr_log):
-            logger.info("[monitor] %s rate limited — waiting %ds before retry",
-                        branch_email, RATE_LIMIT_DELAY)
+            logger.info("[monitor] %s rate limited — waiting %ds before retry", branch_email, RATE_LIMIT_DELAY)
             time.sleep(RATE_LIMIT_DELAY)
         else:
             time.sleep(5)  # Brief pause between retries
@@ -399,7 +398,7 @@ def main():
     # Check for max-turns hit (Claude exits 0 but output contains stop_reason)
     max_turns_hit = False
     try:
-        with open(stdout_log, 'r', encoding='utf-8') as f:
+        with open(stdout_log, "r", encoding="utf-8") as f:
             stdout_content = f.read()
         if '"stop_reason":"max_turns"' in stdout_content or '"stop_reason": "max_turns"' in stdout_content:
             max_turns_hit = True
@@ -412,8 +411,7 @@ def main():
         try:
             suffix = " [MAX TURNS HIT]" if max_turns_hit else ""
             retry_note = f" (took {len(attempts)} attempts)" if len(attempts) > 1 else ""
-            stderr_fh.write(f"\n--- Agent exited: code={exit_code}, "
-                            f"duration={duration}s{suffix}{retry_note} ---\n")
+            stderr_fh.write(f"\n--- Agent exited: code={exit_code}, duration={duration}s{suffix}{retry_note} ---\n")
             stderr_fh.flush()
         except OSError:
             logger.info("[monitor] Failed to write agent exit log")
@@ -435,7 +433,7 @@ def main():
 
         # Check stderr for specific error categories
         try:
-            with open(stderr_log, 'r', encoding='utf-8') as f:
+            with open(stderr_log, "r", encoding="utf-8") as f:
                 content = f.read()
             if "rate_limit" in content.lower() or "429" in content:
                 reason = f"API rate limit (all {len(attempts)} attempts failed, {duration}s)"
@@ -463,11 +461,9 @@ def main():
     # Desktop notification on completion
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
+
         icon = "dialog-information" if exit_code == 0 else "dialog-warning"
-        send_notification(
-            f"@{branch_name} {status}", f"Duration: {duration}s",
-            source=branch_name, icon=icon
-        )
+        send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, icon=icon)
     except Exception:
         logger.info("[monitor] Desktop notification unavailable")
 

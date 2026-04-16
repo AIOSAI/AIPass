@@ -24,6 +24,7 @@ from pathlib import Path
 # Import helper
 # ---------------------------------------------------------------------------
 
+
 def _import_indexer(monkeypatch, tmp_path):
     """Import indexer with mocked dependencies and paths pointed at tmp_path."""
     sys.modules.pop("aipass.memory.apps.handlers.archive.indexer", None)
@@ -45,6 +46,7 @@ def _import_indexer(monkeypatch, tmp_path):
 # ===========================================================================
 # Tests: extract_file_info
 # ===========================================================================
+
 
 class TestExtractFileInfo:
     """Test extract_file_info metadata extraction."""
@@ -159,6 +161,7 @@ class TestExtractFileInfo:
 # Tests: get_archive_files
 # ===========================================================================
 
+
 class TestGetArchiveFiles:
     """Test get_archive_files directory scanning."""
 
@@ -231,6 +234,7 @@ class TestGetArchiveFiles:
 # Tests: load_index
 # ===========================================================================
 
+
 class TestLoadIndex:
     """Test load_index file reading."""
 
@@ -245,9 +249,7 @@ class TestLoadIndex:
             "categories": {"utils": ["helper.py"]},
             "files": {"helper.py": {"filename": "helper.py"}},
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(index_data), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(index_data), encoding="utf-8")
 
         result = indexer.load_index()
 
@@ -284,6 +286,7 @@ class TestLoadIndex:
 # ===========================================================================
 # Tests: save_index
 # ===========================================================================
+
 
 class TestSaveIndex:
     """Test save_index file writing."""
@@ -329,6 +332,7 @@ class TestSaveIndex:
 # ===========================================================================
 # Tests: build_index
 # ===========================================================================
+
 
 class TestBuildIndex:
     """Test build_index full scan."""
@@ -382,6 +386,7 @@ class TestBuildIndex:
 # Tests: check_for_new_files
 # ===========================================================================
 
+
 class TestCheckForNewFiles:
     """Test check_for_new_files sync logic."""
 
@@ -397,9 +402,7 @@ class TestCheckForNewFiles:
             "categories": {},
             "files": {},
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(empty_index), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(empty_index), encoding="utf-8")
 
         # Now create a file on disk
         (archive_dir / "new_file.py").write_text("pass\n", encoding="utf-8")
@@ -425,9 +428,7 @@ class TestCheckForNewFiles:
                 "ghost.py": {"filename": "ghost.py", "path": "ghost.py"},
             },
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(index_with_ghost), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(index_with_ghost), encoding="utf-8")
 
         result = indexer.check_for_new_files()
 
@@ -451,9 +452,7 @@ class TestCheckForNewFiles:
                 "existing.py": {"filename": "existing.py", "path": "existing.py"},
             },
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(index), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(index), encoding="utf-8")
 
         result = indexer.check_for_new_files()
 
@@ -476,9 +475,7 @@ class TestCheckForNewFiles:
                 "old_file.py": {"filename": "old_file.py", "path": "old_file.py"},
             },
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(index), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(index), encoding="utf-8")
 
         # Disk has new_file.py but not old_file.py
         (archive_dir / "new_file.py").write_text("pass\n", encoding="utf-8")
@@ -494,6 +491,7 @@ class TestCheckForNewFiles:
 # ===========================================================================
 # Tests: get_index_status
 # ===========================================================================
+
 
 class TestGetIndexStatus:
     """Test get_index_status reporting."""
@@ -516,9 +514,7 @@ class TestGetIndexStatus:
                 str(Path("utils") / "b.py"): {"filename": "b.py"},
             },
         }
-        (archive_dir / "index.json").write_text(
-            json.dumps(index), encoding="utf-8"
-        )
+        (archive_dir / "index.json").write_text(json.dumps(index), encoding="utf-8")
 
         status = indexer.get_index_status()
 

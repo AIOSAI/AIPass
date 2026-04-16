@@ -28,17 +28,35 @@ AUDIT_SCOPE = "branch_level"
 
 # Directories to skip when collecting source files
 _SKIP_DIRS = {
-    "__pycache__", ".archive", ".mypy_cache", ".ruff_cache",
-    ".pytest_cache", "json_templates", "logs", "tools",
-    ".venv", "venv", "node_modules", ".git", "site-packages",
-    ".trinity", ".aipass", ".ai_mail.local", ".spawn",
-    "backups", "reports", "docs", "tests", ".sorting_unprocessed",
+    "__pycache__",
+    ".archive",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    "json_templates",
+    "logs",
+    "tools",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".git",
+    "site-packages",
+    ".trinity",
+    ".aipass",
+    ".ai_mail.local",
+    ".spawn",
+    "backups",
+    "reports",
+    "docs",
+    "tests",
+    ".sorting_unprocessed",
 }
 
 
 # =============================================
 # BYPASS HELPER
 # =============================================
+
 
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed."""
@@ -60,6 +78,7 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
 # =============================================
 # FILE COLLECTION
 # =============================================
+
 
 def _should_skip(path: Path) -> bool:
     """Check whether any parent directory component is in the skip set."""
@@ -105,6 +124,7 @@ def _collect_source_text(apps_dir: Path) -> str:
 # =============================================
 # REFERENCE CHECKING
 # =============================================
+
 
 def _build_import_path(py_file: Path, branch_path: Path, branch_name: str) -> str:
     """
@@ -163,9 +183,7 @@ def _check_file_used(
     for suffix_pattern in ("_check", "_content"):
         glob_lit = f'glob("*{suffix_pattern}.py")'
         glob_lit_sq = f"glob('*{suffix_pattern}.py')"
-        if stem.endswith(suffix_pattern) and (
-            glob_lit in source_text or glob_lit_sq in source_text
-        ):
+        if stem.endswith(suffix_pattern) and (glob_lit in source_text or glob_lit_sq in source_text):
             return True
 
     # Rule 4: full dotted import path
@@ -221,6 +239,7 @@ def _check_file_used(
 # =============================================
 # BRANCH-LEVEL CHECK (audit pipeline entry)
 # =============================================
+
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """
@@ -313,9 +332,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     dead_files: list[str] = []
 
     for target in targets:
-        used = _check_file_used(
-            target, bp, branch_name, source_text, entry_point_name
-        )
+        used = _check_file_used(target, bp, branch_name, source_text, entry_point_name)
         if not used:
             # Check per-file bypass
             try:
@@ -333,10 +350,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     if dead_files:
         dead_list = ", ".join(dead_files[:10])
         suffix = f" (+{len(dead_files) - 10} more)" if len(dead_files) > 10 else ""
-        message = (
-            f"{len(dead_files)}/{total_files} files unreferenced: "
-            f"{dead_list}{suffix}"
-        )
+        message = f"{len(dead_files)}/{total_files} files unreferenced: {dead_list}{suffix}"
     else:
         message = f"All {total_files} files referenced -- no dead code"
 

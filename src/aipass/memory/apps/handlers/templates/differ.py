@@ -34,7 +34,9 @@ from aipass.memory.apps.handlers.json import json_handler
 # PATH SETUP
 # =============================================================================
 
-MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # handlers/templates/differ.py -> apps -> handlers -> templates -> memory/
+MEMORY_ROOT = (
+    Path(__file__).resolve().parent.parent.parent.parent
+)  # handlers/templates/differ.py -> apps -> handlers -> templates -> memory/
 
 # =============================================================================
 # CONSTANTS
@@ -60,9 +62,11 @@ OBS_STRUCTURAL = ["document_metadata", "guidelines", "notes"]
 # PLACEHOLDER REPLACEMENT
 # =============================================================================
 
+
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
     """Replace {{BRANCHNAME}} and {{DATE}} in template values."""
     from datetime import datetime
+
     today = datetime.now().strftime("%Y-%m-%d")
     result = copy.deepcopy(template)
 
@@ -84,11 +88,8 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
 # DIFF LOGIC
 # =============================================================================
 
-def _diff_structural_section(
-    current: dict,
-    template: dict,
-    path_prefix: str
-) -> Dict[str, List[str]]:
+
+def _diff_structural_section(current: dict, template: dict, path_prefix: str) -> Dict[str, List[str]]:
     """
     Compare a structural section between current file and template.
 
@@ -118,13 +119,18 @@ def _diff_structural_section(
             diffs["modifications"].extend(sub_diffs["modifications"])
         elif current[key] != template[key]:
             # Skip dynamic values that are expected to differ
-            if key in ("current_lines", "health", "last_health_check",
-                       "current_key_learnings", "current_recently_completed",
-                       "created", "last_updated", "managed_by"):
+            if key in (
+                "current_lines",
+                "health",
+                "last_health_check",
+                "current_key_learnings",
+                "current_recently_completed",
+                "created",
+                "last_updated",
+                "managed_by",
+            ):
                 continue
-            diffs["modifications"].append(
-                f"{full_path}: {_truncate(current[key])} -> {_truncate(template[key])}"
-            )
+            diffs["modifications"].append(f"{full_path}: {_truncate(current[key])} -> {_truncate(template[key])}")
 
     return diffs
 
@@ -185,6 +191,7 @@ def _truncate(val: Any, max_len: int = 60) -> str:
 # PUBLIC API
 # =============================================================================
 
+
 def diff_template_vs_branch(branch_path: str | Path) -> dict:
     """
     Compare template structure against a specific branch's memory files.
@@ -205,13 +212,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
     branch_path = Path(branch_path)
     branch_name = branch_path.name.upper()
 
-    result = {
-        "branch": branch_name,
-        "path": str(branch_path),
-        "local": [],
-        "observations": [],
-        "errors": []
-    }
+    result = {"branch": branch_name, "path": str(branch_path), "local": [], "observations": [], "errors": []}
 
     # Load templates
     templates = {}
@@ -220,7 +221,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
             result["errors"].append(f"Template not found: {path}")
             return result
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 templates[name] = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[differ] Failed to load template {path.name}: {e}")
@@ -239,7 +240,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
             continue
 
         try:
-            with open(f, 'r', encoding='utf-8') as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 current = json.load(fh)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[differ] Failed to read {f.name}: {e}")
@@ -278,7 +279,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
             continue
 
         try:
-            with open(f, 'r', encoding='utf-8') as fh:
+            with open(f, "r", encoding="utf-8") as fh:
                 current = json.load(fh)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[differ] Failed to read {f.name}: {e}")
@@ -301,7 +302,15 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
         if file_diff["additions"] or file_diff["removals"] or file_diff["modifications"]:
             result["observations"].append(file_diff)
 
-    json_handler.log_operation("template_diff", {"branch": branch_name, "local_diffs": len(result["local"]), "obs_diffs": len(result["observations"]), "success": True})
+    json_handler.log_operation(
+        "template_diff",
+        {
+            "branch": branch_name,
+            "local_diffs": len(result["local"]),
+            "obs_diffs": len(result["observations"]),
+            "success": True,
+        },
+    )
     return result
 
 
@@ -309,7 +318,7 @@ def diff_template_vs_branch(branch_path: str | Path) -> dict:
 # CLI INTERFACE
 # =============================================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys as _sys
 
     args = _sys.argv[1:]

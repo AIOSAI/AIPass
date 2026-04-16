@@ -35,6 +35,7 @@ from aipass.cli.apps.modules import console, header, error
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
+
 def discover_modules() -> List[Any]:
     """
     Auto-discover modules in modules/ directory
@@ -61,7 +62,7 @@ def discover_modules() -> List[Any]:
             module = importlib.import_module(module_name)
 
             # Check if module has handle_command function
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 modules.append(module)
                 pass  # Module loaded successfully
             else:
@@ -94,9 +95,11 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
     return False
 
+
 # =============================================================================
 # INTROSPECTION DISPLAY
 # =============================================================================
+
 
 def print_introspection(modules: List[Any]):
     """Display discovered modules when run without arguments"""
@@ -111,11 +114,11 @@ def print_introspection(modules: List[Any]):
 
     if modules:
         for module in modules:
-            module_name = module.__name__.split('.')[-1]
+            module_name = module.__name__.split(".")[-1]
             # Get first line of docstring
             description = "No description"
             if module.__doc__:
-                description = module.__doc__.strip().split('\n')[0]
+                description = module.__doc__.strip().split("\n")[0]
             console.print(f"  [cyan]•[/cyan] {module_name:20} [dim]{description}[/dim]")
     else:
         console.print("  [dim]No modules discovered[/dim]")
@@ -128,6 +131,7 @@ def print_introspection(modules: List[Any]):
 # =============================================================================
 # DRONE COMPLIANCE - HELP SYSTEM
 # =============================================================================
+
 
 def print_help(modules: List[Any]):
     """Display Rich-formatted help"""
@@ -153,11 +157,11 @@ def print_help(modules: List[Any]):
 
     if modules:
         for module in modules:
-            module_name = module.__name__.split('.')[-1]
+            module_name = module.__name__.split(".")[-1]
             # Get first line of docstring
             description = "No description"
             if module.__doc__:
-                description = module.__doc__.strip().split('\n')[0]
+                description = module.__doc__.strip().split("\n")[0]
 
             console.print(f"  [green]{module_name:20}[/green] [dim]{description}[/dim]")
     else:
@@ -176,6 +180,7 @@ def print_help(modules: List[Any]):
 # MAIN ENTRY POINT
 # =============================================================================
 
+
 def main():
     """Main entry point - routes commands or shows help"""
 
@@ -191,12 +196,12 @@ def main():
         return 0
 
     # Show version
-    if args[0] in ['--version', '-V']:
+    if args[0] in ["--version", "-V"]:
         console.print("TRIGGER v2.2.0")
         return 0
 
     # Show help for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help(modules)
         return 0
 

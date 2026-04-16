@@ -23,9 +23,9 @@ import inspect
 logger = logging.getLogger(__name__)
 
 # Resolve paths relative to this file (no hardcoded paths)
-_HANDLER_DIR = Path(__file__).resolve().parent          # .../handlers/json/
-_HANDLERS_DIR = _HANDLER_DIR.parent                     # .../handlers/
-_PRAX_ROOT = _HANDLERS_DIR.parent.parent                # .../prax/
+_HANDLER_DIR = Path(__file__).resolve().parent  # .../handlers/json/
+_HANDLERS_DIR = _HANDLER_DIR.parent  # .../handlers/
+_PRAX_ROOT = _HANDLERS_DIR.parent.parent  # .../prax/
 PRAX_JSON_DIR = _PRAX_ROOT / "prax_json"
 JSON_TEMPLATES_DIR = _HANDLERS_DIR / "json_templates"
 
@@ -46,7 +46,7 @@ def _get_caller_module_name() -> str:
             module_name = caller_path.stem
 
             # Validate module name
-            if module_name and not module_name.startswith('_'):
+            if module_name and not module_name.startswith("_"):
                 return module_name
 
         # Fallback
@@ -64,7 +64,7 @@ def load_template(json_type: str, module_name: str) -> Any:
         return None
 
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             template = json.load(f)
 
         # Replace placeholders
@@ -112,7 +112,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             if validate_json_structure(data, json_type):
@@ -127,7 +127,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
         return False
 
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(template, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -143,7 +143,7 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.warning("json_handler: failed to load json '%s/%s': %s", module_name, json_type, e)
@@ -161,9 +161,9 @@ def _atomic_write(json_path: Path, content: str) -> None:
     import tempfile
     import time
 
-    fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix='.tmp')
+    fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix=".tmp")
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
@@ -175,8 +175,10 @@ def _atomic_write(json_path: Path, content: str) -> None:
                 return
             except PermissionError as exc:
                 last_exc = exc
-                logger.info("json_handler: os.replace attempt %d failed (PermissionError), retrying: %s", attempt + 1, exc)
-                time.sleep(0.05 * (2 ** attempt))
+                logger.info(
+                    "json_handler: os.replace attempt %d failed (PermissionError), retrying: %s", attempt + 1, exc
+                )
+                time.sleep(0.05 * (2**attempt))
         if last_exc is not None:
             raise last_exc
     except Exception:
@@ -248,10 +250,7 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         log = []
 
     # Create new entry
-    entry: Dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation
-    }
+    entry: Dict[str, Any] = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
     if data:
         entry["data"] = data
@@ -267,9 +266,9 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
 
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("JSON HANDLER - Working Implementation")
-    print("="*70)
+    print("=" * 70)
     print("\n[TESTING] Creating prax JSONs...")
 
     # Test auto-creation
@@ -279,4 +278,4 @@ if __name__ == "__main__":
     print("  - prax_config.json")
     print("  - prax_data.json")
     print("  - prax_log.json")
-    print("\n" + "="*70 + "\n")
+    print("\n" + "=" * 70 + "\n")

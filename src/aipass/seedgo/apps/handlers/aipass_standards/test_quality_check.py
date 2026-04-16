@@ -33,21 +33,32 @@ AUDIT_SCOPE = "branch_level"
 
 # -- Directories to skip when scanning for module coverage --------------------
 SKIP_DIRS: set[str] = {
-    "__pycache__", ".archive", ".mypy_cache", ".ruff_cache",
-    ".pytest_cache", ".venv", "venv", "node_modules", ".git",
-    "site-packages", "logs", "tools", ".trinity", ".aipass",
-    ".ai_mail.local", ".spawn", "backups", "reports", "docs",
+    "__pycache__",
+    ".archive",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".git",
+    "site-packages",
+    "logs",
+    "tools",
+    ".trinity",
+    ".aipass",
+    ".ai_mail.local",
+    ".spawn",
+    "backups",
+    "reports",
+    "docs",
     ".sorting_unprocessed",
 }
 
 # -- Regex patterns for module coverage (from test_coverage_check.py) ---------
 RE_TEST_FUNC = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.MULTILINE)
-RE_IMPORT_FROM = re.compile(
-    r"from\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)\s+import"
-)
-RE_IMPORT_DIRECT = re.compile(
-    r"import\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)"
-)
+RE_IMPORT_FROM = re.compile(r"from\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)\s+import")
+RE_IMPORT_DIRECT = re.compile(r"import\s+(?:aipass\.)?\w+\.apps\.(?:modules|handlers)[./]?([\w.]*)")
 
 # -- Standard test categories and their detection patterns --------------------
 STANDARD_CATEGORIES: dict[str, dict[str, list[str]]] = {
@@ -163,6 +174,7 @@ TOTAL_ITEMS = _PATTERN_ITEMS + _MODULE_COVERAGE_ITEMS
 # BYPASS HELPER
 # =============================================
 
+
 def is_bypassed(
     file_path: str,
     standard: str,
@@ -188,6 +200,7 @@ def is_bypassed(
 # =============================================
 # FILE HELPERS
 # =============================================
+
 
 def _read_file_safe(path: Path) -> str:
     """Read a file, returning empty string on any error."""
@@ -282,11 +295,7 @@ def _collect_testable_modules(branch_path: Path) -> set[str]:
             if _should_skip_dir(item.name):
                 continue
             if item.is_dir() and item.name != "__pycache__":
-                has_py = any(
-                    f.suffix == ".py" and f.name != "__init__.py"
-                    for f in item.iterdir()
-                    if f.is_file()
-                )
+                has_py = any(f.suffix == ".py" and f.name != "__init__.py" for f in item.iterdir() if f.is_file())
                 if has_py:
                     modules.add(item.name)
             elif item.is_file() and item.suffix == ".py" and item.name != "__init__.py":
@@ -318,8 +327,10 @@ def _find_all_test_files(branch_path: Path) -> list[Path]:
 # ANALYSIS
 # =============================================
 
+
 def _find_covering_file(
-    patterns: list[str], file_sources: list[tuple[str, str]],
+    patterns: list[str],
+    file_sources: list[tuple[str, str]],
 ) -> str | None:
     """Find the first file that contains any of the given patterns."""
     for filename, source in file_sources:
@@ -356,6 +367,7 @@ def _detect_all_coverage(
 # =============================================
 # BRANCH-LEVEL CHECK
 # =============================================
+
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Run test quality analysis on a branch.
@@ -408,11 +420,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     test_files = _find_all_test_files(bp)
 
     if not test_files:
-        checks.append({
-            "name": "Test files",
-            "passed": False,
-            "message": "No test_*.py or conftest.py files found in tests/ directory",
-        })
+        checks.append(
+            {
+                "name": "Test files",
+                "passed": False,
+                "message": "No test_*.py or conftest.py files found in tests/ directory",
+            }
+        )
 
         json_handler.log_operation(
             "check_completed",
@@ -432,11 +446,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "TEST_QUALITY",
         }
 
-    checks.append({
-        "name": "Test files",
-        "passed": True,
-        "message": f"Found {len(test_files)} test file(s) in tests/",
-    })
+    checks.append(
+        {
+            "name": "Test files",
+            "passed": True,
+            "message": f"Found {len(test_files)} test file(s) in tests/",
+        }
+    )
 
     # Phase 2: Read all test file sources
     file_sources: list[tuple[str, str]] = []
@@ -455,25 +471,24 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         cat_total = len(item_coverage)
         cat_covered = sum(1 for f in item_coverage.values() if f is not None)
         total_items_covered += cat_covered
-        missing_items = [
-            item for item, f in item_coverage.items() if f is None
-        ]
+        missing_items = [item for item, f in item_coverage.items() if f is None]
 
         if cat_covered == cat_total:
-            checks.append({
-                "name": category,
-                "passed": True,
-                "message": f"{category}: {cat_covered}/{cat_total} covered",
-            })
+            checks.append(
+                {
+                    "name": category,
+                    "passed": True,
+                    "message": f"{category}: {cat_covered}/{cat_total} covered",
+                }
+            )
         else:
-            checks.append({
-                "name": category,
-                "passed": False,
-                "message": (
-                    f"{category}: {cat_covered}/{cat_total} covered "
-                    f"(missing: {', '.join(missing_items)})"
-                ),
-            })
+            checks.append(
+                {
+                    "name": category,
+                    "passed": False,
+                    "message": (f"{category}: {cat_covered}/{cat_total} covered (missing: {', '.join(missing_items)})"),
+                }
+            )
 
     # Phase 4: Module coverage (category 11 — from test_coverage_check.py)
     # Uses broader file discovery + import-based module mapping
@@ -533,20 +548,24 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         mc_msg = f"module_coverage: {mc_items_covered}/{_MODULE_COVERAGE_ITEMS} covered"
         if total_modules > 0:
             mc_msg += f" ({covered_count}/{total_modules} modules, {total_tests} tests)"
-        checks.append({
-            "name": "module_coverage",
-            "passed": True,
-            "message": mc_msg,
-        })
+        checks.append(
+            {
+                "name": "module_coverage",
+                "passed": True,
+                "message": mc_msg,
+            }
+        )
     else:
-        checks.append({
-            "name": "module_coverage",
-            "passed": False,
-            "message": (
-                f"module_coverage: {mc_items_covered}/{_MODULE_COVERAGE_ITEMS} covered "
-                f"(missing: {', '.join(mc_details)})"
-            ),
-        })
+        checks.append(
+            {
+                "name": "module_coverage",
+                "passed": False,
+                "message": (
+                    f"module_coverage: {mc_items_covered}/{_MODULE_COVERAGE_ITEMS} covered "
+                    f"(missing: {', '.join(mc_details)})"
+                ),
+            }
+        )
 
     # Score = total coverage percentage
     score = int((total_items_covered / TOTAL_ITEMS) * 100)
@@ -559,24 +578,27 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Overall summary check
     if overall_passed:
-        checks.append({
-            "name": "Overall coverage",
-            "passed": True,
-            "message": (
-                f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                f"across {total_categories} categories ({score}%)"
-            ),
-        })
+        checks.append(
+            {
+                "name": "Overall coverage",
+                "passed": True,
+                "message": (
+                    f"{total_items_covered}/{TOTAL_ITEMS} items covered across {total_categories} categories ({score}%)"
+                ),
+            }
+        )
     else:
-        checks.append({
-            "name": "Overall coverage",
-            "passed": False,
-            "message": (
-                f"{total_items_covered}/{TOTAL_ITEMS} items covered "
-                f"across {total_categories} categories ({score}%) "
-                f"-- minimum 75% required"
-            ),
-        })
+        checks.append(
+            {
+                "name": "Overall coverage",
+                "passed": False,
+                "message": (
+                    f"{total_items_covered}/{TOTAL_ITEMS} items covered "
+                    f"across {total_categories} categories ({score}%) "
+                    f"-- minimum 75% required"
+                ),
+            }
+        )
 
     json_handler.log_operation(
         "check_completed",
@@ -595,9 +617,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "category_detail": {
                 **{
                     cat: {
-                        "covered": sum(
-                            1 for f in items.values() if f is not None
-                        ),
+                        "covered": sum(1 for f in items.values() if f is not None),
                         "total": len(items),
                     }
                     for cat, items in all_coverage.items()

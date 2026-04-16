@@ -18,6 +18,7 @@ Auto-discovery architecture:
 # INFRASTRUCTURE IMPORT PATTERN
 import sys
 from pathlib import Path
+
 _PKG_ROOT = Path(__file__).resolve().parents[2]  # flow.py → apps/ → flow/ → aipass/
 
 # Standard library imports
@@ -27,7 +28,7 @@ from typing import List, Any
 
 # Handle broken pipe gracefully (e.g. output piped to head)
 # SIGPIPE does not exist on Windows
-if hasattr(signal, 'SIGPIPE'):
+if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Prax logger
@@ -41,6 +42,7 @@ from aipass.cli.apps.modules import console, header, error
 # =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
+
 
 def discover_modules() -> List[Any]:
     """
@@ -68,7 +70,7 @@ def discover_modules() -> List[Any]:
             module = importlib.import_module(module_name)
 
             # Check if module has handle_command function
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"[FLOW] Loaded module: {file_path.stem}")
             else:
@@ -104,9 +106,11 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
     return False
 
+
 # =============================================================================
 # MAIN
 # =============================================================================
+
 
 def main():
     """Main entry point - routes commands or shows help"""
@@ -138,12 +142,12 @@ def _main_impl():
         return 0
 
     # Show version
-    if args[0] in ['--version', '-V']:
+    if args[0] in ["--version", "-V"]:
         console.print("FLOW v2.2.1")
         return 0
 
     # Show help for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help(modules)
         return 0
 
@@ -158,7 +162,7 @@ def _main_impl():
         return 0
 
     # Fallback: try module-specific help if command wasn't handled
-    if remaining_args and remaining_args[0] in ['--help', '-h']:
+    if remaining_args and remaining_args[0] in ["--help", "-h"]:
         print_module_help(command, modules)
         return 0
     else:
@@ -183,11 +187,11 @@ def print_introspection(modules: List[Any]):
 
     if modules:
         for module in modules:
-            module_name = module.__name__.split('.')[-1]
+            module_name = module.__name__.split(".")[-1]
             # Get first line of docstring
             description = "No description"
             if module.__doc__:
-                description = module.__doc__.strip().split('\n')[0]
+                description = module.__doc__.strip().split("\n")[0]
             console.print(f"  [cyan]•[/cyan] {module_name:20} [dim]{description}[/dim]")
     else:
         console.print("  [dim]No modules discovered[/dim]")
@@ -223,14 +227,14 @@ def print_help(modules: List[Any]):
 
     if modules:
         for module in modules:
-            module_name = module.__name__.split('.')[-1]
+            module_name = module.__name__.split(".")[-1]
             # Extract short form (before underscore if present)
-            short_name = module_name.split('_')[0] if '_' in module_name else module_name
+            short_name = module_name.split("_")[0] if "_" in module_name else module_name
 
             # Get first line of docstring
             description = "No description"
             if module.__doc__:
-                description = module.__doc__.strip().split('\n')[0]
+                description = module.__doc__.strip().split("\n")[0]
 
             # Display both forms
             if short_name != module_name:
@@ -247,9 +251,11 @@ def print_help(modules: List[Any]):
     console.print("[bold cyan]EXAMPLES:[/bold cyan]")
     console.print()
     console.print("  [yellow]Create plans:[/yellow]")
-    console.print("    [dim]drone @flow create . \"Implementation task\"[/dim]          [dim]# FPLAN (default)[/dim]")
-    console.print("    [dim]drone @flow create . \"subject\" master[/dim]               [dim]# FPLAN master template[/dim]")
-    console.print("    [dim]drone @flow create . \"Design topic\" dplan[/dim]           [dim]# DPLAN[/dim]")
+    console.print('    [dim]drone @flow create . "Implementation task"[/dim]          [dim]# FPLAN (default)[/dim]')
+    console.print(
+        '    [dim]drone @flow create . "subject" master[/dim]               [dim]# FPLAN master template[/dim]'
+    )
+    console.print('    [dim]drone @flow create . "Design topic" dplan[/dim]           [dim]# DPLAN[/dim]')
     console.print()
     console.print("  [yellow]Close plans:[/yellow]")
     console.print("    [dim]drone @flow close FPLAN-0042[/dim]")
@@ -262,7 +268,9 @@ def print_help(modules: List[Any]):
     console.print()
     console.print("  [yellow]Templates:[/yellow]")
     console.print("    [dim]drone @flow templates[/dim]                             [dim]# List registered types[/dim]")
-    console.print("    [dim]drone @flow scan[/dim]                                  [dim]# Find unregistered dirs[/dim]")
+    console.print(
+        "    [dim]drone @flow scan[/dim]                                  [dim]# Find unregistered dirs[/dim]"
+    )
     console.print("    [dim]drone @flow register testing TPLAN[/dim]                [dim]# Register new type[/dim]")
     console.print("    [dim]drone @flow unregister testing[/dim]                    [dim]# Remove type[/dim]")
     console.print()
@@ -279,7 +287,7 @@ def print_module_help(command: str, modules: List[Any]):
     # Try to find the module that handles this command
     target_module = None
     for module in modules:
-        module_name = module.__name__.split('.')[-1]
+        module_name = module.__name__.split(".")[-1]
         # Check if module name matches command (e.g., create_plan matches "create" or "create_plan")
         if command == module_name or module_name.startswith(command):
             target_module = module
@@ -294,7 +302,7 @@ def print_module_help(command: str, modules: List[Any]):
         return
 
     console.print()
-    module_name = target_module.__name__.split('.')[-1]
+    module_name = target_module.__name__.split(".")[-1]
     header(f"Flow - {module_name} Command")
     console.print()
 
@@ -313,6 +321,7 @@ if __name__ == "__main__":
         sys.exit(main())
     except BrokenPipeError:
         import os
+
         logger.info("[FLOW] Broken pipe in main (stdout closed early)")
         try:
             sys.stdout.close()

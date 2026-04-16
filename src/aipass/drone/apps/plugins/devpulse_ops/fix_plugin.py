@@ -27,7 +27,9 @@ def _fix_divergence(repo_root: Path, actions: list[str]) -> None:
     """Fetch origin and merge if local main has diverged."""
     fetch = subprocess.run(
         ["git", "fetch", "origin"],
-        capture_output=True, text=True, cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
     )
     if fetch.returncode != 0:
         actions.append(f"Fetch failed: {fetch.stderr.strip()}")
@@ -36,7 +38,9 @@ def _fix_divergence(repo_root: Path, actions: list[str]) -> None:
 
     rev_list = subprocess.run(
         ["git", "rev-list", "--left-right", "--count", "main...origin/main"],
-        capture_output=True, text=True, cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
     )
     if rev_list.returncode != 0:
         return
@@ -49,7 +53,9 @@ def _fix_divergence(repo_root: Path, actions: list[str]) -> None:
 
     merge = subprocess.run(
         ["git", "merge", "origin/main", "--no-edit"],
-        capture_output=True, text=True, cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
     )
     if merge.returncode == 0:
         actions.append(f"Merged origin/main (was ahead={ahead}, behind={behind})")
@@ -59,22 +65,23 @@ def _fix_divergence(repo_root: Path, actions: list[str]) -> None:
     # Merge failed — report conflict files and abort
     diff = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=U"],
-        capture_output=True, text=True, cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
     )
     conflict_files = diff.stdout.strip().splitlines() if diff.stdout.strip() else []
     subprocess.run(
         ["git", "merge", "--abort"],
-        capture_output=True, text=True, cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
     )
     if conflict_files:
         actions.append(
-            f"Merge conflict (ahead={ahead}, behind={behind}). "
-            f"Conflicting files: {', '.join(conflict_files)}"
+            f"Merge conflict (ahead={ahead}, behind={behind}). Conflicting files: {', '.join(conflict_files)}"
         )
     else:
-        actions.append(
-            f"Merge failed (ahead={ahead}, behind={behind}): {merge.stderr.strip()}"
-        )
+        actions.append(f"Merge failed (ahead={ahead}, behind={behind}): {merge.stderr.strip()}")
     logger.warning("fix_git_state: merge conflict ahead=%d behind=%d", ahead, behind)
 
 
@@ -106,7 +113,9 @@ def fix_git_state(caller: str) -> dict:
         if rebase_merge.exists() or rebase_apply.exists():
             abort = subprocess.run(
                 ["git", "rebase", "--abort"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if abort.returncode == 0:
                 actions.append("Aborted stuck rebase")
@@ -118,12 +127,16 @@ def fix_git_state(caller: str) -> dict:
         # Check 2: Detached HEAD
         sym_ref = subprocess.run(
             ["git", "symbolic-ref", "-q", "HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if sym_ref.returncode != 0:
             checkout = subprocess.run(
                 ["git", "checkout", "main"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if checkout.returncode == 0:
                 actions.append("Checked out main (was detached HEAD)")
@@ -138,13 +151,17 @@ def fix_git_state(caller: str) -> dict:
         # Check 4: Dirty index with no intent
         cached = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if cached.returncode == 0 and cached.stdout.strip():
             staged_files = cached.stdout.strip().splitlines()
             reset = subprocess.run(
                 ["git", "reset", "HEAD"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if reset.returncode == 0:
                 actions.append(f"Unstaged {len(staged_files)} file(s) from index")

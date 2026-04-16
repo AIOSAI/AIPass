@@ -19,10 +19,12 @@ import pytest
 # MODULE LOADING
 # =============================================
 
+
 @pytest.fixture
 def event_queue_module(mock_prax_infrastructure):
     """Force-reload event_queue after sys.modules mocks are in place."""
     import aipass.prax.apps.handlers.monitoring.event_queue as mod
+
     mod = importlib.reload(mod)
     return mod
 
@@ -134,9 +136,7 @@ class TestMonitoringEvent:
         ]
         sorted_events = sorted(events)
         assert [e.priority for e in sorted_events] == [1, 2, 3, 4]
-        assert [e.event_type for e in sorted_events] == [
-            "error_event", "warning_event", "info_event", "debug_event"
-        ]
+        assert [e.event_type for e in sorted_events] == ["error_event", "warning_event", "info_event", "debug_event"]
 
     def test_timestamp_default_is_close_to_now(self, MonitoringEvent):
         """Default timestamp is approximately datetime.now()."""
@@ -239,9 +239,7 @@ class TestMonitoringQueue:
         """Flush empties the queue and returns nothing (size goes to 0)."""
         q = MonitoringQueue()
         for i in range(5):
-            q.enqueue(MonitoringEvent(
-                priority=i + 1, event_type="file", branch=f"B{i}", action="a", message=f"msg{i}"
-            ))
+            q.enqueue(MonitoringEvent(priority=i + 1, event_type="file", branch=f"B{i}", action="a", message=f"msg{i}"))
         assert q.size() == 5
         q.flush()
         assert q.size() == 0
@@ -293,12 +291,15 @@ class TestMonitoringQueue:
         q = MonitoringQueue()
         ts = datetime.now()
         event1 = MonitoringEvent(
-            priority=1, timestamp=ts, event_type="file",
-            branch="PRAX", action="modified", message="config changed"
+            priority=1, timestamp=ts, event_type="file", branch="PRAX", action="modified", message="config changed"
         )
         event2 = MonitoringEvent(
-            priority=1, timestamp=ts + timedelta(milliseconds=500), event_type="file",
-            branch="PRAX", action="modified", message="config changed"
+            priority=1,
+            timestamp=ts + timedelta(milliseconds=500),
+            event_type="file",
+            branch="PRAX",
+            action="modified",
+            message="config changed",
         )
         assert q.enqueue(event1) is True
         assert q.enqueue(event2) is False
@@ -309,12 +310,15 @@ class TestMonitoringQueue:
         q = MonitoringQueue()
         ts = datetime.now()
         event1 = MonitoringEvent(
-            priority=1, timestamp=ts, event_type="file",
-            branch="PRAX", action="modified", message="first change"
+            priority=1, timestamp=ts, event_type="file", branch="PRAX", action="modified", message="first change"
         )
         event2 = MonitoringEvent(
-            priority=1, timestamp=ts + timedelta(milliseconds=100), event_type="file",
-            branch="PRAX", action="modified", message="second change"
+            priority=1,
+            timestamp=ts + timedelta(milliseconds=100),
+            event_type="file",
+            branch="PRAX",
+            action="modified",
+            message="second change",
         )
         assert q.enqueue(event1) is True
         assert q.enqueue(event2) is True
@@ -325,12 +329,15 @@ class TestMonitoringQueue:
         q = MonitoringQueue()
         ts = datetime.now()
         event1 = MonitoringEvent(
-            priority=1, timestamp=ts, event_type="log",
-            branch="DRONE", action="created", message="log entry"
+            priority=1, timestamp=ts, event_type="log", branch="DRONE", action="created", message="log entry"
         )
         event2 = MonitoringEvent(
-            priority=1, timestamp=ts + timedelta(seconds=2), event_type="log",
-            branch="DRONE", action="created", message="log entry"
+            priority=1,
+            timestamp=ts + timedelta(seconds=2),
+            event_type="log",
+            branch="DRONE",
+            action="created",
+            message="log entry",
         )
         assert q.enqueue(event1) is True
         assert q.enqueue(event2) is True
@@ -356,15 +363,29 @@ class TestMonitoringQueue:
         """A queue with maxsize=2 rejects the third enqueue."""
         q = MonitoringQueue(maxsize=2)
         base_ts = datetime.now()
-        r1 = q.enqueue(MonitoringEvent(
-            priority=1, timestamp=base_ts, event_type="a", branch="A", action="x", message="o1"
-        ))
-        r2 = q.enqueue(MonitoringEvent(
-            priority=2, timestamp=base_ts + timedelta(seconds=2), event_type="b", branch="B", action="y", message="o2"
-        ))
-        r3 = q.enqueue(MonitoringEvent(
-            priority=3, timestamp=base_ts + timedelta(seconds=4), event_type="c", branch="C", action="z", message="o3"
-        ))
+        r1 = q.enqueue(
+            MonitoringEvent(priority=1, timestamp=base_ts, event_type="a", branch="A", action="x", message="o1")
+        )
+        r2 = q.enqueue(
+            MonitoringEvent(
+                priority=2,
+                timestamp=base_ts + timedelta(seconds=2),
+                event_type="b",
+                branch="B",
+                action="y",
+                message="o2",
+            )
+        )
+        r3 = q.enqueue(
+            MonitoringEvent(
+                priority=3,
+                timestamp=base_ts + timedelta(seconds=4),
+                event_type="c",
+                branch="C",
+                action="z",
+                message="o3",
+            )
+        )
         assert r1 is True
         assert r2 is True
         assert r3 is False
@@ -433,18 +454,18 @@ class TestMonitoringQueue:
     def test_enqueue_after_flush(self, MonitoringQueue, MonitoringEvent):
         """After a flush, the queue still accepts new events normally."""
         q = MonitoringQueue()
-        q.enqueue(MonitoringEvent(
-            priority=1, event_type="file", branch="A", action="x", message="before_flush"
-        ))
+        q.enqueue(MonitoringEvent(priority=1, event_type="file", branch="A", action="x", message="before_flush"))
         assert q.size() == 1
         q.flush()
         assert q.size() == 0
 
         # Enqueue after flush should still work (queue not stopped, just cleared)
         base_ts = datetime.now() + timedelta(seconds=5)
-        result = q.enqueue(MonitoringEvent(
-            priority=2, timestamp=base_ts, event_type="log", branch="B", action="y", message="after_flush"
-        ))
+        result = q.enqueue(
+            MonitoringEvent(
+                priority=2, timestamp=base_ts, event_type="log", branch="B", action="y", message="after_flush"
+            )
+        )
         assert result is True
         assert q.size() == 1
 

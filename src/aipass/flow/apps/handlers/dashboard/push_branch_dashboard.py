@@ -66,6 +66,7 @@ DASHBOARD_TEMPLATE_FILE = _PKG_ROOT / "devpulse" / "templates" / "DASHBOARD.temp
 # DASHBOARD WRITE (local — no cross-branch imports)
 # =============================================
 
+
 def _write_dashboard_section(branch_path: Path, section_name: str, section_data: Dict[str, Any]) -> bool:
     """
     Write a single section to a branch's DASHBOARD.local.json.
@@ -128,9 +129,7 @@ def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
     if DASHBOARD_TEMPLATE_FILE.exists():
         try:
             template = json.loads(DASHBOARD_TEMPLATE_FILE.read_text())
-            dashboard = json.loads(
-                json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper())
-            )
+            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
             dashboard["last_updated"] = datetime.now().isoformat()
             return dashboard
         except (json.JSONDecodeError, OSError) as exc:
@@ -147,8 +146,8 @@ def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
             "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
             "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
             "devpulse": {"managed_by": "devpulse", "summary": {}, "last_updated": ""},
-            "commons_activity": {"managed_by": "commons", "mentions": 0, "last_updated": ""}
-        }
+            "commons_activity": {"managed_by": "commons", "mentions": 0, "last_updated": ""},
+        },
     }
 
 
@@ -191,7 +190,7 @@ def _calculate_quick_status(sections: Dict[str, Any]) -> Dict[str, Any]:
         "active_plans": active_plans,
         "commons_mentions": mentions,
         "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear"
+        "summary": ", ".join(parts) if parts else "All clear",
     }
 
 
@@ -213,13 +212,16 @@ def _get_all_registry_files() -> List[str]:
         if files:
             return files
     except Exception as exc:
-        logger.warning("[push_branch_dashboard] Failed to discover plan types, falling back to default registry: %s", exc)
+        logger.warning(
+            "[push_branch_dashboard] Failed to discover plan types, falling back to default registry: %s", exc
+        )
     return [REGISTRY_FILE.name]
 
 
 # =============================================
 # HELPER FUNCTIONS
 # =============================================
+
 
 def _load_registry() -> Dict[str, Any]:
     """
@@ -234,7 +236,7 @@ def _load_registry() -> Dict[str, Any]:
         try:
             if not target.exists():
                 continue
-            with open(target, 'r', encoding='utf-8') as f:
+            with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for plan_num, plan_data in data.get("plans", {}).items():
                 merged["plans"][plan_num] = plan_data
@@ -248,8 +250,7 @@ def _load_registry() -> Dict[str, Any]:
 
 
 def _filter_branch_plans(
-    registry: Dict[str, Any],
-    branch_path: Path
+    registry: Dict[str, Any], branch_path: Path
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
     """
     Filter plans for a specific branch from the registry.
@@ -281,17 +282,19 @@ def _filter_branch_plans(
         # Extract plan prefix from file_path (e.g., DPLAN, FPLAN, TDPLAN)
         file_path = plan_data.get("file_path", "")
         filename = Path(file_path).name if file_path else ""
-        prefix_match = re.match(r'^([A-Z]+PLAN)', filename)
+        prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
         prefix = prefix_match.group(1) if prefix_match else "FPLAN"
         plan_id = f"{prefix}-{plan_num.zfill(4)}"
 
         if plan_data.get("status") == "open":
-            active_plans.append({
-                "id": plan_id,
-                "subject": plan_data.get("subject", ""),
-                "created": plan_data.get("created", ""),
-                "location": location
-            })
+            active_plans.append(
+                {
+                    "id": plan_id,
+                    "subject": plan_data.get("subject", ""),
+                    "created": plan_data.get("created", ""),
+                    "location": location,
+                }
+            )
         elif plan_data.get("status") == "closed":
             closed_ts = plan_data.get("closed", "")
             # Only include recently closed (within 7 days)
@@ -299,19 +302,15 @@ def _filter_branch_plans(
                 try:
                     closed_dt = datetime.fromisoformat(closed_ts)
                     if closed_dt >= cutoff:
-                        closed_plans.append({
-                            "id": plan_id,
-                            "subject": plan_data.get("subject", ""),
-                            "closed": closed_ts
-                        })
+                        closed_plans.append(
+                            {"id": plan_id, "subject": plan_data.get("subject", ""), "closed": closed_ts}
+                        )
                 except (ValueError, TypeError) as exc:
                     # If we can't parse the timestamp, include it anyway
-                    logger.warning("Unparseable closed timestamp '%s' for plan %s, including anyway: %s", closed_ts, plan_id, exc)
-                    closed_plans.append({
-                        "id": plan_id,
-                        "subject": plan_data.get("subject", ""),
-                        "closed": closed_ts
-                    })
+                    logger.warning(
+                        "Unparseable closed timestamp '%s' for plan %s, including anyway: %s", closed_ts, plan_id, exc
+                    )
+                    closed_plans.append({"id": plan_id, "subject": plan_data.get("subject", ""), "closed": closed_ts})
 
     # Sort active by created date (newest first)
     active_plans.sort(key=lambda x: x.get("created", ""), reverse=True)
@@ -324,9 +323,7 @@ def _filter_branch_plans(
 
 
 def _build_section_data(
-    active_plans: List[Dict[str, Any]],
-    recently_closed: List[Dict[str, Any]],
-    total_plans: int
+    active_plans: List[Dict[str, Any]], recently_closed: List[Dict[str, Any]], total_plans: int
 ) -> Dict[str, Any]:
     """
     Build the flow section data for write_section().
@@ -344,13 +341,14 @@ def _build_section_data(
         "active_plans": active_plans,
         "active_count": len(active_plans),
         "recently_closed": recently_closed,
-        "total_plans": total_plans
+        "total_plans": total_plans,
     }
 
 
 # =============================================
 # HANDLER FUNCTION
 # =============================================
+
 
 def push_flow_to_branch_dashboard(branch_path: Path) -> bool:
     """
@@ -389,13 +387,16 @@ def push_flow_to_branch_dashboard(branch_path: Path) -> bool:
         result = _write_dashboard_section(branch_path, "flow", section_data)
 
         if result:
-            json_handler.log_operation("branch_dashboard_pushed", {
-                "branch": branch_path.name,
-                "active_plans": len(active_plans),
-                "recently_closed": len(recently_closed),
-                "total_plans": total_plans,
-                "success": True,
-            })
+            json_handler.log_operation(
+                "branch_dashboard_pushed",
+                {
+                    "branch": branch_path.name,
+                    "active_plans": len(active_plans),
+                    "recently_closed": len(recently_closed),
+                    "total_plans": total_plans,
+                    "success": True,
+                },
+            )
 
         return result
 

@@ -19,10 +19,10 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 
-
 # ---------------------------------------------------------------------------
 # Helper: mock CLI modules that verify.py imports at module level
 # ---------------------------------------------------------------------------
+
 
 def _mock_cli_modules(monkeypatch):
     """Inject mocks for aipass.cli.apps.modules (console, error)."""
@@ -40,6 +40,7 @@ def _mock_cli_modules(monkeypatch):
 def _import_verify():
     """Import verify module inside the test (after mocks are in place)."""
     from aipass.memory.apps.modules import verify
+
     return verify
 
 
@@ -85,9 +86,7 @@ class TestGetMemoryPython:
 
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
         # Point to a path that does not exist
-        monkeypatch.setattr(
-            verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python")
-        )
+        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python"))
         result = verify._get_memory_python()
         assert result == sys.executable
 
@@ -98,9 +97,7 @@ class TestGetMemoryPython:
 
         monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "")
         # Empty string is falsy, so it should NOT be returned
-        monkeypatch.setattr(
-            verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python")
-        )
+        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python"))
         result = verify._get_memory_python()
         # Falls through to venv check (missing) then sys.executable
         assert result == sys.executable

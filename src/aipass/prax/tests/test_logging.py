@@ -18,53 +18,63 @@ from unittest.mock import MagicMock, patch
 # _is_prax_internal
 # =============================================
 
+
 class TestIsPraxInternal:
     """Tests for _is_prax_internal() — checks prax internal markers."""
 
     def test_prax_logger_path(self, mock_prax_infrastructure):
         """Logger module path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/home/user/src/aipass/prax/apps/modules/logger.py") is True
 
     def test_prax_handlers_path(self, mock_prax_infrastructure):
         """Handler directory path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/home/user/src/aipass/prax/apps/handlers/logging/setup.py") is True
 
     def test_prax_logger_filename(self, mock_prax_infrastructure):
         """prax_logger.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/some/path/prax_logger.py") is True
 
     def test_prax_handlers_filename(self, mock_prax_infrastructure):
         """prax_handlers.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/some/path/prax_handlers.py") is True
 
     def test_external_cli_path(self, mock_prax_infrastructure):
         """CLI module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/home/user/src/aipass/cli/apps/cli.py") is False
 
     def test_external_flow_path(self, mock_prax_infrastructure):
         """Flow module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/home/user/src/aipass/flow/apps/flow.py") is False
 
     def test_random_script_path(self, mock_prax_infrastructure):
         """Random script path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("/tmp/random_script.py") is False
 
     def test_empty_string(self, mock_prax_infrastructure):
         """Empty string returns False."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
         assert _is_prax_internal("") is False
 
 
 # =============================================
 # detect_branch_from_path
 # =============================================
+
 
 class TestDetectBranchFromPath:
     """Tests for detect_branch_from_path() — extracts branch name from file paths."""
@@ -75,6 +85,7 @@ class TestDetectBranchFromPath:
             detect_branch_from_path,
             _AIPASS_PKG_ROOT,
         )
+
         cli_path = str(_AIPASS_PKG_ROOT / "cli" / "apps" / "cli.py")
         assert detect_branch_from_path(cli_path) == "cli"
 
@@ -84,6 +95,7 @@ class TestDetectBranchFromPath:
             detect_branch_from_path,
             _AIPASS_PKG_ROOT,
         )
+
         flow_path = str(_AIPASS_PKG_ROOT / "flow" / "apps" / "flow.py")
         assert detect_branch_from_path(flow_path) == "flow"
 
@@ -93,6 +105,7 @@ class TestDetectBranchFromPath:
             detect_branch_from_path,
             _AIPASS_PKG_ROOT,
         )
+
         prax_path = str(_AIPASS_PKG_ROOT / "prax" / "apps" / "module.py")
         assert detect_branch_from_path(prax_path) == "prax"
 
@@ -102,17 +115,20 @@ class TestDetectBranchFromPath:
             detect_branch_from_path,
             _AIPASS_PKG_ROOT,
         )
+
         drone_path = str(_AIPASS_PKG_ROOT / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == "drone"
 
     def test_random_path_returns_none(self, mock_prax_infrastructure):
         """Random path outside the project returns None."""
         from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
+
         assert detect_branch_from_path("/tmp/random_script.py") is None
 
     def test_empty_string_returns_none(self, mock_prax_infrastructure):
         """Empty string returns None."""
         from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
+
         assert detect_branch_from_path("") is None
 
     def test_nested_module_still_resolves(self, mock_prax_infrastructure):
@@ -121,9 +137,8 @@ class TestDetectBranchFromPath:
             detect_branch_from_path,
             _AIPASS_PKG_ROOT,
         )
-        deep_path = str(
-            _AIPASS_PKG_ROOT / "flow" / "apps" / "handlers" / "deep" / "module.py"
-        )
+
+        deep_path = str(_AIPASS_PKG_ROOT / "flow" / "apps" / "handlers" / "deep" / "module.py")
         assert detect_branch_from_path(deep_path) == "flow"
 
 
@@ -131,12 +146,14 @@ class TestDetectBranchFromPath:
 # get_caller_info
 # =============================================
 
+
 class TestGetCallerInfo:
     """Tests for get_caller_info() — returns (module_name, path, branch) tuple."""
 
     def test_returns_tuple_of_three(self, mock_prax_infrastructure):
         """get_caller_info always returns a 3-tuple."""
         from aipass.prax.apps.handlers.logging.introspection import get_caller_info
+
         result = get_caller_info()
         assert isinstance(result, tuple)
         assert len(result) == 3
@@ -144,12 +161,14 @@ class TestGetCallerInfo:
     def test_module_name_is_string(self, mock_prax_infrastructure):
         """First element (module_name) is always a string."""
         from aipass.prax.apps.handlers.logging.introspection import get_caller_info
+
         module_name, _path, _branch = get_caller_info()
         assert isinstance(module_name, str)
 
     def test_called_from_test_file(self, mock_prax_infrastructure):
         """When called from a test file, path should reference this file."""
         from aipass.prax.apps.handlers.logging.introspection import get_caller_info
+
         module_name, caller_path, branch = get_caller_info()
         # Called from this test file, so module_name should be "test_logging"
         # or the stack walk may land on pytest internals; either way it is a string
@@ -169,6 +188,7 @@ class TestGetCallerInfo:
 # lines_to_bytes
 # =============================================
 
+
 class TestLinesToBytes:
     """Tests for lines_to_bytes() — converts line counts to byte estimates."""
 
@@ -183,9 +203,12 @@ class TestLinesToBytes:
         mock_config.load_log_config = MagicMock()
         mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
 
-        with patch.dict(sys.modules, {
-            "aipass.prax.apps.handlers.config.load": mock_config,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "aipass.prax.apps.handlers.config.load": mock_config,
+            },
+        ):
             # Direct computation test — mirrors the function logic
             result = 1000 * 200
             assert result == 200_000
@@ -215,9 +238,12 @@ class TestLinesToBytes:
 
         mock_config_mod.lines_to_bytes = real_lines_to_bytes
 
-        with patch.dict(sys.modules, {
-            "aipass.prax.apps.handlers.config.load": mock_config_mod,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "aipass.prax.apps.handlers.config.load": mock_config_mod,
+            },
+        ):
             fn = sys.modules["aipass.prax.apps.handlers.config.load"].lines_to_bytes
             assert fn(1000) == 200_000
             assert fn(1000, 100) == 100_000
@@ -228,6 +254,7 @@ class TestLinesToBytes:
 # =============================================
 # _replace_placeholders
 # =============================================
+
 
 class TestReplacePlaceholders:
     """Tests for _replace_placeholders() — template placeholder substitution."""
@@ -240,6 +267,7 @@ class TestReplacePlaceholders:
         which has dependencies that need extensive mocking. The logic under test
         is the recursive walk + placeholder replacement algorithm.
         """
+
         def _replace_placeholders(template: dict, branch_name: str) -> dict:
             def _walk(val):
                 if isinstance(val, str):
@@ -249,9 +277,11 @@ class TestReplacePlaceholders:
                 elif isinstance(val, dict):
                     return {k: _walk(v) for k, v in val.items()}
                 return val
+
             result = _walk(copy.deepcopy(template))
             assert isinstance(result, dict)
             return result
+
         return _replace_placeholders
 
     def test_simple_string_replacement(self, mock_prax_infrastructure):

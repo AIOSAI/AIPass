@@ -55,6 +55,7 @@ ARCHIVE_DIR = _MEMORY_ROOT / ".archive"
 # STATS COLLECTION
 # =============================================================================
 
+
 def count_chroma_vectors() -> int:
     """
     Count total vectors across all ChromaDB collections
@@ -162,13 +163,14 @@ def collect_stats() -> Dict[str, Any]:
     return {
         "total_vectors": count_chroma_vectors(),
         "total_archives": count_archive_files(),
-        "last_rollover": get_last_rollover_timestamp()
+        "last_rollover": get_last_rollover_timestamp(),
     }
 
 
 # =============================================================================
 # CENTRAL FILE OPERATIONS
 # =============================================================================
+
 
 def read_central_file() -> Dict[str, Any]:
     """
@@ -186,14 +188,10 @@ def read_central_file() -> Dict[str, Any]:
             return {
                 "service": "memory",
                 "last_updated": "",
-                "stats": {
-                    "total_vectors": 0,
-                    "total_archives": 0,
-                    "last_rollover": ""
-                }
+                "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
             }
 
-        with open(CENTRAL_FILE, 'r', encoding='utf-8') as f:
+        with open(CENTRAL_FILE, "r", encoding="utf-8") as f:
             return json_load(f)
 
     except Exception as e:
@@ -215,7 +213,7 @@ def write_central_file(data: Dict[str, Any]) -> None:
         # Ensure directory exists
         CENTRAL_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(CENTRAL_FILE, 'w', encoding='utf-8') as f:
+        with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
             json_dump(data, f, indent=2, ensure_ascii=False)
 
     except Exception as e:
@@ -226,6 +224,7 @@ def write_central_file(data: Dict[str, Any]) -> None:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def update_central(verbose: bool = False) -> Dict[str, Any]:
     """
@@ -267,10 +266,7 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
         # Write updated file
         write_central_file(central_data)
 
-        result = {
-            "success": True,
-            "updated": CENTRAL_FILE.as_posix()
-        }
+        result = {"success": True, "updated": CENTRAL_FILE.as_posix()}
 
         if verbose:
             result["stats"] = stats
@@ -281,10 +277,7 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"[central_writer] Failed to update central: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def get_current_stats() -> Dict[str, Any]:
@@ -302,17 +295,11 @@ def get_current_stats() -> Dict[str, Any]:
     """
     try:
         stats = collect_stats()
-        return {
-            "success": True,
-            **stats
-        }
+        return {"success": True, **stats}
 
     except Exception as e:
         logger.warning(f"[central_writer] Failed to get current stats: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
@@ -326,7 +313,7 @@ if __name__ == "__main__":
     print("Collecting statistics...")
     stats_result = get_current_stats()
 
-    if stats_result['success']:
+    if stats_result["success"]:
         print(f"  Total Vectors: {stats_result.get('total_vectors', 0)}")
         print(f"  Total Archives: {stats_result.get('total_archives', 0)}")
         print(f"  Last Rollover: {stats_result.get('last_rollover', 'Never')}")
@@ -339,9 +326,9 @@ if __name__ == "__main__":
     print("Updating central file...")
     result = update_central(verbose=True)
 
-    if result['success']:
+    if result["success"]:
         print(f"Updated: {result['updated']}")
-        if 'stats' in result:
+        if "stats" in result:
             print(f"  Vectors: {result['stats']['total_vectors']}")
             print(f"  Archives: {result['stats']['total_archives']}")
     else:

@@ -12,7 +12,6 @@ Log Visibility Standards Content
 Provides Rich-formatted reference text for the log visibility standard.
 """
 
-
 from aipass.seedgo.apps.handlers.json import json_handler
 
 _GETLOGGER = "logging" + ".getLogger"

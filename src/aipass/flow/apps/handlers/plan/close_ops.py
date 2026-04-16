@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from aipass.prax import logger
+
 # logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -45,7 +46,8 @@ MODULE_NAME = "close_plan"
 def _extract_prefix(plan_num_raw: str) -> str | None:
     """Extract plan-type prefix (e.g. ``"DPLAN"``) from raw input."""
     import re
-    m = re.match(r'^([A-Z]+PLAN)-', plan_num_raw.strip(), re.IGNORECASE)
+
+    m = re.match(r"^([A-Z]+PLAN)-", plan_num_raw.strip(), re.IGNORECASE)
     return m.group(1).upper() if m else None
 
 
@@ -59,6 +61,7 @@ def _resolve_registry_file(plan_num_raw: str) -> str | None:
         return None
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import get_plan_type  # type: ignore[import-not-found]
+
         config = get_plan_type(prefix)
         return config.get("registry_file")
     except Exception as e:
@@ -73,6 +76,7 @@ def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | 
     """
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
+
         for _type_key, config in discover_plan_types().items():
             reg_file = config.get("registry_file")
             if not reg_file:
@@ -93,14 +97,12 @@ def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | 
 # HELPER
 # =============================================
 
+
 def _spawn_background_runner():
     """Spawn post_close_runner.py as a fully detached background process"""
     bg_runner = FLOW_ROOT / "apps" / "modules" / "post_close_runner.py"
     subprocess.Popen(
-        [sys.executable, str(bg_runner)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True
+        [sys.executable, str(bg_runner)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
     )
 
 
@@ -108,20 +110,25 @@ def _spawn_background_runner():
 # CLOSE PLAN IMPLEMENTATION
 # =============================================
 
-def close_plan_impl(plan_num: Any = None, confirm: bool = False,
-                    all_plans: bool = False, spawn_background: bool = True,
-                    dry_run: bool = False,
-                    # Dependencies injected from module
-                    normalize_plan_number: Any = None,
-                    load_registry: Any = None,
-                    save_registry: Any = None,
-                    validate_plan_exists: Any = None,
-                    confirm_plan_deletion: Any = None,
-                    is_template_content: Any = None,
-                    update_dashboard_local: Any = None,
-                    push_to_plans_central: Any = None,
-                    push_flow_to_branch_dashboard: Any = None,
-                    close_all_plans_fn: Any = None) -> Dict[str, Any]:
+
+def close_plan_impl(
+    plan_num: Any = None,
+    confirm: bool = False,
+    all_plans: bool = False,
+    spawn_background: bool = True,
+    dry_run: bool = False,
+    # Dependencies injected from module
+    normalize_plan_number: Any = None,
+    load_registry: Any = None,
+    save_registry: Any = None,
+    validate_plan_exists: Any = None,
+    confirm_plan_deletion: Any = None,
+    is_template_content: Any = None,
+    update_dashboard_local: Any = None,
+    push_to_plans_central: Any = None,
+    push_flow_to_branch_dashboard: Any = None,
+    close_all_plans_fn: Any = None,
+) -> Dict[str, Any]:
     """
     Implement plan closure workflow
 
@@ -217,15 +224,21 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
             }
 
         # 4. IDEMPOTENCY CHECK: Prevent double-closing (with orphan cleanup)
-        if plan_info['status'] == 'closed':
-            closed_date = plan_info.get('closed', 'unknown')
+        if plan_info["status"] == "closed":
+            closed_date = plan_info.get("closed", "unknown")
 
             # Check if .md file is orphaned on disk (registry-closed but file never moved)
             if plan_file.exists():
-                messages.append({"type": "warning", "text": f"{plan_label} already closed on {closed_date} — orphaned .md file detected"})
+                messages.append(
+                    {
+                        "type": "warning",
+                        "text": f"{plan_label} already closed on {closed_date} — orphaned .md file detected",
+                    }
+                )
                 messages.append({"type": "dim", "text": f"  Cleaning up: moving {plan_file.name} to processed_plans/"})
                 try:
                     from aipass.flow.apps.handlers.mbank.process import archive_plan
+
                     if archive_plan(plan_file):
                         logger.info(f"[{MODULE_NAME}] Cleaned up orphaned file for {plan_label}: {plan_file}")
                         # Update registry flags that were missed on the failed first close
@@ -240,7 +253,9 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
                         messages.append({"type": "success", "text": "  Orphaned file archived successfully"})
                     else:
                         logger.warning(f"[{MODULE_NAME}] Failed to archive orphaned file for {plan_label}: {plan_file}")
-                        messages.append({"type": "error_text", "text": "  Failed to move orphaned file — manual cleanup required"})
+                        messages.append(
+                            {"type": "error_text", "text": "  Failed to move orphaned file — manual cleanup required"}
+                        )
                 except Exception as e:
                     logger.warning(f"[{MODULE_NAME}] Error cleaning orphaned file for {plan_label}: {e}")
                     messages.append({"type": "error_text", "text": f"  Error during cleanup: {e}"})
@@ -263,11 +278,13 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         # --- Step 1/5: Template check (may fast-delete) ---
         messages.append({"type": "step", "text": "[1/5] Checking template status..."})
         try:
-            with open(plan_file, 'r', encoding='utf-8') as f:
+            with open(plan_file, "r", encoding="utf-8") as f:
                 content = f.read()
 
             if is_template_content(content):
-                messages.append({"type": "warning", "text": f"  {plan_label} is empty template - fast-deleting (not archiving)"})
+                messages.append(
+                    {"type": "warning", "text": f"  {plan_label} is empty template - fast-deleting (not archiving)"}
+                )
 
                 # Delete the file
                 plan_file.unlink()
@@ -281,7 +298,9 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
                     save_registry(registry)
                 logger.info(f"[{MODULE_NAME}] Removed {plan_label} from registry")
 
-                messages.append({"type": "success", "text": f"  Empty template deleted - {plan_label} removed from system"})
+                messages.append(
+                    {"type": "success", "text": f"  Empty template deleted - {plan_label} removed from system"}
+                )
                 return {
                     "success": True,
                     "messages": messages,
@@ -294,7 +313,9 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
             messages.append({"type": "warning", "text": "  Plan file not found, continuing with registry close"})
         except Exception as e:
             logger.warning(f"[{MODULE_NAME}] Template check failed: {e}")
-            messages.append({"type": "warning", "text": "  Could not check template status, continuing with normal close"})
+            messages.append(
+                {"type": "warning", "text": "  Could not check template status, continuing with normal close"}
+            )
 
         # DISPLAY: plan info header
         messages.append({"type": "header", "plan_key": plan_key, "plan_info": plan_info, "prefix": plan_prefix})
@@ -314,8 +335,8 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         messages.append({"type": "step", "text": "[2/5] Marking plan as closed..."})
         try:
             # CRITICAL: Close ALWAYS succeeds from this point. Archive is non-blocking.
-            plan_info['status'] = 'closed'
-            plan_info['closed'] = datetime.now(timezone.utc).isoformat()
+            plan_info["status"] = "closed"
+            plan_info["closed"] = datetime.now(timezone.utc).isoformat()
             if reg_file:
                 save_registry(registry, registry_file=reg_file)
             else:
@@ -335,6 +356,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         messages.append({"type": "step", "text": "[3/5] Archiving plan..."})
         try:
             from aipass.flow.apps.handlers.mbank.process import archive_plan
+
             archive_success = archive_plan(plan_file)
             if archive_success:
                 # Set flags on same registry object we already have in memory
@@ -360,7 +382,8 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         try:
             subprocess.run(
                 ["drone", "@memory", "process-plans"],
-                capture_output=True, timeout=30,
+                capture_output=True,
+                timeout=30,
             )
         except Exception as e:
             logger.warning(f"[{MODULE_NAME}] Best-effort drone @memory process-plans failed: {e}")
@@ -368,6 +391,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         # Verify vectorization via memory's verify module
         try:
             from aipass.memory.apps.modules.verify import is_plan_vectorized  # type: ignore[import-not-found]
+
             result = is_plan_vectorized(plan_label)
             if result.get("found"):
                 chunk_count = result.get("count", 0)
@@ -400,7 +424,9 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
             if plan_location:
                 branch_dashboard_success = push_flow_to_branch_dashboard(Path(plan_location))
                 if not branch_dashboard_success:
-                    logger.warning(f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {plan_location}")
+                    logger.warning(
+                        f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {plan_location}"
+                    )
         except Exception as e:
             logger.warning(f"[{MODULE_NAME}] Dashboard update error: {e}")
             messages.append({"type": "warning", "text": f"  Dashboard update failed (non-critical): {e}"})
@@ -412,6 +438,7 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         # Append to branch's CLOSED_PLANS.local.json
         try:
             from aipass.flow.apps.handlers.plan.append_closed_plan import append_to_closed_plans
+
             append_to_closed_plans(plan_key, plan_info, plan_file.parent)
         except Exception as e:
             logger.warning(f"[{MODULE_NAME}] CLOSED_PLANS update failed (non-critical): {e}")
@@ -419,7 +446,8 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         # Fire trigger event for plan closure
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_closed', plan_number=plan_key, location=str(plan_file.parent))
+
+            trigger.fire("plan_closed", plan_number=plan_key, location=str(plan_file.parent))
         except ImportError:
             logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping event fire")
         except Exception as e:
@@ -452,10 +480,13 @@ def close_plan_impl(plan_num: Any = None, confirm: bool = False,
         }
 
 
-def close_all_plans_impl(confirm: bool = False, dry_run: bool = False,
-                         # Dependencies injected from module
-                         get_open_plans: Any = None,
-                         close_plan_fn: Any = None) -> Dict[str, Any]:
+def close_all_plans_impl(
+    confirm: bool = False,
+    dry_run: bool = False,
+    # Dependencies injected from module
+    get_open_plans: Any = None,
+    close_plan_fn: Any = None,
+) -> Dict[str, Any]:
     """
     Close all open plans in one operation
 
@@ -570,18 +601,25 @@ def close_all_plans_impl(confirm: bool = False, dry_run: bool = False,
                 messages.append({"type": "dim", "text": f"Background processing started for {success_count} plan(s)"})
             except Exception as e:
                 logger.warning(f"[{MODULE_NAME}] Failed to spawn background post-processing: {e}")
-                messages.append({"type": "warning", "text": "Background processing failed to start - will retry on next close"})
+                messages.append(
+                    {"type": "warning", "text": "Background processing failed to start - will retry on next close"}
+                )
 
         # Summary
-        messages.append({
-            "type": "close_all_summary",
-            "success_count": success_count,
-            "failure_count": failure_count,
-            "total": len(open_plans),
-        })
+        messages.append(
+            {
+                "type": "close_all_summary",
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "total": len(open_plans),
+            }
+        )
 
         logger.info(f"[{MODULE_NAME}] close_all completed: {success_count} success, {failure_count} failures")
-        json_handler.log_operation("all_plans_closed", {"success_count": success_count, "failure_count": failure_count, "total": len(open_plans)})
+        json_handler.log_operation(
+            "all_plans_closed",
+            {"success_count": success_count, "failure_count": failure_count, "total": len(open_plans)},
+        )
         return {
             "success": success_count > 0,
             "messages": messages,

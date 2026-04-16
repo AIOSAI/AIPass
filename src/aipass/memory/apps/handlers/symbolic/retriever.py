@@ -44,11 +44,8 @@ DEFAULT_N_RESULTS = 5
 # VECTOR SIMILARITY SEARCH
 # =============================================================================
 
-def search_by_vector(
-    query: str,
-    n_results: int = DEFAULT_N_RESULTS,
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+
+def search_by_vector(query: str, n_results: int = DEFAULT_N_RESULTS, db_path: Path | None = None) -> Dict[str, Any]:
     """
     Search fragments by vector similarity
 
@@ -64,28 +61,19 @@ def search_by_vector(
         Dict with 'success', 'results' list containing fragments with scores
     """
     if not query:
-        return {
-            'success': False,
-            'error': 'Query text required'
-        }
+        return {"success": False, "error": "Query text required"}
 
     # Encode query to embedding
     embed_result = embedder.encode_batch([query])
-    if not embed_result.get('success'):
-        return {
-            'success': False,
-            'error': f"Embedding failed: {embed_result.get('error', 'Unknown error')}"
-        }
+    if not embed_result.get("success"):
+        return {"success": False, "error": f"Embedding failed: {embed_result.get('error', 'Unknown error')}"}
 
-    embeddings = embed_result.get('embeddings', [])
+    embeddings = embed_result.get("embeddings", [])
     if not embeddings:
-        return {
-            'success': False,
-            'error': 'No embedding generated'
-        }
+        return {"success": False, "error": "No embedding generated"}
 
     query_vec = embeddings[0]
-    if hasattr(query_vec, 'tolist'):
+    if hasattr(query_vec, "tolist"):
         query_vec = query_vec.tolist()
 
     try:
@@ -93,50 +81,31 @@ def search_by_vector(
 
         # Get collection
         try:
-            collection = client.get_collection(
-                COLLECTION_NAME,
-                embedding_function=None
-            )
+            collection = client.get_collection(COLLECTION_NAME, embedding_function=None)
         except Exception as e:
             logger.warning(f"[retriever] Collection '{COLLECTION_NAME}' not found for vector search: {e}")
-            return {
-                'success': True,
-                'results': [],
-                'message': f'Collection {COLLECTION_NAME} not found'
-            }
+            return {"success": True, "results": [], "message": f"Collection {COLLECTION_NAME} not found"}
 
         # Query by vector similarity
-        results = collection.query(
-            query_embeddings=[query_vec],
-            n_results=n_results
-        )
+        results = collection.query(query_embeddings=[query_vec], n_results=n_results)
 
         # Format results
         formatted = _format_query_results(results)
 
-        return {
-            'success': True,
-            'results': formatted,
-            'total_results': len(formatted),
-            'search_type': 'vector'
-        }
+        return {"success": True, "results": formatted, "total_results": len(formatted), "search_type": "vector"}
 
     except Exception as e:
         logger.error(f"[retriever] Vector search failed: {e}")
-        return {
-            'success': False,
-            'error': f"Vector search failed: {e}"
-        }
+        return {"success": False, "error": f"Vector search failed: {e}"}
 
 
 # =============================================================================
 # DIMENSION FILTERING
 # =============================================================================
 
+
 def search_by_dimensions(
-    dimension_filters: Dict[str, str],
-    n_results: int = DEFAULT_N_RESULTS,
-    db_path: Path | None = None
+    dimension_filters: Dict[str, str], n_results: int = DEFAULT_N_RESULTS, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Search fragments by symbolic dimension filters
@@ -153,27 +122,17 @@ def search_by_dimensions(
         Dict with 'success', 'results' list of matching fragments
     """
     if not dimension_filters:
-        return {
-            'success': False,
-            'error': 'Dimension filters required'
-        }
+        return {"success": False, "error": "Dimension filters required"}
 
     try:
         client = get_chroma_client(db_path)
 
         # Get collection
         try:
-            collection = client.get_collection(
-                COLLECTION_NAME,
-                embedding_function=None
-            )
+            collection = client.get_collection(COLLECTION_NAME, embedding_function=None)
         except Exception as e:
             logger.warning(f"[retriever] Collection '{COLLECTION_NAME}' not found for dimension search: {e}")
-            return {
-                'success': True,
-                'results': [],
-                'message': f'Collection {COLLECTION_NAME} not found'
-            }
+            return {"success": True, "results": [], "message": f"Collection {COLLECTION_NAME} not found"}
 
         # Build where clause for filtering
         # ChromaDB where clause: {"$and": [{"key": {"$eq": "value"}}, ...]}
@@ -187,39 +146,31 @@ def search_by_dimensions(
             where_clause = {"$and": where_conditions}
 
         # Query with filter (no embedding, just metadata filter)
-        results = collection.get(
-            where=where_clause,
-            limit=n_results,
-            include=['documents', 'metadatas']
-        )
+        results = collection.get(where=where_clause, limit=n_results, include=["documents", "metadatas"])
 
         # Format results (get() returns different structure than query())
         formatted = _format_get_results(results)
 
         return {
-            'success': True,
-            'results': formatted,
-            'total_results': len(formatted),
-            'search_type': 'dimension_filter',
-            'filters_applied': dimension_filters
+            "success": True,
+            "results": formatted,
+            "total_results": len(formatted),
+            "search_type": "dimension_filter",
+            "filters_applied": dimension_filters,
         }
 
     except Exception as e:
         logger.error(f"[retriever] Dimension search failed: {e}")
-        return {
-            'success': False,
-            'error': f"Dimension search failed: {e}"
-        }
+        return {"success": False, "error": f"Dimension search failed: {e}"}
 
 
 # =============================================================================
 # TRIGGER KEYWORD SEARCH
 # =============================================================================
 
+
 def search_by_triggers(
-    keywords: List[str],
-    n_results: int = DEFAULT_N_RESULTS,
-    db_path: Path | None = None
+    keywords: List[str], n_results: int = DEFAULT_N_RESULTS, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Search fragments by trigger keywords
@@ -237,45 +188,33 @@ def search_by_triggers(
         Dict with 'success', 'results' list of matching fragments
     """
     if not keywords:
-        return {
-            'success': False,
-            'error': 'Keywords required'
-        }
+        return {"success": False, "error": "Keywords required"}
 
     try:
         client = get_chroma_client(db_path)
 
         # Get collection
         try:
-            collection = client.get_collection(
-                COLLECTION_NAME,
-                embedding_function=None
-            )
+            collection = client.get_collection(COLLECTION_NAME, embedding_function=None)
         except Exception as e:
             logger.warning(f"[retriever] Collection '{COLLECTION_NAME}' not found for trigger search: {e}")
-            return {
-                'success': True,
-                'results': [],
-                'message': f'Collection {COLLECTION_NAME} not found'
-            }
+            return {"success": True, "results": [], "message": f"Collection {COLLECTION_NAME} not found"}
 
         # Get all fragments and filter in Python
         # ChromaDB metadata where doesn't support $contains for strings
         # Triggers are stored as comma-separated strings in metadata
-        all_results = collection.get(
-            include=['documents', 'metadatas']
-        )
+        all_results = collection.get(include=["documents", "metadatas"])
 
         # Filter by trigger keywords
         matching_indices = []
         keywords_lower = [k.lower() for k in keywords]
 
-        if all_results.get('metadatas'):
-            for i, meta in enumerate(all_results['metadatas']):
-                triggers_str = meta.get('triggers', '')
+        if all_results.get("metadatas"):
+            for i, meta in enumerate(all_results["metadatas"]):
+                triggers_str = meta.get("triggers", "")
                 if triggers_str:
                     # Triggers are comma-separated
-                    fragment_triggers = [t.strip().lower() for t in triggers_str.split(',')]
+                    fragment_triggers = [t.strip().lower() for t in triggers_str.split(",")]
                     # Check if any keyword matches any trigger
                     for kw in keywords_lower:
                         if any(kw in trigger for trigger in fragment_triggers):
@@ -284,46 +223,48 @@ def search_by_triggers(
 
         # Build filtered results
         filtered_results = {
-            'ids': [all_results['ids'][i] for i in matching_indices] if all_results.get('ids') else [],
-            'documents': [all_results['documents'][i] for i in matching_indices] if all_results.get('documents') else [],
-            'metadatas': [all_results['metadatas'][i] for i in matching_indices] if all_results.get('metadatas') else []
+            "ids": [all_results["ids"][i] for i in matching_indices] if all_results.get("ids") else [],
+            "documents": [all_results["documents"][i] for i in matching_indices]
+            if all_results.get("documents")
+            else [],
+            "metadatas": [all_results["metadatas"][i] for i in matching_indices]
+            if all_results.get("metadatas")
+            else [],
         }
 
         # Limit results
-        if len(filtered_results['ids']) > n_results:
-            filtered_results['ids'] = filtered_results['ids'][:n_results]
-            filtered_results['documents'] = filtered_results['documents'][:n_results]
-            filtered_results['metadatas'] = filtered_results['metadatas'][:n_results]
+        if len(filtered_results["ids"]) > n_results:
+            filtered_results["ids"] = filtered_results["ids"][:n_results]
+            filtered_results["documents"] = filtered_results["documents"][:n_results]
+            filtered_results["metadatas"] = filtered_results["metadatas"][:n_results]
 
         # Format results
         formatted = _format_get_results(filtered_results)
 
         return {
-            'success': True,
-            'results': formatted,
-            'total_results': len(formatted),
-            'search_type': 'trigger_keywords',
-            'keywords_searched': keywords
+            "success": True,
+            "results": formatted,
+            "total_results": len(formatted),
+            "search_type": "trigger_keywords",
+            "keywords_searched": keywords,
         }
 
     except Exception as e:
         logger.error(f"[retriever] Trigger search failed: {e}")
-        return {
-            'success': False,
-            'error': f"Trigger search failed: {e}"
-        }
+        return {"success": False, "error": f"Trigger search failed: {e}"}
 
 
 # =============================================================================
 # COMBINED RETRIEVAL
 # =============================================================================
 
+
 def retrieve_fragments(
     query: str | None = None,
     dimension_filters: Dict[str, str] | None = None,
     trigger_keywords: List[str] | None = None,
     n_results: int = DEFAULT_N_RESULTS,
-    db_path: Path | None = None
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Main retrieval function combining all search methods
@@ -349,8 +290,8 @@ def retrieve_fragments(
     """
     if not query and not dimension_filters and not trigger_keywords:
         return {
-            'success': False,
-            'error': 'At least one search method required (query, dimension_filters, or trigger_keywords)'
+            "success": False,
+            "error": "At least one search method required (query, dimension_filters, or trigger_keywords)",
         }
 
     all_results = []
@@ -359,36 +300,36 @@ def retrieve_fragments(
     # 1. Vector similarity search (if query provided)
     if query:
         vector_result = search_by_vector(query, n_results=n_results * 2, db_path=db_path)
-        if vector_result.get('success') and vector_result.get('results'):
-            search_methods_used.append('vector')
-            for result in vector_result['results']:
-                result['_source'] = 'vector'
+        if vector_result.get("success") and vector_result.get("results"):
+            search_methods_used.append("vector")
+            for result in vector_result["results"]:
+                result["_source"] = "vector"
                 all_results.append(result)
 
     # 2. Dimension filter search (if filters provided)
     if dimension_filters:
         dim_result = search_by_dimensions(dimension_filters, n_results=n_results * 2, db_path=db_path)
-        if dim_result.get('success') and dim_result.get('results'):
-            search_methods_used.append('dimension')
-            for result in dim_result['results']:
-                result['_source'] = 'dimension'
+        if dim_result.get("success") and dim_result.get("results"):
+            search_methods_used.append("dimension")
+            for result in dim_result["results"]:
+                result["_source"] = "dimension"
                 all_results.append(result)
 
     # 3. Trigger keyword search (if keywords provided)
     if trigger_keywords:
         trigger_result = search_by_triggers(trigger_keywords, n_results=n_results * 2, db_path=db_path)
-        if trigger_result.get('success') and trigger_result.get('results'):
-            search_methods_used.append('trigger')
-            for result in trigger_result['results']:
-                result['_source'] = 'trigger'
+        if trigger_result.get("success") and trigger_result.get("results"):
+            search_methods_used.append("trigger")
+            for result in trigger_result["results"]:
+                result["_source"] = "trigger"
                 all_results.append(result)
 
     if not all_results:
         return {
-            'success': True,
-            'results': [],
-            'message': 'No matching fragments found',
-            'search_methods': search_methods_used
+            "success": True,
+            "results": [],
+            "message": "No matching fragments found",
+            "search_methods": search_methods_used,
         }
 
     # Merge and deduplicate results
@@ -400,19 +341,22 @@ def retrieve_fragments(
     # Return top n_results
     final_results = ranked[:n_results]
 
-    json_handler.log_operation("symbolic_retrieve", {"results": len(final_results), "methods": search_methods_used, "success": True})
+    json_handler.log_operation(
+        "symbolic_retrieve", {"results": len(final_results), "methods": search_methods_used, "success": True}
+    )
     return {
-        'success': True,
-        'results': final_results,
-        'total_results': len(final_results),
-        'search_methods': search_methods_used,
-        'total_before_merge': len(all_results)
+        "success": True,
+        "results": final_results,
+        "total_results": len(final_results),
+        "search_methods": search_methods_used,
+        "total_before_merge": len(all_results),
     }
 
 
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
 
 def _format_query_results(results: Dict) -> List[Dict[str, Any]]:
     """
@@ -423,25 +367,25 @@ def _format_query_results(results: Dict) -> List[Dict[str, Any]]:
     """
     formatted = []
 
-    if not results.get('documents') or not results['documents'][0]:
+    if not results.get("documents") or not results["documents"][0]:
         return formatted
 
-    for i, doc in enumerate(results['documents'][0]):
+    for i, doc in enumerate(results["documents"][0]):
         frag = {
-            'id': results['ids'][0][i] if results.get('ids') else None,
-            'content': doc,
-            'metadata': results['metadatas'][0][i] if results.get('metadatas') else {},
-            'distance': results['distances'][0][i] if results.get('distances') else None
+            "id": results["ids"][0][i] if results.get("ids") else None,
+            "content": doc,
+            "metadata": results["metadatas"][0][i] if results.get("metadatas") else {},
+            "distance": results["distances"][0][i] if results.get("distances") else None,
         }
 
         # Calculate similarity score (cosine distance: 0=identical, 2=opposite)
-        if frag['distance'] is not None:
-            frag['similarity'] = max(0, 1 - frag['distance'])
+        if frag["distance"] is not None:
+            frag["similarity"] = max(0, 1 - frag["distance"])
         else:
-            frag['similarity'] = 0
+            frag["similarity"] = 0
 
         # Assign relevance tier
-        frag['relevance_tier'] = _compute_relevance_tier(frag['similarity'])
+        frag["relevance_tier"] = _compute_relevance_tier(frag["similarity"])
 
         formatted.append(frag)
 
@@ -457,18 +401,18 @@ def _format_get_results(results: Dict) -> List[Dict[str, Any]]:
     """
     formatted = []
 
-    if not results.get('documents'):
+    if not results.get("documents"):
         return formatted
 
-    for i, doc in enumerate(results['documents']):
+    for i, doc in enumerate(results["documents"]):
         similarity = 0.5  # Default score for filter-only results
         frag = {
-            'id': results['ids'][i] if results.get('ids') else None,
-            'content': doc,
-            'metadata': results['metadatas'][i] if results.get('metadatas') else {},
-            'distance': None,
-            'similarity': similarity,
-            'relevance_tier': _compute_relevance_tier(similarity)
+            "id": results["ids"][i] if results.get("ids") else None,
+            "content": doc,
+            "metadata": results["metadatas"][i] if results.get("metadatas") else {},
+            "distance": None,
+            "similarity": similarity,
+            "relevance_tier": _compute_relevance_tier(similarity),
         }
         formatted.append(frag)
 
@@ -492,12 +436,12 @@ def _compute_relevance_tier(similarity: float) -> str:
         Relevance tier string
     """
     if similarity >= 0.65:
-        return 'strong'
+        return "strong"
     if similarity >= 0.45:
-        return 'moderate'
+        return "moderate"
     if similarity >= 0.30:
-        return 'serendipity'
-    return 'weak'
+        return "serendipity"
+    return "weak"
 
 
 def _merge_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -509,21 +453,21 @@ def _merge_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     merged = {}
 
     for result in results:
-        frag_id = result.get('id')
+        frag_id = result.get("id")
         if not frag_id:
             continue
 
         if frag_id not in merged:
             merged[frag_id] = result.copy()
-            merged[frag_id]['_sources'] = [result.get('_source', 'unknown')]
+            merged[frag_id]["_sources"] = [result.get("_source", "unknown")]
         else:
             # Fragment found by multiple methods - combine scores
             existing = merged[frag_id]
-            existing['_sources'].append(result.get('_source', 'unknown'))
+            existing["_sources"].append(result.get("_source", "unknown"))
 
             # Take best similarity if both have scores
-            if result.get('similarity', 0) > existing.get('similarity', 0):
-                existing['similarity'] = result['similarity']
+            if result.get("similarity", 0) > existing.get("similarity", 0):
+                existing["similarity"] = result["similarity"]
 
     return list(merged.values())
 
@@ -537,19 +481,19 @@ def _rank_results(results: List[Dict[str, Any]], _methods_used: List[str]) -> Li
     - Bonus: +0.1 for each additional method that found the fragment
     """
     for result in results:
-        sources = result.get('_sources', [])
-        base_score = result.get('similarity', 0)
+        sources = result.get("_sources", [])
+        base_score = result.get("similarity", 0)
 
         # Bonus for being found by multiple methods
         multi_method_bonus = (len(sources) - 1) * 0.1
 
-        result['relevance_score'] = min(1.0, base_score + multi_method_bonus)
+        result["relevance_score"] = min(1.0, base_score + multi_method_bonus)
 
         # Clean up internal fields
-        if '_source' in result:
-            del result['_source']
+        if "_source" in result:
+            del result["_source"]
 
     # Sort by relevance score descending
-    results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+    results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
 
     return results

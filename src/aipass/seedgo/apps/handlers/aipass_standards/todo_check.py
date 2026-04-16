@@ -175,11 +175,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "message": "No TODO/FIXME/HACK/XXX comments found",
         }
     else:
-        breakdown = ", ".join(
-            f"{tag}: {count}"
-            for tag in _TAGS
-            if (count := tag_counts.get(tag, 0)) > 0
-        )
+        breakdown = ", ".join(f"{tag}: {count}" for tag in _TAGS if (count := tag_counts.get(tag, 0)) > 0)
         check_result = {
             "name": "TODO/FIXME comments",
             "passed": False,

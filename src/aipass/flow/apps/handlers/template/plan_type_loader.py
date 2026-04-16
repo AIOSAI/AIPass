@@ -61,6 +61,7 @@ def _get_prefix_map() -> Dict[str, str]:
     """Load prefix map from persistent template registry."""
     try:
         from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+
         return get_prefix_map()
     except Exception as exc:
         logger.warning(
@@ -69,6 +70,7 @@ def _get_prefix_map() -> Dict[str, str]:
             exc,
         )
         return _FALLBACK_PREFIX_MAP
+
 
 # Standardised defaults applied to every discovered plan type
 STANDARD_DIGITS = 4
@@ -119,8 +121,7 @@ def _build_cache() -> Dict[str, Dict]:
         prefix = prefix_map.get(dir_name)
         if prefix is None:
             logger.warning(
-                "%s: Unknown plan type '%s' in templates/. "
-                "Register with: drone @flow register %s <PREFIX>",
+                "%s: Unknown plan type '%s' in templates/. Register with: drone @flow register %s <PREFIX>",
                 MODULE_NAME,
                 dir_name,
                 dir_name,
@@ -201,10 +202,7 @@ def _resolve_type_key(type_key: str) -> tuple[str, str | None]:
         if key.lower() == lower:
             return key, None
 
-    raise ValueError(
-        f"Unknown plan type '{type_key}'. "
-        f"Available: {', '.join(cache.keys())}"
-    )
+    raise ValueError(f"Unknown plan type '{type_key}'. Available: {', '.join(cache.keys())}")
 
 
 # =============================================
@@ -226,11 +224,14 @@ def discover_plan_types() -> Dict[str, Dict]:
     _plan_type_cache = None
     cache = _get_cache()
 
-    json_handler.log_operation("plan_types_discovered", {
-        "types_found": len(cache),
-        "type_keys": list(cache.keys()),
-        "success": True,
-    })
+    json_handler.log_operation(
+        "plan_types_discovered",
+        {
+            "types_found": len(cache),
+            "type_keys": list(cache.keys()),
+            "success": True,
+        },
+    )
 
     return cache
 

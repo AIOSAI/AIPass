@@ -41,7 +41,7 @@ class BranchDetector:
     def __init__(self):
         """Initialize detector with empty caches"""
         self.branch_map: Dict[str, str] = {}  # path -> branch
-        self.log_map: Dict[str, str] = {}     # log file -> branch
+        self.log_map: Dict[str, str] = {}  # log file -> branch
         self.module_map: Dict[str, str] = {}  # module -> branch
         self.known_branches: Set[str] = set()
         self._repo_root: Optional[Path] = None
@@ -63,14 +63,14 @@ class BranchDetector:
 
     def _register_branch(self, branch: dict) -> None:
         """Register a single branch entry into the lookup tables."""
-        branch_name = branch.get('name', '').upper()
-        branch_path = branch.get('path', '')
+        branch_name = branch.get("name", "").upper()
+        branch_path = branch.get("path", "")
         if not branch_name or not branch_path:
             return
         path = Path(branch_path).resolve()
         self.branch_map[str(path)] = branch_name
         self.known_branches.add(branch_name)
-        self.branch_map[str(path) + '/'] = branch_name
+        self.branch_map[str(path) + "/"] = branch_name
 
     def _load_registry(self):
         """Load AIPASS_REGISTRY.json and build lookup tables."""
@@ -82,10 +82,10 @@ class BranchDetector:
                 self._load_fallback_branches()
                 return
 
-            with open(registry_path, encoding='utf-8') as f:
+            with open(registry_path, encoding="utf-8") as f:
                 data = json.load(f)
 
-            branches = data.get('branches', [])
+            branches = data.get("branches", [])
             if not branches:
                 logger.warning("No branches found in registry")
                 self._load_fallback_branches()
@@ -105,8 +105,7 @@ class BranchDetector:
 
     def _load_fallback_branches(self):
         """Load fallback branch names when registry is unavailable"""
-        fallback = ['SEEDGO', 'CLI', 'FLOW', 'PRAX', 'DRONE',
-                   'BACKUP', 'SECURITY', 'AIPASS']
+        fallback = ["SEEDGO", "CLI", "FLOW", "PRAX", "DRONE", "BACKUP", "SECURITY", "AIPASS"]
         self.known_branches.update(fallback)
         logger.info(f"Using fallback branches: {fallback}")
 
@@ -119,14 +118,14 @@ class BranchDetector:
         Returns:
             Name from registry file stem (e.g., 'VERA-STUDIO') or uppercased dir name
         """
-        for base in [Path.home() / 'Projects']:
+        for base in [Path.home() / "Projects"]:
             project_dir = base / project_part
             if not project_dir.exists():
                 continue
             try:
                 for item in project_dir.iterdir():
-                    if item.is_file() and item.name.endswith('_REGISTRY.json'):
-                        return item.stem.replace('_REGISTRY', '')
+                    if item.is_file() and item.name.endswith("_REGISTRY.json"):
+                        return item.stem.replace("_REGISTRY", "")
             except (OSError, PermissionError) as e:
                 logger.info(f"[branch_detector] Cannot read project dir {project_dir}: {e}")
             return project_part.upper()
@@ -146,27 +145,27 @@ class BranchDetector:
             (project_name, agent_name) -- agent_name is None if no src subdir
             Returns (None, None) if cannot parse.
         """
-        if not encoded_folder.startswith('-'):
+        if not encoded_folder.startswith("-"):
             return None, None
 
         name = encoded_folder[1:]  # strip leading dash
 
         # Find -Projects- boundary
-        sep = '-projects-'
+        sep = "-projects-"
         idx = name.lower().find(sep)
         if idx < 0:
             return None, None
 
         # Everything after -projects- is our target
-        after = name[idx + len(sep):]
+        after = name[idx + len(sep) :]
 
         # Split on -src- to separate project from agent subdirectory
-        src_sep = '-src-'
+        src_sep = "-src-"
         src_idx = after.lower().find(src_sep)
 
         if src_idx >= 0:
             project_part = after[:src_idx]
-            agent_part = after[src_idx + len(src_sep):]
+            agent_part = after[src_idx + len(src_sep) :]
         else:
             project_part = after
             agent_part = None
@@ -188,29 +187,29 @@ class BranchDetector:
         - External project main session: 'VERA-STUDIO'
         Sub-agents append ' SUB' to the agent/branch segment.
         """
-        projects_idx = path_str.index('.claude/projects/') + len('.claude/projects/')
+        projects_idx = path_str.index(".claude/projects/") + len(".claude/projects/")
         remaining = path_str[projects_idx:]
-        project_folder = remaining.split('/')[0]
-        is_subagent = '/subagents/' in path_str
-        sub_suffix = ' SUB' if is_subagent else ''
+        project_folder = remaining.split("/")[0]
+        is_subagent = "/subagents/" in path_str
+        sub_suffix = " SUB" if is_subagent else ""
 
         folder_lower = project_folder.lower()
 
         # Internal AIPass: path contains -projects-aipass-src-aipass-
-        if '-projects-aipass-src-aipass-' in folder_lower:
+        if "-projects-aipass-src-aipass-" in folder_lower:
             # Strip leading dash before decode — avoids double slash and preserves
             # normalization that treats - and _ as equivalent (handles ai_mail→ai-mail).
-            name_part = project_folder[1:] if project_folder.startswith('-') else project_folder
-            project_path = '/' + name_part.replace('-', '/')
+            name_part = project_folder[1:] if project_folder.startswith("-") else project_folder
+            project_path = "/" + name_part.replace("-", "/")
             for registered_path, branch_name in self.branch_map.items():
-                reg_norm = registered_path.replace('_', '/')
-                proj_norm = project_path.replace('_', '/')
+                reg_norm = registered_path.replace("_", "/")
+                proj_norm = project_path.replace("_", "/")
                 if reg_norm == proj_norm or registered_path == project_path:
                     return f"AIPASS/{branch_name}{sub_suffix}"
             # Fallback: scan segments for known branch names (handles multi-word: ai_mail)
-            segs = [s for s in project_folder.split('-') if s]
+            segs = [s for s in project_folder.split("-") if s]
             for n in range(min(3, len(segs)), 0, -1):
-                candidate = '_'.join(segs[-n:]).upper()
+                candidate = "_".join(segs[-n:]).upper()
                 if candidate in self.known_branches:
                     return f"AIPASS/{candidate}{sub_suffix}"
             if segs:
@@ -228,11 +227,11 @@ class BranchDetector:
                 return project_name
 
         # Old fallback: segment scanning for known branch names
-        segments = [s for s in project_folder.split('-') if s]
+        segments = [s for s in project_folder.split("-") if s]
         if not segments:
             return None
         for i in range(len(segments) - 1, 0, -1):
-            candidate = '_'.join(segments[i:]).upper()
+            candidate = "_".join(segments[i:]).upper()
             if candidate in self.known_branches:
                 return candidate
         last = segments[-1].upper()
@@ -243,8 +242,8 @@ class BranchDetector:
     def _detect_from_compound_parts(self, path_parts: list) -> Optional[str]:
         """Check compound path parts for known branch names."""
         for part in path_parts:
-            if '_' in part:
-                for subpart in part.split('_'):
+            if "_" in part:
+                for subpart in part.split("_"):
                     branch_upper = subpart.upper()
                     if branch_upper in self.known_branches:
                         return branch_upper
@@ -259,7 +258,7 @@ class BranchDetector:
 
         Returns labels like 'AIPL/POLYGLOT', 'VERA-STUDIO', 'AIPL/POLYGLOT TESTS'.
         """
-        projects_base = Path.home() / 'Projects'
+        projects_base = Path.home() / "Projects"
         try:
             rel = path.relative_to(projects_base)
         except ValueError:
@@ -273,7 +272,7 @@ class BranchDetector:
         project_dir_name = parts[0]
 
         # Skip AIPass — handled by registry/branch_map (Strategy 2)
-        if project_dir_name.lower() == 'aipass':
+        if project_dir_name.lower() == "aipass":
             return None
 
         # Look up project name (cached)
@@ -284,8 +283,8 @@ class BranchDetector:
             project_name = None
             try:
                 for item in project_dir.iterdir():
-                    if item.is_file() and item.name.endswith('_REGISTRY.json'):
-                        project_name = item.stem.replace('_REGISTRY', '')
+                    if item.is_file() and item.name.endswith("_REGISTRY.json"):
+                        project_name = item.stem.replace("_REGISTRY", "")
                         break
             except (OSError, PermissionError) as e:
                 logger.info(f"[branch_detector] Cannot scan project dir {project_dir}: {e}")
@@ -295,14 +294,18 @@ class BranchDetector:
 
         # Extract agent from path: {project}/src/{agent}/...
         agent_name = None
-        if len(parts) > 2 and parts[1].lower() == 'src':
+        if len(parts) > 2 and parts[1].lower() == "src":
             agent_name = parts[2].upper()
 
         # Append TESTS suffix when path is clearly test output
-        path_str_lower = str(path).replace('\\', '/').lower()
-        is_test = ('/tests/' in path_str_lower or '/test_' in path_str_lower
-                   or path_str_lower.endswith('_test.py') or path_str_lower.endswith('_test.log'))
-        test_suffix = ' TESTS' if is_test else ''
+        path_str_lower = str(path).replace("\\", "/").lower()
+        is_test = (
+            "/tests/" in path_str_lower
+            or "/test_" in path_str_lower
+            or path_str_lower.endswith("_test.py")
+            or path_str_lower.endswith("_test.log")
+        )
+        test_suffix = " TESTS" if is_test else ""
 
         if agent_name:
             return f"{project_name}/{agent_name}{test_suffix}"
@@ -310,14 +313,14 @@ class BranchDetector:
 
     def _extract_branch_from_central(self, path_str: str, path: Path) -> Optional[str]:
         """Extract branch name from ai_mail central filename patterns."""
-        if not ('AI_MAIL' in path_str or '.ai_mail' in path_str or 'ai_mail' in path_str.lower()):
+        if not ("AI_MAIL" in path_str or ".ai_mail" in path_str or "ai_mail" in path_str.lower()):
             return None
 
         name = path.name
-        if '.central.json' in name:
-            return name.replace('.central.json', '').upper()
-        if '_central.json' in name:
-            return name.replace('_central.json', '').upper()
+        if ".central.json" in name:
+            return name.replace(".central.json", "").upper()
+        if "_central.json" in name:
+            return name.replace("_central.json", "").upper()
         return None
 
     def detect_from_path(self, file_path: str) -> str:
@@ -342,7 +345,7 @@ class BranchDetector:
             # Normalize to forward slashes for all string-based pattern matching.
             # Path.resolve() returns OS-native separators (backslashes on Windows), which
             # breaks every hardcoded '/' check. branch_map lookups still use path_str (OS-native).
-            path_str_fwd = path_str.replace('\\', '/')
+            path_str_fwd = path_str.replace("\\", "/")
 
             # Check cache first
             if path_str in self.log_map:
@@ -353,13 +356,12 @@ class BranchDetector:
             # absolute paths, so Strategy 2 would return bare 'POLYGLOT' before we can
             # add the project prefix. Check external paths first to return 'AIPL/POLYGLOT TESTS'.
             _repo_root = self._find_repo_root()
-            _projects_base = Path.home() / 'Projects'
+            _projects_base = Path.home() / "Projects"
             _path_str_lower = path_str_fwd.lower()
-            _projects_str = str(_projects_base).replace('\\', '/').lower()
-            _repo_str = str(_repo_root).replace('\\', '/').lower()
-            _is_external = (
-                _path_str_lower.startswith(_projects_str + '/')
-                and not _path_str_lower.startswith(_repo_str + '/')
+            _projects_str = str(_projects_base).replace("\\", "/").lower()
+            _repo_str = str(_repo_root).replace("\\", "/").lower()
+            _is_external = _path_str_lower.startswith(_projects_str + "/") and not _path_str_lower.startswith(
+                _repo_str + "/"
             )
 
             if _is_external:
@@ -390,7 +392,7 @@ class BranchDetector:
                     return result
 
             # Strategy 3: Claude Code project files
-            if '.claude/projects/' in path_str_fwd:
+            if ".claude/projects/" in path_str_fwd:
                 result = self._detect_from_claude_project(path_str_fwd)
                 if result:
                     self.log_map[path_str] = result
@@ -404,12 +406,12 @@ class BranchDetector:
 
             # Strategy 5: Root-level system files (repo root or .claude under it)
             repo_root = self._find_repo_root()
-            if path.parent == repo_root or path.parent == repo_root / '.claude':
-                self.log_map[path_str] = 'SYSTEM'
-                return 'SYSTEM'
+            if path.parent == repo_root or path.parent == repo_root / ".claude":
+                self.log_map[path_str] = "SYSTEM"
+                return "SYSTEM"
 
             # Strategy 6: Parse path for known branch names
-            path_parts = path_str_fwd.lower().split('/')
+            path_parts = path_str_fwd.lower().split("/")
             for part in path_parts:
                 branch_upper = part.upper()
                 if branch_upper in self.known_branches:
@@ -424,11 +426,11 @@ class BranchDetector:
 
             # No match found
             logger.info(f"Could not detect branch for path: {file_path}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
         except Exception as e:
             logger.error(f"Error detecting branch from path {file_path}: {e}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
     def detect_from_log(self, log_file: str) -> str:
         """
@@ -457,7 +459,7 @@ class BranchDetector:
             # Check known branches first (longest match wins)
             # Handles compound names like ai_mail, backup, memory
             for branch_name in sorted(self.known_branches, key=len, reverse=True):
-                prefix = branch_name.lower() + '_'
+                prefix = branch_name.lower() + "_"
                 if name.lower().startswith(prefix) or name.lower() == branch_name.lower():
                     self.log_map[name] = branch_name
                     return branch_name
@@ -465,12 +467,12 @@ class BranchDetector:
             # Full path: use path detection before falling back to stem splitting.
             # This ensures ai_mail/logs/mail_*.log resolves to AI_MAIL via branch_map
             # rather than returning a truncated stem like MAIL.
-            if '/' in log_file:
+            if "/" in log_file:
                 return self.detect_from_path(log_file)
 
             # Bare filename: fallback to stem splitting
-            if '_' in name:
-                parts = name.split('_')
+            if "_" in name:
+                parts = name.split("_")
                 first_part = parts[0].upper()
                 self.log_map[name] = first_part
                 return first_part
@@ -482,11 +484,11 @@ class BranchDetector:
                 return name_upper
 
             logger.info(f"Could not detect branch from log: {log_file}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
         except Exception as e:
             logger.info(f"Error detecting branch from log {log_file}: {e}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
     def detect_from_module(self, dotted_name: str) -> str:
         """
@@ -508,7 +510,7 @@ class BranchDetector:
                 return self.module_map[dotted_name]
 
             # Split on dots and check first part
-            parts = dotted_name.split('.')
+            parts = dotted_name.split(".")
             if parts:
                 first_part = parts[0].upper()
 
@@ -517,11 +519,11 @@ class BranchDetector:
                     return first_part
 
             logger.info(f"Could not detect branch from module: {dotted_name}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
         except Exception as e:
             logger.error(f"Error detecting branch from module {dotted_name}: {e}")
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
     def reload_registry(self):
         """
@@ -545,10 +547,10 @@ class BranchDetector:
             Dictionary with cache sizes
         """
         return {
-            'branch_paths': len(self.branch_map),
-            'cached_lookups': len(self.log_map),
-            'cached_modules': len(self.module_map),
-            'known_branches': len(self.known_branches)
+            "branch_paths": len(self.branch_map),
+            "cached_lookups": len(self.log_map),
+            "cached_modules": len(self.module_map),
+            "known_branches": len(self.known_branches),
         }
 
 
@@ -600,7 +602,7 @@ def reload_registry():
     get_detector().reload_registry()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Quick test
     detector = BranchDetector()
 

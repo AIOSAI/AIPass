@@ -27,6 +27,7 @@ from aipass.cli.apps.modules import display
 # Helpers
 # =============================================================================
 
+
 def _make_capture_console():
     """Return (console, get_output) for capturing Rich output.
 
@@ -45,15 +46,18 @@ def _make_capture_console():
 # main() flow tests — mock sys.argv to simulate CLI invocation
 # =============================================================================
 
+
 class TestMainFlow:
     """Integration tests for the main() entry point."""
 
     def test_main_no_args_returns_zero(self):
         """No args shows introspection and returns 0."""
         cons, _get_output = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch("sys.argv", ["cli"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch("sys.argv", ["cli"]),
+        ):
             result = main()
         assert result == 0
 
@@ -61,21 +65,25 @@ class TestMainFlow:
         """--help returns 0."""
         cons, _get_output = _make_capture_console()
         err_cons, _get_err = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True), \
-             patch("sys.argv", ["cli", "--help"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+            patch("sys.argv", ["cli", "--help"]),
+        ):
             result = main()
         assert result == 0
 
     def test_main_version_flag_returns_zero(self):
         """--version returns 0."""
         cons, get_output = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch("sys.argv", ["cli", "--version"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch("sys.argv", ["cli", "--version"]),
+        ):
             result = main()
         assert result == 0
         output = get_output()
@@ -85,10 +93,12 @@ class TestMainFlow:
         """Unknown command returns 1."""
         cons, _get_output = _make_capture_console()
         err_cons, get_err = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch("sys.argv", ["cli", "nonexistent_cmd_xyz"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch("sys.argv", ["cli", "nonexistent_cmd_xyz"]),
+        ):
             result = main()
         assert result == 1
         err_output = get_err()
@@ -98,12 +108,14 @@ class TestMainFlow:
         """'aipass init --help' returns 0."""
         cons, _get_output = _make_capture_console()
         err_cons, _get_err = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True), \
-             patch("sys.argv", ["cli", "aipass", "init", "--help"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+            patch("sys.argv", ["cli", "aipass", "init", "--help"]),
+        ):
             result = main()
         assert result == 0
 
@@ -111,13 +123,15 @@ class TestMainFlow:
         """'display demo' returns 0."""
         cons, _get_output = _make_capture_console()
         err_cons, _get_err = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True), \
-             patch("aipass.cli.apps.handlers.json.json_handler.log_operation"), \
-             patch("sys.argv", ["cli", "display", "demo"]):
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+            patch("aipass.cli.apps.handlers.json.json_handler.log_operation"),
+            patch("sys.argv", ["cli", "display", "demo"]),
+        ):
             result = main()
         assert result == 0
 
@@ -125,6 +139,7 @@ class TestMainFlow:
 # =============================================================================
 # __main__.py test — verify module is runnable
 # =============================================================================
+
 
 class TestModuleRunnable:
     """Verify python -m aipass.cli works as a subprocess."""
@@ -143,9 +158,11 @@ class TestModuleRunnable:
     def test_cli_entry_callable(self):
         """cli_entry() is the console_scripts entry point — verify it's callable."""
         cons, _get_output = _make_capture_console()
-        with patch.object(cli_module, "CONSOLE", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch("sys.argv", ["aipass", "--version"]), \
-             pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(cli_module, "CONSOLE", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch("sys.argv", ["aipass", "--version"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             cli_entry()
         assert exc_info.value.code == 0

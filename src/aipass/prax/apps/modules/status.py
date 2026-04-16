@@ -42,7 +42,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command was handled
     """
-    if command != 'status':
+    if command != "status":
         return False
 
     # --- sub-command routing ------------------------------------------------

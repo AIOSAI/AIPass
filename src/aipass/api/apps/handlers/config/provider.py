@@ -34,31 +34,21 @@ PROVIDER_DEFAULTS = {
         "api_key": "",
         "base_url": "https://openrouter.ai/api/v1",
         "temperature": 0.7,
-        "timeout_seconds": 30
+        "timeout_seconds": 30,
     },
-    "openai": {
-        "api_key": "",
-        "base_url": "https://api.openai.com/v1",
-        "temperature": 0.7,
-        "timeout_seconds": 30
-    }
+    "openai": {"api_key": "", "base_url": "https://api.openai.com/v1", "temperature": 0.7, "timeout_seconds": 30},
 }
 
 # Provider validation rules
 VALIDATION_RULES = {
-    "openrouter": {
-        "prefix": "sk-or-v1-",
-        "min_length": 40
-    },
-    "openai": {
-        "prefix": "sk-",
-        "min_length": 40
-    }
+    "openrouter": {"prefix": "sk-or-v1-", "min_length": 40},
+    "openai": {"prefix": "sk-", "min_length": 40},
 }
 
 # =============================================
 # CONFIGURATION MERGING
 # =============================================
+
 
 def merge_configs(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -99,6 +89,7 @@ def merge_configs(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, An
 # VALIDATION HELPERS
 # =============================================
 
+
 def get_validation_rules(provider: str) -> Optional[Dict[str, Any]]:
     """
     Get validation rules for provider
@@ -113,5 +104,3 @@ def get_validation_rules(provider: str) -> Optional[Dict[str, Any]]:
     if rules is None:
         logger.info(f"No validation rules found for provider: {provider}")
     return rules
-
-

@@ -43,9 +43,7 @@ def _build_fake_branch(tmp_path: Path, branch_name: str = "fakebranch") -> Path:
             {"email": f"@{branch_name}", "path": str(branch_path)},
         ]
     }
-    (tmp_path / "AIPASS_REGISTRY.json").write_text(
-        json.dumps(registry), encoding='utf-8'
-    )
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
     return branch_path
 
 
@@ -53,7 +51,7 @@ def _write_lock(branch_path: Path, pid: int) -> Path:
     """Write a fake .dispatch.lock and return its path."""
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
     lock_data = {"pid": pid, "timestamp": "2026-04-14T00:00:00", "branch": str(branch_path)}
-    lock_file.write_text(json.dumps(lock_data), encoding='utf-8')
+    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
     return lock_file
 
 
@@ -104,9 +102,7 @@ def test_watch_agent_completed_via_lock_removal(monkeypatch, tmp_path):
 
     monkeypatch.setattr(agent_handler.time, "sleep", fake_sleep)
 
-    result = agent_handler.watch_agent(
-        "@fakebranch", timeout_seconds=5, poll_interval=0.01
-    )
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
     assert result["woke"] is True
     assert result["agent_state"] == "completed"
@@ -125,15 +121,13 @@ def test_watch_agent_crashed_via_bounce_file(monkeypatch, tmp_path):
 
     def fake_sleep(seconds):
         """Drop a bounce file then remove the lock to simulate crash exit."""
-        bounce_file.write_text(json.dumps({"exit_code": 1, "reason": "test"}), encoding='utf-8')
+        bounce_file.write_text(json.dumps({"exit_code": 1, "reason": "test"}), encoding="utf-8")
         lock_file.unlink(missing_ok=True)
         real_sleep(0.01)
 
     monkeypatch.setattr(agent_handler.time, "sleep", fake_sleep)
 
-    result = agent_handler.watch_agent(
-        "@fakebranch", timeout_seconds=5, poll_interval=0.01
-    )
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
     assert result["woke"] is True
     assert result["agent_state"] == "crashed"
@@ -147,9 +141,7 @@ def test_watch_agent_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
     monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
 
-    result = agent_handler.watch_agent(
-        "@fakebranch", timeout_seconds=1, poll_interval=0.05
-    )
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=1, poll_interval=0.05)
 
     assert result["woke"] is False
     assert result["agent_state"] == "timeout"
@@ -164,9 +156,7 @@ def test_watch_agent_pid_dead_treated_as_crash(monkeypatch, tmp_path):
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
     monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: False)
 
-    result = agent_handler.watch_agent(
-        "@fakebranch", timeout_seconds=5, poll_interval=0.01
-    )
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
     assert result["woke"] is True
     assert result["agent_state"] == "crashed"
@@ -175,8 +165,13 @@ def test_watch_agent_pid_dead_treated_as_crash(monkeypatch, tmp_path):
 def test_watch_agent_return_keys():
     """Every code path must return all expected keys (Phase 4 adds ``handle``)."""
     expected = {
-        "woke", "reason", "elapsed", "agent_state",
-        "exit_code", "agent_id", "handle",
+        "woke",
+        "reason",
+        "elapsed",
+        "agent_state",
+        "exit_code",
+        "agent_id",
+        "handle",
     }
     # Use the not-found path for a fast invocation
     result = agent_handler.watch_agent("@__definitely_not_a_branch__", timeout_seconds=1)
@@ -202,9 +197,10 @@ def test_watch_agent_live_dispatch_completes():
     import subprocess
 
     dispatch = subprocess.run(
-        ["drone", "@ai_mail", "dispatch", "@drone",
-         "Watchdog ping test", "Reply with OK then exit."],
-        capture_output=True, text=True, timeout=60,
+        ["drone", "@ai_mail", "dispatch", "@drone", "Watchdog ping test", "Reply with OK then exit."],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert dispatch.returncode == 0, f"dispatch failed: {dispatch.stderr}"
 
@@ -223,9 +219,10 @@ def test_watch_agent_live_dispatch_timeout_path():
     import subprocess
 
     subprocess.run(
-        ["drone", "@ai_mail", "dispatch", "@drone",
-         "Long watchdog test", "Wait at least 30 seconds then reply."],
-        capture_output=True, text=True, timeout=60,
+        ["drone", "@ai_mail", "dispatch", "@drone", "Long watchdog test", "Wait at least 30 seconds then reply."],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     result = agent_handler.watch_agent("@drone", timeout_seconds=2, poll_interval=0.5)

@@ -27,7 +27,7 @@ from aipass.trigger.apps.handlers.watchers.log_watcher import (
     start_log_watcher,
     stop_log_watcher,
     is_log_watcher_active,
-    SYSTEM_LOGS_DIR
+    SYSTEM_LOGS_DIR,
 )
 
 
@@ -38,6 +38,7 @@ def print_introspection():
     except ImportError:
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -92,10 +93,7 @@ def status() -> dict:
             'log_dir': str
         }
     """
-    return {
-        'active': is_log_watcher_active(),
-        'log_dir': str(SYSTEM_LOGS_DIR)
-    }
+    return {"active": is_log_watcher_active(), "log_dir": str(SYSTEM_LOGS_DIR)}
 
 
 def print_help() -> None:
@@ -143,7 +141,7 @@ def handle_command(command: str, args: list) -> bool:
         if not args:
             print_introspection()
             return True
-        if args[0] in ['--help', '-h', 'help']:
+        if args[0] in ["--help", "-h", "help"]:
             print_help()
             return True
         return handle_command(args[0], args[1:])
@@ -151,7 +149,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["start", "stop", "status"]:
         return False
 
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -177,12 +175,12 @@ def handle_command(command: str, args: list) -> bool:
 if __name__ == "__main__":
     import argparse
 
-    if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    parser = argparse.ArgumentParser(description='Log Events Module')
-    parser.add_argument('command', choices=['start', 'stop', 'status'])
+    parser = argparse.ArgumentParser(description="Log Events Module")
+    parser.add_argument("command", choices=["start", "stop", "status"])
     parsed_args = parser.parse_args()
 
     handle_command(parsed_args.command, sys.argv[2:])

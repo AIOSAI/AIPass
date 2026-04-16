@@ -29,7 +29,7 @@ from aipass.trigger.apps.handlers.log_watcher import (
     start_branch_log_watcher,
     stop_branch_log_watcher,
     get_watcher_status,
-    clear_seen_hashes
+    clear_seen_hashes,
 )
 from aipass.trigger.apps.config import AIPASS_PKG_ROOT
 
@@ -41,6 +41,7 @@ def print_introspection():
     except ImportError:
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -162,7 +163,7 @@ def handle_command(command: str, args: list) -> bool:
         if not args:
             print_introspection()
             return True
-        if args[0] in ['--help', '-h', 'help']:
+        if args[0] in ["--help", "-h", "help"]:
             print_help()
             return True
         subcommand = args[0]
@@ -170,7 +171,7 @@ def handle_command(command: str, args: list) -> bool:
         return handle_command(subcommand, remaining)
 
     # Help gate — catch --help passed as direct command
-    if command in ['--help', '-h', 'help']:
+    if command in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -178,7 +179,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["start", "stop", "status", "reset"]:
         return False
 
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -211,12 +212,12 @@ def handle_command(command: str, args: list) -> bool:
 if __name__ == "__main__":
     import argparse
 
-    if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    parser = argparse.ArgumentParser(description='Branch Log Events Module')
-    parser.add_argument('command', choices=['start', 'stop', 'status', 'reset'])
+    parser = argparse.ArgumentParser(description="Branch Log Events Module")
+    parser.add_argument("command", choices=["start", "stop", "status", "reset"])
     parsed_args = parser.parse_args()
 
     handle_command(parsed_args.command, sys.argv[2:])

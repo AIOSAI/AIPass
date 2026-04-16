@@ -29,6 +29,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # CONSTANTS
 # =============================================================================
 
+
 def _find_registry() -> Path:
     """Find AIPASS_REGISTRY.json by walking up from this file's location."""
     current = Path(__file__).resolve().parent
@@ -38,23 +39,25 @@ def _find_registry() -> Path:
             return candidate
     return Path.cwd() / "AIPASS_REGISTRY.json"
 
+
 REGISTRY_PATH = _find_registry()
 # Generator lives in same handlers/standards/ directory as this file
 GENERATOR_PATH = Path(__file__).resolve().parent / "readme_generator.py"
 
 # Section display names for output
 SECTION_NAMES = {
-    'tree': 'TREE',
-    'modules': 'MODULES',
-    'commands': 'COMMANDS',
-    'header': 'HEADER',
-    'last_updated': 'LAST_UPDATED',
+    "tree": "TREE",
+    "modules": "MODULES",
+    "commands": "COMMANDS",
+    "header": "HEADER",
+    "last_updated": "LAST_UPDATED",
 }
 
 
 # =============================================================================
 # BRANCH RESOLUTION
 # =============================================================================
+
 
 def resolve_branch(branch_arg: str) -> Optional[Dict]:
     """
@@ -70,22 +73,22 @@ def resolve_branch(branch_arg: str) -> Optional[Dict]:
         return None
 
     try:
-        content = REGISTRY_PATH.read_text(encoding='utf-8')
+        content = REGISTRY_PATH.read_text(encoding="utf-8")
         registry = json.loads(content)
     except (json.JSONDecodeError, OSError):
         logger.info("Cannot read registry for branch resolution: %s", REGISTRY_PATH)
         return None
 
     # Strip @ prefix and normalize
-    name = branch_arg.lstrip('@').upper()
+    name = branch_arg.lstrip("@").upper()
 
-    for branch in registry.get('branches', []):
-        if branch.get('name', '').upper() == name:
+    for branch in registry.get("branches", []):
+        if branch.get("name", "").upper() == name:
             return branch
         # Also check aliases
-        aliases = branch.get('aliases', [])
+        aliases = branch.get("aliases", [])
         for alias in aliases:
-            if alias.lstrip('@').upper() == name:
+            if alias.lstrip("@").upper() == name:
                 return branch
 
     return None
@@ -102,9 +105,9 @@ def get_all_branches() -> List[Dict]:
         return []
 
     try:
-        content = REGISTRY_PATH.read_text(encoding='utf-8')
+        content = REGISTRY_PATH.read_text(encoding="utf-8")
         registry = json.loads(content)
-        return registry.get('branches', [])
+        return registry.get("branches", [])
     except (json.JSONDecodeError, OSError):
         logger.info("Cannot read registry for branch listing: %s", REGISTRY_PATH)
         return []
@@ -113,6 +116,7 @@ def get_all_branches() -> List[Dict]:
 # =============================================================================
 # GENERATOR LOADER
 # =============================================================================
+
 
 def load_generator():
     """
@@ -125,10 +129,7 @@ def load_generator():
         return None
 
     try:
-        spec = importlib.util.spec_from_file_location(
-            "readme_generator",
-            str(GENERATOR_PATH)
-        )
+        spec = importlib.util.spec_from_file_location("readme_generator", str(GENERATOR_PATH))
         if spec is None or spec.loader is None:
             return None
         generator = importlib.util.module_from_spec(spec)
@@ -142,6 +143,7 @@ def load_generator():
 # =============================================================================
 # TARGET RESOLUTION
 # =============================================================================
+
 
 def resolve_targets(args: List[str]) -> tuple:
     """
@@ -164,7 +166,7 @@ def resolve_targets(args: List[str]) -> tuple:
     json_handler.log_operation("readme_ops_executed", {"target": target})
 
     # Handle @all
-    if target.lstrip('@').lower() == 'all':
+    if target.lstrip("@").lower() == "all":
         branches = get_all_branches()
         if not branches:
             return [], "no_branches"

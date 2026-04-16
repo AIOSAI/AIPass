@@ -24,13 +24,12 @@ import pytest
 # FIXTURES
 # =============================================
 
+
 @pytest.fixture()
 def mock_ignore_patterns(monkeypatch):
     """Mock the ignore_patterns config module in sys.modules."""
     mock_mod = MagicMock()
-    mock_mod.load_ignore_patterns_from_config = MagicMock(
-        return_value={'.git', '__pycache__', '.venv', 'node_modules'}
-    )
+    mock_mod.load_ignore_patterns_from_config = MagicMock(return_value={".git", "__pycache__", ".venv", "node_modules"})
     monkeypatch.setitem(
         sys.modules,
         "aipass.prax.apps.handlers.config.ignore_patterns",
@@ -45,12 +44,8 @@ def mock_config_load(monkeypatch, tmp_path):
     mock_mod = MagicMock()
     mock_mod.PRAX_ROOT = tmp_path / "prax"
     mock_mod.ECOSYSTEM_ROOT = tmp_path
-    mock_mod.get_system_logs_dir = MagicMock(
-        return_value=tmp_path / "system_logs"
-    )
-    mock_mod.get_module_logs_dir = MagicMock(
-        return_value=tmp_path / "logs"
-    )
+    mock_mod.get_system_logs_dir = MagicMock(return_value=tmp_path / "system_logs")
+    mock_mod.get_module_logs_dir = MagicMock(return_value=tmp_path / "logs")
     monkeypatch.setitem(
         sys.modules,
         "aipass.prax.apps.handlers.config.load",
@@ -66,6 +61,7 @@ def filtering_module(mock_ignore_patterns, mock_prax_infrastructure):
     if mod_name in sys.modules:
         return importlib.reload(sys.modules[mod_name])
     import aipass.prax.apps.handlers.discovery.filtering as mod
+
     return mod
 
 
@@ -81,12 +77,14 @@ def scanner_module(mock_ignore_patterns, mock_config_load, mock_prax_infrastruct
     if mod_name in sys.modules:
         return importlib.reload(sys.modules[mod_name])
     import aipass.prax.apps.handlers.discovery.scanner as mod
+
     return mod
 
 
 # =============================================
 # should_ignore_path TESTS
 # =============================================
+
 
 class TestShouldIgnorePath:
     """Tests for filtering.should_ignore_path."""
@@ -145,6 +143,7 @@ class TestShouldIgnorePath:
 # =============================================
 # scan_directory_safely TESTS
 # =============================================
+
 
 class TestScanDirectorySafely:
     """Tests for scanner.scan_directory_safely."""
@@ -233,9 +232,14 @@ class TestScanDirectorySafely:
         assert "mymod" in modules
         meta = modules["mymod"]
         expected_keys = {
-            "file_path", "relative_path", "system_log_file",
-            "log_file", "discovered_time", "size",
-            "modified_time", "enabled",
+            "file_path",
+            "relative_path",
+            "system_log_file",
+            "log_file",
+            "discovered_time",
+            "size",
+            "modified_time",
+            "enabled",
         }
         assert expected_keys.issubset(meta.keys())
         assert meta["enabled"] is True
@@ -259,6 +263,7 @@ class TestScanDirectorySafely:
 # =============================================
 # discover_python_modules TESTS
 # =============================================
+
 
 class TestDiscoverPythonModules:
     """Tests for scanner.discover_python_modules."""

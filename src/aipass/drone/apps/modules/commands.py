@@ -54,6 +54,7 @@ __all__ = [
 # Standard module interface
 # ---------------------------------------------------------------------------
 
+
 def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
     """Route commands subcommands to handler functions.
 
@@ -90,9 +91,9 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         cmd_args: list[str] = []
         for arg in extra:
             if arg.startswith("--desc="):
-                description = arg[len("--desc="):]
+                description = arg[len("--desc=") :]
             elif arg.startswith("--branch="):
-                source_branch = arg[len("--branch="):]
+                source_branch = arg[len("--branch=") :]
             else:
                 cmd_args.append(arg)
 
@@ -130,7 +131,10 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return False
         result = lookup(args[0])
         if result:
-            console.print("  %s -> %s %s %s" % (result["name"], result["target"], result["command"], " ".join(result.get("args", []))))
+            console.print(
+                "  %s -> %s %s %s"
+                % (result["name"], result["target"], result["command"], " ".join(result.get("args", [])))
+            )
         else:
             logger.warning("  Command '%s' not found", args[0])
             return False
@@ -147,6 +151,7 @@ def print_introspection() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -167,6 +172,7 @@ def print_help() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print("commands -- Custom command shortcuts")
@@ -181,6 +187,7 @@ def print_help() -> None:
 # ---------------------------------------------------------------------------
 # Delegated operations
 # ---------------------------------------------------------------------------
+
 
 def add(
     name: str,

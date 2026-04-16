@@ -54,9 +54,9 @@ def append_footer(message: str) -> str:
 
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EMAIL FOOTER HANDLER")
-    print("="*70)
+    print("=" * 70)
     print("\nPURPOSE:")
     print("  Generates standard footer for all outgoing emails")
     print()
@@ -77,4 +77,4 @@ if __name__ == "__main__":
     print("  from ai_mail.apps.handlers.email.footer import append_footer")
     print("  from ai_mail.apps.handlers.email.footer import get_footer")
     print()
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")

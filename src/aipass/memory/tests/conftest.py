@@ -7,6 +7,7 @@
 # =============================================
 
 """Shared pytest fixtures for memory tests."""
+
 import os
 import tempfile
 
@@ -99,12 +100,10 @@ def sample_memory_data() -> dict:
             "managed_by": "TEST",
             "tags": ["test"],
             "limits": {"max_sessions": 20, "max_key_learnings": 25},
-            "status": {"health": "healthy", "current_lines": 50}
+            "status": {"health": "healthy", "current_lines": 50},
         },
         "key_learnings": {"test_learning": "This is a test."},
-        "sessions": [
-            {"session_number": 1, "date": "2026-01-01", "summary": "Test session", "status": "completed"}
-        ]
+        "sessions": [{"session_number": 1, "date": "2026-01-01", "summary": "Test session", "status": "completed"}],
     }
 
 
@@ -118,15 +117,15 @@ def sample_registry_data() -> dict:
                 "path": "src/aipass/test_branch",
                 "module": "aipass.test_branch",
                 "email": "@test_branch",
-                "status": "active"
+                "status": "active",
             },
             {
                 "name": "MEMORY",
                 "path": "src/aipass/memory",
                 "module": "aipass.memory",
                 "email": "@memory",
-                "status": "active"
-            }
+                "status": "active",
+            },
         ]
     }
 
@@ -138,15 +137,21 @@ def temp_branch(tmp_path, sample_memory_data):
     trinity = branch_dir / ".trinity"
     trinity.mkdir(parents=True)
     (trinity / "local.json").write_text(json.dumps(sample_memory_data, indent=2), encoding="utf-8")
-    (trinity / "passport.json").write_text(json.dumps({
-        "branch_info": {"branch_name": "test_branch", "path": "src/aipass/test_branch"},
-        "identity": {"role": "test", "purpose": "testing"},
-        "citizenship": {"registered": True}
-    }, indent=2), encoding="utf-8")
-    (trinity / "observations.json").write_text(json.dumps({
-        "document_metadata": {"document_type": "collaboration_patterns"},
-        "observations": []
-    }, indent=2), encoding="utf-8")
+    (trinity / "passport.json").write_text(
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "test_branch", "path": "src/aipass/test_branch"},
+                "identity": {"role": "test", "purpose": "testing"},
+                "citizenship": {"registered": True},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (trinity / "observations.json").write_text(
+        json.dumps({"document_metadata": {"document_type": "collaboration_patterns"}, "observations": []}, indent=2),
+        encoding="utf-8",
+    )
     return branch_dir
 
 

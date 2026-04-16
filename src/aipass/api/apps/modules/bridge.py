@@ -12,6 +12,7 @@ Contracts are string names (e.g. "memory", "search") that map to driver function
 Drivers register themselves; callers resolve by name.
 Bridge itself is stateless beyond the registry dict — no threading, no startup side effects.
 """
+
 from typing import Callable
 
 from aipass.api.apps.handlers.json import json_handler
@@ -34,6 +35,7 @@ def print_introspection() -> None:
         console.print("[dim]No contracts registered.[/dim]")
     console.print()
     json_handler.log_operation("bridge_introspection", {"contracts": contracts})
+
 
 _registry: dict[str, Callable] = {}
 

@@ -122,6 +122,7 @@ def print_introspection():
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -159,7 +160,9 @@ def route_all(
         except Exception as exc:
             logger.warning(
                 "route_all: branch '%s' failed for command '%s': %s",
-                branch_name, command, exc,
+                branch_name,
+                command,
+                exc,
             )
             results[branch_name] = CommandResult(
                 stdout="",

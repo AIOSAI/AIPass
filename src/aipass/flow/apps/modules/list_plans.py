@@ -50,10 +50,7 @@ from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.statistics import get_registry_statistics
 
 # Plan display handler
-from aipass.flow.apps.handlers.plan.display import (
-    format_plans_list,
-    format_statistics_summary
-)
+from aipass.flow.apps.handlers.plan.display import format_plans_list, format_statistics_summary
 
 # Implementation handler
 from aipass.flow.apps.handlers.plan.list_ops import list_plans_impl
@@ -67,6 +64,7 @@ MODULE_NAME = "list_plans"
 # =============================================
 # INTROSPECTION FUNCTION
 # =============================================
+
 
 def print_introspection():
     """Display module info and connected handlers"""
@@ -114,6 +112,7 @@ def print_help():
 # =============================================
 # ORCHESTRATION WORKFLOWS
 # =============================================
+
 
 def list_plans(filter_type: str = "open") -> bool:
     """
@@ -189,10 +188,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Log the operation
-    json_handler.log_operation(
-        "plans_listed",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("plans_listed", {"command": command, "args": args})
 
     # STEP 1: Parse filter argument
     filter_type = "open"  # Default to open plans
@@ -225,7 +221,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         # Handle help flag
-        if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+        if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
             print_help()
             sys.exit(0)
 
@@ -233,21 +229,18 @@ if __name__ == "__main__":
         logger.info("Prax logger connected to list_plans")
 
         # Log standalone execution
-        json_handler.log_operation(
-            "plans_listed",
-            {"command": "standalone"}
-        )
+        json_handler.log_operation("plans_listed", {"command": "standalone"})
 
         # Call handle_command
         args = sys.argv[1:] if len(sys.argv) > 1 else []
 
         # If first arg is not our command, assume it's a filter (backward compatibility)
-        if args and args[0] not in ['list', 'list_plans']:
+        if args and args[0] not in ["list", "list_plans"]:
             # First arg is filter
-            result = handle_command('list', args)
+            result = handle_command("list", args)
         else:
             # Standard command format
-            cmd = args[0] if args else 'list'
+            cmd = args[0] if args else "list"
             result = handle_command(cmd, args[1:] if len(args) > 1 else [])
 
         # Exit with appropriate code
@@ -256,6 +249,7 @@ if __name__ == "__main__":
     except BrokenPipeError:
         # Pipe closed by reader - exit cleanly
         import os
+
         logger.info(f"[{MODULE_NAME}] Broken pipe in standalone mode (stdout closed early)")
         try:
             sys.stdout.close()

@@ -16,6 +16,7 @@ No console output - follows 3-tier handler pattern.
 """
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 from pathlib import Path
@@ -27,11 +28,7 @@ from watchdog.observers import Observer as WatchdogObserver
 from watchdog.events import FileSystemEventHandler
 
 # Import from prax config
-from aipass.prax.apps.handlers.config.load import (
-    ECOSYSTEM_ROOT,
-    get_system_logs_dir,
-    get_module_logs_dir
-)
+from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_logs_dir, get_module_logs_dir
 
 # Import from prax registry handlers
 from aipass.prax.apps.handlers.registry.load import load_module_registry
@@ -44,6 +41,7 @@ from aipass.prax.apps.handlers.json import json_handler
 # Trigger integration - graceful fallback if trigger not available
 try:
     from aipass.trigger.apps.modules.core import trigger
+
     _HAS_TRIGGER = True
 except ImportError as e:
     logger.info(f"[watcher] trigger module not available, falling back: {e}")
@@ -59,7 +57,7 @@ class PythonFileWatcher(FileSystemEventHandler):
 
     def on_created(self, event):
         """Handle new file creation events"""
-        if not event.is_directory and str(event.src_path).endswith('.py'):
+        if not event.is_directory and str(event.src_path).endswith(".py"):
             py_file = Path(str(event.src_path))
 
             # Skip ignored paths
@@ -89,7 +87,7 @@ class PythonFileWatcher(FileSystemEventHandler):
                 "discovered_time": datetime.now(timezone.utc).isoformat(),
                 "size": py_file.stat().st_size,
                 "modified_time": datetime.fromtimestamp(py_file.stat().st_mtime).isoformat(),
-                "enabled": True
+                "enabled": True,
             }
 
             # Save updated registry
@@ -98,10 +96,11 @@ class PythonFileWatcher(FileSystemEventHandler):
             # Fire trigger event for module discovery
             if _HAS_TRIGGER:
                 try:
-                    trigger.fire('module_discovered',  # type: ignore[union-attr]
+                    trigger.fire(
+                        "module_discovered",  # type: ignore[union-attr]
                         module_name=module_name,
                         file_path=str(py_file),
-                        relative_path=str(relative_path)
+                        relative_path=str(relative_path),
                     )
                 except (OSError, Exception) as e:
                     logger.warning(f"[watcher] trigger.fire('module_discovered') failed for {module_name}: {e}")

@@ -105,6 +105,7 @@ def print_introspection():
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -149,17 +150,13 @@ def resolve_branch(symbolic_name: str) -> str:
         RegistryNotFoundError: If registry file missing
     """
     if not symbolic_name.startswith("@"):
-        raise BranchNotFoundError(
-            f"Branch name must use @ prefix: '@{symbolic_name}' (got '{symbolic_name}')"
-        )
+        raise BranchNotFoundError(f"Branch name must use @ prefix: '@{symbolic_name}' (got '{symbolic_name}')")
 
     name = normalize_branch_name(symbolic_name).lower()
     branch = get_branch_by_name(name)
 
     if branch is None:
-        raise BranchNotFoundError(
-            f"Branch '{symbolic_name}' not found in registry"
-        )
+        raise BranchNotFoundError(f"Branch '{symbolic_name}' not found in registry")
 
     system_logger.info("Resolved @%s → %s", name, branch["path"])
     return branch["path"]
@@ -184,9 +181,7 @@ def get_branch_info(symbolic_name: str) -> Dict[str, Any]:
     branch = registry.get("branches", {}).get(name)
 
     if branch is None:
-        raise BranchNotFoundError(
-            f"Branch '{symbolic_name}' not found in registry"
-        )
+        raise BranchNotFoundError(f"Branch '{symbolic_name}' not found in registry")
 
     return branch
 

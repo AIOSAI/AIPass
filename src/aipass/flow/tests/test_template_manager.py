@@ -103,8 +103,10 @@ class TestHandleCommandRouting:
         """'templates list' should load registry and display types."""
         mock_registry = {"types": {"flow_plans": {"prefix": "FPLAN"}}}
 
-        with patch(f"{_MOD}.load_registry", return_value=mock_registry) as mock_lr, \
-             patch(f"{_MOD}._display_registered_types") as mock_display:
+        with (
+            patch(f"{_MOD}.load_registry", return_value=mock_registry) as mock_lr,
+            patch(f"{_MOD}._display_registered_types") as mock_display,
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("templates", ["list"])
@@ -117,8 +119,7 @@ class TestHandleCommandRouting:
 
     def test_register_no_args_shows_error(self):
         """'register' with insufficient args should show usage error."""
-        with patch(f"{_MOD}.error") as mock_error, \
-             patch(f"{_MOD}.console"):
+        with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             # Note: empty args triggers introspection gate first,
@@ -131,10 +132,12 @@ class TestHandleCommandRouting:
 
     def test_register_valid_calls_add_type(self):
         """'register testing TPLAN' should call add_type."""
-        with patch(f"{_MOD}.add_type", return_value=True) as mock_add, \
-             patch(f"{_MOD}.success") as mock_success, \
-             patch(f"{_MOD}.console"), \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.add_type", return_value=True) as mock_add,
+            patch(f"{_MOD}.success") as mock_success,
+            patch(f"{_MOD}.console"),
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("register", ["testing", "TPLAN"])
@@ -145,10 +148,12 @@ class TestHandleCommandRouting:
 
     def test_register_add_type_failure(self):
         """add_type returning False should show error message."""
-        with patch(f"{_MOD}.add_type", return_value=False) as mock_add, \
-             patch(f"{_MOD}.error") as mock_error, \
-             patch(f"{_MOD}.console"), \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.add_type", return_value=False) as mock_add,
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.console"),
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("register", ["testing", "TPLAN"])
@@ -160,8 +165,7 @@ class TestHandleCommandRouting:
 
     def test_register_invalid_prefix_not_uppercase(self):
         """Prefix that is not uppercase should be rejected."""
-        with patch(f"{_MOD}.error") as mock_error, \
-             patch(f"{_MOD}.console"):
+        with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("register", ["testing", "bad"])
@@ -172,8 +176,7 @@ class TestHandleCommandRouting:
 
     def test_register_invalid_prefix_no_plan_suffix(self):
         """Prefix that doesn't end with PLAN should be rejected."""
-        with patch(f"{_MOD}.error") as mock_error, \
-             patch(f"{_MOD}.console"):
+        with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("register", ["testing", "TFIX"])
@@ -196,10 +199,12 @@ class TestHandleCommandRouting:
 
     def test_unregister_valid_calls_remove_type(self):
         """'unregister testing' should call remove_type."""
-        with patch(f"{_MOD}.remove_type", return_value=True) as mock_rm, \
-             patch(f"{_MOD}.success") as mock_success, \
-             patch(f"{_MOD}.console"), \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.remove_type", return_value=True) as mock_rm,
+            patch(f"{_MOD}.success") as mock_success,
+            patch(f"{_MOD}.console"),
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("unregister", ["testing"])
@@ -210,10 +215,12 @@ class TestHandleCommandRouting:
 
     def test_unregister_failure_shows_error(self):
         """remove_type returning False should show error."""
-        with patch(f"{_MOD}.remove_type", return_value=False) as mock_rm, \
-             patch(f"{_MOD}.error") as mock_error, \
-             patch(f"{_MOD}.console"), \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.remove_type", return_value=False) as mock_rm,
+            patch(f"{_MOD}.error") as mock_error,
+            patch(f"{_MOD}.console"),
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("unregister", ["testing"])
@@ -227,9 +234,11 @@ class TestHandleCommandRouting:
 
     def test_scan_no_unregistered_dirs(self):
         """scan with all dirs registered should show success message."""
-        with patch(f"{_MOD}.scan_unregistered", return_value=[]) as mock_scan, \
-             patch(f"{_MOD}.console") as mock_console, \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.scan_unregistered", return_value=[]) as mock_scan,
+            patch(f"{_MOD}.console") as mock_console,
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("scan", ["run"])
@@ -247,10 +256,12 @@ class TestHandleCommandRouting:
             {"dir_name": "skills_plans", "template_count": 1},
         ]
 
-        with patch(f"{_MOD}.scan_unregistered", return_value=unregistered) as mock_scan, \
-             patch(f"{_MOD}.warning") as mock_warn, \
-             patch(f"{_MOD}.console") as mock_console, \
-             patch(f"{_MOD}.json_handler"):
+        with (
+            patch(f"{_MOD}.scan_unregistered", return_value=unregistered) as mock_scan,
+            patch(f"{_MOD}.warning") as mock_warn,
+            patch(f"{_MOD}.console") as mock_console,
+            patch(f"{_MOD}.json_handler"),
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("scan", ["run"])
@@ -278,9 +289,11 @@ class TestHandleCommandRouting:
         """json_handler.log_operation should be called for templates command."""
         mock_registry = {"types": {}}
 
-        with patch(f"{_MOD}.load_registry", return_value=mock_registry), \
-             patch(f"{_MOD}._display_registered_types"), \
-             patch(f"{_MOD}.json_handler") as mock_jh:
+        with (
+            patch(f"{_MOD}.load_registry", return_value=mock_registry),
+            patch(f"{_MOD}._display_registered_types"),
+            patch(f"{_MOD}.json_handler") as mock_jh,
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("templates", ["list"])
@@ -293,9 +306,11 @@ class TestHandleCommandRouting:
 
     def test_json_handler_called_on_scan(self):
         """json_handler.log_operation should be called for scan command."""
-        with patch(f"{_MOD}.scan_unregistered", return_value=[]), \
-             patch(f"{_MOD}.console"), \
-             patch(f"{_MOD}.json_handler") as mock_jh:
+        with (
+            patch(f"{_MOD}.scan_unregistered", return_value=[]),
+            patch(f"{_MOD}.console"),
+            patch(f"{_MOD}.json_handler") as mock_jh,
+        ):
             from aipass.flow.apps.modules.template_manager import handle_command
 
             result = handle_command("scan", ["run"])

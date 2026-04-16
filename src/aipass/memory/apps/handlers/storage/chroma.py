@@ -43,6 +43,7 @@ _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 # was an internal singleton wrapper
 _chroma_clients: Dict[str, Any] = {}
 
+
 def get_client(db_path: Path):
     """
     Get or create a ChromaDB PersistentClient for the given path.
@@ -63,10 +64,7 @@ def get_client(db_path: Path):
             import chromadb
         except ImportError:
             logger.info("[chroma] chromadb not installed, vector storage unavailable")
-            raise ImportError(
-                "chromadb is required for vector storage. "
-                "Install with: pip install chromadb"
-            )
+            raise ImportError("chromadb is required for vector storage. Install with: pip install chromadb")
         db_path.mkdir(parents=True, exist_ok=True)
         _chroma_clients[path_str] = chromadb.PersistentClient(path=str(db_path))
     return _chroma_clients[path_str]
@@ -75,6 +73,7 @@ def get_client(db_path: Path):
 # =============================================================================
 # CHROMA SERVICE (Singleton)
 # =============================================================================
+
 
 class ChromaService:
     """
@@ -101,7 +100,6 @@ class ChromaService:
         self.client = get_client(db_path)
         self.db_path = db_path
 
-
     def get_collection_name(self, branch: str, memory_type: str) -> str:
         """
         Generate collection name using pattern: {branch}_{type}
@@ -115,14 +113,8 @@ class ChromaService:
         """
         return f"{branch.lower()}_{memory_type.lower()}"
 
-
     def store_vectors(
-        self,
-        branch: str,
-        memory_type: str,
-        embeddings: List,
-        documents: List[str],
-        metadatas: List[Dict[str, Any]]
+        self, branch: str, memory_type: str, embeddings: List, documents: List[str], metadatas: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
         Store vectors in branch-specific collection
@@ -143,7 +135,7 @@ class ChromaService:
         collection = self.client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine", "branch": branch, "type": memory_type},
-            embedding_function=None
+            embedding_function=None,
         )
 
         # Get existing count for ID generation
@@ -151,31 +143,17 @@ class ChromaService:
 
         # Generate unique IDs
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ids = [
-            f"{branch}_{memory_type}_{existing_count + i}_{timestamp}"
-            for i in range(len(embeddings))
-        ]
+        ids = [f"{branch}_{memory_type}_{existing_count + i}_{timestamp}" for i in range(len(embeddings))]
 
         # Convert embeddings to list format (Chroma requirement)
-        embeddings_list = [emb.tolist() if hasattr(emb, 'tolist') else emb for emb in embeddings]
+        embeddings_list = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
         # Batch insert (optimal size: 100-150)
-        collection.add(
-            embeddings=embeddings_list,
-            documents=documents,
-            metadatas=metadatas,
-            ids=ids
-        )
+        collection.add(embeddings=embeddings_list, documents=documents, metadatas=metadatas, ids=ids)
 
         new_count = collection.count()
 
-        return {
-            "collection": collection_name,
-            "count": len(embeddings),
-            "total_vectors": new_count,
-            "ids": ids
-        }
-
+        return {"collection": collection_name, "count": len(embeddings), "total_vectors": new_count, "ids": ids}
 
     def get_collection_stats(self, branch: str, memory_type: str) -> Dict[str, Any]:
         """
@@ -191,25 +169,13 @@ class ChromaService:
         collection_name = self.get_collection_name(branch, memory_type)
 
         try:
-            collection = self.client.get_collection(
-                collection_name,
-                embedding_function=None
-            )
+            collection = self.client.get_collection(collection_name, embedding_function=None)
             count = collection.count()
 
-            return {
-                "collection": collection_name,
-                "exists": True,
-                "vector_count": count
-            }
+            return {"collection": collection_name, "exists": True, "vector_count": count}
         except Exception as e:
             logger.warning(f"[chroma] Collection stats lookup failed for '{collection_name}': {e}")
-            return {
-                "collection": collection_name,
-                "exists": False,
-                "vector_count": 0
-            }
-
+            return {"collection": collection_name, "exists": False, "vector_count": 0}
 
     def list_all_collections(self) -> List[str]:
         """
@@ -262,13 +228,14 @@ def _get_service(db_path: Path | None = None) -> ChromaService:
 # PUBLIC API
 # =============================================================================
 
+
 def store_vectors(
     branch: str,
     memory_type: str,
     embeddings: List,
     documents: List[str],
     metadatas: List[Dict[str, Any]],
-    db_path: Path | None = None
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Store vectors in Chroma collection
@@ -300,35 +267,28 @@ def store_vectors(
         db_path = Path(db_path)
 
     if not embeddings:
-        return {
-            'success': True,
-            'message': 'No vectors provided',
-            'count': 0
-        }
+        return {"success": True, "message": "No vectors provided", "count": 0}
 
     if len(embeddings) != len(documents) or len(embeddings) != len(metadatas):
         return {
-            'success': False,
-            'error': f"Length mismatch: {len(embeddings)} embeddings, "
-                    f"{len(documents)} documents, {len(metadatas)} metadatas"
+            "success": False,
+            "error": f"Length mismatch: {len(embeddings)} embeddings, "
+            f"{len(documents)} documents, {len(metadatas)} metadatas",
         }
 
     try:
         service = _get_service(db_path)
         result = service.store_vectors(branch, memory_type, embeddings, documents, metadatas)
 
-        json_handler.log_operation("chroma_store_vectors", {"collection": result.get('collection'), "count": result.get('count', 0), "success": True})
-        return {
-            'success': True,
-            **result
-        }
+        json_handler.log_operation(
+            "chroma_store_vectors",
+            {"collection": result.get("collection"), "count": result.get("count", 0), "success": True},
+        )
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"[chroma] Vector storage failed: {e}")
-        return {
-            'success': False,
-            'error': f"Storage failed: {e}"
-        }
+        return {"success": False, "error": f"Storage failed: {e}"}
 
 
 def get_collection_stats(branch: str, memory_type: str) -> Dict[str, Any]:
@@ -346,17 +306,11 @@ def get_collection_stats(branch: str, memory_type: str) -> Dict[str, Any]:
         service = _get_service()
         stats = service.get_collection_stats(branch, memory_type)
 
-        return {
-            'success': True,
-            **stats
-        }
+        return {"success": True, **stats}
 
     except Exception as e:
         logger.error(f"[chroma] Failed to get collection stats: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to get stats: {e}"
-        }
+        return {"success": False, "error": f"Failed to get stats: {e}"}
 
 
 def list_all_collections() -> Dict[str, Any]:
@@ -370,18 +324,11 @@ def list_all_collections() -> Dict[str, Any]:
         service = _get_service()
         collections = service.list_all_collections()
 
-        return {
-            'success': True,
-            'collections': collections,
-            'count': len(collections)
-        }
+        return {"success": True, "collections": collections, "count": len(collections)}
 
     except Exception as e:
         logger.error(f"[chroma] Failed to list collections: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to list collections: {e}"
-        }
+        return {"success": False, "error": f"Failed to list collections: {e}"}
 
 
 def get_database_info() -> Dict[str, Any]:
@@ -396,18 +343,15 @@ def get_database_info() -> Dict[str, Any]:
         collections = service.list_all_collections()
 
         return {
-            'success': True,
-            'db_path': str(service.db_path),
-            'collections_count': len(collections),
-            'collections': collections
+            "success": True,
+            "db_path": str(service.db_path),
+            "collections_count": len(collections),
+            "collections": collections,
         }
 
     except Exception as e:
         logger.error(f"[chroma] Failed to get database info: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to get database info: {e}"
-        }
+        return {"success": False, "error": f"Failed to get database info: {e}"}
 
 
 def search_vectors(
@@ -415,7 +359,7 @@ def search_vectors(
     branch: str | None = None,
     memory_type: str | None = None,
     n_results: int = 5,
-    db_path: Path | None = None
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Search for similar vectors in Chroma collections
@@ -459,38 +403,30 @@ def search_vectors(
                 collection_names = [c for c in collection_names if c.endswith(memory_type.lower())]
 
         if not collection_names:
-            return {
-                'success': True,
-                'results': [],
-                'message': 'No matching collections found'
-            }
+            return {"success": True, "results": [], "message": "No matching collections found"}
 
         # Search each collection
         all_results = []
 
         for collection_name in collection_names:
             try:
-                collection = service.client.get_collection(
-                    collection_name,
-                    embedding_function=None
-                )
+                collection = service.client.get_collection(collection_name, embedding_function=None)
 
                 # Query collection
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=n_results
-                )
+                results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
 
                 # Format results
-                if results['documents'] and results['documents'][0]:
-                    for i, doc in enumerate(results['documents'][0]):
-                        all_results.append({
-                            'collection': collection_name,
-                            'document': doc,
-                            'metadata': results['metadatas'][0][i] if results['metadatas'] else {},
-                            'distance': results['distances'][0][i] if results['distances'] else None,
-                            'id': results['ids'][0][i] if results['ids'] else None
-                        })
+                if results["documents"] and results["documents"][0]:
+                    for i, doc in enumerate(results["documents"][0]):
+                        all_results.append(
+                            {
+                                "collection": collection_name,
+                                "document": doc,
+                                "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                                "distance": results["distances"][0][i] if results["distances"] else None,
+                                "id": results["ids"][0][i] if results["ids"] else None,
+                            }
+                        )
 
             except Exception as e:
                 # Collection might not exist - skip it
@@ -498,19 +434,19 @@ def search_vectors(
                 continue
 
         # Sort by distance (lower is better)
-        all_results.sort(key=lambda x: x['distance'] if x['distance'] is not None else float('inf'))
+        all_results.sort(key=lambda x: x["distance"] if x["distance"] is not None else float("inf"))
 
-        json_handler.log_operation("chroma_search_vectors", {"collections": len(collection_names), "results": len(all_results), "success": True})
+        json_handler.log_operation(
+            "chroma_search_vectors",
+            {"collections": len(collection_names), "results": len(all_results), "success": True},
+        )
         return {
-            'success': True,
-            'results': all_results[:n_results * len(collection_names)] if all_results else [],
-            'collections_searched': len(collection_names),
-            'total_results': len(all_results)
+            "success": True,
+            "results": all_results[: n_results * len(collection_names)] if all_results else [],
+            "collections_searched": len(collection_names),
+            "total_results": len(all_results),
         }
 
     except Exception as e:
         logger.error(f"[chroma] Vector search failed: {e}")
-        return {
-            'success': False,
-            'error': f"Search failed: {e}"
-        }
+        return {"success": False, "error": f"Search failed: {e}"}

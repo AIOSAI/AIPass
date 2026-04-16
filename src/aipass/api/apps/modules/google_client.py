@@ -103,7 +103,7 @@ CREDENTIAL SETUP:
   3. Run: drone @api reauth google
   4. Complete OAuth consent in browser
   5. Credentials saved to: ~/.secrets/aipass/google_creds.json
-        """
+        """,
     )
     console.print(parser.format_help())
 
@@ -268,9 +268,7 @@ def get_google_service(
         )
 
     if thread_safe:
-        service = google_factory.build_thread_safe_service(
-            service_name, version, scopes
-        )
+        service = google_factory.build_thread_safe_service(service_name, version, scopes)
     else:
         service = google_factory.build_service(service_name, version, scopes)
 

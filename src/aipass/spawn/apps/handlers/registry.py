@@ -142,9 +142,7 @@ def save_registry(registry_path, data):
             branch_list = list(branches.values())
         else:
             branch_list = branches
-        data["branches"] = sorted(
-            branch_list, key=lambda b: b.get("name", "")
-        )
+        data["branches"] = sorted(branch_list, key=lambda b: b.get("name", ""))
 
     return json_handler.write_json(registry_path, data)
 

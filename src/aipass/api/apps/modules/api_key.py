@@ -174,7 +174,7 @@ def print_help():
 
     parser = argparse.ArgumentParser(
         prog="drone @api",
-        description='API Key Management Module - Manage API keys and credentials',
+        description="API Key Management Module - Manage API keys and credentials",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 COMMANDS:
@@ -199,7 +199,7 @@ EXAMPLES:
 
   # Initialize environment
   drone @api init
-        """
+        """,
     )
     console.print(parser.format_help())
 
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Show help for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

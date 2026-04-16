@@ -1,4 +1,5 @@
 """Shared test fixtures for spawn test suite."""
+
 import os
 import tempfile
 
@@ -17,6 +18,7 @@ from unittest.mock import patch
 # ---------------------------------------------------------------------------
 # Registry backup/restore — prevents test ghost entries in AIPASS_REGISTRY.json
 # ---------------------------------------------------------------------------
+
 
 def _find_registry_path() -> Path:
     """Locate AIPASS_REGISTRY.json from the spawn branch."""
@@ -63,9 +65,7 @@ def mock_infrastructure(tmp_path):
         "branch_info": {"branch_name": "test_branch"},
         "identity": {"citizen_class": "builder"},
     }
-    (branch / ".trinity" / "passport.json").write_text(
-        json.dumps(passport), encoding="utf-8"
-    )
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
     return branch
 
 

@@ -47,7 +47,7 @@ def _get_caller_module_name() -> str:
             module_name = caller_path.stem
 
             # Validate module name
-            if module_name and not module_name.startswith('_'):
+            if module_name and not module_name.startswith("_"):
                 return module_name
 
         # Fallback
@@ -104,12 +104,10 @@ def _atomic_write_json(target_path: Path, data: Any) -> None:
 
     Prevents corruption from concurrent processes writing the same file.
     """
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(target_path.parent), suffix=".tmp", prefix=target_path.stem
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(target_path.parent), suffix=".tmp", prefix=target_path.stem)
     succeeded = False
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         os.replace(tmp_path, str(target_path))
         succeeded = True
@@ -133,14 +131,16 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             if validate_json_structure(data, json_type):
                 return True
         except Exception as exc:
             # File exists but is corrupted - will regenerate below
-            logger.warning("[json_handler] Corrupted JSON file for '%s/%s', regenerating: %s", module_name, json_type, exc)
+            logger.warning(
+                "[json_handler] Corrupted JSON file for '%s/%s', regenerating: %s", module_name, json_type, exc
+            )
 
     template = _default_template(json_type, module_name)
     if template is None:
@@ -162,7 +162,7 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as exc:
         logger.error("[json_handler] Failed to load JSON for '%s/%s': %s", module_name, json_type, exc)
@@ -229,10 +229,7 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         log = []
 
     # Create new entry
-    entry: Dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation
-    }
+    entry: Dict[str, Any] = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
     if data:
         entry["data"] = data
@@ -284,10 +281,7 @@ if __name__ == "__main__":
     console = Console()
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]",
-        border_style="bright_blue"
-    ))
+    console.print(Panel.fit("[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]", border_style="bright_blue"))
     console.print()
     console.print("[yellow]TESTING:[/yellow] Creating FLOW JSONs...")
 

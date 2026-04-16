@@ -37,7 +37,4 @@ def sample_test_data() -> dict:
 
     Customize this fixture for your module's needs
     """
-    return {
-        "test_key": "test_value",
-        "sample_data": "example"
-    }
+    return {"test_key": "test_value", "sample_data": "example"}

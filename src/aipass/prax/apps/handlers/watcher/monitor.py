@@ -29,25 +29,38 @@ try:
     from watchdog.observers import Observer  # type: ignore
     from watchdog.events import FileSystemEventHandler  # type: ignore
     from watchdog.events import FileSystemEvent  # type: ignore
+
     WATCHDOG_AVAILABLE = True
 except ImportError as e:
     logger.info(f"[monitor] watchdog not available, using placeholders: {e}")
     WATCHDOG_AVAILABLE = False
+
     # Create placeholder classes for when watchdog not available
     class Observer:  # type: ignore
         """Placeholder when watchdog unavailable."""
-        def schedule(self, *args, **kwargs): return None
-        def start(self): return None
-        def stop(self): return None
-        def join(self): return None
+
+        def schedule(self, *args, **kwargs):
+            return None
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def join(self):
+            return None
+
     class FileSystemEventHandler:  # type: ignore
         """Placeholder when watchdog unavailable."""
+
     class FileSystemEvent:  # type: ignore
         """Placeholder when watchdog unavailable."""
 
 # =============================================================================
 # EVENT HANDLER
 # =============================================================================
+
 
 class BranchFileHandler(FileSystemEventHandler):
     """
@@ -80,36 +93,36 @@ class BranchFileHandler(FileSystemEventHandler):
             True if file should be ignored, False otherwise
         """
         # Ignore log files (prevents infinite loop)
-        if path.endswith('.log'):
+        if path.endswith(".log"):
             return True
 
         # Ignore temporary and backup files
-        if '.tmp.' in path or path.endswith('.tmp'):
+        if ".tmp." in path or path.endswith(".tmp"):
             return True
-        if path.endswith('.backup') or path.endswith('.bak'):
+        if path.endswith(".backup") or path.endswith(".bak"):
             return True
-        if path.endswith('~'):  # Editor backup files
+        if path.endswith("~"):  # Editor backup files
             return True
-        if path.endswith('.swp') or path.endswith('.swo'):  # Vim swap files
+        if path.endswith(".swp") or path.endswith(".swo"):  # Vim swap files
             return True
 
         # Ignore log directories
-        if '/logs/' in path or '/system_logs/' in path:
+        if "/logs/" in path or "/system_logs/" in path:
             return True
 
         # Ignore system/config directories (prevents watching non-branch files)
         ignore_dirs = [
-            '/.claude/',
-            '/.local/',
-            '/.cache/',
-            '/.config/',
-            '/.vscode/',
-            '/.git/',
-            '/__pycache__/',
-            '/.pytest_cache/',
-            '/node_modules/',
-            '/.venv/',
-            '/venv/'
+            "/.claude/",
+            "/.local/",
+            "/.cache/",
+            "/.config/",
+            "/.vscode/",
+            "/.git/",
+            "/__pycache__/",
+            "/.pytest_cache/",
+            "/node_modules/",
+            "/.venv/",
+            "/venv/",
         ]
 
         for ignore_dir in ignore_dirs:
@@ -121,26 +134,28 @@ class BranchFileHandler(FileSystemEventHandler):
     def on_created(self, event) -> None:
         """File or directory created"""
         if not event.is_directory and not self._should_ignore(event.src_path):
-            self.callback(self.branch_name, 'CREATED', event.src_path)
+            self.callback(self.branch_name, "CREATED", event.src_path)
 
     def on_modified(self, event) -> None:
         """File or directory modified"""
         if not event.is_directory and not self._should_ignore(event.src_path):
-            self.callback(self.branch_name, 'MODIFIED', event.src_path)
+            self.callback(self.branch_name, "MODIFIED", event.src_path)
 
     def on_deleted(self, event) -> None:
         """File or directory deleted"""
         if not event.is_directory and not self._should_ignore(event.src_path):
-            self.callback(self.branch_name, 'DELETED', event.src_path)
+            self.callback(self.branch_name, "DELETED", event.src_path)
 
     def on_moved(self, event) -> None:
         """File or directory moved/renamed"""
         if not event.is_directory and not self._should_ignore(event.src_path):
-            self.callback(self.branch_name, 'MOVED', f"{event.src_path} → {event.dest_path}")
+            self.callback(self.branch_name, "MOVED", f"{event.src_path} → {event.dest_path}")
+
 
 # =============================================================================
 # MONITOR FUNCTIONS
 # =============================================================================
+
 
 def start_monitoring(branch_paths: List[tuple], callback: Callable) -> Any:
     """

@@ -75,9 +75,7 @@ class TestRegistry:
         assert data["branches"] == []
 
     def test_add_and_load(self, tmp_registry):
-        result = add_to_registry(
-            tmp_registry, "TEST", "/tmp/test", "Workshop", "@test", "A test"
-        )
+        result = add_to_registry(tmp_registry, "TEST", "/tmp/test", "Workshop", "@test", "A test")
         assert result is True
         data = load_registry(tmp_registry)
         assert len(data["branches"]) == 1

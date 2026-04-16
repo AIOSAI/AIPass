@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_imports_standards() -> str:
     """Return formatted import standards content with Rich markup
 
@@ -36,8 +37,7 @@ def get_imports_standards() -> str:
         "   • [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
         "",
         "[bold]4. Services (CLI, etc.)[/bold]",
-        "   • [dim]from aipass.cli.apps.modules"
-        " import console, header, success[/dim]",
+        "   • [dim]from aipass.cli.apps.modules import console, header, success[/dim]",
         "",
         "[bold]5. Internal handlers[/bold]",
         "   • [dim]from aipass.seedgo.apps.handlers.json import json_handler[/dim]",
@@ -53,8 +53,7 @@ def get_imports_standards() -> str:
         "  [dim]from typing import Dict, List, Optional[/dim]",
         "",
         "  [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
-        "  [dim]from aipass.cli.apps.modules"
-        " import console, header[/dim]",
+        "  [dim]from aipass.cli.apps.modules import console, header[/dim]",
         "  [dim]from aipass.seedgo.apps.handlers.json import json_handler[/dim]",
         "",
         "[bold cyan]CRITICAL RULES:[/bold cyan]",
@@ -80,11 +79,11 @@ def get_imports_standards() -> str:
         "  • Auto-generates config at [branch]/seedgo_json/user_config.json",
         "",
         "[bold]Best Practice - Use Drone:[/bold]",
-        "  [dim]subprocess.run([\"drone\", \"email\", \"send\", \"@recipient\", \"Subject\", \"Message\"])[/dim]",
+        '  [dim]subprocess.run(["drone", "email", "send", "@recipient", "Subject", "Message"])[/dim]',
         "  • Drone handles PWD detection automatically",
         "",
         "[bold]Direct Invocation (Advanced):[/bold]",
-        "  [dim]subprocess.run([\"drone\", \"@ai_mail\", \"send\", ...],[/dim]",
+        '  [dim]subprocess.run(["drone", "@ai_mail", "send", ...],[/dim]',
         "  [dim]                cwd=str(branch_dir))  # Force correct working directory[/dim]",
         "  • Must use cwd= parameter for PWD detection to work",
         "",

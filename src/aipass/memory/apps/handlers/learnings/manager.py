@@ -38,14 +38,12 @@ from aipass.memory.apps.handlers.json import json_handler
 logger = get_system_logger()
 
 # Handler imports (relative within package)
-from aipass.memory.apps.handlers.json.memory_files import (
-    read_memory_file_data,
-    write_memory_file_simple
-)
+from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 
 # ChromaDB subprocess for vectorization (resolved relative to handler location)
 _MEMORY_ROOT = Path(__file__).resolve().parents[3]
 CHROMA_SUBPROCESS_SCRIPT = _MEMORY_ROOT / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
+
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
@@ -66,6 +64,7 @@ TIMESTAMP_PATTERN = r"\[(\d{4}-\d{2}-\d{2})\]$"
 # TIMESTAMP OPERATIONS
 # =============================================================================
 
+
 def parse_timestamp(value: str) -> Tuple[str, str | None]:
     """
     Parse timestamp from key_learnings value
@@ -83,7 +82,7 @@ def parse_timestamp(value: str) -> Tuple[str, str | None]:
     match = re.search(TIMESTAMP_PATTERN, value.strip())
     if match:
         timestamp = match.group(1)
-        clean_value = value[:match.start()].strip()
+        clean_value = value[: match.start()].strip()
         return (clean_value, timestamp)
     return (value, None)
 
@@ -136,6 +135,7 @@ def get_entry_age(value: str) -> int:
 # KEY_LEARNINGS LOCATION
 # =============================================================================
 
+
 def _find_learnings_location(data: Dict[str, Any]) -> Tuple[Dict[str, Any] | None, str]:
     """
     Find key_learnings in data structure
@@ -150,15 +150,15 @@ def _find_learnings_location(data: Dict[str, Any]) -> Tuple[Dict[str, Any] | Non
         Returns (None, '') if not found
     """
     # Check root level first
-    if 'key_learnings' in data:
-        return (data, 'root')
+    if "key_learnings" in data:
+        return (data, "root")
 
     # Check inside active_tasks (legacy devpulse structure)
-    if 'active_tasks' in data and isinstance(data['active_tasks'], dict):
-        if 'key_learnings' in data['active_tasks']:
-            return (data['active_tasks'], 'active_tasks')
+    if "active_tasks" in data and isinstance(data["active_tasks"], dict):
+        if "key_learnings" in data["active_tasks"]:
+            return (data["active_tasks"], "active_tasks")
 
-    return (None, '')
+    return (None, "")
 
 
 def _get_learnings(data: Dict[str, Any]) -> Dict[str, str]:
@@ -174,7 +174,7 @@ def _get_learnings(data: Dict[str, Any]) -> Dict[str, str]:
     parent, _ = _find_learnings_location(data)
     if parent is None:
         return {}
-    return parent.get('key_learnings', {})
+    return parent.get("key_learnings", {})
 
 
 def _set_learnings(data: Dict[str, Any], learnings: Dict[str, str]) -> bool:
@@ -191,15 +191,16 @@ def _set_learnings(data: Dict[str, Any], learnings: Dict[str, str]) -> bool:
     parent, _ = _find_learnings_location(data)
     if parent is None:
         # Create at root level if not exists
-        data['key_learnings'] = learnings
+        data["key_learnings"] = learnings
         return True
-    parent['key_learnings'] = learnings
+    parent["key_learnings"] = learnings
     return True
 
 
 # =============================================================================
 # CONFIG OPERATIONS
 # =============================================================================
+
 
 def get_max_learnings(data: Dict[str, Any]) -> int:
     """
@@ -215,13 +216,14 @@ def get_max_learnings(data: Dict[str, Any]) -> int:
     Returns:
         Maximum allowed key_learnings entries
     """
-    limits = data.get('document_metadata', {}).get('limits', {})
-    return limits.get('max_learnings', DEFAULT_MAX_LEARNINGS)
+    limits = data.get("document_metadata", {}).get("limits", {})
+    return limits.get("max_learnings", DEFAULT_MAX_LEARNINGS)
 
 
 # =============================================================================
 # RECENTLY_COMPLETED LOCATION
 # =============================================================================
+
 
 def _find_recently_completed_location(data: Dict[str, Any]) -> Tuple[Dict[str, Any] | None, str]:
     """
@@ -237,15 +239,15 @@ def _find_recently_completed_location(data: Dict[str, Any]) -> Tuple[Dict[str, A
         Returns (None, '') if not found
     """
     # Check root level first
-    if 'recently_completed' in data:
-        return (data, 'root')
+    if "recently_completed" in data:
+        return (data, "root")
 
     # Check inside active_tasks (devpulse structure)
-    if 'active_tasks' in data and isinstance(data['active_tasks'], dict):
-        if 'recently_completed' in data['active_tasks']:
-            return (data['active_tasks'], 'active_tasks')
+    if "active_tasks" in data and isinstance(data["active_tasks"], dict):
+        if "recently_completed" in data["active_tasks"]:
+            return (data["active_tasks"], "active_tasks")
 
-    return (None, '')
+    return (None, "")
 
 
 def _get_recently_completed(data: Dict[str, Any]) -> List[str]:
@@ -261,7 +263,7 @@ def _get_recently_completed(data: Dict[str, Any]) -> List[str]:
     parent, _ = _find_recently_completed_location(data)
     if parent is None:
         return []
-    return parent.get('recently_completed', [])
+    return parent.get("recently_completed", [])
 
 
 def _set_recently_completed(data: Dict[str, Any], completed: List[str]) -> bool:
@@ -278,9 +280,9 @@ def _set_recently_completed(data: Dict[str, Any], completed: List[str]) -> bool:
     parent, _ = _find_recently_completed_location(data)
     if parent is None:
         # Create at root level if not exists
-        data['recently_completed'] = completed
+        data["recently_completed"] = completed
         return True
-    parent['recently_completed'] = completed
+    parent["recently_completed"] = completed
     return True
 
 
@@ -298,18 +300,16 @@ def get_max_recently_completed(data: Dict[str, Any]) -> int:
     Returns:
         Maximum allowed recently_completed entries
     """
-    limits = data.get('document_metadata', {}).get('limits', {})
-    return limits.get('max_recently_completed', DEFAULT_MAX_RECENTLY_COMPLETED)
+    limits = data.get("document_metadata", {}).get("limits", {})
+    return limits.get("max_recently_completed", DEFAULT_MAX_RECENTLY_COMPLETED)
 
 
 # =============================================================================
 # VECTORIZATION
 # =============================================================================
 
-def _vectorize_learnings(
-    branch: str,
-    learnings: List[Tuple[str, str]]
-) -> Dict[str, Any]:
+
+def _vectorize_learnings(branch: str, learnings: List[Tuple[str, str]]) -> Dict[str, Any]:
     """
     Vectorize key_learnings entries to memory
 
@@ -321,7 +321,7 @@ def _vectorize_learnings(
         Dict with success status
     """
     if not learnings:
-        return {'success': True, 'message': 'No learnings to vectorize'}
+        return {"success": True, "message": "No learnings to vectorize"}
 
     # Prepare texts and metadata for vectorization
     texts = []
@@ -331,47 +331,44 @@ def _vectorize_learnings(
         clean_value, timestamp = parse_timestamp(value)
         text = f"{key}: {clean_value}"
         texts.append(text)
-        metadatas.append({
-            'branch': branch,
-            'type': 'key_learning',
-            'key': key,
-            'timestamp': timestamp or 'unknown',
-            'archived_at': datetime.now().isoformat()
-        })
+        metadatas.append(
+            {
+                "branch": branch,
+                "type": "key_learning",
+                "key": key,
+                "timestamp": timestamp or "unknown",
+                "archived_at": datetime.now().isoformat(),
+            }
+        )
 
     # Generate embeddings via subprocess
     try:
         from aipass.memory.apps.handlers.vector import embedder
+
         embed_result = embedder.encode_batch(texts)
 
-        if not embed_result['success']:
-            return {
-                'success': False,
-                'error': f"Embedding failed: {embed_result.get('error')}"
-            }
+        if not embed_result["success"]:
+            return {"success": False, "error": f"Embedding failed: {embed_result.get('error')}"}
 
-        embeddings = embed_result.get('embeddings', [])
+        embeddings = embed_result.get("embeddings", [])
         if not embeddings:
-            return {'success': False, 'error': 'No embeddings generated'}
+            return {"success": False, "error": "No embeddings generated"}
 
     except Exception as e:
         logger.warning(f"[learnings_manager] Embedding error for key_learnings: {e}")
-        return {'success': False, 'error': f"Embedding error: {e}"}
+        return {"success": False, "error": f"Embedding error: {e}"}
 
     # Store in ChromaDB via subprocess
-    embeddings_serializable = [
-        emb.tolist() if hasattr(emb, 'tolist') else emb
-        for emb in embeddings
-    ]
+    embeddings_serializable = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
     input_data = {
-        'operation': 'store_vectors',
-        'branch': branch,
-        'memory_type': 'key_learnings',
-        'embeddings': embeddings_serializable,
-        'documents': texts,
-        'metadatas': metadatas,
-        'db_path': None  # Global memory
+        "operation": "store_vectors",
+        "branch": branch,
+        "memory_type": "key_learnings",
+        "embeddings": embeddings_serializable,
+        "documents": texts,
+        "metadatas": metadatas,
+        "db_path": None,  # Global memory
     }
 
     try:
@@ -380,29 +377,26 @@ def _vectorize_learnings(
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
         )
 
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Subprocess failed'}
+            return {"success": False, "error": result.stderr or "Subprocess failed"}
 
         return json.loads(result.stdout)
 
     except subprocess.TimeoutExpired:
         logger.warning("[learnings_manager] Key learnings vectorization timed out")
-        return {'success': False, 'error': 'Vectorization timed out'}
+        return {"success": False, "error": "Vectorization timed out"}
     except json.JSONDecodeError as e:
         logger.warning(f"[learnings_manager] Invalid JSON from key_learnings vectorization: {e}")
-        return {'success': False, 'error': f'Invalid JSON response: {e}'}
+        return {"success": False, "error": f"Invalid JSON response: {e}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Key learnings vectorization error: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
-def _vectorize_completed_tasks(
-    branch: str,
-    tasks: List[str]
-) -> Dict[str, Any]:
+def _vectorize_completed_tasks(branch: str, tasks: List[str]) -> Dict[str, Any]:
     """
     Vectorize recently_completed entries to memory.
 
@@ -414,7 +408,7 @@ def _vectorize_completed_tasks(
         Dict with success status
     """
     if not tasks:
-        return {'success': True, 'message': 'No tasks to vectorize'}
+        return {"success": True, "message": "No tasks to vectorize"}
 
     # Prepare document_texts and document_metadatas for vectorization
     document_texts: List[str] = []
@@ -423,46 +417,43 @@ def _vectorize_completed_tasks(
     for task in tasks:
         clean_value, timestamp = parse_timestamp(task)
         document_texts.append(clean_value)
-        document_metadatas.append({
-            'branch': branch,
-            'type': 'recently_completed',
-            'timestamp': timestamp or 'unknown',
-            'archived_at': datetime.now().isoformat()
-        })
+        document_metadatas.append(
+            {
+                "branch": branch,
+                "type": "recently_completed",
+                "timestamp": timestamp or "unknown",
+                "archived_at": datetime.now().isoformat(),
+            }
+        )
 
     # Generate embeddings via subprocess
     try:
         from aipass.memory.apps.handlers.vector import embedder
+
         embed_result = embedder.encode_batch(document_texts)
 
-        if not embed_result['success']:
-            return {
-                'success': False,
-                'error': f"Embedding failed: {embed_result.get('error')}"
-            }
+        if not embed_result["success"]:
+            return {"success": False, "error": f"Embedding failed: {embed_result.get('error')}"}
 
-        embeddings = embed_result.get('embeddings', [])
+        embeddings = embed_result.get("embeddings", [])
         if not embeddings:
-            return {'success': False, 'error': 'No embeddings generated'}
+            return {"success": False, "error": "No embeddings generated"}
 
     except Exception as e:
         logger.warning(f"[learnings_manager] Embedding error for recently_completed: {e}")
-        return {'success': False, 'error': f"Embedding error: {e}"}
+        return {"success": False, "error": f"Embedding error: {e}"}
 
     # Store in ChromaDB via subprocess
-    embeddings_serializable = [
-        emb.tolist() if hasattr(emb, 'tolist') else emb
-        for emb in embeddings
-    ]
+    embeddings_serializable = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
     input_data = {
-        'operation': 'store_vectors',
-        'branch': branch,
-        'memory_type': 'recently_completed',
-        'embeddings': embeddings_serializable,
-        'documents': document_texts,
-        'metadatas': document_metadatas,
-        'db_path': None  # Global memory
+        "operation": "store_vectors",
+        "branch": branch,
+        "memory_type": "recently_completed",
+        "embeddings": embeddings_serializable,
+        "documents": document_texts,
+        "metadatas": document_metadatas,
+        "db_path": None,  # Global memory
     }
 
     try:
@@ -471,28 +462,29 @@ def _vectorize_completed_tasks(
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
         )
 
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Subprocess failed'}
+            return {"success": False, "error": result.stderr or "Subprocess failed"}
 
         return json.loads(result.stdout)
 
     except subprocess.TimeoutExpired:
         logger.warning("[learnings_manager] Completed tasks vectorization timed out")
-        return {'success': False, 'error': 'Vectorization timed out'}
+        return {"success": False, "error": "Vectorization timed out"}
     except json.JSONDecodeError as e:
         logger.warning(f"[learnings_manager] Invalid JSON from completed tasks vectorization: {e}")
-        return {'success': False, 'error': f'Invalid JSON response: {e}'}
+        return {"success": False, "error": f"Invalid JSON response: {e}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Completed tasks vectorization error: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
 # CORE OPERATIONS
 # =============================================================================
+
 
 def ensure_timestamps(file_path: Path) -> Dict[str, Any]:
     """
@@ -507,19 +499,19 @@ def ensure_timestamps(file_path: Path) -> Dict[str, Any]:
         Dict with update status and count
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     learnings = _get_learnings(data)
     if not learnings:
-        return {'success': True, 'updated': 0, 'message': 'No key_learnings found'}
+        return {"success": True, "updated": 0, "message": "No key_learnings found"}
 
     updated_count = 0
     today = datetime.now().strftime("%Y-%m-%d")
@@ -536,13 +528,9 @@ def ensure_timestamps(file_path: Path) -> Dict[str, Any]:
             write_memory_file_simple(file_path, data)
         except Exception as e:
             logger.warning(f"[learnings_manager] Failed to write file: {e}")
-            return {'success': False, 'error': f'Failed to write file: {e}'}
+            return {"success": False, "error": f"Failed to write file: {e}"}
 
-    return {
-        'success': True,
-        'updated': updated_count,
-        'total': len(learnings)
-    }
+    return {"success": True, "updated": updated_count, "total": len(learnings)}
 
 
 def enforce_limit(file_path: Path) -> Dict[str, Any]:
@@ -561,37 +549,37 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
         Dict with enforcement status
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     learnings = _get_learnings(data)
     if not learnings:
-        return {'success': True, 'removed': 0, 'message': 'No key_learnings found'}
+        return {"success": True, "removed": 0, "message": "No key_learnings found"}
 
     max_entries = get_max_learnings(data)
     current_count = len(learnings)
 
     if current_count <= max_entries:
         return {
-            'success': True,
-            'removed': 0,
-            'current': current_count,
-            'max': max_entries,
-            'message': 'Under limit, no action needed'
+            "success": True,
+            "removed": 0,
+            "current": current_count,
+            "max": max_entries,
+            "message": "Under limit, no action needed",
         }
 
     # Sort by age (oldest first)
     sorted_entries = sorted(
         learnings.items(),
         key=lambda x: get_entry_age(x[1]),
-        reverse=True  # Oldest first
+        reverse=True,  # Oldest first
     )
 
     # Calculate how many to remove
@@ -600,8 +588,8 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
     to_keep = sorted_entries[to_remove_count:]
 
     # Extract branch name from filename
-    parts = file_path.stem.split('.')
-    branch_name = parts[0] if parts else 'UNKNOWN'
+    parts = file_path.stem.split(".")
+    branch_name = parts[0] if parts else "UNKNOWN"
 
     # Vectorize before removing
     vectorize_result = _vectorize_learnings(branch_name, to_remove)
@@ -616,23 +604,26 @@ def enforce_limit(file_path: Path) -> Dict[str, Any]:
         write_memory_file_simple(file_path, data)
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to write file: {e}")
-        return {'success': False, 'error': f'Failed to write file: {e}'}
+        return {"success": False, "error": f"Failed to write file: {e}"}
 
-    json_handler.log_operation("enforce_limit", {"removed": to_remove_count, "remaining": len(to_keep), "success": True})
+    json_handler.log_operation(
+        "enforce_limit", {"removed": to_remove_count, "remaining": len(to_keep), "success": True}
+    )
 
     return {
-        'success': True,
-        'removed': to_remove_count,
-        'vectorized': vectorize_result.get('success', False),
-        'remaining': len(to_keep),
-        'max': max_entries,
-        'removed_keys': [k for k, _ in to_remove]
+        "success": True,
+        "removed": to_remove_count,
+        "vectorized": vectorize_result.get("success", False),
+        "remaining": len(to_keep),
+        "max": max_entries,
+        "removed_keys": [k for k, _ in to_remove],
     }
 
 
 # =============================================================================
 # RECENTLY_COMPLETED OPERATIONS
 # =============================================================================
+
 
 def ensure_timestamps_completed(file_path: Path) -> Dict[str, Any]:
     """
@@ -647,19 +638,19 @@ def ensure_timestamps_completed(file_path: Path) -> Dict[str, Any]:
         Dict with update status and count
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     completed = _get_recently_completed(data)
     if not completed:
-        return {'success': True, 'updated': 0, 'message': 'No recently_completed found'}
+        return {"success": True, "updated": 0, "message": "No recently_completed found"}
 
     updated_count = 0
     today = datetime.now().strftime("%Y-%m-%d")
@@ -679,13 +670,9 @@ def ensure_timestamps_completed(file_path: Path) -> Dict[str, Any]:
             write_memory_file_simple(file_path, data)
         except Exception as e:
             logger.warning(f"[learnings_manager] Failed to write file: {e}")
-            return {'success': False, 'error': f'Failed to write file: {e}'}
+            return {"success": False, "error": f"Failed to write file: {e}"}
 
-    return {
-        'success': True,
-        'updated': updated_count,
-        'total': len(completed)
-    }
+    return {"success": True, "updated": updated_count, "total": len(completed)}
 
 
 def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
@@ -704,30 +691,30 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
         Dict with enforcement status
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     completed = _get_recently_completed(data)
     if not completed:
-        return {'success': True, 'removed': 0, 'message': 'No recently_completed found'}
+        return {"success": True, "removed": 0, "message": "No recently_completed found"}
 
     max_entries = get_max_recently_completed(data)
     current_count = len(completed)
 
     if current_count <= max_entries:
         return {
-            'success': True,
-            'removed': 0,
-            'current': current_count,
-            'max': max_entries,
-            'message': 'Under limit, no action needed'
+            "success": True,
+            "removed": 0,
+            "current": current_count,
+            "max": max_entries,
+            "message": "Under limit, no action needed",
         }
 
     # Sort by age (oldest first) - for lists, we use index as proxy
@@ -735,7 +722,7 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
     sorted_entries = sorted(
         completed,
         key=lambda x: get_entry_age(x),
-        reverse=True  # Oldest first
+        reverse=True,  # Oldest first
     )
 
     # Calculate how many to remove
@@ -744,8 +731,8 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
     to_keep = sorted_entries[to_remove_count:]
 
     # Extract branch name from filename
-    parts = file_path.stem.split('.')
-    branch_name = parts[0] if parts else 'UNKNOWN'
+    parts = file_path.stem.split(".")
+    branch_name = parts[0] if parts else "UNKNOWN"
 
     # Vectorize before removing
     vectorize_result = _vectorize_completed_tasks(branch_name, to_remove)
@@ -757,23 +744,19 @@ def enforce_limit_completed(file_path: Path) -> Dict[str, Any]:
         write_memory_file_simple(file_path, data)
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to write file: {e}")
-        return {'success': False, 'error': f'Failed to write file: {e}'}
+        return {"success": False, "error": f"Failed to write file: {e}"}
 
     return {
-        'success': True,
-        'removed': to_remove_count,
-        'vectorized': vectorize_result.get('success', False),
-        'remaining': len(to_keep),
-        'max': max_entries,
-        'removed_tasks': to_remove
+        "success": True,
+        "removed": to_remove_count,
+        "vectorized": vectorize_result.get("success", False),
+        "remaining": len(to_keep),
+        "max": max_entries,
+        "removed_tasks": to_remove,
     }
 
 
-def add_learning(
-    file_path: Path,
-    key: str,
-    value: str
-) -> Dict[str, Any]:
+def add_learning(file_path: Path, key: str, value: str) -> Dict[str, Any]:
     """
     Add or update a key_learning entry.
 
@@ -788,15 +771,15 @@ def add_learning(
         Dict with add status
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     # Get existing learnings or create empty dict
     learnings = _get_learnings(data)
@@ -813,25 +796,28 @@ def add_learning(
         write_memory_file_simple(file_path, data)
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to write file: {e}")
-        return {'success': False, 'error': f'Failed to write file: {e}'}
+        return {"success": False, "error": f"Failed to write file: {e}"}
 
     # Enforce limit after adding
     enforce_result = enforce_limit(file_path)
 
-    json_handler.log_operation("add_learning", {"key": key, "action": "updated" if is_update else "added", "success": True})
+    json_handler.log_operation(
+        "add_learning", {"key": key, "action": "updated" if is_update else "added", "success": True}
+    )
 
     return {
-        'success': True,
-        'action': 'updated' if is_update else 'added',
-        'key': key,
-        'value': timestamped_value,
-        'limit_enforced': enforce_result.get('removed', 0) > 0
+        "success": True,
+        "action": "updated" if is_update else "added",
+        "key": key,
+        "value": timestamped_value,
+        "limit_enforced": enforce_result.get("removed", 0) > 0,
     }
 
 
 # =============================================================================
 # STATUS COUNT UPDATES
 # =============================================================================
+
 
 def update_status_counts(file_path: Path) -> Dict[str, Any]:
     """
@@ -846,15 +832,15 @@ def update_status_counts(file_path: Path) -> Dict[str, Any]:
         Dict with update status
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
         data = read_memory_file_data(file_path)
         if data is None:
-            return {'success': False, 'error': f'Failed to parse file: {file_path.name}'}
+            return {"success": False, "error": f"Failed to parse file: {file_path.name}"}
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read file: {e}")
-        return {'success': False, 'error': f'Failed to read file: {e}'}
+        return {"success": False, "error": f"Failed to read file: {e}"}
 
     # Get actual counts
     learnings = _get_learnings(data)
@@ -863,19 +849,19 @@ def update_status_counts(file_path: Path) -> Dict[str, Any]:
     completed_count = len(completed)
 
     # Ensure document_metadata.status exists
-    if 'document_metadata' not in data:
-        data['document_metadata'] = {}
-    if 'status' not in data['document_metadata']:
-        data['document_metadata']['status'] = {}
+    if "document_metadata" not in data:
+        data["document_metadata"] = {}
+    if "status" not in data["document_metadata"]:
+        data["document_metadata"]["status"] = {}
 
-    status = data['document_metadata']['status']
-    old_learnings = status.get('current_key_learnings', 0)
-    old_completed = status.get('current_recently_completed', 0)
+    status = data["document_metadata"]["status"]
+    old_learnings = status.get("current_key_learnings", 0)
+    old_completed = status.get("current_recently_completed", 0)
 
     # Update counts
-    status['current_key_learnings'] = learnings_count
-    status['current_recently_completed'] = completed_count
-    status['last_health_check'] = datetime.now().strftime("%Y-%m-%d")
+    status["current_key_learnings"] = learnings_count
+    status["current_recently_completed"] = completed_count
+    status["last_health_check"] = datetime.now().strftime("%Y-%m-%d")
 
     # Only write if changed
     if old_learnings != learnings_count or old_completed != completed_count:
@@ -883,19 +869,20 @@ def update_status_counts(file_path: Path) -> Dict[str, Any]:
             write_memory_file_simple(file_path, data)
         except Exception as e:
             logger.warning(f"[learnings_manager] Failed to write file: {e}")
-            return {'success': False, 'error': f'Failed to write file: {e}'}
+            return {"success": False, "error": f"Failed to write file: {e}"}
 
     return {
-        'success': True,
-        'current_key_learnings': learnings_count,
-        'current_recently_completed': completed_count,
-        'changed': old_learnings != learnings_count or old_completed != completed_count
+        "success": True,
+        "current_key_learnings": learnings_count,
+        "current_recently_completed": completed_count,
+        "changed": old_learnings != learnings_count or old_completed != completed_count,
     }
 
 
 # =============================================================================
 # BATCH OPERATIONS
 # =============================================================================
+
 
 def process_file(file_path: Path) -> Dict[str, Any]:
     """
@@ -915,56 +902,51 @@ def process_file(file_path: Path) -> Dict[str, Any]:
         Dict with processing summary
     """
     if not file_path.exists():
-        return {'success': False, 'error': f'File not found: {file_path}'}
+        return {"success": False, "error": f"File not found: {file_path}"}
 
-    results: Dict[str, Any] = {
-        'success': True,
-        'key_learnings': {},
-        'recently_completed': {},
-        'status': {}
-    }
+    results: Dict[str, Any] = {"success": True, "key_learnings": {}, "recently_completed": {}, "status": {}}
 
     # Process key_learnings
     timestamp_result = ensure_timestamps(file_path)
     limit_result = enforce_limit(file_path)
-    results['key_learnings'] = {
-        'timestamps_added': timestamp_result.get('updated', 0),
-        'removed': limit_result.get('removed', 0),
-        'vectorized': limit_result.get('vectorized', False),
-        'remaining': limit_result.get('remaining', 0)
+    results["key_learnings"] = {
+        "timestamps_added": timestamp_result.get("updated", 0),
+        "removed": limit_result.get("removed", 0),
+        "vectorized": limit_result.get("vectorized", False),
+        "remaining": limit_result.get("remaining", 0),
     }
 
     # Process recently_completed
     timestamp_completed = ensure_timestamps_completed(file_path)
     limit_completed = enforce_limit_completed(file_path)
-    results['recently_completed'] = {
-        'timestamps_added': timestamp_completed.get('updated', 0),
-        'removed': limit_completed.get('removed', 0),
-        'vectorized': limit_completed.get('vectorized', False),
-        'remaining': limit_completed.get('remaining', 0),
-        'removed_tasks': limit_completed.get('removed_tasks', [])
+    results["recently_completed"] = {
+        "timestamps_added": timestamp_completed.get("updated", 0),
+        "removed": limit_completed.get("removed", 0),
+        "vectorized": limit_completed.get("vectorized", False),
+        "remaining": limit_completed.get("remaining", 0),
+        "removed_tasks": limit_completed.get("removed_tasks", []),
     }
 
     # Update status counts
     status_result = update_status_counts(file_path)
-    results['status'] = {
-        'current_key_learnings': status_result.get('current_key_learnings', 0),
-        'current_recently_completed': status_result.get('current_recently_completed', 0)
+    results["status"] = {
+        "current_key_learnings": status_result.get("current_key_learnings", 0),
+        "current_recently_completed": status_result.get("current_recently_completed", 0),
     }
 
     # Check for errors
-    if not timestamp_result['success']:
-        results['success'] = False
-        results['error'] = timestamp_result.get('error')
-    if not limit_result['success']:
-        results['success'] = False
-        results['error'] = limit_result.get('error')
-    if not timestamp_completed['success']:
-        results['success'] = False
-        results['error'] = timestamp_completed.get('error')
-    if not limit_completed['success']:
-        results['success'] = False
-        results['error'] = limit_completed.get('error')
+    if not timestamp_result["success"]:
+        results["success"] = False
+        results["error"] = timestamp_result.get("error")
+    if not limit_result["success"]:
+        results["success"] = False
+        results["error"] = limit_result.get("error")
+    if not timestamp_completed["success"]:
+        results["success"] = False
+        results["error"] = timestamp_completed.get("error")
+    if not limit_completed["success"]:
+        results["success"] = False
+        results["error"] = limit_completed.get("error")
 
     return results
 
@@ -984,46 +966,40 @@ def process_all_branches() -> Dict[str, Any]:
     registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
     if not registry_path.exists():
-        return {'success': False, 'error': 'AIPASS_REGISTRY.json not found'}
+        return {"success": False, "error": "AIPASS_REGISTRY.json not found"}
 
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
     except Exception as e:
         logger.warning(f"[learnings_manager] Failed to read registry: {e}")
-        return {'success': False, 'error': f'Failed to read registry: {e}'}
+        return {"success": False, "error": f"Failed to read registry: {e}"}
 
-    branches = registry.get('branches', [])
-    results: Dict[str, Any] = {
-        'success': True,
-        'processed': 0,
-        'skipped': 0,
-        'errors': [],
-        'details': {}
-    }
+    branches = registry.get("branches", [])
+    results: Dict[str, Any] = {"success": True, "processed": 0, "skipped": 0, "errors": [], "details": {}}
 
     for branch in branches:
-        branch_name = branch.get('name', 'UNKNOWN')
-        branch_path = Path(branch.get('path', ''))
+        branch_name = branch.get("name", "UNKNOWN")
+        branch_path = Path(branch.get("path", ""))
 
         if not branch_path.exists():
-            results['skipped'] += 1
+            results["skipped"] += 1
             continue
 
         # Find .local.json file
         local_file = branch_path / f"{branch_name.upper()}.local.json"
         if not local_file.exists():
-            results['skipped'] += 1
+            results["skipped"] += 1
             continue
 
         # Process this branch
         branch_result = process_file(local_file)
 
-        results['processed'] += 1
-        results['details'][branch_name] = branch_result
+        results["processed"] += 1
+        results["details"][branch_name] = branch_result
 
-        if not branch_result['success']:
-            results['errors'].append(f"{branch_name}: {branch_result.get('error')}")
+        if not branch_result["success"]:
+            results["errors"].append(f"{branch_name}: {branch_result.get('error')}")
 
     return results
 
@@ -1035,65 +1011,64 @@ def process_all_branches() -> Dict[str, Any]:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Memory Sections Management Handler"
-    )
+    parser = argparse.ArgumentParser(description="Memory Sections Management Handler")
     parser.add_argument(
-        'command',
+        "command",
         choices=[
-            'timestamps', 'enforce', 'process-all', 'process-file',
-            'timestamps-completed', 'enforce-completed', 'update-status'
+            "timestamps",
+            "enforce",
+            "process-all",
+            "process-file",
+            "timestamps-completed",
+            "enforce-completed",
+            "update-status",
         ],
-        help='Command to execute'
+        help="Command to execute",
     )
-    parser.add_argument(
-        '--file',
-        type=Path,
-        help='Path to .local.json file'
-    )
+    parser.add_argument("--file", type=Path, help="Path to .local.json file")
 
     args = parser.parse_args()
 
-    if args.command == 'process-all':
+    if args.command == "process-all":
         result = process_all_branches()
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'process-file':
+    elif args.command == "process-file":
         if not args.file:
             print("Error: --file required for process-file command")
             sys.exit(1)
         result = process_file(args.file)
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'timestamps':
+    elif args.command == "timestamps":
         if not args.file:
             print("Error: --file required for timestamps command")
             sys.exit(1)
         result = ensure_timestamps(args.file)
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'enforce':
+    elif args.command == "enforce":
         if not args.file:
             print("Error: --file required for enforce command")
             sys.exit(1)
         result = enforce_limit(args.file)
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'timestamps-completed':
+    elif args.command == "timestamps-completed":
         if not args.file:
             print("Error: --file required for timestamps-completed command")
             sys.exit(1)
         result = ensure_timestamps_completed(args.file)
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'enforce-completed':
+    elif args.command == "enforce-completed":
         if not args.file:
             print("Error: --file required for enforce-completed command")
             sys.exit(1)
         result = enforce_limit_completed(args.file)
         print(json.dumps(result, indent=2))
 
-    elif args.command == 'update-status':
+    elif args.command == "update-status":
         if not args.file:
             print("Error: --file required for update-status command")
             sys.exit(1)

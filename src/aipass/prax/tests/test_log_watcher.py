@@ -22,13 +22,14 @@ from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _RealFSHandler:
     """Stub base so LogFileWatcher subclass methods are not swallowed by MagicMock."""
+
     pass
 
 
@@ -55,19 +56,23 @@ def _import_log_watcher() -> ModuleType:
 
     mock_trigger_mod = MagicMock()
 
-    with patch.dict(sys.modules, {
-        "watchdog": MagicMock(),
-        "watchdog.observers": mock_watchdog_observer,
-        "watchdog.events": mock_watchdog_events,
-        "aipass.prax.apps.handlers.config.load": mock_config,
-        "aipass.prax.apps.handlers.monitoring.event_queue": mock_event_queue_mod,
-        "aipass.prax.apps.handlers.monitoring.branch_detector": mock_branch_detector,
-        "aipass.trigger": MagicMock(),
-        "aipass.trigger.apps": MagicMock(),
-        "aipass.trigger.apps.modules": MagicMock(),
-        "aipass.trigger.apps.modules.core": mock_trigger_mod,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "watchdog": MagicMock(),
+            "watchdog.observers": mock_watchdog_observer,
+            "watchdog.events": mock_watchdog_events,
+            "aipass.prax.apps.handlers.config.load": mock_config,
+            "aipass.prax.apps.handlers.monitoring.event_queue": mock_event_queue_mod,
+            "aipass.prax.apps.handlers.monitoring.branch_detector": mock_branch_detector,
+            "aipass.trigger": MagicMock(),
+            "aipass.trigger.apps": MagicMock(),
+            "aipass.trigger.apps.modules": MagicMock(),
+            "aipass.trigger.apps.modules.core": mock_trigger_mod,
+        },
+    ):
         import importlib
+
         if "aipass.prax.apps.handlers.monitoring.log_watcher" in sys.modules:
             mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.log_watcher"])
         else:
@@ -86,6 +91,7 @@ def _make_watcher(mod: ModuleType):
 # ============================================================================
 # _detect_log_level tests
 # ============================================================================
+
 
 class TestDetectLogLevel:
     """Test log level detection from raw log lines."""
@@ -137,6 +143,7 @@ class TestDetectLogLevel:
 # ============================================================================
 # _extract_command_info tests
 # ============================================================================
+
 
 class TestExtractCommandInfo:
     """Test command pattern extraction from log lines."""
@@ -280,6 +287,7 @@ class TestExtractCommandInfo:
 # _parse_log_message tests
 # ============================================================================
 
+
 class TestParseLogMessage:
     """Test pipe-delimited log line parsing."""
 
@@ -323,6 +331,7 @@ class TestParseLogMessage:
 # start/stop/is_active lifecycle tests
 # ============================================================================
 
+
 class TestLogWatcherLifecycle:
     """Test start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
@@ -349,9 +358,12 @@ class TestLogWatcherLifecycle:
 
         setattr(mod, "_log_observer", None)
 
-        with patch.dict(sys.modules, {
-            "watchdog.observers.polling": MagicMock(PollingObserver=mock_polling_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "watchdog.observers.polling": MagicMock(PollingObserver=mock_polling_cls),
+            },
+        ):
             with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")):
                 result = mod.start_log_watcher(mock_queue, use_polling=True)
 
@@ -399,6 +411,7 @@ class TestLogWatcherLifecycle:
 # ============================================================================
 # initialize_positions tests
 # ============================================================================
+
 
 class TestInitializePositions:
     """Test seek-to-end initialization."""

@@ -49,6 +49,7 @@ def _extract_field(pattern: re.Pattern, text: str) -> str:
 # Core
 # ---------------------------------------------------------------------------
 
+
 def sync_status() -> Dict:
     """
     Scan all branches for STATUS.local.md, build central STATUS.md.
@@ -135,9 +136,7 @@ def sync_status() -> Dict:
     ]
 
     for branch_email, state, last_update, content in entries:
-        lines.append(
-            f"<details><summary><strong>{branch_email}</strong> — {state} ({last_update})</summary>"
-        )
+        lines.append(f"<details><summary><strong>{branch_email}</strong> — {state} ({last_update})</summary>")
         lines.append("")
         lines.append(content.rstrip())
         lines.append("")
@@ -147,9 +146,7 @@ def sync_status() -> Dict:
     status_md = repo_root / "STATUS.md"
     status_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    logger.info(
-        "STATUS.md synced: %d branches, %d missing", len(synced), len(missing)
-    )
+    logger.info("STATUS.md synced: %d branches, %d missing", len(synced), len(missing))
 
     json_handler.log_operation("status_synced", {"branches_synced": len(synced), "branches_missing": len(missing)})
 

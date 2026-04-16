@@ -35,10 +35,7 @@ def _get_caller_cwd() -> Path:
     return Path.cwd()
 
 
-def resolve_plan_location(
-    location: str | None,
-    ecosystem_root: Path
-) -> Tuple[bool, Path, str]:
+def resolve_plan_location(location: str | None, ecosystem_root: Path) -> Tuple[bool, Path, str]:
     """
     Resolve plan location relative to the CALLER's directory.
 

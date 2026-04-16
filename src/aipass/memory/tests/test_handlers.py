@@ -26,6 +26,7 @@ from unittest.mock import MagicMock, patch
 # Import helpers -- each handler has module-level imports that need mocking
 # ---------------------------------------------------------------------------
 
+
 def _import_extractor(monkeypatch):
     """Import extractor with mocked infrastructure dependencies."""
     mock_json_handler = MagicMock()
@@ -108,6 +109,7 @@ def _import_normalize(monkeypatch):
 # Tests: rollover/extractor.py
 # ===========================================================================
 
+
 class TestDetectGrowingArray:
     """Test _detect_growing_array helper."""
 
@@ -165,8 +167,9 @@ class TestDerivebranchAndType:
 class TestExtractItemsV2:
     """Test _extract_items_v2 entry-count based extraction."""
 
-    def _make_v2_data(self, num_sessions: int = 5, num_learnings: int = 5,
-                      max_sessions: int = 3, max_learnings: int = 3):
+    def _make_v2_data(
+        self, num_sessions: int = 5, num_learnings: int = 5, max_sessions: int = 3, max_learnings: int = 3
+    ):
         """Build a v2 memory data dict with controllable counts."""
         sessions = [
             {"session_number": i, "date": f"2026-01-{i:02d}", "summary": f"Session {i}"}
@@ -210,8 +213,7 @@ class TestExtractItemsV2:
 
     def test_trims_key_learnings_to_limit(self, monkeypatch, tmp_path):
         ext = _import_extractor(monkeypatch)[0]
-        data = self._make_v2_data(num_sessions=2, num_learnings=7,
-                                  max_sessions=3, max_learnings=4)
+        data = self._make_v2_data(num_sessions=2, num_learnings=7, max_sessions=3, max_learnings=4)
 
         mem_file = tmp_path / ".trinity" / "local.json"
         mem_file.parent.mkdir(parents=True)
@@ -231,8 +233,7 @@ class TestExtractItemsV2:
 
     def test_skips_when_under_limits(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
-        data = self._make_v2_data(num_sessions=2, num_learnings=2,
-                                  max_sessions=5, max_learnings=5)
+        data = self._make_v2_data(num_sessions=2, num_learnings=2, max_sessions=5, max_learnings=5)
 
         mem_file = tmp_path / ".trinity" / "local.json"
         mem_file.parent.mkdir(parents=True)
@@ -245,8 +246,7 @@ class TestExtractItemsV2:
     def test_extracts_oldest_sessions_from_end(self, monkeypatch, tmp_path):
         """Sessions are stored newest-first, oldest at end. Extraction takes from end."""
         ext, _ = _import_extractor(monkeypatch)
-        data = self._make_v2_data(num_sessions=5, num_learnings=0,
-                                  max_sessions=3, max_learnings=100)
+        data = self._make_v2_data(num_sessions=5, num_learnings=0, max_sessions=3, max_learnings=100)
 
         mem_file = tmp_path / ".trinity" / "local.json"
         mem_file.parent.mkdir(parents=True)
@@ -268,8 +268,7 @@ class TestExtractItemsV2:
     def test_extracts_oldest_key_learnings_by_insertion_order(self, monkeypatch, tmp_path):
         """First-inserted keys are oldest and should be extracted first."""
         ext, _ = _import_extractor(monkeypatch)
-        data = self._make_v2_data(num_sessions=0, num_learnings=5,
-                                  max_sessions=100, max_learnings=3)
+        data = self._make_v2_data(num_sessions=0, num_learnings=5, max_sessions=100, max_learnings=3)
 
         mem_file = tmp_path / ".trinity" / "local.json"
         mem_file.parent.mkdir(parents=True)
@@ -334,7 +333,7 @@ class TestCreateRolloverBackup:
     def test_restore_fails_without_backup(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
         mem_file = tmp_path / "local.json"
-        mem_file.write_text('{}', encoding="utf-8")
+        mem_file.write_text("{}", encoding="utf-8")
 
         result = ext.restore_from_backup(mem_file)
         assert result["success"] is False
@@ -343,6 +342,7 @@ class TestCreateRolloverBackup:
 # ===========================================================================
 # Tests: tracking/line_counter.py
 # ===========================================================================
+
 
 class TestCountPhysicalLines:
     """Test _count_physical_lines helper."""
@@ -385,9 +385,7 @@ class TestUpdateLineCount:
 
     def test_reports_failure_when_metadata_update_fails(self, monkeypatch, tmp_path):
         lc, mocks = _import_line_counter(monkeypatch)
-        mocks["memory_files"].update_metadata.return_value = {
-            "success": False, "error": "write error"
-        }
+        mocks["memory_files"].update_metadata.return_value = {"success": False, "error": "write error"}
         f = tmp_path / "test.json"
         f.write_text("{}\n", encoding="utf-8")
 
@@ -399,6 +397,7 @@ class TestUpdateLineCount:
 # ===========================================================================
 # Tests: schema/normalize.py
 # ===========================================================================
+
 
 class TestNormalizeMemoryFile:
     """Test normalize_memory_file function."""
@@ -414,11 +413,14 @@ class TestNormalizeMemoryFile:
     def test_moves_root_limits_into_metadata(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {"status": {"current_lines": 10}},
-            "limits": {"max_lines": 600},
-            "sessions": [],
-        })
+        self._write_json(
+            f,
+            {
+                "document_metadata": {"status": {"current_lines": 10}},
+                "limits": {"max_lines": 600},
+                "sessions": [],
+            },
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
 
@@ -429,14 +431,17 @@ class TestNormalizeMemoryFile:
     def test_merges_root_limits_preserving_metadata_values(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {
-                "limits": {"max_lines": 500},
-                "status": {"current_lines": 10},
+        self._write_json(
+            f,
+            {
+                "document_metadata": {
+                    "limits": {"max_lines": 500},
+                    "status": {"current_lines": 10},
+                },
+                "limits": {"max_lines": 600, "extra_field": 42},
+                "sessions": [],
             },
-            "limits": {"max_lines": 600, "extra_field": 42},
-            "sessions": [],
-        })
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
 
@@ -449,11 +454,14 @@ class TestNormalizeMemoryFile:
     def test_removes_root_status(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {"status": {"current_lines": 10}},
-            "status": {"health": "ok", "current_lines": 5},
-            "sessions": [],
-        })
+        self._write_json(
+            f,
+            {
+                "document_metadata": {"status": {"current_lines": 10}},
+                "status": {"health": "ok", "current_lines": 5},
+                "sessions": [],
+            },
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
 
@@ -464,12 +472,15 @@ class TestNormalizeMemoryFile:
     def test_removes_auto_compress_at(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {
-                "status": {"current_lines": 10, "auto_compress_at": 500},
+        self._write_json(
+            f,
+            {
+                "document_metadata": {
+                    "status": {"current_lines": 10, "auto_compress_at": 500},
+                },
+                "sessions": [],
             },
-            "sessions": [],
-        })
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
 
@@ -497,13 +508,16 @@ class TestNormalizeMemoryFile:
     def test_no_changes_when_already_normalized(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {
-                "limits": {"max_sessions": 20},
-                "status": {"current_lines": 10, "last_health_check": "2026-03-31"},
+        self._write_json(
+            f,
+            {
+                "document_metadata": {
+                    "limits": {"max_sessions": 20},
+                    "status": {"current_lines": 10, "last_health_check": "2026-03-31"},
+                },
+                "sessions": [],
             },
-            "sessions": [],
-        })
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
         assert result["changes"] == []
@@ -511,13 +525,16 @@ class TestNormalizeMemoryFile:
     def test_removes_unused_limit_fields(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
         f = tmp_path / "test.json"
-        self._write_json(f, {
-            "document_metadata": {
-                "limits": {"max_lines": 600, "max_word_count": 9999, "max_token_count": 5000},
-                "status": {"current_lines": 10, "last_health_check": "2026-03-31"},
+        self._write_json(
+            f,
+            {
+                "document_metadata": {
+                    "limits": {"max_lines": 600, "max_word_count": 9999, "max_token_count": 5000},
+                    "status": {"current_lines": 10, "last_health_check": "2026-03-31"},
+                },
+                "sessions": [],
             },
-            "sessions": [],
-        })
+        )
         result = norm.normalize_memory_file(f)
         assert result["success"] is True
 

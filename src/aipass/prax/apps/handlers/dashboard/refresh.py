@@ -91,15 +91,14 @@ def _extract_flow_section(centrals: Dict, branch_name: str) -> Dict:
     recently_closed_raw = plans_data.get("recently_closed", [])
     # Simplify for dashboard display (just id and subject)
     recently_closed = [
-        {"plan_id": p.get("plan_id", ""), "subject": p.get("subject", "")}
-        for p in recently_closed_raw[:5]
+        {"plan_id": p.get("plan_id", ""), "subject": p.get("subject", "")} for p in recently_closed_raw[:5]
     ]
 
     return {
         "managed_by": "flow",
         "active_plans": len(branch_plans),
         "recently_closed": recently_closed,
-        "last_updated": plans_data.get("generated_at", plans_data.get("last_updated", datetime.now().isoformat()))
+        "last_updated": plans_data.get("generated_at", plans_data.get("last_updated", datetime.now().isoformat())),
     }
 
 
@@ -116,7 +115,7 @@ def _extract_ai_mail_section(centrals: Dict, branch_name: str) -> Dict:
         "managed_by": "ai_mail",
         "unread": stats.get("unread", 0),
         "total": stats.get("total", 0),
-        "last_updated": mail_data.get("last_updated", datetime.now().isoformat())
+        "last_updated": mail_data.get("last_updated", datetime.now().isoformat()),
     }
 
 
@@ -137,6 +136,7 @@ def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
             sqlite_file = chroma_dir / "chroma.sqlite3"
             if sqlite_file.exists():
                 import sqlite3
+
                 conn = sqlite3.connect(str(sqlite_file))
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM embeddings")
@@ -149,12 +149,7 @@ def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     mb_data = centrals.get("memory", {})
     mb_last_updated = mb_data.get("last_updated", datetime.now().isoformat())
 
-    return {
-        "managed_by": "memory",
-        "vectors_stored": local_vectors,
-        "notes": {},
-        "last_updated": mb_last_updated
-    }
+    return {"managed_by": "memory", "vectors_stored": local_vectors, "notes": {}, "last_updated": mb_last_updated}
 
 
 def _extract_commons_section(centrals: Dict, branch_name: str) -> Optional[Dict]:
@@ -183,7 +178,7 @@ def _extract_commons_section(centrals: Dict, branch_name: str) -> Optional[Dict]
         "mentions": stats.get("mentions", 0),
         "new_posts_since_last_visit": stats.get("new_posts_since_last_visit", 0),
         "new_comments_since_last_visit": stats.get("new_comments_since_last_visit", 0),
-        "last_updated": stats.get("last_updated", "")
+        "last_updated": stats.get("last_updated", ""),
     }
 
 
@@ -228,7 +223,7 @@ def _calculate_quick_status(sections: Dict) -> Dict:
         "active_plans": active_plans,
         "commons_mentions": mentions,
         "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear"
+        "summary": ", ".join(parts) if parts else "All clear",
     }
 
 
@@ -286,12 +281,7 @@ def refresh_all_dashboards() -> Dict:
         branch_paths = _load_branch_paths()
     except Exception as e:
         logger.error("Failed to load branch paths: %s", e)
-        return {
-            "status": "error",
-            "branches_updated": 0,
-            "branches_failed": 0,
-            "errors": [str(e)]
-        }
+        return {"status": "error", "branches_updated": 0, "branches_failed": 0, "errors": [str(e)]}
 
     # Update each branch
     for branch_path in branch_paths:
@@ -329,17 +319,20 @@ def refresh_all_dashboards() -> Dict:
     else:
         status = "error"
 
-    json_handler.log_operation("dashboard_refreshed", {
-        "status": status,
-        "branches_updated": branches_updated,
-        "branches_failed": branches_failed,
-    })
+    json_handler.log_operation(
+        "dashboard_refreshed",
+        {
+            "status": status,
+            "branches_updated": branches_updated,
+            "branches_failed": branches_failed,
+        },
+    )
 
     return {
         "status": status,
         "branches_updated": branches_updated,
         "branches_failed": branches_failed,
-        "errors": errors
+        "errors": errors,
     }
 
 

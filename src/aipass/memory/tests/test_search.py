@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 # Helpers: build the full mock graph that search.py needs at import time
 # ---------------------------------------------------------------------------
 
+
 def _prepare_search_mocks(monkeypatch):
     """Insert mocks for every module-level import search.py touches.
 
@@ -50,19 +51,21 @@ def _prepare_search_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules_mod)
 
     # aipass.memory.apps.handlers.search.query_executor
-    mock_execute_search = MagicMock(return_value={
-        "success": True,
-        "collections_searched": 2,
-        "total_results": 1,
-        "results": [
-            {
-                "collection": "seed_observations",
-                "document": "Test document content",
-                "metadata": {"timestamp": "2026-01-01", "source": "local.json"},
-                "similarity": 0.85,
-            }
-        ],
-    })
+    mock_execute_search = MagicMock(
+        return_value={
+            "success": True,
+            "collections_searched": 2,
+            "total_results": 1,
+            "results": [
+                {
+                    "collection": "seed_observations",
+                    "document": "Test document content",
+                    "metadata": {"timestamp": "2026-01-01", "source": "local.json"},
+                    "similarity": 0.85,
+                }
+            ],
+        }
+    )
     mock_query_executor = MagicMock()
     mock_query_executor.execute_search = mock_execute_search
 
@@ -113,6 +116,7 @@ def _import_search(monkeypatch):
 # handle_command: routing
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandRouting:
     """Verify that handle_command routes known commands and rejects unknown."""
 
@@ -136,9 +140,7 @@ class TestHandleCommandRouting:
         result = search_mod.handle_command("search", ["hello", "world"])
 
         assert result is True
-        mock_show.assert_called_once_with(
-            "hello world", branch=None, memory_type=None, n_results=5
-        )
+        mock_show.assert_called_once_with("hello world", branch=None, memory_type=None, n_results=5)
 
     def test_unknown_command_returns_false(self, monkeypatch):
         """An unrecognised command should return False."""
@@ -160,6 +162,7 @@ class TestHandleCommandRouting:
 # ---------------------------------------------------------------------------
 # handle_command: help flags
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandHelp:
     """Verify help flags route to print_help."""
@@ -235,6 +238,7 @@ class TestHandleCommandHelp:
 # handle_command: argument parsing
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandArgParsing:
     """Verify argument parsing: --branch, --type, --n, and edge cases."""
 
@@ -246,9 +250,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["my", "query", "--branch", "SEEDGO"])
 
-        mock_show.assert_called_once_with(
-            "my query", branch="SEEDGO", memory_type=None, n_results=5
-        )
+        mock_show.assert_called_once_with("my query", branch="SEEDGO", memory_type=None, n_results=5)
 
     def test_type_option_parsed(self, monkeypatch):
         """--type value should be forwarded to show_search_results."""
@@ -258,9 +260,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--type", "observations"])
 
-        mock_show.assert_called_once_with(
-            "test", branch=None, memory_type="observations", n_results=5
-        )
+        mock_show.assert_called_once_with("test", branch=None, memory_type="observations", n_results=5)
 
     def test_n_option_parsed(self, monkeypatch):
         """--n value should override the default n_results."""
@@ -270,9 +270,7 @@ class TestHandleCommandArgParsing:
 
         search_mod.handle_command("search", ["test", "--n", "10"])
 
-        mock_show.assert_called_once_with(
-            "test", branch=None, memory_type=None, n_results=10
-        )
+        mock_show.assert_called_once_with("test", branch=None, memory_type=None, n_results=10)
 
     def test_all_options_combined(self, monkeypatch):
         """All options together should be correctly parsed."""
@@ -285,9 +283,7 @@ class TestHandleCommandArgParsing:
             ["find", "stuff", "--branch", "CLI", "--type", "local", "--n", "3"],
         )
 
-        mock_show.assert_called_once_with(
-            "find stuff", branch="CLI", memory_type="local", n_results=3
-        )
+        mock_show.assert_called_once_with("find stuff", branch="CLI", memory_type="local", n_results=3)
 
     def test_invalid_n_shows_error(self, monkeypatch):
         """Non-numeric --n value should call error() and return True."""
@@ -322,6 +318,7 @@ class TestHandleCommandArgParsing:
 # ---------------------------------------------------------------------------
 # _discover_handlers: handler directory scanning
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverHandlers:
     """Verify handler auto-discovery logic with synthetic directory trees."""
@@ -447,6 +444,7 @@ class TestDiscoverHandlers:
 # show_search_results: display path
 # ---------------------------------------------------------------------------
 
+
 class TestShowSearchResults:
     """Verify show_search_results calls the handler and renders output."""
 
@@ -457,9 +455,7 @@ class TestShowSearchResults:
         result = search_mod.show_search_results("test query")
 
         assert result is True
-        mocks["execute_search"].assert_called_once_with(
-            query="test query", branch=None, memory_type=None, n_results=5
-        )
+        mocks["execute_search"].assert_called_once_with(query="test query", branch=None, memory_type=None, n_results=5)
 
     def test_failed_search_returns_false(self, monkeypatch):
         """If the handler returns success=False, show_search_results returns False."""
@@ -493,13 +489,9 @@ class TestShowSearchResults:
         """Branch, memory_type, and n_results should be forwarded."""
         search_mod, mocks = _import_search(monkeypatch)
 
-        search_mod.show_search_results(
-            "q", branch="SEEDGO", memory_type="local", n_results=3
-        )
+        search_mod.show_search_results("q", branch="SEEDGO", memory_type="local", n_results=3)
 
-        mocks["execute_search"].assert_called_once_with(
-            query="q", branch="SEEDGO", memory_type="local", n_results=3
-        )
+        mocks["execute_search"].assert_called_once_with(query="q", branch="SEEDGO", memory_type="local", n_results=3)
 
     def test_handler_timeout_returns_false(self, monkeypatch):
         """When the handler returns a timeout error, show_search_results returns False."""
@@ -531,10 +523,9 @@ class TestShowSearchResults:
     def test_handler_exception_does_not_crash(self, monkeypatch):
         """If the handler raises an unexpected exception, it should not propagate."""
         import subprocess
+
         search_mod, mocks = _import_search(monkeypatch)
-        mocks["execute_search"].side_effect = subprocess.TimeoutExpired(
-            cmd="python embed_subprocess.py", timeout=120
-        )
+        mocks["execute_search"].side_effect = subprocess.TimeoutExpired(cmd="python embed_subprocess.py", timeout=120)
 
         result = search_mod.show_search_results("crash query")
 

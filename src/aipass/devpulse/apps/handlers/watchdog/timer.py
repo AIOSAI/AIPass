@@ -84,7 +84,7 @@ def _load_store(storage_path: Path) -> dict:
     if not storage_path.exists():
         return _empty_store()
     try:
-        data = json.loads(storage_path.read_text(encoding='utf-8'))
+        data = json.loads(storage_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("[watchdog.timer] could not load %s: %s", storage_path, exc)
         return _empty_store()
@@ -107,7 +107,7 @@ def _atomic_write(storage_path: Path, data: dict) -> None:
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = storage_path.with_suffix(storage_path.suffix + ".tmp")
     try:
-        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding='utf-8')
+        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp_path, storage_path)
     finally:
         if tmp_path.exists():
@@ -286,22 +286,26 @@ def timer_list(storage_path: Path | None = None) -> dict:
     for name, entry in sorted(store["active"].items()):
         started_epoch = float(entry.get("started_epoch", now))
         elapsed = max(0, int(now - started_epoch))
-        active.append({
-            "name": name,
-            "started_at": entry.get("started_at"),
-            "elapsed_so_far_seconds": elapsed,
-            "human": format_human(elapsed),
-        })
+        active.append(
+            {
+                "name": name,
+                "started_at": entry.get("started_at"),
+                "elapsed_so_far_seconds": elapsed,
+                "human": format_human(elapsed),
+            }
+        )
 
     history = []
     for entry in store["history"]:
-        history.append({
-            "name": entry.get("name"),
-            "started_at": entry.get("started_at"),
-            "stopped_at": entry.get("stopped_at"),
-            "elapsed_seconds": entry.get("elapsed_seconds", 0),
-            "human": format_human(int(entry.get("elapsed_seconds", 0))),
-        })
+        history.append(
+            {
+                "name": entry.get("name"),
+                "started_at": entry.get("started_at"),
+                "stopped_at": entry.get("stopped_at"),
+                "elapsed_seconds": entry.get("elapsed_seconds", 0),
+                "human": format_human(int(entry.get("elapsed_seconds", 0))),
+            }
+        )
 
     return {"active": active, "history": history}
 
@@ -315,9 +319,7 @@ def timer_report(storage_path: Path | None = None) -> str:
     if snapshot["active"]:
         for item in snapshot["active"]:
             started = _short_time(item.get("started_at"))
-            lines.append(
-                f"  - {item['name']:<15} elapsed {item['human']} (started {started})"
-            )
+            lines.append(f"  - {item['name']:<15} elapsed {item['human']} (started {started})")
     else:
         lines.append("  (none)")
 
@@ -327,9 +329,7 @@ def timer_report(storage_path: Path | None = None) -> str:
         for item in snapshot["history"]:
             started = _short_time(item.get("started_at"))
             stopped = _short_time(item.get("stopped_at"))
-            lines.append(
-                f"  - {item['name']:<15} {item['human']:<8} ({started} → {stopped})"
-            )
+            lines.append(f"  - {item['name']:<15} {item['human']:<8} ({started} → {stopped})")
     else:
         lines.append("  (none)")
 

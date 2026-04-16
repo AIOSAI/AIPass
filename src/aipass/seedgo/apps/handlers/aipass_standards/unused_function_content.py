@@ -39,7 +39,7 @@ def get_unused_function_standards() -> str:
         "  Reads all files and strips non-code content:",
         "  - Triple-quoted strings (docstrings, multiline literals)",
         "  - Comment lines",
-        "  - [dim]if __name__ == \"__main__\":[/dim] blocks",
+        '  - [dim]if __name__ == "__main__":[/dim] blocks',
         "",
         "  [yellow]Phase 3 -- Extract functions:[/yellow]",
         "  AST-parses each file to find [dim]def[/dim] and [dim]async def[/dim]",

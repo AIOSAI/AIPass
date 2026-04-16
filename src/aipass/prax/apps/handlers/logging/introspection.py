@@ -14,6 +14,7 @@ Used by logger_setup.py to route logs to correct files.
 """
 
 import logging
+
 logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Optional
@@ -21,10 +22,10 @@ from typing import Optional
 from aipass.prax.apps.handlers.json import json_handler
 
 _PRAX_INTERNAL_MARKERS = (
-    '/prax/apps/modules/logger.py',
-    '/prax/apps/handlers/',
-    'prax_logger.py',
-    'prax_handlers.py',
+    "/prax/apps/modules/logger.py",
+    "/prax/apps/handlers/",
+    "prax_logger.py",
+    "prax_handlers.py",
 )
 
 
@@ -46,7 +47,7 @@ def _find_external_caller_path() -> Optional[str]:
             frame_count += 1
             if not current_frame:
                 break
-            module_path = current_frame.f_globals.get('__file__', '')
+            module_path = current_frame.f_globals.get("__file__", "")
             if not module_path or module_path == __file__:
                 continue
             if not _is_prax_internal(module_path):
@@ -65,7 +66,7 @@ def get_calling_module() -> str:
     caller_path = _find_external_caller_path()
     if caller_path:
         return Path(caller_path).stem
-    return 'unknown_module'
+    return "unknown_module"
 
 
 def get_calling_module_path() -> Optional[str]:
@@ -89,13 +90,15 @@ def get_caller_info() -> tuple:
     """
     caller_path = _find_external_caller_path()
     if not caller_path:
-        return ('unknown_module', None, None)
+        return ("unknown_module", None, None)
     module_name = Path(caller_path).stem
     branch = detect_branch_from_path(caller_path)
     return (module_name, caller_path, branch)
 
+
 _AIPASS_PKG_ROOT = Path(__file__).resolve().parents[4]  # logging/ → handlers/ → apps/ → prax/ → aipass/
 _SRC_ROOT = _AIPASS_PKG_ROOT.parent  # aipass/ → src/ (contains branches outside aipass namespace)
+
 
 def detect_branch_from_path(module_path: str) -> Optional[str]:
     """Detect branch name from module file path
@@ -124,7 +127,11 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         # relative is like: flow/apps/module.py → parts[0] = "flow"
         if len(relative.parts) >= 2:
             branch = relative.parts[0]
-            json_handler.log_operation("introspection_resolved", {"module_path": module_path, "branch": branch}, module_name="prax_introspection")
+            json_handler.log_operation(
+                "introspection_resolved",
+                {"module_path": module_path, "branch": branch},
+                module_name="prax_introspection",
+            )
             return branch
     except ValueError:
         logger.info("Path %s is not relative to aipass package root", module_path)
@@ -134,7 +141,11 @@ def detect_branch_from_path(module_path: str) -> Optional[str]:
         relative = path.relative_to(_SRC_ROOT)
         if len(relative.parts) >= 2 and relative.parts[0] != "aipass":
             branch = relative.parts[0]
-            json_handler.log_operation("introspection_resolved", {"module_path": module_path, "branch": branch, "outside_aipass": True}, module_name="prax_introspection")
+            json_handler.log_operation(
+                "introspection_resolved",
+                {"module_path": module_path, "branch": branch, "outside_aipass": True},
+                module_name="prax_introspection",
+            )
             return branch
     except ValueError:
         logger.info("Path %s is not relative to src root", module_path)

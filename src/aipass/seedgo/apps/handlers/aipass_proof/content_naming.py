@@ -100,23 +100,27 @@ def scan(pack_dir: Path) -> dict:
         except SyntaxError as exc:
             logger.info("Skipped %s: SyntaxError during parse", content_file.name)
             incorrect.append(content_file.name)
-            issues.append({
-                "file": content_file.name,
-                "expected": expected_fn,
-                "issue": f"SyntaxError: {exc}",
-            })
+            issues.append(
+                {
+                    "file": content_file.name,
+                    "expected": expected_fn,
+                    "issue": f"SyntaxError: {exc}",
+                }
+            )
             continue
 
         if expected_fn in public_fns:
             correct.append(content_file.name)
         else:
             incorrect.append(content_file.name)
-            issues.append({
-                "file": content_file.name,
-                "expected": expected_fn,
-                "found_functions": public_fns,
-                "issue": f"Missing expected function {expected_fn}()",
-            })
+            issues.append(
+                {
+                    "file": content_file.name,
+                    "expected": expected_fn,
+                    "found_functions": public_fns,
+                    "issue": f"Missing expected function {expected_fn}()",
+                }
+            )
 
     total = len(correct) + len(incorrect)
     passed = len(incorrect) == 0

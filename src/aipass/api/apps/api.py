@@ -47,6 +47,7 @@ MODULES_DIR = MODULE_ROOT / "modules"
 # MODULE DISCOVERY
 # =============================================================================
 
+
 def discover_modules() -> List[Any]:
     """
     Auto-discover modules from modules/ directory
@@ -74,7 +75,7 @@ def discover_modules() -> List[Any]:
             module = importlib.import_module(f"aipass.api.apps.modules.{module_name}")
 
             # Check for required interface
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"  [+] {module_name}")
             else:
@@ -86,9 +87,11 @@ def discover_modules() -> List[Any]:
     logger.info(f"[{Path(__file__).stem}] Discovered {len(modules)} modules")
     return modules
 
+
 # =============================================================================
 # INTROSPECTION DISPLAY
 # =============================================================================
+
 
 def print_introspection():
     """Display discovered modules and available commands"""
@@ -110,7 +113,7 @@ def print_introspection():
     console.print()
 
     for module in modules:
-        module_name = module.__name__.split('.')[-1]
+        module_name = module.__name__.split(".")[-1]
         console.print(f"  [cyan]•[/cyan] {module_name}")
 
     console.print()
@@ -121,6 +124,7 @@ def print_introspection():
 # =============================================================================
 # DRONE COMPLIANCE - HELP SYSTEM
 # =============================================================================
+
 
 def print_help():
     """Display Rich-formatted help"""
@@ -178,7 +182,7 @@ def print_help():
     usage_examples = [
         "[yellow]Quick Commands:[/yellow]\n  [dim]drone @api get-key[/dim]\n  [dim]drone @api validate[/dim]",
         "[yellow]Testing:[/yellow]\n  [dim]drone @api test[/dim]\n  [dim]drone @api models[/dim]",
-        "[yellow]Analytics:[/yellow]\n  [dim]drone @api track[/dim]\n  [dim]drone @api stats[/dim]"
+        "[yellow]Analytics:[/yellow]\n  [dim]drone @api track[/dim]\n  [dim]drone @api stats[/dim]",
     ]
 
     console.print(Columns(usage_examples, equal=True, expand=True))
@@ -200,13 +204,16 @@ def print_help():
     console.print("─" * 70)
     console.print()
 
-    console.print("[dim]Commands: get-key, validate, test, models, status, call, list-providers, init, track, stats, session, caller-usage, cleanup[/dim]")
+    console.print(
+        "[dim]Commands: get-key, validate, test, models, status, call, list-providers, init, track, stats, session, caller-usage, cleanup[/dim]"
+    )
     console.print()
 
 
 # =============================================================================
 # COMMAND ROUTING
 # =============================================================================
+
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """
@@ -229,9 +236,11 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
     return False
 
+
 # =============================================================================
 # MAIN
 # =============================================================================
+
 
 def main():
     """Main entry point - routes commands to modules"""
@@ -246,12 +255,12 @@ def main():
             return 0
 
         # Show version
-        if args[0] in ['--version', '-V']:
+        if args[0] in ["--version", "-V"]:
             console.print("API v1.0.0")
             return 0
 
         # Show help for explicit help flags
-        if args[0] in ['--help', '-h', 'help']:
+        if args[0] in ["--help", "-h", "help"]:
             print_help()
             json_handler.log_operation("api_help_displayed", {"trigger": args[0]})
             return 0
@@ -269,10 +278,7 @@ def main():
         remaining_args = args[1:] if len(args) > 1 else []
 
         # Log api command attempt
-        json_handler.log_operation(
-            "api_command_attempted",
-            {"command": command, "modules_discovered": len(modules)}
-        )
+        json_handler.log_operation("api_command_attempted", {"command": command, "modules_discovered": len(modules)})
 
         # Route command to modules
         if route_command(command, remaining_args, modules):
@@ -285,6 +291,7 @@ def main():
     except Exception as exc:
         logger.error("[api] Unhandled error in main: %s", exc)
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

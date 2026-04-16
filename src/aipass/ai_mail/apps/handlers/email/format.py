@@ -98,16 +98,13 @@ def format_email_header(email_data: Dict) -> str:
         Formatted header string
     """
     json_handler.log_operation("format_email_header", {"subject": email_data.get("subject", "")})
-    sender = format_sender_display(
-        email_data.get('from_name', 'Unknown'),
-        email_data.get('from', 'unknown')
-    )
+    sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
     lines = [
         "=" * 70,
         f"From: {sender}",
         f"Date: {email_data.get('timestamp', 'Unknown')}",
         f"Subject: {email_data.get('subject', 'No Subject')}",
-        "=" * 70
+        "=" * 70,
     ]
     return "\n".join(lines)
 
@@ -127,24 +124,25 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
     lines = []
 
     # Unread marker + ID for copy-paste
-    msg_id = email_data.get('id', '????????')
+    msg_id = email_data.get("id", "????????")
     if show_unread:
         # v2: check status first, fall back to read for backward compat
         status = email_data.get("status")
         is_new = status == "new" if status else not email_data.get("read", False)
         unread_marker = "📨" if is_new else "📬"
-        sender = format_sender_display(
-            email_data.get('from_name', 'Unknown'),
-            email_data.get('from', 'unknown')
+        sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
+        lines.append(
+            f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {email_data.get('timestamp', 'Unknown')}"
         )
-        lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {email_data.get('timestamp', 'Unknown')}")
     else:
-        lines.append(f"\n{index}. \\[{msg_id}] To: {email_data.get('to', 'Unknown')} @ {email_data.get('timestamp', 'Unknown')}")
+        lines.append(
+            f"\n{index}. \\[{msg_id}] To: {email_data.get('to', 'Unknown')} @ {email_data.get('timestamp', 'Unknown')}"
+        )
 
     lines.append(f"   Subject: {email_data.get('subject', 'No Subject')}")
 
     # Preview
-    message = email_data.get('message', '')
+    message = email_data.get("message", "")
     preview = format_email_preview(message, 100)
     lines.append(f"   {preview}")
 
@@ -153,9 +151,10 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
 
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
-    console.print("\n" + "="*70)
+
+    console.print("\n" + "=" * 70)
     console.print("EMAIL FORMATTING HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Email display formatting and text utilities")
     console.print()
@@ -174,4 +173,4 @@ if __name__ == "__main__":
     console.print("  from ai_mail.apps.handlers.email.format import format_email_preview")
     console.print("  from ai_mail.apps.handlers.email.format import format_email_header")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

@@ -34,10 +34,12 @@ from aipass.flow.apps.handlers.json import json_handler
 # HANDLER FUNCTION
 # =============================================
 
+
 def _get_all_registry_files() -> List[str]:
     """Return per-type registry filenames via plan-type discovery."""
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
+
         files: List[str] = []
         for _key, config in discover_plan_types().items():
             rf = config.get("registry_file")

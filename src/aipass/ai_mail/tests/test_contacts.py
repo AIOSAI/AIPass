@@ -23,6 +23,7 @@ from aipass.ai_mail.apps.handlers.email.contacts import (
 
 # ---- Fixtures ------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
@@ -40,6 +41,7 @@ def isolated_contacts(tmp_path, monkeypatch):
 
 
 # ---- _load_contacts() tests --------------------------------
+
 
 def test_load_contacts_missing_file(isolated_contacts):
     """Missing contacts.json returns default empty structure."""
@@ -64,6 +66,7 @@ def test_load_contacts_missing_key(isolated_contacts):
 
 
 # ---- get_contact() tests -----------------------------------
+
 
 def test_get_contact_empty(isolated_contacts):
     """get_contact with no contacts returns None."""
@@ -94,6 +97,7 @@ def test_get_contact_not_found(isolated_contacts):
 
 
 # ---- register_contact() tests ------------------------------
+
 
 def test_register_contact_creates_entry(isolated_contacts):
     """register_contact writes a new entry with correct fields."""
@@ -145,6 +149,7 @@ def test_register_contact_persists_to_disk(isolated_contacts):
 
 
 # ---- all_contacts() tests ----------------------------------
+
 
 def test_all_contacts_empty(isolated_contacts):
     """all_contacts returns empty dict when no contacts registered."""

@@ -16,6 +16,7 @@ from pathlib import Path
 # meta_ops tests
 # =============================================================================
 
+
 class TestComputeFileHash:
     """Tests for compute_file_hash()."""
 
@@ -215,6 +216,7 @@ class TestGetTemplateDir:
 # deep_merge tests
 # =============================================================================
 
+
 class TestDeepMerge:
     """Tests for deep_merge()."""
 
@@ -314,6 +316,7 @@ class TestDeepMerge:
 # =============================================================================
 # detect_changes tests
 # =============================================================================
+
 
 class TestDetectChanges:
     """Tests for detect_changes()."""
@@ -489,6 +492,7 @@ class TestDetectChanges:
 # reconcile_branch_state tests
 # =============================================================================
 
+
 class TestReconcileBranchState:
     """Tests for reconcile_branch_state()."""
 
@@ -609,6 +613,7 @@ class TestReconcileBranchState:
 # =============================================================================
 # backup_json tests
 # =============================================================================
+
 
 class TestBackupJson:
     """Tests for backup_json()."""

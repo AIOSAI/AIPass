@@ -11,9 +11,7 @@
 Placeholder for future memory event handling.
 """
 
-
 from aipass.trigger.apps.handlers.json import json_handler
-
 
 
 def handle_memory_saved(**kwargs):

@@ -38,6 +38,7 @@ def _get_all_registry_info() -> Tuple[list[str], Dict[str, str]]:
     """
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
+
         files: list[str] = []
         prefix_map: Dict[str, str] = {}
         for _key, config in discover_plan_types().items():
@@ -56,6 +57,7 @@ def _get_all_registry_info() -> Tuple[list[str], Dict[str, str]]:
 # =============================================
 # LIST PLANS IMPLEMENTATION
 # =============================================
+
 
 def list_plans_impl(
     filter_type: str = "open",
@@ -132,7 +134,9 @@ def list_plans_impl(
 
         # STEP 5: Log success
         logger.info(f"[{MODULE_NAME}] Listed plans (filter: {filter_type})")
-        json_handler.log_operation("plans_listed", {"filter_type": filter_type, "count": len(merged_plans), "success": True})
+        json_handler.log_operation(
+            "plans_listed", {"filter_type": filter_type, "count": len(merged_plans), "success": True}
+        )
 
         return {
             "success": True,

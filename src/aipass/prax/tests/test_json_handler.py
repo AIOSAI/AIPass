@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 # FIXTURES
 # =============================================
 
+
 @pytest.fixture
 def sample_test_data():
     """Provide sample_data for json handler tests."""
@@ -38,6 +39,7 @@ def cleanup_temp(tmp_path):
     yield created
     # teardown — clean up created files
     import shutil
+
     for p in created:
         if Path(p).exists():
             if Path(p).is_dir():
@@ -78,13 +80,16 @@ def json_handler_module(mock_prax_infrastructure, tmp_path, monkeypatch):
 
     # Provide real functions with patched paths
     from types import ModuleType
+
     real_mod = ModuleType("json_handler_test")
-    real_mod.__dict__.update({
-        "json": json,
-        "Path": Path,
-        "PRAX_JSON_DIR": mod.PRAX_JSON_DIR,
-        "JSON_TEMPLATES_DIR": mod.JSON_TEMPLATES_DIR,
-    })
+    real_mod.__dict__.update(
+        {
+            "json": json,
+            "Path": Path,
+            "PRAX_JSON_DIR": mod.PRAX_JSON_DIR,
+            "JSON_TEMPLATES_DIR": mod.JSON_TEMPLATES_DIR,
+        }
+    )
 
     return mod
 
@@ -92,6 +97,7 @@ def json_handler_module(mock_prax_infrastructure, tmp_path, monkeypatch):
 # =============================================
 # JSON HANDLER: load_template / default_factory
 # =============================================
+
 
 def test_load_template_returns_config(json_handler_module, tmp_path):
     """load_template returns populated template — covers _create_default / default_factory."""
@@ -113,6 +119,7 @@ def test_load_template_returns_config(json_handler_module, tmp_path):
 # JSON HANDLER: validate_json_structure
 # =============================================
 
+
 def test_validate_json_structure_config(sample_test_data):
     """validate_json_structure accepts valid config with module_name."""
     data = sample_test_data
@@ -131,6 +138,7 @@ def test_validate_json_structure_rejects_non_dict():
 # JSON HANDLER: get_json_path
 # =============================================
 
+
 def test_get_json_path_returns_path(json_handler_module):
     """get_json_path returns a Path object."""
     prax_json_dir = json_handler_module.PRAX_JSON_DIR
@@ -145,6 +153,7 @@ def test_get_json_path_returns_path(json_handler_module):
 # =============================================
 # JSON HANDLER: ensure_json_exists
 # =============================================
+
 
 def test_ensure_json_exists_creates_file(json_handler_module):
     """ensure_json_exists creates missing config file from template."""
@@ -183,6 +192,7 @@ def test_ensure_json_no_overwrite(json_handler_module):
 # JSON HANDLER: load_json
 # =============================================
 
+
 def test_load_json_returns_dict(json_handler_module):
     """load_json returns dict type — isinstance(result, dict) check."""
     prax_dir = json_handler_module.PRAX_JSON_DIR
@@ -213,6 +223,7 @@ def test_load_json_missing_file_returns_none(json_handler_module):
 # JSON HANDLER: save_json
 # =============================================
 
+
 def test_save_json_writes_valid_data(json_handler_module):
     """save_json writes valid config data to file."""
     prax_dir = json_handler_module.PRAX_JSON_DIR
@@ -236,6 +247,7 @@ def test_save_json_invalid_raises(json_handler_module):
 # JSON HANDLER: ensure_module_jsons
 # =============================================
 
+
 def test_ensure_module_jsons_creates_all(json_handler_module):
     """ensure_module_jsons creates config, data, and log files."""
     prax_dir = json_handler_module.PRAX_JSON_DIR
@@ -255,6 +267,7 @@ def test_ensure_module_jsons_creates_all(json_handler_module):
 # =============================================
 # EXCEPTION CONTRACTS
 # =============================================
+
 
 def test_create_default_raises_on_invalid_type():
     """_create_default raises ValueError on invalid json_type."""
@@ -278,6 +291,7 @@ def test_invalid_mode_raises_on_bad_input():
 # CLI ROUTING: unknown_command + output_capture
 # =============================================
 
+
 def test_unknown_command_returns_false(mock_prax_infrastructure):
     """handle_command returns False for unknown_command."""
     # Simulate command routing for unrecognized command
@@ -298,6 +312,7 @@ def test_output_capture_with_capsys(capsys, mock_prax_infrastructure):
 # RETURN TYPE CONTRACTS
 # =============================================
 
+
 def test_command_returns_bool_type(mock_prax_infrastructure):
     """handle_command returns_bool — isinstance(result, bool) check."""
     # Simulate command routing
@@ -311,6 +326,7 @@ def test_command_returns_bool_type(mock_prax_infrastructure):
 # DATA STRUCTURE CONTRACTS
 # =============================================
 
+
 def test_config_has_required_keys(sample_test_data):
     """Config JSON contains module_name and config_keys."""
     data = sample_test_data
@@ -321,6 +337,7 @@ def test_config_has_required_keys(sample_test_data):
 # =============================================
 # INIT PROVISIONING
 # =============================================
+
 
 def test_auto_creates_directory(tmp_path):
     """Provisioning auto-creates directories with mkdir."""

@@ -38,6 +38,7 @@ _handler_mocks = types.SimpleNamespace(
 # Autouse fixture -- mock all heavy imports before symbolic.py is loaded
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_symbolic_infrastructure(monkeypatch):
     """Replace handler modules with MagicMock before importing symbolic.py."""
@@ -62,9 +63,7 @@ def _mock_symbolic_infrastructure(monkeypatch):
     json_pkg = MagicMock()
     json_pkg.json_handler = mock_json_handler
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler
-    )
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
     # -- symbolic handler sub-modules (the delegation targets) --------------
     mock_extractor = MagicMock()
@@ -81,27 +80,15 @@ def _mock_symbolic_infrastructure(monkeypatch):
     symbolic_pkg.deduplicator = mock_deduplicator
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic", symbolic_pkg)
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.symbolic.extractor", mock_extractor
-    )
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.symbolic.storage", mock_storage
-    )
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.symbolic.retriever", mock_retriever
-    )
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.symbolic.hook", mock_hook
-    )
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.symbolic.deduplicator", mock_deduplicator
-    )
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic.extractor", mock_extractor)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic.storage", mock_storage)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic.retriever", mock_retriever)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic.hook", mock_hook)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.symbolic.deduplicator", mock_deduplicator)
 
     # -- vector embedder (imported by storage handler) ----------------------
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.vector", MagicMock())
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.vector.embedder", MagicMock()
-    )
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.vector.embedder", MagicMock())
 
     # -- trigger (lazy import inside create_fragment) -----------------------
     mock_trigger_core = MagicMock()
@@ -125,6 +112,7 @@ def _mock_symbolic_infrastructure(monkeypatch):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _sample_chat() -> list:
     """Return a minimal chat history list."""
@@ -151,12 +139,14 @@ def _import_symbolic():
         delattr(parent, "symbolic")
 
     from aipass.memory.apps.modules import symbolic
+
     return symbolic
 
 
 # ===========================================================================
 # EXTRACTION DELEGATION TESTS
 # ===========================================================================
+
 
 class TestExtractTechnicalFlow:
     """extract_technical_flow delegates to extractor handler."""
@@ -168,9 +158,7 @@ class TestExtractTechnicalFlow:
 
         result = symbolic.extract_technical_flow(_sample_chat())
 
-        _handler_mocks.extractor.extract_technical_flow.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_technical_flow.assert_called_once_with(_sample_chat())
         assert result == expected
 
     def test_returns_handler_result_unchanged(self):
@@ -191,9 +179,7 @@ class TestExtractEmotionalJourney:
 
         result = symbolic.extract_emotional_journey(_sample_chat())
 
-        _handler_mocks.extractor.extract_emotional_journey.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_emotional_journey.assert_called_once_with(_sample_chat())
         assert result == expected
 
 
@@ -207,9 +193,7 @@ class TestExtractCollaborationPatterns:
 
         result = symbolic.extract_collaboration_patterns(_sample_chat())
 
-        _handler_mocks.extractor.extract_collaboration_patterns.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_collaboration_patterns.assert_called_once_with(_sample_chat())
         assert result == expected
 
 
@@ -223,9 +207,7 @@ class TestExtractKeyLearnings:
 
         result = symbolic.extract_key_learnings(_sample_chat())
 
-        _handler_mocks.extractor.extract_key_learnings.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_key_learnings.assert_called_once_with(_sample_chat())
         assert result == expected
 
 
@@ -239,9 +221,7 @@ class TestExtractContextTriggers:
 
         result = symbolic.extract_context_triggers(_sample_chat())
 
-        _handler_mocks.extractor.extract_context_triggers.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_context_triggers.assert_called_once_with(_sample_chat())
         assert result == expected
 
 
@@ -259,15 +239,14 @@ class TestExtractSymbolicDimensions:
 
         result = symbolic.extract_symbolic_dimensions(_sample_chat())
 
-        _handler_mocks.extractor.extract_symbolic_dimensions.assert_called_once_with(
-            _sample_chat()
-        )
+        _handler_mocks.extractor.extract_symbolic_dimensions.assert_called_once_with(_sample_chat())
         assert result == expected
 
 
 # ===========================================================================
 # STORAGE DELEGATION TESTS
 # ===========================================================================
+
 
 class TestCreateFragment:
     """create_fragment delegates to storage handler and fires trigger."""
@@ -283,9 +262,7 @@ class TestCreateFragment:
 
         result = symbolic.create_fragment(analysis, content="hello", source_branch="memory")
 
-        _handler_mocks.storage.create_fragment.assert_called_once_with(
-            analysis, "hello", "memory"
-        )
+        _handler_mocks.storage.create_fragment.assert_called_once_with(analysis, "hello", "memory")
         assert result == fragment_result
 
     def test_fires_trigger_on_success(self):
@@ -347,6 +324,7 @@ class TestCreateFragment:
 # ===========================================================================
 # EMPTY INPUT / EDGE CASE TESTS
 # ===========================================================================
+
 
 class TestEmptyChatHistory:
     """Verify wrapper functions forward empty lists without crashing."""

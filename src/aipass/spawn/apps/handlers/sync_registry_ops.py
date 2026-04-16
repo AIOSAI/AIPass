@@ -83,6 +83,7 @@ def _scan_for_branches(project_root: Path) -> dict[str, Path]:
 # PUBLIC API
 # =============================================================================
 
+
 def sync_registry(fix: bool = False) -> dict:
     """Synchronize *_REGISTRY.json with filesystem.
 
@@ -158,14 +159,15 @@ def sync_registry(fix: bool = False) -> dict:
         if stale:
             if isinstance(raw_branches, dict):
                 for key in list(raw_branches.keys()):
-                    entry_name = raw_branches[key].get("name", "").lower() if isinstance(raw_branches[key], dict) else key.lower()
+                    entry_name = (
+                        raw_branches[key].get("name", "").lower()
+                        if isinstance(raw_branches[key], dict)
+                        else key.lower()
+                    )
                     if entry_name in stale or key.lower() in stale:
                         del raw_branches[key]
             else:
-                raw_branches = [
-                    b for b in raw_branches
-                    if b.get("name", "").lower() not in stale
-                ]
+                raw_branches = [b for b in raw_branches if b.get("name", "").lower() not in stale]
             registry["branches"] = raw_branches
             for s in stale:
                 logger.info(f"[sync-registry] Removed stale entry: {s}")
@@ -235,7 +237,9 @@ def sync_registry(fix: bool = False) -> dict:
                 try:
                     template_dir = get_template_dir(citizen_class)
                 except ValueError:
-                    logger.warning(f"[sync-registry] Unknown class '{citizen_class}' for {name}, falling back to builder")
+                    logger.warning(
+                        f"[sync-registry] Unknown class '{citizen_class}' for {name}, falling back to builder"
+                    )
                     template_dir = get_template_dir("builder")
                 template_registry = load_template_registry(template_dir)
                 if template_registry:

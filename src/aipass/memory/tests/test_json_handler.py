@@ -38,6 +38,7 @@ import pytest
 # Per-test fixture: import json_handler with mocks in place
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _fresh_json_handler(monkeypatch):
     """Ensure json_handler module is freshly imported each test.

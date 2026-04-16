@@ -30,6 +30,7 @@ from aipass.drone.apps.modules.resolver import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_registry(
     registry_path: Path,
     branches: List[Dict[str, Any]],
@@ -68,6 +69,7 @@ def _make_branch(
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def registry_dir(temp_test_dir: Path):
@@ -123,6 +125,7 @@ def empty_registry(registry_dir: Path) -> Path:
 # normalize helpers
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeBranchName:
     def test_strips_at_prefix(self):
         assert normalize_branch_name("@FOO") == "FOO"
@@ -152,6 +155,7 @@ class TestNormalizeBranchArg:
 # ---------------------------------------------------------------------------
 # resolve_branch
 # ---------------------------------------------------------------------------
+
 
 class TestResolveBranch:
     def test_resolve_with_at_prefix(self, populated_registry):
@@ -205,6 +209,7 @@ class TestResolveBranch:
 # branch_exists
 # ---------------------------------------------------------------------------
 
+
 class TestBranchExists:
     def test_exists_for_valid_branch(self, populated_registry):
         assert branch_exists("@ALPHA") is True
@@ -230,6 +235,7 @@ class TestBranchExists:
 # ---------------------------------------------------------------------------
 # get_branch_info
 # ---------------------------------------------------------------------------
+
 
 class TestGetBranchInfo:
     def test_contains_expected_keys(self, populated_registry):
@@ -270,6 +276,7 @@ class TestGetBranchInfo:
 # ---------------------------------------------------------------------------
 # list_branches
 # ---------------------------------------------------------------------------
+
 
 class TestListBranches:
     @pytest.fixture(autouse=True)
@@ -322,6 +329,7 @@ class TestListBranches:
 # handle_command routing
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommand:
     def test_resolve_command_success(self, populated_registry):
         assert handle_command("resolve", ["@ALPHA"]) is True
@@ -357,6 +365,7 @@ class TestHandleCommand:
 # ---------------------------------------------------------------------------
 # sample_registry conftest fixture
 # ---------------------------------------------------------------------------
+
 
 class TestWithSampleRegistry:
     """Tests using the sample_registry fixture from conftest.py."""

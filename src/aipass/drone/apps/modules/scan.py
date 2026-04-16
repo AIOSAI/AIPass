@@ -35,6 +35,7 @@ __all__ = [
 # Standard module interface
 # ---------------------------------------------------------------------------
 
+
 def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
     """Route scan subcommands to handler functions.
 
@@ -71,6 +72,7 @@ def print_introspection() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -95,6 +97,7 @@ def print_help() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print("scan -- Branch command scanning")
@@ -110,6 +113,7 @@ def print_help() -> None:
 # ---------------------------------------------------------------------------
 # Core operation
 # ---------------------------------------------------------------------------
+
 
 def scan(target: str) -> list[dict] | None:
     """Resolve ``@target``, scan for commands, display and return results.
@@ -128,6 +132,7 @@ def scan(target: str) -> list[dict] | None:
         logger.warning("scan: could not resolve '%s': %s", target, exc)
         try:
             from aipass.cli.apps.modules import err_console
+
             err_console.print(f"scan: could not resolve '{target}': {exc}")
         except ImportError as exc:
             logger.warning("CLI err_console not available, skipping user-facing error: %s", exc)

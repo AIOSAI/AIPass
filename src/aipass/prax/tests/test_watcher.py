@@ -16,31 +16,37 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-
 # ============================================================================
 # WATCHER/MONITOR.PY - BranchFileHandler and start/stop_monitoring
 # ============================================================================
+
 
 class TestBranchFileHandler:
     """Tests for BranchFileHandler event callbacks and filtering."""
 
     def _make_handler(self):
         """Create a BranchFileHandler with a mock callback."""
+
         # Provide a real base class so subclass methods work properly
         class _RealFSHandler:
             """Stub base so BranchFileHandler methods are not swallowed."""
+
             pass
 
         mock_watchdog_events = MagicMock()
         mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
         mock_watchdog_events.FileSystemEvent = MagicMock()
         mock_watchdog_observer = MagicMock()
-        with patch.dict(sys.modules, {
-            "watchdog": MagicMock(),
-            "watchdog.observers": mock_watchdog_observer,
-            "watchdog.events": mock_watchdog_events,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "watchdog": MagicMock(),
+                "watchdog.observers": mock_watchdog_observer,
+                "watchdog.events": mock_watchdog_events,
+            },
+        ):
             import importlib
+
             if "aipass.prax.apps.handlers.watcher.monitor" in sys.modules:
                 mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.watcher.monitor"])
             else:
@@ -151,6 +157,7 @@ class TestBranchFileHandler:
 # WATCHER/MONITOR.PY - start_monitoring / stop_monitoring
 # ============================================================================
 
+
 class TestStartStopMonitoring:
     """Tests for start_monitoring and stop_monitoring functions."""
 
@@ -164,12 +171,16 @@ class TestStartStopMonitoring:
 
         mock_watchdog_events = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "watchdog": MagicMock(),
-            "watchdog.observers": mock_watchdog_observer,
-            "watchdog.events": mock_watchdog_events,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "watchdog": MagicMock(),
+                "watchdog.observers": mock_watchdog_observer,
+                "watchdog.events": mock_watchdog_events,
+            },
+        ):
             import importlib
+
             if "aipass.prax.apps.handlers.watcher.monitor" in sys.modules:
                 mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.watcher.monitor"])
             else:
@@ -225,6 +236,7 @@ class TestStartStopMonitoring:
 # DISCOVERY/WATCHER.PY - PythonFileWatcher, start/stop/is_active
 # ============================================================================
 
+
 class TestDiscoveryWatcher:
     """Tests for the discovery watcher that registers new Python modules."""
 
@@ -253,20 +265,24 @@ class TestDiscoveryWatcher:
 
         mock_trigger_mod = MagicMock()
 
-        with patch.dict(sys.modules, {
-            "watchdog": MagicMock(),
-            "watchdog.observers": mock_watchdog_observer,
-            "watchdog.events": mock_watchdog_events,
-            "aipass.prax.apps.handlers.config.load": mock_config,
-            "aipass.prax.apps.handlers.registry.load": mock_registry_load,
-            "aipass.prax.apps.handlers.registry.save": mock_registry_save,
-            "aipass.prax.apps.handlers.discovery.filtering": mock_filtering,
-            "aipass.trigger": MagicMock(),
-            "aipass.trigger.apps": MagicMock(),
-            "aipass.trigger.apps.modules": MagicMock(),
-            "aipass.trigger.apps.modules.core": mock_trigger_mod,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "watchdog": MagicMock(),
+                "watchdog.observers": mock_watchdog_observer,
+                "watchdog.events": mock_watchdog_events,
+                "aipass.prax.apps.handlers.config.load": mock_config,
+                "aipass.prax.apps.handlers.registry.load": mock_registry_load,
+                "aipass.prax.apps.handlers.registry.save": mock_registry_save,
+                "aipass.prax.apps.handlers.discovery.filtering": mock_filtering,
+                "aipass.trigger": MagicMock(),
+                "aipass.trigger.apps": MagicMock(),
+                "aipass.trigger.apps.modules": MagicMock(),
+                "aipass.trigger.apps.modules.core": mock_trigger_mod,
+            },
+        ):
             import importlib
+
             if "aipass.prax.apps.handlers.discovery.watcher" in sys.modules:
                 mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.discovery.watcher"])
             else:

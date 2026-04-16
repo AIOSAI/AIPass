@@ -153,9 +153,7 @@ def reply_to(msg_id: str, body: str) -> bool:
     return True
 
 
-def _deliver_to_ai_mail(
-    to_branch: str, subject: str, body: str, thread_id: str, reply_path: str = ""
-) -> None:
+def _deliver_to_ai_mail(to_branch: str, subject: str, body: str, thread_id: str, reply_path: str = "") -> None:
     """Deliver a reply to the sender's ai_mail inbox.
 
     Writes directly to the sender's .ai_mail.local/inbox.json.
@@ -175,9 +173,7 @@ def _deliver_to_ai_mail(
         ai_mail_path = _AIPASS_ROOT / to_branch / ".ai_mail.local" / "inbox.json"
 
     if not ai_mail_path.exists():
-        logger.warning(
-            f"[FEEDBACK] ai_mail inbox not found for {to_branch} at {ai_mail_path} — skipping delivery"
-        )
+        logger.warning(f"[FEEDBACK] ai_mail inbox not found for {to_branch} at {ai_mail_path} — skipping delivery")
         return
 
     try:

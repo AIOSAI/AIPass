@@ -15,6 +15,7 @@ from aipass.seedgo.apps.handlers.bypass import ignore_handler
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
+
 def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     """Auto-discover all *_check.py modules from a pack directory.
 
@@ -39,14 +40,19 @@ def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
             checkers[name] = mod
     return checkers
 
+
 def _collect_py_files(branch_path: Path) -> List[Dict[str, str]]:
     """Collect auditable .py files from apps/, respecting ignore patterns."""
     apps_dir = branch_path / "apps"
     if not apps_dir.exists():
         return []
     ign = ignore_handler.get_audit_ignore_patterns()
-    return [{"file": str(f), "name": f.name} for f in apps_dir.rglob("*.py")
-            if f.name != "__init__.py" and not any(p in str(f).lower() for p in ign)]
+    return [
+        {"file": str(f), "name": f.name}
+        for f in apps_dir.rglob("*.py")
+        if f.name != "__init__.py" and not any(p in str(f).lower() for p in ign)
+    ]
+
 
 def _extract_branch_level_violations(result: dict) -> list:
     """Extract per-file violations from a branch-level checker result.
@@ -88,8 +94,7 @@ def _run_all_files(checker, name: str, files: List[Dict], bypass_rules: list) ->
             logger.info("Checker %s failed on %s", name, fi["name"])
             continue
         score, checks = r.get("score", 0), r.get("checks", [])
-        if checks and not any(w in c.get("message", "").lower() for c in checks
-                              for w in ("skipped", "not applicable")):
+        if checks and not any(w in c.get("message", "").lower() for c in checks for w in ("skipped", "not applicable")):
             scores.append(score)
         # Collect violations from ANY file with failing checks, regardless of
         # overall pass/fail.  The old gate (not r["passed"]) hid violations
@@ -97,8 +102,7 @@ def _run_all_files(checker, name: str, files: List[Dict], bypass_rules: list) ->
         failed = [c for c in checks if not c.get("passed", False)]
         if failed:
             msgs = [c.get("message", "Unknown") for c in failed]
-            v = {"file": fi["name"], "path": fi["file"], "score": score, "issues": msgs,
-                 "message": "; ".join(msgs)}
+            v = {"file": fi["name"], "path": fi["file"], "score": score, "issues": msgs, "message": "; ".join(msgs)}
             violations.append(v)
     return violations, scores
 
@@ -163,7 +167,12 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
                 for vi in v:
                     all_failed.extend({"name": name, "passed": False, "message": iss} for iss in vi.get("issues", []))
                 if all_failed:
-                    results[name] = {"passed": avg_score >= 75, "checks": all_failed, "score": avg_score, "standard": name.upper()}
+                    results[name] = {
+                        "passed": avg_score >= 75,
+                        "checks": all_failed,
+                        "score": avg_score,
+                        "standard": name.upper(),
+                    }
 
     # Dynamic post-checks: call check_branch_post() on any checker that implements it
     for name, checker in checkers.items():
@@ -182,8 +191,15 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
     # Deprecated DOCUMENTS/ directory check
     deprecated = []
     if (branch_path / "DOCUMENTS").is_dir():
-        deprecated.append({"type": "directory", "old": "DOCUMENTS/", "new": "docs/",
-                           "path": str(branch_path / "DOCUMENTS"), "message": "Rename DOCUMENTS/ to docs/"})
+        deprecated.append(
+            {
+                "type": "directory",
+                "old": "DOCUMENTS/",
+                "new": "docs/",
+                "path": str(branch_path / "DOCUMENTS"),
+                "message": "Rename DOCUMENTS/ to docs/",
+            }
+        )
 
     # Custom function coverage scan (informational, not scored)
     try:
@@ -193,10 +209,17 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
         test_map_result = None
 
     diag_result = results.get("diagnostics", {})
-    output = {"branch": branch, "results": results, "scores": scores, "average": avg,
-              "deprecated_patterns": deprecated, "files_checked": len(all_files),
-              "type_errors": diag_result.get("total_errors", 0), "type_error_files": diag_result.get("results", []),
-              "test_map": test_map_result}
+    output = {
+        "branch": branch,
+        "results": results,
+        "scores": scores,
+        "average": avg,
+        "deprecated_patterns": deprecated,
+        "files_checked": len(all_files),
+        "type_errors": diag_result.get("total_errors", 0),
+        "type_error_files": diag_result.get("results", []),
+        "test_map": test_map_result,
+    }
     for name in checkers:
         output[f"{name}_violations"] = all_violations.get(name, [])
     return output

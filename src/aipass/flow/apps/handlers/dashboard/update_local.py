@@ -113,6 +113,7 @@ def _get_all_registry_files() -> List[str]:
 # HELPER FUNCTIONS
 # =============================================
 
+
 def _read_registry() -> Optional[Dict[str, Any]]:
     """
     Read all per-type plan registries and merge into a single dict.
@@ -127,7 +128,7 @@ def _read_registry() -> Optional[Dict[str, Any]]:
         try:
             if not target.exists():
                 continue
-            with open(target, 'r', encoding='utf-8') as f:
+            with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
             found_any = True
             for plan_num, plan_data in data.get("plans", {}).items():
@@ -165,7 +166,7 @@ def _extract_flow_plans(registry: Dict[str, Any]) -> tuple[List[Dict[str, Any]],
         # Extract plan prefix from file_path (e.g., DPLAN, FPLAN, TDPLAN)
         file_path_str = plan_data.get("file_path", "")
         filename = Path(file_path_str).name if file_path_str else ""
-        prefix_match = re.match(r'^([A-Z]+PLAN)', filename)
+        prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
         prefix = prefix_match.group(1) if prefix_match else "FPLAN"
 
         # Build plan entry
@@ -175,7 +176,7 @@ def _extract_flow_plans(registry: Dict[str, Any]) -> tuple[List[Dict[str, Any]],
             "subject": plan_data.get("subject", ""),
             "status": plan_data.get("status", "unknown"),
             "file_path": plan_data.get("file_path", ""),
-            "location": location
+            "location": location,
         }
 
         # Add timestamps
@@ -198,8 +199,9 @@ def _extract_flow_plans(registry: Dict[str, Any]) -> tuple[List[Dict[str, Any]],
     return active, closed
 
 
-def _calculate_statistics(active: List[Dict[str, Any]], closed: List[Dict[str, Any]],
-                          registry: Dict[str, Any]) -> Dict[str, int]:
+def _calculate_statistics(
+    active: List[Dict[str, Any]], closed: List[Dict[str, Any]], registry: Dict[str, Any]
+) -> Dict[str, int]:
     """
     Calculate statistics for Flow's plans.
 
@@ -211,11 +213,7 @@ def _calculate_statistics(active: List[Dict[str, Any]], closed: List[Dict[str, A
     Returns:
         Statistics dict
     """
-    return {
-        "active_count": len(active),
-        "total_closed": len(closed),
-        "next_number": registry.get("next_number", 1)
-    }
+    return {"active_count": len(active), "total_closed": len(closed), "next_number": registry.get("next_number", 1)}
 
 
 def _read_existing_dashboard() -> Dict[str, Any]:
@@ -228,7 +226,7 @@ def _read_existing_dashboard() -> Dict[str, Any]:
     try:
         if not DASHBOARD_FILE.exists():
             return {}
-        with open(DASHBOARD_FILE, 'r', encoding='utf-8') as f:
+        with open(DASHBOARD_FILE, "r", encoding="utf-8") as f:
             content = f.read().strip()
             # Handle old markdown format gracefully
             if not content or content.startswith("⚠️"):
@@ -240,9 +238,9 @@ def _read_existing_dashboard() -> Dict[str, Any]:
         return {}
 
 
-def _build_dashboard_data(active: List[Dict[str, Any]], closed: List[Dict[str, Any]],
-                          statistics: Dict[str, int],
-                          existing: Dict[str, Any]) -> Dict[str, Any]:
+def _build_dashboard_data(
+    active: List[Dict[str, Any]], closed: List[Dict[str, Any]], statistics: Dict[str, int], existing: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Build updated dashboard data with Flow's section.
 
@@ -264,7 +262,7 @@ def _build_dashboard_data(active: List[Dict[str, Any]], closed: List[Dict[str, A
     dashboard["flow_plans"] = {
         "active": active,
         "recently_closed": closed[-5:] if len(closed) > 0 else [],  # Last 5
-        "statistics": statistics
+        "statistics": statistics,
     }
 
     return dashboard
@@ -282,7 +280,7 @@ def _write_dashboard(dashboard: Dict[str, Any]) -> bool:
     """
     try:
         DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(DASHBOARD_FILE, 'w', encoding='utf-8') as f:
+        with open(DASHBOARD_FILE, "w", encoding="utf-8") as f:
             json.dump(dashboard, f, indent=2, ensure_ascii=False)
         return True
     except Exception as exc:
@@ -293,6 +291,7 @@ def _write_dashboard(dashboard: Dict[str, Any]) -> bool:
 # =============================================
 # HANDLER FUNCTION
 # =============================================
+
 
 def update_dashboard_local() -> bool:
     """
@@ -334,10 +333,13 @@ def update_dashboard_local() -> bool:
     result = _write_dashboard(dashboard)
 
     if result:
-        json_handler.log_operation("dashboard_local_updated", {
-            "active_count": statistics["active_count"],
-            "total_closed": statistics["total_closed"],
-            "success": True,
-        })
+        json_handler.log_operation(
+            "dashboard_local_updated",
+            {
+                "active_count": statistics["active_count"],
+                "total_closed": statistics["total_closed"],
+                "success": True,
+            },
+        )
 
     return result

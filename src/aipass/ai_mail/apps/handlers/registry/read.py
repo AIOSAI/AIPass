@@ -59,7 +59,7 @@ def get_all_branches() -> List[Dict]:
         return []
 
     try:
-        with open(BRANCH_REGISTRY_PATH, 'r', encoding='utf-8') as f:
+        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
 
         # Handle both formats: list of dicts or dict keyed by name
@@ -82,11 +82,7 @@ def get_all_branches() -> List[Dict]:
             else:
                 email = _derive_email_from_branch_name(branch_name)
 
-            branches.append({
-                "name": branch_name,
-                "path": path,
-                "email": email
-            })
+            branches.append({"name": branch_name, "path": path, "email": email})
 
         return branches
 
@@ -112,18 +108,18 @@ def _derive_email_from_branch_name(branch_name: str) -> str:
     Returns:
         Email address in format "@email"
     """
-    if '.' in branch_name:
+    if "." in branch_name:
         # Special case: AIPASS.admin -> admin
-        email_part = branch_name.split('.')[-1].lower()
-    elif ' ' in branch_name:
+        email_part = branch_name.split(".")[-1].lower()
+    elif " " in branch_name:
         # Handle spaces: take first word
         email_part = branch_name.split()[0].lower()
-    elif '-' in branch_name and branch_name.split('-')[0] == 'AIPASS':
+    elif "-" in branch_name and branch_name.split("-")[0] == "AIPASS":
         # AIPASS-prefixed branches: use second part to avoid collision
-        email_part = branch_name.split('-', 1)[1].lower()
+        email_part = branch_name.split("-", 1)[1].lower()
     else:
         # Take first word before hyphen or whole name
-        email_part = branch_name.split('-')[0].lower()
+        email_part = branch_name.split("-")[0].lower()
 
     return f"@{email_part}"
 
@@ -200,9 +196,10 @@ def get_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
 
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
-    console.print("\n" + "="*70)
+
+    console.print("\n" + "=" * 70)
     console.print("AI_MAIL HANDLER: registry/read.py")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nRegistry Read Handler")
     console.print()
     console.print("FUNCTIONS PROVIDED:")
@@ -219,4 +216,4 @@ if __name__ == "__main__":
     if len(branches) > 5:
         console.print(f"  ... and {len(branches) - 5} more")
 
-    console.print("\n" + "="*70 + "\n")
+    console.print("\n" + "=" * 70 + "\n")

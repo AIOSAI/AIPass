@@ -48,6 +48,7 @@ REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
+
 def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
     """Save module registry to prax_registry.json (system registry)
 
@@ -87,12 +88,12 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
             "statistics": {
                 "total_modules": len(modules),
                 "last_updated": datetime.now(timezone.utc).isoformat(),
-                "scan_location": str(ECOSYSTEM_ROOT)
-            }
+                "scan_location": str(ECOSYSTEM_ROOT),
+            },
         }
 
         # Save to file
-        with open(REGISTRY_FILE, 'w', encoding='utf-8') as f:
+        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
             json.dump(registry_structure, f, indent=2, ensure_ascii=False)
 
         json_handler.log_operation("registry_saved", {"total_modules": len(modules)})

@@ -74,9 +74,9 @@ def prepend_dispatch_header(message: str, no_memory_save: bool = False) -> str:
 
 
 if __name__ == "__main__":
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("EMAIL HEADER HANDLER")
-    print("="*70)
+    print("=" * 70)
     print("\nPURPOSE:")
     print("  Generates header for dispatch emails (critical reminders)")
     print()
@@ -96,4 +96,4 @@ if __name__ == "__main__":
     print("USAGE FROM MODULES:")
     print("  from ai_mail.apps.handlers.email.header import prepend_dispatch_header")
     print()
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")

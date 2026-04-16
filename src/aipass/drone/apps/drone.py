@@ -49,6 +49,7 @@ INTERACTIVE_BRANCHES = ("cli",)
 # AUTO-DISCOVERY
 # =============================================================================
 
+
 def _discover_modules() -> list[tuple[str, str]]:
     """Auto-discover modules in apps/modules/ with handle_command()."""
     discovered = []
@@ -57,9 +58,7 @@ def _discover_modules() -> list[tuple[str, str]]:
             continue
         module_name = file_path.stem
         try:
-            module = importlib.import_module(
-                f"aipass.drone.apps.modules.{module_name}"
-            )
+            module = importlib.import_module(f"aipass.drone.apps.modules.{module_name}")
             if hasattr(module, "handle_command"):
                 doc = (module.__doc__ or "").strip().split("\n")[0]
                 discovered.append((module_name, doc))
@@ -71,6 +70,7 @@ def _discover_modules() -> list[tuple[str, str]]:
 # =============================================================================
 # HELP & INTROSPECTION
 # =============================================================================
+
 
 def show_help() -> None:
     """Display drone help with Rich formatting."""
@@ -141,6 +141,7 @@ def show_introspection() -> None:
 # =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
+
 
 def _cwd_has_registry(max_depth: int = 10) -> bool:
     """Check if CWD is within a project that has a *_REGISTRY.json."""
@@ -332,13 +333,16 @@ def _handle_custom_command(args: list[str]) -> int:
 
     try:
         result = route_command(
-            target, command,
+            target,
+            command,
             args=cmd_args if cmd_args else None,
             interactive=interactive,
         )
     except (BranchNotFoundError, CommandExecutionError, RegistryError) as exc:
         if isinstance(exc, BranchNotFoundError) and is_module(module_name):
-            logger.info("Falling back to module routing for custom command @%s %s (not in local registry)", module_name, command)
+            logger.info(
+                "Falling back to module routing for custom command @%s %s (not in local registry)", module_name, command
+            )
             return _handle_module(module_name, [command] + cmd_args)
         logger.warning("Custom command failed for target %s: %s", target, exc)
         err_console.print(f"drone: {exc}")
@@ -360,9 +364,7 @@ def _handle_target(args: List[str]) -> int:
     module_name = target.lstrip("@").lower()
 
     first_cmd = rest[0] if rest and rest[0] != "--help" else None
-    needs_interactive = (
-        first_cmd in INTERACTIVE_COMMANDS or module_name in INTERACTIVE_BRANCHES
-    )
+    needs_interactive = first_cmd in INTERACTIVE_COMMANDS or module_name in INTERACTIVE_BRANCHES
 
     # Route to internal module — unless command needs interactive terminal,
     # in which case fall through to branch (subprocess) routing so Rich
@@ -417,7 +419,8 @@ def _handle_target(args: List[str]) -> int:
 
     try:
         result = route_command(
-            target, command,
+            target,
+            command,
             args=cmd_args if cmd_args else None,
             interactive=interactive,
         )
@@ -441,6 +444,7 @@ def _handle_target(args: List[str]) -> int:
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
+
 
 def main() -> int:
     """Main entry point - routes commands or shows help."""
@@ -487,6 +491,7 @@ def main() -> int:
             err_console.print("drone: scan requires a target (e.g., drone scan @seedgo)")
             return 1
         from aipass.drone.apps.modules.scan import scan
+
         results = scan(args[1])
         return 0 if results is not None else 1
 
@@ -507,6 +512,7 @@ def main() -> int:
     # hook-sounds — toggle hook notification sounds
     if command == "hook-sounds":
         from aipass.drone.apps.plugins.hook_sounds.hook_sounds_plugin import handle_command as hs_handle
+
         cmd = args[1] if len(args) > 1 else None
         hs_handle(cmd)
         return 0
@@ -564,11 +570,9 @@ def main() -> int:
     # Git Bash on Windows is fine — it passes @ through like Linux.
     try:
         from aipass.drone.apps.modules.resolver import branch_exists
+
         if branch_exists(command):
-            err_console.print(
-                f"drone: branch references require @ prefix. "
-                f"Use '@{command}' instead of '{command}'."
-            )
+            err_console.print(f"drone: branch references require @ prefix. Use '@{command}' instead of '{command}'.")
             return 1
     except Exception as exc:
         logger.warning("Branch existence check failed for '%s': %s", command, exc)

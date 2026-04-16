@@ -402,23 +402,13 @@ def get_help(command: str | None = None) -> str:
             "  creates a feature branch, commits, pushes, and opens a PR.\n"
         )
     if command == "status":
-        return (
-            "git status — Show git status filtered to your branch directory\n"
-        )
+        return "git status — Show git status filtered to your branch directory\n"
     if command == "sync":
-        return (
-            "git sync — Checkout main and pull latest changes\n"
-        )
+        return "git sync — Checkout main and pull latest changes\n"
     if command == "lock":
-        return (
-            "git lock — Check current lock status\n"
-            "  Shows lock holder, age, stale/orphan detection.\n"
-        )
+        return "git lock — Check current lock status\n  Shows lock holder, age, stale/orphan detection.\n"
     if command == "unlock":
-        return (
-            "git unlock --force — Force-release the PR lock\n"
-            "  Removes .git_pr.lock regardless of holder.\n"
-        )
+        return "git unlock --force — Force-release the PR lock\n  Removes .git_pr.lock regardless of holder.\n"
     if command == "system-pr":
         return (
             "git system-pr <description> — Create a system-wide PR (devpulse only)\n"
@@ -487,6 +477,7 @@ def print_introspection() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print(get_introspective())
@@ -499,6 +490,7 @@ def print_help() -> None:
     except ImportError:
         logger.warning("CLI console not available, using fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print(get_help())

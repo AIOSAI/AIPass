@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_architecture_standards() -> str:
     """Return formatted architecture standards content with Rich markup
 

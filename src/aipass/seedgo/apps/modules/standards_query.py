@@ -41,6 +41,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # PACK DISCOVERY
 # =============================================================================
 
+
 def _discover_packs() -> dict:
     """Discover available checker packs from handlers/ directory.
 
@@ -70,6 +71,7 @@ def _discover_packs() -> dict:
 # STANDARD DISCOVERY
 # =============================================================================
 
+
 def _discover_standards(pack_path: Path) -> dict:
     """Discover available standards content files within a pack.
 
@@ -90,6 +92,7 @@ def _discover_standards(pack_path: Path) -> dict:
 # =============================================================================
 # CONTENT LOADING
 # =============================================================================
+
 
 def _load_content(content_file: Path, standard_name: str) -> str | None:
     """Load and return formatted standards content from a content handler.
@@ -129,6 +132,7 @@ def _load_content(content_file: Path, standard_name: str) -> str | None:
 # DISPLAY HELPERS
 # =============================================================================
 
+
 def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
     """List all standards available in a pack."""
     standards = _discover_standards(pack_path)
@@ -158,6 +162,7 @@ def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
 # =============================================================================
 # COMMAND HANDLER
 # =============================================================================
+
 
 def handle_command(command: str, args: List[str]) -> bool:
     """
@@ -233,6 +238,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # INTROSPECTION & HELP
 # =============================================================================
 
+
 def print_introspection() -> None:
     """Display module info, discovered packs, and connected handlers."""
     console.print()
@@ -274,9 +280,15 @@ def print_help():
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  [green]drone @seedgo standards_query[/green]                        [dim]List available packs[/dim]")
-    console.print("  [green]drone @seedgo standards_query <pack>[/green]                 [dim]List standards in pack[/dim]")
-    console.print("  [green]drone @seedgo standards_query <pack> <standard>[/green]      [dim]Show standard content[/dim]")
+    console.print(
+        "  [green]drone @seedgo standards_query[/green]                        [dim]List available packs[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo standards_query <pack>[/green]                 [dim]List standards in pack[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo standards_query <pack> <standard>[/green]      [dim]Show standard content[/dim]"
+    )
     console.print("  [green]drone @seedgo standards_query --help[/green]                 [dim]This help message[/dim]")
     console.print()
 

@@ -164,9 +164,7 @@ class TestOperationComplete:
         # No key-value summary lines should appear after "Summary:"
         lines = output.splitlines()
         summary_idx = next(i for i, line in enumerate(lines) if "Summary:" in line)
-        after_summary = [
-            line.strip() for line in lines[summary_idx + 1:] if line.strip()
-        ]
+        after_summary = [line.strip() for line in lines[summary_idx + 1 :] if line.strip()]
         kv_lines = [line for line in after_summary if ": " in line]
         assert len(kv_lines) == 0
 

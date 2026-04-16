@@ -53,15 +53,15 @@ def resolve_sender_info(
                 "email_address": email_addr,
                 "display_name": branch_info["name"],
                 "mailbox_path": str(branch_path / ".ai_mail.local"),
-                "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                "timestamp_format": "%Y-%m-%d %H:%M:%S",
             }
         else:
-            branch_name = from_branch.lstrip('@').upper()
+            branch_name = from_branch.lstrip("@").upper()
             return {
                 "email_address": email_addr,
                 "display_name": branch_name,
-                "mailbox_path": str(ai_mail_dir.parent / from_branch.lstrip('@').lower() / ".ai_mail.local"),
-                "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                "mailbox_path": str(ai_mail_dir.parent / from_branch.lstrip("@").lower() / ".ai_mail.local"),
+                "timestamp_format": "%Y-%m-%d %H:%M:%S",
             }
     else:
         return get_current_user_fn()
@@ -91,7 +91,9 @@ def send_to_broadcast(
         On failure: 4th element is an error string.
         On success: 4th element is a list of (branch_name, success, error_msg) tuples.
     """
-    email_file = create_email_file_fn("all", subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to)
+    email_file = create_email_file_fn(
+        "all", subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to
+    )
     email_data = load_email_file_fn(email_file)
 
     if email_data is None:
@@ -101,13 +103,15 @@ def send_to_broadcast(
     results = []  # List of (branch_name, success, error_msg)
     for branch in branches:
         delivery_data = email_data.copy()
-        delivery_data['to'] = branch['email']
-        delivery_data['auto_execute'] = auto_execute
+        delivery_data["to"] = branch["email"]
+        delivery_data["auto_execute"] = auto_execute
         if no_memory_save:
-            delivery_data['no_memory_save'] = True
+            delivery_data["no_memory_save"] = True
 
-        success, error_msg = deliver_email_to_branch_fn(branch['email'], delivery_data, on_delivered=on_delivered_callback)
-        results.append((branch.get('name', branch['email']), success, error_msg))
+        success, error_msg = deliver_email_to_branch_fn(
+            branch["email"], delivery_data, on_delivered=on_delivered_callback
+        )
+        results.append((branch.get("name", branch["email"]), success, error_msg))
 
     success_count = sum(1 for _, s, _ in results if s)
     log_operation_fn("broadcast_sent", {"recipients": len(branches), "successful": success_count})
@@ -115,7 +119,8 @@ def send_to_broadcast(
     # Fire trigger event (best-effort)
     try:
         from aipass.trigger.apps.modules.core import trigger
-        trigger.fire('email_broadcast_sent', recipients=len(branches), successful=success_count, subject=subject)
+
+        trigger.fire("email_broadcast_sent", recipients=len(branches), successful=success_count, subject=subject)
     except ImportError as e:
         logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
 
@@ -151,18 +156,20 @@ def send_to_single(
     Returns:
         Tuple of (success, error_msg). error_msg is None on success.
     """
-    email_file = create_email_file_fn(to_branch, subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to)
+    email_file = create_email_file_fn(
+        to_branch, subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to
+    )
     email_data = load_email_file_fn(email_file)
 
     if email_data is None:
         log_operation_fn("email_failed", {"to": to_branch, "error": "Email file could not be loaded"})
         return False, "Email file could not be loaded"
 
-    email_data['auto_execute'] = auto_execute
+    email_data["auto_execute"] = auto_execute
     if dispatched_to:
-        email_data['dispatched_to'] = dispatched_to
+        email_data["dispatched_to"] = dispatched_to
     if no_memory_save:
-        email_data['no_memory_save'] = True
+        email_data["no_memory_save"] = True
 
     success, error_msg = deliver_email_to_branch_fn(to_branch, email_data, on_delivered=on_delivered_callback)
 
@@ -172,7 +179,8 @@ def send_to_single(
         # Fire trigger event (best-effort)
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('email_sent', to=to_branch, subject=subject, auto_execute=auto_execute)
+
+            trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
         except ImportError as e:
             logger.warning("[send] trigger import unavailable for send event: %s", e)
 
@@ -239,7 +247,7 @@ def collect_interactive_input(branches: List[Dict[str, Any]]) -> Optional[Dict[s
 
     try:
         confirm = input("\nSend? (y/n): ").strip().lower()
-        if confirm != 'y':
+        if confirm != "y":
             return None
     except (KeyboardInterrupt, EOFError) as e:
         logger.warning("[send] confirmation cancelled: %s", e)

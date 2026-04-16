@@ -24,9 +24,7 @@ from aipass.prax.apps.handlers.json import json_handler
 
 
 def run_monitoring_loop(
-    status_callback: Callable[[], Dict[str, Any]],
-    interval: int = 5,
-    status_interval: int = 300
+    status_callback: Callable[[], Dict[str, Any]], interval: int = 5, status_interval: int = 300
 ) -> None:
     """Run continuous monitoring loop - HANDLER implements logic
 
@@ -59,9 +57,11 @@ def run_monitoring_loop(
             if counter % status_interval == 0:
                 logger.info("\n" + "=" * 60)
                 status = status_callback()
-                modules_count = status.get('total_modules', 0)
-                loggers_count = status.get('individual_loggers', 0)
-                logger.info(f"[{module_name}] Status: {modules_count} modules discovered, {loggers_count} loggers active")
+                modules_count = status.get("total_modules", 0)
+                loggers_count = status.get("individual_loggers", 0)
+                logger.info(
+                    f"[{module_name}] Status: {modules_count} modules discovered, {loggers_count} loggers active"
+                )
                 logger.info("=" * 60)
                 sys.stdout.flush()
 

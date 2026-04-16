@@ -111,8 +111,7 @@ def test_save_dispatch_log(dispatch_log_file):
 def test_save_dispatch_log_truncates_to_50(dispatch_log_file):
     """Saving 60 entries keeps only the last 50."""
     entries = [
-        {"branch": f"@branch_{i}", "pid": i, "status": "spawned", "timestamp": "2026-03-24 12:00:00"}
-        for i in range(60)
+        {"branch": f"@branch_{i}", "pid": i, "status": "spawned", "timestamp": "2026-03-24 12:00:00"} for i in range(60)
     ]
 
     result = save_dispatch_log(entries)

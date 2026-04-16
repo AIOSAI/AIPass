@@ -33,6 +33,7 @@ def _get_write_section():
     global _write_section
     if _write_section is None:
         from aipass.prax.apps.modules.dashboard import write_section
+
         _write_section = write_section
     return _write_section
 
@@ -136,7 +137,7 @@ def _calculate_section_data(inbox_data: Dict) -> Dict:
         "opened": opened_count,
         "total": total_count,
         "oldest_unread_age": oldest_unread_age,
-        "last_dispatch_received": last_dispatch_iso
+        "last_dispatch_received": last_dispatch_iso,
     }
 
 
@@ -176,10 +177,10 @@ def push_dashboard_update(branch_path: Path) -> bool:
                 "opened": 0,
                 "total": 0,
                 "oldest_unread_age": None,
-                "last_dispatch_received": None
+                "last_dispatch_received": None,
             }
         else:
-            with open(inbox_file, 'r', encoding='utf-8') as f:
+            with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
             section_data = _calculate_section_data(inbox_data)
 

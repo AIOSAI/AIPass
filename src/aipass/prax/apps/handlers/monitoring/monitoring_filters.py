@@ -35,20 +35,16 @@ MONITOR_IGNORE_PATTERNS = [
     "*.pyc",
     "*.pyo",
     "*.pyd",
-
     # Virtual environments (massive file count, not user code)
     ".venv",
     "venv",
     "env",
-
     # Node.js (massive file count)
     "node_modules",
     "npm-debug.log",
     "yarn-error.log",
-
     # Version control (Git manages its own changes)
     ".git",
-
     # Backup directories (prevent circular monitoring)
     "backups",
     "backup/backups",
@@ -56,17 +52,14 @@ MONITOR_IGNORE_PATTERNS = [
     "system_snapshot",
     "versioned_backup",
     "deleted_branches",
-
     # System logs (prevent feedback loop - log watcher handles these separately)
     "system_logs",
     "*.log",
-
     # System backups and trash
     "TimeShift*",
     "timeshift*",
     ".local/share/Trash",
     "Trash",
-
     # Linux system directories (not code, constant changes)
     ".cache",
     ".local",
@@ -80,14 +73,12 @@ MONITOR_IGNORE_PATTERNS = [
     ".backup",
     ".antigravity",
     ".gemini",
-
     # IDE and editor directories (auto-generated, large)
     ".vscode/cli",
     ".vscode/extensions",
     ".vscode-server",
     ".idea",
     ".eclipse",
-
     # Claude Code internal files (change constantly, not user code)
     ".claude/todos",
     ".claude/shell-snapshots",
@@ -105,7 +96,6 @@ MONITOR_IGNORE_PATTERNS = [
     ".last_diagnostics_file",
     ".serena/logs",
     ".code",
-
     # Development cache/build directories
     ".npm",
     ".cargo",
@@ -118,26 +108,22 @@ MONITOR_IGNORE_PATTERNS = [
     "install",
     "lib",
     "bin",
-
     # Application data
     ".thunderbird",
     ".wine",
     ".steam",
     ".zoom",
-
     # User directories (not code)
     "Downloads",
     "Videos",
     "Pictures",
     "Dropbox",
-
     # Large binary/image files
     "*.img",
     "*.iso",
     "*.vmdk",
     "*.vdi",
     "*.qcow2",
-
     # Archive and compressed files
     "*.zip",
     "*.tar",
@@ -146,10 +132,8 @@ MONITOR_IGNORE_PATTERNS = [
     "*.rar",
     "*.7z",
     "*.whl",
-
     # HuggingFace model cache (sentence-transformers etc.)
     "huggingface",
-
     # Temporary files (includes Claude Code atomic writes: file.py.tmp.PID.TIMESTAMP)
     "*.tmp",
     "*.temp",
@@ -157,7 +141,6 @@ MONITOR_IGNORE_PATTERNS = [
     "*.swp",
     "*.swo",
     "*~",
-
     # Operating system files
     ".DS_Store",
     "Thumbs.db",
@@ -173,7 +156,6 @@ MONITOR_ALWAYS_PATTERNS = [
     "*.local.json",
     "*.observations.json",
     "*.ai_mail.json",
-
     # Configuration files
     "*_config.json",
     ".claude.json",
@@ -181,23 +163,18 @@ MONITOR_ALWAYS_PATTERNS = [
     ".commands.json",
     ".gitignore",
     ".gitattributes",
-
     # Python source code
     "*.py",
-
     # Documentation
     "README.md",
     "CLAUDE.md",
     "*.local.md",
-
     # VS Code settings
     ".vscode/settings.json",
     ".vscode/settings.local.json",
-
     # Templates (everything in templates is important)
     "templates/**",
     "*/templates/**",
-
     # Marker files
     ".gitkeep",
 ]
@@ -213,26 +190,14 @@ CONTENT_FILTER_PATTERNS = {
     "*.log": {
         "filter_mode": "errors_only",
         "show_patterns": ["ERROR", "CRITICAL", "WARNING", "Failed", "Exception"],
-        "description": "Only show error-level log entries"
+        "description": "Only show error-level log entries",
     },
-
     # Data JSON files: only show structural changes, not data updates
-    "*_data.json": {
-        "filter_mode": "structure_only",
-        "description": "Show only structural changes, not data updates"
-    },
-
+    "*_data.json": {"filter_mode": "structure_only", "description": "Show only structural changes, not data updates"},
     # Registry JSON files: only show new/deleted keys
-    "*_registry.json": {
-        "filter_mode": "keys_only",
-        "description": "Show only new/deleted keys, not value changes"
-    },
-
+    "*_registry.json": {"filter_mode": "keys_only", "description": "Show only new/deleted keys, not value changes"},
     # Snapshot files: summarize instead of full content
-    "snapshot_*.json": {
-        "filter_mode": "summary",
-        "description": "Show summary of changes, not full content"
-    },
+    "snapshot_*.json": {"filter_mode": "summary", "description": "Show summary of changes, not full content"},
 }
 
 # =============================================
@@ -244,28 +209,25 @@ CONTENT_FILTER_PATTERNS = {
 HIGHLIGHT_PATTERNS = {
     # CRITICAL: System-breaking changes
     "critical": [
-        "*.id.json",           # Branch identity - system core
-        "CLAUDE.md",           # System instructions
-        ".gitignore",          # Version control rules
+        "*.id.json",  # Branch identity - system core
+        "CLAUDE.md",  # System instructions
+        ".gitignore",  # Version control rules
         "*_config.json deletion",  # Config deletion is critical
     ],
-
     # HIGH: Important files that should stand out
     "high": [
-        "*.py deletion",       # Source code deletion
-        "*.py creation",       # New source code
-        "README.md",           # Documentation
-        "*_config.json",       # Configuration changes
+        "*.py deletion",  # Source code deletion
+        "*.py creation",  # New source code
+        "README.md",  # Documentation
+        "*_config.json",  # Configuration changes
     ],
-
     # MEDIUM: Files worth noting
     "medium": [
-        "*.local.json",        # Session files
-        "*.observations.json", # Collaboration patterns
-        "*.py modification",   # Source code edits
-        "*.md",               # Documentation
+        "*.local.json",  # Session files
+        "*.observations.json",  # Collaboration patterns
+        "*.py modification",  # Source code edits
+        "*.md",  # Documentation
     ],
-
     # LOW: Normal files (default)
     # Everything else not matched above
 }
@@ -287,6 +249,7 @@ DEFAULT_EVENT_TYPES = EVENT_TYPES["all"]
 # =============================================
 # HELPER FUNCTIONS
 # =============================================
+
 
 def should_monitor(path: Path) -> bool:
     """Check if path should be monitored
@@ -314,13 +277,13 @@ def should_monitor(path: Path) -> bool:
 
     # Early exit: Claude Code atomic writes and backups (override ALWAYS patterns)
     # These contain .claude.json as substring, which would match the ALWAYS pattern
-    if '.claude.json.backup' in name or '.claude.json.tmp' in name:
+    if ".claude.json.backup" in name or ".claude.json.tmp" in name:
         return False
 
     # CLI session files: always monitor (override ignore patterns for .codex, .gemini)
-    if '.codex/sessions/' in path_str and name.endswith('.jsonl'):
+    if ".codex/sessions/" in path_str and name.endswith(".jsonl"):
         return True
-    if '.gemini/tmp/' in path_str and '/chats/' in path_str and name.endswith('.json'):
+    if ".gemini/tmp/" in path_str and "/chats/" in path_str and name.endswith(".json"):
         return True
 
     if _matches_always_patterns(path_str, parts, name):
@@ -332,8 +295,7 @@ def should_monitor(path: Path) -> bool:
     return True
 
 
-_PARTS_ONLY_IGNORE = {"backups", ".cache", ".git", "node_modules",
-                       ".local", ".config", ".var", ".backup"}
+_PARTS_ONLY_IGNORE = {"backups", ".cache", ".git", "node_modules", ".local", ".config", ".var", ".backup"}
 
 
 def _matches_always_patterns(path_str: str, parts: set, name: str) -> bool:
@@ -343,7 +305,7 @@ def _matches_always_patterns(path_str: str, parts: set, name: str) -> bool:
             exception_parts = pattern.split("/**")[0]
             if exception_parts in path_str or exception_parts in "/".join(parts):
                 return True
-        if pattern.startswith('*') and name.endswith(pattern[1:]):
+        if pattern.startswith("*") and name.endswith(pattern[1:]):
             return True
         if pattern == name or pattern in path_str:
             return True
@@ -359,7 +321,7 @@ def _matches_ignore_patterns(path_str: str, parts: set, name: str) -> bool:
             continue
         if pattern == name:
             return True
-        if pattern.startswith('*') and name.endswith(pattern[1:]):
+        if pattern.startswith("*") and name.endswith(pattern[1:]):
             return True
         if pattern in parts or pattern in path_str:
             return True
@@ -401,9 +363,9 @@ def _pattern_matches_event(pattern: str, name: str, path_str: str, event_type: s
         pattern_base, pattern_event = pattern.split(" ", 1)
         if event_type != pattern_event:
             return False
-        return (pattern_base.startswith('*') and name.endswith(pattern_base[1:])) or pattern_base == name
+        return (pattern_base.startswith("*") and name.endswith(pattern_base[1:])) or pattern_base == name
 
-    if pattern.startswith('*') and name.endswith(pattern[1:]):
+    if pattern.startswith("*") and name.endswith(pattern[1:]):
         return True
     return pattern == name or pattern in path_str
 
@@ -428,8 +390,8 @@ def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
 
     # Check content filter patterns (case-insensitive)
     for pattern, config in CONTENT_FILTER_PATTERNS.items():
-        bare = pattern.replace('*', '')
-        if pattern.startswith('*') and name_lower.endswith(pattern[1:]):
+        bare = pattern.replace("*", "")
+        if pattern.startswith("*") and name_lower.endswith(pattern[1:]):
             return config
         if pattern == name or bare in name_lower:
             return config
@@ -437,9 +399,9 @@ def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
-def filter_log_content(content: str, show_errors: bool = True,
-                       show_warnings: bool = True,
-                       show_info: bool = False) -> Optional[str]:
+def filter_log_content(
+    content: str, show_errors: bool = True, show_warnings: bool = True, show_info: bool = False
+) -> Optional[str]:
     """Filter log content based on level preferences
 
     Extracts relevant lines from log content based on user's level preferences.
@@ -459,21 +421,19 @@ def filter_log_content(content: str, show_errors: bool = True,
         >>> filter_log_content(content, show_errors=True, show_info=False)
         "ERROR: Failed"
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
     filtered_lines = []
 
     for line in lines:
         line_upper = line.upper()
 
         # Check for errors
-        if show_errors and any(kw in line_upper for kw in
-                              ["ERROR", "CRITICAL", "EXCEPTION", "TRACEBACK", "FAILED"]):
+        if show_errors and any(kw in line_upper for kw in ["ERROR", "CRITICAL", "EXCEPTION", "TRACEBACK", "FAILED"]):
             filtered_lines.append(line)
             continue
 
         # Check for warnings
-        if show_warnings and any(kw in line_upper for kw in
-                                ["WARNING", "WARN"]):
+        if show_warnings and any(kw in line_upper for kw in ["WARNING", "WARN"]):
             filtered_lines.append(line)
             continue
 
@@ -484,14 +444,13 @@ def filter_log_content(content: str, show_errors: bool = True,
 
     # Return filtered content or None if nothing matched
     if filtered_lines:
-        return '\n'.join(filtered_lines)
+        return "\n".join(filtered_lines)
     return None
 
 
-def apply_content_filter(path: Path, content: str,
-                        show_errors: bool = True,
-                        show_warnings: bool = True,
-                        show_info: bool = False) -> Optional[str]:
+def apply_content_filter(
+    path: Path, content: str, show_errors: bool = True, show_warnings: bool = True, show_info: bool = False
+) -> Optional[str]:
     """Apply appropriate content filter based on file type
 
     Main entry point for content filtering. Checks if file has a content

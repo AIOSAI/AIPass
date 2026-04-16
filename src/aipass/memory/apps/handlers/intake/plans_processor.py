@@ -70,6 +70,7 @@ MAX_CHUNK_CHARS = 1500  # ~375 tokens, fits well with all-MiniLM-L6-v2
 # CHUNKING
 # =============================================================================
 
+
 def _chunk_plan_text(text: str, filename: str) -> List[Dict[str, str]]:
     """
     Chunk plan text into sections for vectorization.
@@ -87,51 +88,48 @@ def _chunk_plan_text(text: str, filename: str) -> List[Dict[str, str]]:
     chunks = []
 
     # Split by markdown headers
-    lines = text.split('\n')
+    lines = text.split("\n")
     current_section = filename
     current_lines = []
 
     for line in lines:
-        if line.startswith('## ') or line.startswith('### '):
+        if line.startswith("## ") or line.startswith("### "):
             # Flush previous section
             if current_lines:
-                section_text = '\n'.join(current_lines).strip()
+                section_text = "\n".join(current_lines).strip()
                 if section_text and len(section_text) > 30:
-                    chunks.append({'text': section_text, 'section': current_section})
-            current_section = line.lstrip('#').strip()
+                    chunks.append({"text": section_text, "section": current_section})
+            current_section = line.lstrip("#").strip()
             current_lines = [line]
         else:
             current_lines.append(line)
 
     # Flush last section
     if current_lines:
-        section_text = '\n'.join(current_lines).strip()
+        section_text = "\n".join(current_lines).strip()
         if section_text and len(section_text) > 30:
-            chunks.append({'text': section_text, 'section': current_section})
+            chunks.append({"text": section_text, "section": current_section})
 
     # If no headers found, chunk by size
     if not chunks:
         full_text = text.strip()
         if len(full_text) > MAX_CHUNK_CHARS:
             for i in range(0, len(full_text), MAX_CHUNK_CHARS):
-                chunk_text = full_text[i:i + MAX_CHUNK_CHARS].strip()
+                chunk_text = full_text[i : i + MAX_CHUNK_CHARS].strip()
                 if chunk_text and len(chunk_text) > 30:
-                    chunks.append({'text': chunk_text, 'section': f'{filename}_part{i // MAX_CHUNK_CHARS}'})
+                    chunks.append({"text": chunk_text, "section": f"{filename}_part{i // MAX_CHUNK_CHARS}"})
         elif len(full_text) > 30:
-            chunks.append({'text': full_text, 'section': filename})
+            chunks.append({"text": full_text, "section": filename})
 
     # Split oversized chunks
     final_chunks = []
     for chunk in chunks:
-        if len(chunk['text']) > MAX_CHUNK_CHARS * 2:
-            text_content = chunk['text']
+        if len(chunk["text"]) > MAX_CHUNK_CHARS * 2:
+            text_content = chunk["text"]
             for i in range(0, len(text_content), MAX_CHUNK_CHARS):
-                part = text_content[i:i + MAX_CHUNK_CHARS].strip()
+                part = text_content[i : i + MAX_CHUNK_CHARS].strip()
                 if part and len(part) > 30:
-                    final_chunks.append({
-                        'text': part,
-                        'section': f"{chunk['section']}_part{i // MAX_CHUNK_CHARS}"
-                    })
+                    final_chunks.append({"text": part, "section": f"{chunk['section']}_part{i // MAX_CHUNK_CHARS}"})
         else:
             final_chunks.append(chunk)
 
@@ -142,11 +140,12 @@ def _chunk_plan_text(text: str, filename: str) -> List[Dict[str, str]]:
 # PROCESSED MANIFEST
 # =============================================================================
 
+
 def _load_manifest() -> Dict[str, str]:
     """Load processed files manifest."""
     if _PROCESSED_MANIFEST.exists():
         try:
-            return json.loads(_PROCESSED_MANIFEST.read_text(encoding='utf-8'))
+            return json.loads(_PROCESSED_MANIFEST.read_text(encoding="utf-8"))
         except Exception as e:
             logger.warning(f"[plans_processor] Failed to load processed manifest: {e}")
             return {}
@@ -156,58 +155,64 @@ def _load_manifest() -> Dict[str, str]:
 def _save_manifest(manifest: Dict[str, str]) -> None:
     """Save processed files manifest."""
     _PROCESSED_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    _PROCESSED_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    _PROCESSED_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 # =============================================================================
 # SUBPROCESS WRAPPERS
 # =============================================================================
 
+
 def _embed_texts(texts: List[str]) -> dict:
     """Encode texts via subprocess."""
-    input_data = json.dumps({'texts': texts})
+    input_data = json.dumps({"texts": texts})
     try:
         result = subprocess.run(
             [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
             input=input_data,
-            capture_output=True, text=True, timeout=120
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Embedding failed'}
+            return {"success": False, "error": result.stderr or "Embedding failed"}
         return json.loads(result.stdout)
     except Exception as e:
         logger.warning(f"[plans_processor] Embedding subprocess failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans") -> dict:
     """Store vectors via subprocess."""
     input_data = {
-        'operation': 'store_vectors',
-        'branch': 'FLOW',
-        'memory_type': collection_name,
-        'embeddings': embeddings,
-        'documents': documents,
-        'metadatas': metadatas,
-        'db_path': None  # global
+        "operation": "store_vectors",
+        "branch": "FLOW",
+        "memory_type": collection_name,
+        "embeddings": embeddings,
+        "documents": documents,
+        "metadatas": metadatas,
+        "db_path": None,  # global
     }
     try:
         result = subprocess.run(
             [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
             input=json.dumps(input_data),
-            capture_output=True, text=True, timeout=60
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Storage failed'}
+            return {"success": False, "error": result.stderr or "Storage failed"}
         return json.loads(result.stdout)
     except Exception as e:
         logger.warning(f"[plans_processor] Vector storage subprocess failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def process_plans() -> Dict[str, Any]:
     """
@@ -227,39 +232,39 @@ def process_plans() -> Dict[str, Any]:
     # Load config
     config_path = _MEMORY_ROOT / "config" / "memory_bank.config.json"
     try:
-        config = json.loads(config_path.read_text(encoding='utf-8'))
-        plans_config = config.get('plans', {})
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        plans_config = config.get("plans", {})
     except Exception as e:
         logger.warning(f"[plans_processor] Config load failed: {e}")
-        return {'success': False, 'error': f'Config load failed: {e}'}
+        return {"success": False, "error": f"Config load failed: {e}"}
 
-    if not plans_config.get('enabled', False):
-        return {'success': True, 'skipped': True, 'reason': 'plans disabled'}
+    if not plans_config.get("enabled", False):
+        return {"success": True, "skipped": True, "reason": "plans disabled"}
 
     # Resolve plans directory (relative to repo root)
-    plans_dir = plans_config.get('path', 'src/aipass/flow/processed_plans')
+    plans_dir = plans_config.get("path", "src/aipass/flow/processed_plans")
     repo_root = _find_repo_root()
     plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else repo_root / plans_dir
-    extensions = plans_config.get('supported_extensions', ['.md'])
-    collection_name = plans_config.get('collection_name', 'flow_plans')
+    extensions = plans_config.get("supported_extensions", [".md"])
+    collection_name = plans_config.get("collection_name", "flow_plans")
 
     if not plans_path.exists():
-        return {'success': True, 'files_processed': 0, 'total_chunks': 0, 'reason': 'plans dir not found'}
+        return {"success": True, "files_processed": 0, "total_chunks": 0, "reason": "plans dir not found"}
 
     # Get plan files
     files = []
     for ext in extensions:
-        files.extend(plans_path.glob(f'*{ext}'))
+        files.extend(plans_path.glob(f"*{ext}"))
 
     if not files:
-        return {'success': True, 'files_processed': 0, 'total_chunks': 0}
+        return {"success": True, "files_processed": 0, "total_chunks": 0}
 
     # Load manifest to skip already-processed files
     manifest = _load_manifest()
     unprocessed = [f for f in files if f.name not in manifest]
 
     if not unprocessed:
-        return {'success': True, 'files_processed': 0, 'total_chunks': 0, 'reason': 'all files already processed'}
+        return {"success": True, "files_processed": 0, "total_chunks": 0, "reason": "all files already processed"}
 
     logger.info(f"[plans] Found {len(unprocessed)} unprocessed plan files")
 
@@ -275,10 +280,10 @@ def process_plans() -> Dict[str, Any]:
 
     for plan_file in unprocessed:
         try:
-            text = plan_file.read_text(encoding='utf-8')
+            text = plan_file.read_text(encoding="utf-8")
         except Exception as e:
             logger.warning(f"[plans_processor] Failed to read plan file {plan_file.name}: {e}")
-            errors.append(f'{plan_file.name}: read error: {e}')
+            errors.append(f"{plan_file.name}: read error: {e}")
             continue
 
         chunks = _chunk_plan_text(text, plan_file.name)
@@ -288,13 +293,15 @@ def process_plans() -> Dict[str, Any]:
 
         files_with_chunks.append(plan_file)
         for c in chunks:
-            all_texts.append(c['text'])
-            all_metadatas.append({
-                'source_file': plan_file.name,
-                'section': c['section'],
-                'processed_at': datetime.now().isoformat(),
-                'type': 'plan'
-            })
+            all_texts.append(c["text"])
+            all_metadatas.append(
+                {
+                    "source_file": plan_file.name,
+                    "section": c["section"],
+                    "processed_at": datetime.now().isoformat(),
+                    "type": "plan",
+                }
+            )
 
     total_chunks = len(all_texts)
     files_processed = 0
@@ -308,17 +315,17 @@ def process_plans() -> Dict[str, Any]:
         logger.info(f"[plans] Batch embedding {total_chunks} chunks from {len(files_with_chunks)} files")
 
         embed_result = _embed_texts(all_texts)
-        if not embed_result.get('success'):
+        if not embed_result.get("success"):
             error_msg = f"batch embed error: {embed_result.get('error')}"
             logger.error(f"[plans] {error_msg}")
             errors.append(error_msg)
         else:
-            embeddings = embed_result.get('embeddings', [])
+            embeddings = embed_result.get("embeddings", [])
             if not embeddings:
-                errors.append('batch embed returned no embeddings')
+                errors.append("batch embed returned no embeddings")
             else:
                 store_result = _store_vectors(embeddings, all_texts, all_metadatas, collection_name)
-                if not store_result.get('success'):
+                if not store_result.get("success"):
                     error_msg = f"batch store error: {store_result.get('error')}"
                     logger.error(f"[plans] {error_msg}")
                     errors.append(error_msg)
@@ -333,13 +340,16 @@ def process_plans() -> Dict[str, Any]:
     _save_manifest(manifest)
 
     result: Dict[str, Any] = {
-        'success': files_processed > 0 or (not errors and not files_with_chunks),
-        'files_processed': files_processed,
-        'total_chunks': total_chunks if files_processed > 0 else 0,
+        "success": files_processed > 0 or (not errors and not files_with_chunks),
+        "files_processed": files_processed,
+        "total_chunks": total_chunks if files_processed > 0 else 0,
     }
     if errors:
-        result['errors'] = errors
+        result["errors"] = errors
 
-    json_handler.log_operation("process_plans", {"files_processed": files_processed, "total_chunks": result['total_chunks'], "success": result['success']})
+    json_handler.log_operation(
+        "process_plans",
+        {"files_processed": files_processed, "total_chunks": result["total_chunks"], "success": result["success"]},
+    )
 
     return result

@@ -29,6 +29,7 @@ import pytest
 # Helper: import learnings manager with mocked dependencies
 # ---------------------------------------------------------------------------
 
+
 def _import_learnings_manager(monkeypatch):
     """Import manager with mocked dependencies."""
     # Mock memory_files since it's imported at module level
@@ -51,6 +52,7 @@ def _import_learnings_manager(monkeypatch):
 # ---------------------------------------------------------------------------
 # Fixture: fresh manager per test
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mgr(monkeypatch):
@@ -109,9 +111,7 @@ class TestAddTimestamp:
 
     def test_replaces_existing_date(self, mgr):
         manager, _ = mgr
-        result = manager.add_timestamp(
-            "old learning [2025-01-01]", date="2026-04-03"
-        )
+        result = manager.add_timestamp("old learning [2025-01-01]", date="2026-04-03")
         assert result == "old learning [2026-04-03]"
 
     def test_defaults_to_today(self, mgr):
@@ -180,11 +180,7 @@ class TestGetMaxRecentlyCompleted:
 
     def test_with_limits_set(self, mgr):
         manager, _ = mgr
-        data = {
-            "document_metadata": {
-                "limits": {"max_recently_completed": 10}
-            }
-        }
+        data = {"document_metadata": {"limits": {"max_recently_completed": 10}}}
         assert manager.get_max_recently_completed(data) == 10
 
     def test_without_limits_returns_default(self, mgr):
@@ -407,9 +403,7 @@ class TestEnforceLimitCompleted:
 
         data = {
             "recently_completed": ["Task [2026-01-01]"],
-            "document_metadata": {
-                "limits": {"max_recently_completed": 10}
-            },
+            "document_metadata": {"limits": {"max_recently_completed": 10}},
         }
         mock_mf.read_memory_file_data.return_value = data
 
@@ -431,9 +425,7 @@ class TestEnforceLimitCompleted:
                 f"Another old [{old_date}]",
                 f"Recent task [{new_date}]",
             ],
-            "document_metadata": {
-                "limits": {"max_recently_completed": 2}
-            },
+            "document_metadata": {"limits": {"max_recently_completed": 2}},
         }
         mock_mf.read_memory_file_data.return_value = data
         mock_mf.write_memory_file_simple.return_value = None
@@ -499,9 +491,7 @@ class TestAddLearning:
         fp.write_text("{}", encoding="utf-8")
 
         data = {
-            "key_learnings": {
-                "existing_key": "old value [2025-01-01]"
-            },
+            "key_learnings": {"existing_key": "old value [2025-01-01]"},
             "document_metadata": {"limits": {"max_learnings": 100}},
         }
         mock_mf.read_memory_file_data.return_value = data

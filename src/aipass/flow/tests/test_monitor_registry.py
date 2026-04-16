@@ -9,19 +9,20 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-
 # ─── Import helpers ───────────────────────────────────────
 
 
 def _import_monitor_ops():
     """Import monitor_ops module and return it."""
     import aipass.flow.apps.handlers.registry.monitor_ops as mod
+
     return mod
 
 
 def _import_registry_monitor():
     """Import registry_monitor module and return it."""
     import aipass.flow.apps.modules.registry_monitor as mod
+
     return mod
 
 
@@ -590,9 +591,14 @@ class TestRegistryMonitorStartMonitoring:
         """Successful start should print success message and return True."""
         mod = _import_registry_monitor()
         mock_con = MagicMock()
-        with patch.object(mod, "start_monitoring_impl",
-            return_value={"success": True, "status": "started", "message": "Monitor started"},
-        ), patch.object(mod, "console", mock_con):
+        with (
+            patch.object(
+                mod,
+                "start_monitoring_impl",
+                return_value={"success": True, "status": "started", "message": "Monitor started"},
+            ),
+            patch.object(mod, "console", mock_con),
+        ):
             result = mod.start_monitoring()
         assert result is True
         mock_con.print.assert_called()
@@ -601,9 +607,14 @@ class TestRegistryMonitorStartMonitoring:
         """Already-running should trigger warning and return False."""
         mod = _import_registry_monitor()
         mock_warn = MagicMock()
-        with patch.object(mod, "start_monitoring_impl",
-            return_value={"success": False, "status": "already_running", "message": "Already running"},
-        ), patch.object(mod, "warning", mock_warn):
+        with (
+            patch.object(
+                mod,
+                "start_monitoring_impl",
+                return_value={"success": False, "status": "already_running", "message": "Already running"},
+            ),
+            patch.object(mod, "warning", mock_warn),
+        ):
             result = mod.start_monitoring()
         assert result is False
         mock_warn.assert_called_once_with("Monitor is already running")
@@ -612,9 +623,14 @@ class TestRegistryMonitorStartMonitoring:
         """Error status should trigger error display and return False."""
         mod = _import_registry_monitor()
         mock_err = MagicMock()
-        with patch.object(mod, "start_monitoring_impl",
-            return_value={"success": False, "status": "error", "message": "Observer failed"},
-        ), patch.object(mod, "error", mock_err):
+        with (
+            patch.object(
+                mod,
+                "start_monitoring_impl",
+                return_value={"success": False, "status": "error", "message": "Observer failed"},
+            ),
+            patch.object(mod, "error", mock_err),
+        ):
             result = mod.start_monitoring()
         assert result is False
         mock_err.assert_called_once_with("Observer failed")
@@ -627,9 +643,14 @@ class TestRegistryMonitorStopMonitoring:
         """Successful stop should print message and return True."""
         mod = _import_registry_monitor()
         mock_con = MagicMock()
-        with patch.object(mod, "stop_monitoring_impl",
-            return_value={"success": True, "status": "stopped", "message": "Monitor stopped"},
-        ), patch.object(mod, "console", mock_con):
+        with (
+            patch.object(
+                mod,
+                "stop_monitoring_impl",
+                return_value={"success": True, "status": "stopped", "message": "Monitor stopped"},
+            ),
+            patch.object(mod, "console", mock_con),
+        ):
             result = mod.stop_monitoring()
         assert result is True
         mock_con.print.assert_called()
@@ -638,9 +659,14 @@ class TestRegistryMonitorStopMonitoring:
         """Stopping when not running should trigger warning and return False."""
         mod = _import_registry_monitor()
         mock_warn = MagicMock()
-        with patch.object(mod, "stop_monitoring_impl",
-            return_value={"success": False, "status": "not_running", "message": "Not running"},
-        ), patch.object(mod, "warning", mock_warn):
+        with (
+            patch.object(
+                mod,
+                "stop_monitoring_impl",
+                return_value={"success": False, "status": "not_running", "message": "Not running"},
+            ),
+            patch.object(mod, "warning", mock_warn),
+        ):
             result = mod.stop_monitoring()
         assert result is False
         mock_warn.assert_called_once_with("Monitor is not running")

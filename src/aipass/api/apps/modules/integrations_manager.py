@@ -12,6 +12,7 @@ Handles `drone @api integrations` subcommands:
   integrations list              — list all registered contracts
   integrations call <name> ...   — call a registered contract
 """
+
 import sys
 from typing import List
 

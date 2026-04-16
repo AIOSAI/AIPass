@@ -160,11 +160,7 @@ class TestGetCallerProjectBranches:
         """Returns email->path mapping from a *_REGISTRY.json in caller_cwd."""
         branch_path = tmp_path / "src" / "strategy"
         branch_path.mkdir(parents=True)
-        registry = {
-            "branches": [
-                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
-            ]
-        }
+        registry = {"branches": [{"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}]}
         (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         result = get_caller_project_branches(str(tmp_path))
         assert result == {"@strategy": str(branch_path)}
@@ -173,11 +169,7 @@ class TestGetCallerProjectBranches:
         """Walks up from caller_cwd to find registry in parent."""
         branch_path = tmp_path / "src" / "strategy"
         branch_path.mkdir(parents=True)
-        registry = {
-            "branches": [
-                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
-            ]
-        }
+        registry = {"branches": [{"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}]}
         (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         subdir = tmp_path / "src" / "strategy" / "apps"
         subdir.mkdir(parents=True)
@@ -188,11 +180,7 @@ class TestGetCallerProjectBranches:
         """Resolves relative paths in registry relative to the registry file."""
         branch_path = tmp_path / "src" / "strategy"
         branch_path.mkdir(parents=True)
-        registry = {
-            "branches": [
-                {"name": "STRATEGY", "email": "@strategy", "path": "src/strategy"}
-            ]
-        }
+        registry = {"branches": [{"name": "STRATEGY", "email": "@strategy", "path": "src/strategy"}]}
         (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         result = get_caller_project_branches(str(tmp_path))
         assert result == {"@strategy": str(branch_path)}
@@ -201,11 +189,7 @@ class TestGetCallerProjectBranches:
         """Handles dict-format branches (AIPass format)."""
         branch_path = tmp_path / "src" / "quality"
         branch_path.mkdir(parents=True)
-        registry = {
-            "branches": {
-                "quality": {"email": "@quality", "path": str(branch_path)}
-            }
-        }
+        registry = {"branches": {"quality": {"email": "@quality", "path": str(branch_path)}}}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         result = get_caller_project_branches(str(tmp_path))
         assert result == {"@quality": str(branch_path)}

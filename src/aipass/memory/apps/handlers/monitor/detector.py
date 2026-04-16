@@ -50,9 +50,11 @@ _REPO_ROOT = _find_repo_root()
 # DATA STRUCTURES
 # =============================================================================
 
+
 @dataclass
 class RolloverTrigger:
     """Represents a file that needs rollover"""
+
     branch: str
     memory_type: str  # 'observations' or 'local'
     file_path: Path
@@ -71,6 +73,7 @@ class RolloverTrigger:
 # REGISTRY OPERATIONS
 # =============================================================================
 
+
 def _read_registry() -> List[Dict[str, Any]]:
     """
     Read AIPASS_REGISTRY.json from repo root.
@@ -86,17 +89,17 @@ def _read_registry() -> List[Dict[str, Any]]:
         return []
 
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            branches = data.get('branches', [])
+            branches = data.get("branches", [])
 
             # Resolve relative paths against repo root
             for branch in branches:
-                raw_path = branch.get('path', '')
+                raw_path = branch.get("path", "")
                 resolved = Path(raw_path)
                 if not resolved.is_absolute():
                     resolved = _REPO_ROOT / raw_path
-                branch['path'] = str(resolved)
+                branch["path"] = str(resolved)
 
             return branches
     except Exception as e:
@@ -118,7 +121,7 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
     Returns:
         Path to memory file, or None if not found
     """
-    raw_path = branch.get('path', '')
+    raw_path = branch.get("path", "")
     if not raw_path:
         return None
     branch_path = Path(raw_path)
@@ -126,7 +129,7 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
         return None
 
     # Memory files are in .trinity/ subdirectory
-    file_path = branch_path / '.trinity' / f'{memory_type}.json'
+    file_path = branch_path / ".trinity" / f"{memory_type}.json"
 
     return file_path if file_path.exists() else None
 
@@ -134,6 +137,7 @@ def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
 # =============================================================================
 # CONFIG LOADING
 # =============================================================================
+
 
 def _load_config() -> Dict[str, Any]:
     """
@@ -149,7 +153,7 @@ def _load_config() -> Dict[str, Any]:
         return {}
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.warning(f"[detector] Failed to load config: {e}")
@@ -159,6 +163,7 @@ def _load_config() -> Dict[str, Any]:
 # =============================================================================
 # LINE COUNTING
 # =============================================================================
+
 
 def _count_file_lines(file_path: Path) -> int:
     """
@@ -171,7 +176,7 @@ def _count_file_lines(file_path: Path) -> int:
         Number of physical lines in file
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return len(f.readlines())
     except Exception as e:
         logger.warning(f"[detector] Failed to count lines in {file_path}: {e}")
@@ -191,11 +196,11 @@ def _get_max_lines(file_path: Path, branch_name: str | None = None) -> int:
     """
     # 1. Try file-level metadata first (highest priority)
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            metadata = data.get('document_metadata', {})
-            limits = metadata.get('limits', {})
-            file_limit = limits.get('max_lines')
+            metadata = data.get("document_metadata", {})
+            limits = metadata.get("limits", {})
+            file_limit = limits.get("max_lines")
             if file_limit is not None:
                 return file_limit
     except Exception as e:
@@ -204,18 +209,18 @@ def _get_max_lines(file_path: Path, branch_name: str | None = None) -> int:
     # 2. Try branch-level config (if branch_name provided or can be extracted)
     if branch_name is None:
         # Extract from filename (e.g., SEEDGO.local.json -> SEEDGO)
-        parts = file_path.stem.split('.')
+        parts = file_path.stem.split(".")
         branch_name = parts[0] if parts else None
 
     if branch_name:
         config = _load_config()
-        branch_limits = config.get('rollover', {}).get('per_branch', {}).get(branch_name, {})
-        if 'max_lines' in branch_limits:
-            return branch_limits['max_lines']
+        branch_limits = config.get("rollover", {}).get("per_branch", {}).get(branch_name, {})
+        if "max_lines" in branch_limits:
+            return branch_limits["max_lines"]
 
     # 3. Fall back to global default from config
     config = _load_config()
-    default_limit = config.get('rollover', {}).get('defaults', {}).get('max_lines')
+    default_limit = config.get("rollover", {}).get("defaults", {}).get("max_lines")
     if default_limit is not None:
         return default_limit
 
@@ -226,6 +231,7 @@ def _get_max_lines(file_path: Path, branch_name: str | None = None) -> int:
 # =============================================================================
 # ROLLOVER DETECTION
 # =============================================================================
+
 
 def _should_rollover(file_path: Path) -> tuple[bool, int, int, str, str]:
     """
@@ -242,48 +248,48 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, int, str, str]:
 
     # Read file data once for schema detection + limit checks
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         # Can't parse — fall back to line-based with hardcoded default
         logger.warning(f"[detector] Failed to parse {file_path} for rollover check: {e}")
-        return (current_lines >= 600, current_lines, 600, '1.0.0', '')
+        return (current_lines >= 600, current_lines, 600, "1.0.0", "")
 
-    metadata = data.get('document_metadata', {})
-    schema_version = metadata.get('schema_version', '1.0.0')
-    limits = metadata.get('limits', {})
+    metadata = data.get("document_metadata", {})
+    schema_version = metadata.get("schema_version", "1.0.0")
+    limits = metadata.get("limits", {})
 
     # v2: entry-count based limits
-    if schema_version.startswith('2'):
+    if schema_version.startswith("2"):
         reasons = []
 
-        max_sessions = limits.get('max_sessions')
+        max_sessions = limits.get("max_sessions")
         if max_sessions is not None:
-            sessions = data.get('sessions', [])
+            sessions = data.get("sessions", [])
             if isinstance(sessions, list) and len(sessions) > max_sessions:
                 reasons.append(f"{len(sessions)}/{max_sessions} sessions")
 
-        max_key_learnings = limits.get('max_key_learnings')
+        max_key_learnings = limits.get("max_key_learnings")
         if max_key_learnings is not None:
-            key_learnings = data.get('key_learnings', {})
+            key_learnings = data.get("key_learnings", {})
             if isinstance(key_learnings, dict) and len(key_learnings) > max_key_learnings:
                 reasons.append(f"{len(key_learnings)}/{max_key_learnings} key_learnings")
 
-        max_observations = limits.get('max_observations')
+        max_observations = limits.get("max_observations")
         if max_observations is not None:
-            observations = data.get('observations', [])
+            observations = data.get("observations", [])
             if isinstance(observations, list) and len(observations) > max_observations:
                 reasons.append(f"{len(observations)}/{max_observations} observations")
 
         triggered = len(reasons) > 0
-        return (triggered, current_lines, 0, schema_version, ', '.join(reasons))
+        return (triggered, current_lines, 0, schema_version, ", ".join(reasons))
 
     # v1: line-count based
-    max_lines = limits.get('max_lines')
+    max_lines = limits.get("max_lines")
     if max_lines is None:
         max_lines = _get_max_lines(file_path)
 
-    return (current_lines >= max_lines, current_lines, max_lines, '1.0.0', '')
+    return (current_lines >= max_lines, current_lines, max_lines, "1.0.0", "")
 
 
 def check_all_branches() -> Dict[str, Any]:
@@ -301,19 +307,14 @@ def check_all_branches() -> Dict[str, Any]:
     # Read registry
     branches = _read_registry()
     if not branches:
-        return {
-            'success': True,
-            'triggers': [],
-            'count': 0,
-            'message': 'No branches in registry'
-        }
+        return {"success": True, "triggers": [], "count": 0, "message": "No branches in registry"}
 
     # Check each branch
     for branch in branches:
-        branch_name = branch.get('name', 'UNKNOWN')
+        branch_name = branch.get("name", "UNKNOWN")
 
         # Check both memory types
-        for memory_type in ['observations', 'local']:
+        for memory_type in ["observations", "local"]:
             file_path = _get_memory_file_path(branch, memory_type)
 
             if file_path is None:
@@ -333,13 +334,15 @@ def check_all_branches() -> Dict[str, Any]:
                 )
                 triggers.append(trigger)
 
-    json_handler.log_operation("check_all_branches", {"branches_checked": len(branches), "triggers_found": len(triggers)})
+    json_handler.log_operation(
+        "check_all_branches", {"branches_checked": len(branches), "triggers_found": len(triggers)}
+    )
 
     return {
-        'success': True,
-        'triggers': triggers,
-        'count': len(triggers),
-        'message': f'Found {len(triggers)} rollover triggers' if triggers else 'No rollover triggers detected'
+        "success": True,
+        "triggers": triggers,
+        "count": len(triggers),
+        "message": f"Found {len(triggers)} rollover triggers" if triggers else "No rollover triggers detected",
     }
 
 
@@ -354,16 +357,13 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
         Dict with trigger status and details
     """
     if not file_path.exists():
-        return {
-            'success': False,
-            'error': f"File not found: {file_path}"
-        }
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     should_trigger, current_lines, max_lines, schema_ver, v2_reason = _should_rollover(file_path)
 
     if should_trigger:
         # Extract branch and type from filename (e.g., SEEDGO.observations.json)
-        parts = file_path.stem.split('.')
+        parts = file_path.stem.split(".")
         branch_name = parts[0] if len(parts) > 0 else "UNKNOWN"
         memory_type = parts[1] if len(parts) > 1 else "unknown"
 
@@ -377,26 +377,23 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
             v2_reason=v2_reason,
         )
 
-        return {
-            'success': True,
-            'trigger': trigger,
-            'should_rollover': True
-        }
+        return {"success": True, "trigger": trigger, "should_rollover": True}
     else:
         remaining = max_lines - current_lines if max_lines > 0 else 0
         return {
-            'success': True,
-            'should_rollover': False,
-            'current_lines': current_lines,
-            'max_lines': max_lines,
-            'schema_version': schema_ver,
-            'remaining': remaining
+            "success": True,
+            "should_rollover": False,
+            "current_lines": current_lines,
+            "max_lines": max_lines,
+            "schema_version": schema_ver,
+            "remaining": remaining,
         }
 
 
 # =============================================================================
 # STATISTICS
 # =============================================================================
+
 
 def get_rollover_stats() -> Dict[str, Any]:
     """
@@ -405,46 +402,40 @@ def get_rollover_stats() -> Dict[str, Any]:
     Returns:
         Dict with statistics for all branches
     """
-    stats = {
-        'success': True,
-        'total_branches': 0,
-        'files_checked': 0,
-        'files_ready': 0,
-        'branches': {}
-    }
+    stats = {"success": True, "total_branches": 0, "files_checked": 0, "files_ready": 0, "branches": {}}
 
     branches = _read_registry()
-    stats['total_branches'] = len(branches)
+    stats["total_branches"] = len(branches)
 
     for branch in branches:
-        branch_name = branch.get('name', 'UNKNOWN')
+        branch_name = branch.get("name", "UNKNOWN")
         branch_stats = {}
 
-        for memory_type in ['observations', 'local']:
+        for memory_type in ["observations", "local"]:
             file_path = _get_memory_file_path(branch, memory_type)
 
             if file_path is None:
                 continue
 
-            stats['files_checked'] += 1
+            stats["files_checked"] += 1
             should_trigger, current_lines, max_lines, schema_ver, v2_reason = _should_rollover(file_path)
 
             stat_entry = {
-                'current': current_lines,
-                'max': max_lines,
-                'ready': should_trigger,
-                'remaining': max_lines - current_lines if max_lines > 0 else 0,
-                'schema_version': schema_ver,
+                "current": current_lines,
+                "max": max_lines,
+                "ready": should_trigger,
+                "remaining": max_lines - current_lines if max_lines > 0 else 0,
+                "schema_version": schema_ver,
             }
             if v2_reason:
-                stat_entry['v2_reason'] = v2_reason
+                stat_entry["v2_reason"] = v2_reason
 
             branch_stats[memory_type] = stat_entry
 
             if should_trigger:
-                stats['files_ready'] += 1
+                stats["files_ready"] += 1
 
         if branch_stats:
-            stats['branches'][branch_name] = branch_stats
+            stats["branches"][branch_name] = branch_stats
 
     return stats

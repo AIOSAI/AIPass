@@ -29,9 +29,7 @@ _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = (
-        Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    )
+    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -76,6 +74,7 @@ def _json_dir_as_path(tmp_path: Path) -> Path:
 # ============================================================================
 # Error Resilience Tests
 # ============================================================================
+
 
 def test_missing_file(tmp_path: Path) -> None:
     """Loading a non-existent file returns a graceful default, not a crash."""

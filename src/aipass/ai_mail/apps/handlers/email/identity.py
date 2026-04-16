@@ -26,6 +26,7 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 # PUBLIC API
 # =============================================
 
+
 def create_identity(branch_path: Path, branch_name: str, project: str) -> bool:
     """Write identity.json to branch_path/.ai_mail.local/.
 
@@ -48,7 +49,7 @@ def create_identity(branch_path: Path, branch_name: str, project: str) -> bool:
             "inbox": str(inbox_path),
         }
         identity_file = mail_dir / "identity.json"
-        with open(identity_file, 'w', encoding='utf-8') as f:
+        with open(identity_file, "w", encoding="utf-8") as f:
             json.dump(identity_data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -71,7 +72,7 @@ def read_identity(branch_path: Path) -> Optional[Dict]:
     if not identity_file.exists():
         return None
     try:
-        with open(identity_file, 'r', encoding='utf-8') as f:
+        with open(identity_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.warning("[identity] read_identity(%s) failed: %s", branch_path, e)

@@ -32,13 +32,7 @@ def _top_level_files(pack_dir: Path) -> list[Path]:
     """Return all regular files directly in *pack_dir*, skipping hidden/skip dirs."""
     if not pack_dir.is_dir():
         return []
-    return [
-        p
-        for p in pack_dir.iterdir()
-        if p.is_file()
-        and p.name not in _SKIP_DIRS
-        and not p.name.startswith("_")
-    ]
+    return [p for p in pack_dir.iterdir() if p.is_file() and p.name not in _SKIP_DIRS and not p.name.startswith("_")]
 
 
 def scan(pack_dir: Path) -> dict:

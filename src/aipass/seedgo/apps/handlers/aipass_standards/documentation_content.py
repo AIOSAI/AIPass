@@ -15,6 +15,7 @@ Truth-checked 2025-11-13 against spawn and seedgo production code.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_documentation_standards() -> str:
     """Return formatted documentation standards content with Rich markup
 
@@ -49,14 +50,14 @@ def get_documentation_standards() -> str:
         "",
         "[bold cyan]REQUIRED: MODULE DOCSTRING[/bold cyan]",
         "",
-        "  [dim]\"\"\"",
+        '  [dim]"""',
         "  Module Title",
         "",
         "  Brief purpose description.",
         "  Key features or workflow if needed.",
         "",
         "  Usage examples (optional).",
-        "  \"\"\"[/dim]",
+        '  """[/dim]',
         "",
         "[yellow]RULES:[/yellow]",
         "  • Goes right after AIPass block",
@@ -68,7 +69,7 @@ def get_documentation_standards() -> str:
         "[bold cyan]FUNCTION DOCSTRINGS (Google-style)[/bold cyan]",
         "",
         "  [dim]def function_name(arg: Type) -> ReturnType:",
-        "      \"\"\"",
+        '      """',
         "      One-line summary",
         "",
         "      Args:",
@@ -79,7 +80,7 @@ def get_documentation_standards() -> str:
         "",
         "      Raises:",
         "          Exception: When raised (optional)",
-        "      \"\"\"[/dim]",
+        '      """[/dim]',
         "",
         "[yellow]RULES:[/yellow]",
         "  • Type hints REQUIRED on all functions",
@@ -111,7 +112,7 @@ def get_documentation_standards() -> str:
         "",
         "  [bold]Good:[/bold] Explain WHY, not WHAT",
         "  [dim]# Memory file suffixes to check (JSON format)[/dim]",
-        "  [dim]memory_suffixes = [\".json\", \".local.json\"][/dim]",
+        '  [dim]memory_suffixes = [".json", ".local.json"][/dim]',
         "",
         "  [bold]Bad:[/bold] Obvious narration",
         "  [dim]# Set x to 5[/dim]",

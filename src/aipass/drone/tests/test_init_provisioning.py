@@ -43,13 +43,9 @@ else:
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
     if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
     else:
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -77,8 +73,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 
 if _JSON_DIR_ATTR is None:
     pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler -- "
-        f"tried: {_JSON_DIR_CANDIDATES}",
+        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler -- tried: {_JSON_DIR_CANDIDATES}",
         allow_module_level=True,
     )
 
@@ -86,6 +81,7 @@ if _JSON_DIR_ATTR is None:
 # ---------------------------------------------------------------------------
 # Isolation fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -112,6 +108,7 @@ def _json_dir_as_path(tmp_path: Path) -> Path:
 # Init/Provisioning Tests (4 tests)
 # ============================================================================
 
+
 def test_creates_expected_files(tmp_path: Path) -> None:  # IP-001
     """ensure_json_exists creates the expected file on disk."""
     json_dir = _json_dir_as_path(tmp_path)
@@ -121,9 +118,7 @@ def test_creates_expected_files(tmp_path: Path) -> None:  # IP-001
         assert result is True, f"ensure_json_exists must return True for {json_type}"
 
         expected = json_dir / f"prov_mod_{json_type}.json"
-        assert expected.exists(), (
-            f"ensure_json_exists must create {expected.name} on disk"
-        )
+        assert expected.exists(), f"ensure_json_exists must create {expected.name} on disk"
 
         raw = expected.read_text(encoding="utf-8")
         parsed = json.loads(raw)
@@ -144,9 +139,7 @@ def test_auto_creates_directory(tmp_path: Path) -> None:  # IP-002
 
     try:
         result = json_handler.ensure_json_exists("autodir", "config")
-        assert nested_dir.exists(), (
-            "ensure_json_exists must auto-create missing directories"
-        )
+        assert nested_dir.exists(), "ensure_json_exists must auto-create missing directories"
         assert result is True
         assert (nested_dir / "autodir_config.json").exists()
     except (FileNotFoundError, OSError):

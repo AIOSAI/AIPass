@@ -371,6 +371,7 @@ def test_resolve_branch_strips_leading_at(repo_root):
 
 def test_clean_zombies_finds_zombie(monkeypatch):
     """Detects zombie claude processes from ps output."""
+
     class FakeResult:
         stdout = "  100 Z+   claude\n  200 Ss   claude\n  300 Z    claude\n"
         returncode = 0
@@ -385,6 +386,7 @@ def test_clean_zombies_finds_zombie(monkeypatch):
 
 def test_clean_zombies_none_found(monkeypatch):
     """Returns 0 when no zombie processes exist."""
+
     class FakeResult:
         stdout = "  PID STAT COMM\n  200 Ss   claude\n"
         returncode = 0
@@ -422,16 +424,19 @@ def _raise_permission(pid, sig):
 
 def _raise_subprocess_error(*args, **kwargs):
     import subprocess
+
     raise subprocess.SubprocessError("failed")
 
 
 def _fake_open_factory(real_status_path, mapping):
     """Return an open() replacement that redirects /proc paths to real files."""
+
     def _fake_open(path, *args, **kwargs):
         path_str = str(path)
         if path_str in mapping:
             return _real_open(mapping[path_str], *args, **kwargs)
         return _real_open(path, *args, **kwargs)
+
     return _fake_open
 
 
@@ -517,11 +522,7 @@ class TestResolveBranchCallerRegistry:
         (branch_path / ".ai_mail.local").mkdir()
 
         # External registry
-        registry = {
-            "branches": [
-                {"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}
-            ]
-        }
+        registry = {"branches": [{"name": "STRATEGY", "email": "@strategy", "path": str(branch_path)}]}
         (tmp_path / "VERA_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
 
         # AIPass registry has no @strategy
@@ -542,9 +543,9 @@ class TestResolveBranchCallerRegistry:
         branch_path.mkdir(parents=True)
 
         aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_registry.write_text(json.dumps({
-            "branches": [{"name": "DRONE", "email": "@drone", "path": str(branch_path)}]
-        }), encoding="utf-8")
+        aipass_registry.write_text(
+            json.dumps({"branches": [{"name": "DRONE", "email": "@drone", "path": str(branch_path)}]}), encoding="utf-8"
+        )
         monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", aipass_registry)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
@@ -576,9 +577,11 @@ class TestWakeBranchSpawnEnv:
         (branch_path / ".ai_mail.local").mkdir()
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         import json
-        registry_file.write_text(json.dumps({
-            "branches": [{"name": "TESTBRANCH", "email": "@testbranch", "path": str(branch_path)}]
-        }), encoding="utf-8")
+
+        registry_file.write_text(
+            json.dumps({"branches": [{"name": "TESTBRANCH", "email": "@testbranch", "path": str(branch_path)}]}),
+            encoding="utf-8",
+        )
 
         monkeypatch.setattr(wake_mod, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", registry_file)
@@ -589,6 +592,7 @@ class TestWakeBranchSpawnEnv:
 
         # Strip ~/.local/bin from os.environ to simulate restricted PATH
         from pathlib import Path as _Path
+
         local_bin = str(_Path.home() / ".local" / "bin")
         monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
@@ -597,8 +601,10 @@ class TestWakeBranchSpawnEnv:
         def fake_popen(cmd, **kwargs):
             """Capture spawn_env without launching a real process."""
             captured_envs.append(kwargs.get("env", {}))
+
             class FakeProc:
                 pid = 99999
+
             return FakeProc()
 
         monkeypatch.setattr("subprocess.Popen", fake_popen)
@@ -617,6 +623,4 @@ class TestWakeBranchSpawnEnv:
 
         assert captured_envs, "Popen was not called"
         env = captured_envs[0]
-        assert local_bin in env.get("PATH", ""), (
-            f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
-        )
+        assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"

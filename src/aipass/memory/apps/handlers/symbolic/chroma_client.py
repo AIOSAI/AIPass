@@ -45,6 +45,7 @@ _clients: Dict[str, Any] = {}
 # CLIENT MANAGEMENT
 # =============================================================================
 
+
 def get_client(db_path: Path | str | None = None):
     """
     Get or create a shared ChromaDB PersistentClient (singleton per path)
@@ -86,10 +87,7 @@ def get_chroma_client(db_path: Path | str | None = None):
 
 
 def get_collection(
-    collection_name: str,
-    db_path: Path | None = None,
-    create: bool = True,
-    metadata: Dict[str, Any] | None = None
+    collection_name: str, db_path: Path | None = None, create: bool = True, metadata: Dict[str, Any] | None = None
 ):
     """
     Get a collection from the shared ChromaDB client
@@ -112,25 +110,16 @@ def get_collection(
                 metadata = {"hnsw:space": "cosine"}
 
             collection = client.get_or_create_collection(
-                name=collection_name,
-                metadata=metadata,
-                embedding_function=None
+                name=collection_name, metadata=metadata, embedding_function=None
             )
         else:
-            collection = client.get_collection(
-                collection_name,
-                embedding_function=None
-            )
+            collection = client.get_collection(collection_name, embedding_function=None)
 
-        json_handler.log_operation("chroma_get_collection", {"collection": collection_name, "create": create, "success": True})
-        return {
-            'success': True,
-            'collection': collection
-        }
+        json_handler.log_operation(
+            "chroma_get_collection", {"collection": collection_name, "create": create, "success": True}
+        )
+        return {"success": True, "collection": collection}
 
     except Exception as e:
         logger.error(f"[chroma_client] Failed to get collection '{collection_name}': {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}

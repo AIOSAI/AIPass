@@ -81,9 +81,12 @@ def grant_passport(
 
     # Build placeholder replacements
     replacements = build_replacements_dict(
-        target, folder_name,
-        role=role, purpose=purpose or "Birthright citizen - purpose TBD",
-        profile=detected_profile, citizen_number=citizen_number,
+        target,
+        folder_name,
+        role=role,
+        purpose=purpose or "Birthright citizen - purpose TBD",
+        profile=detected_profile,
+        citizen_number=citizen_number,
     )
 
     # Create directory if needed
@@ -105,8 +108,12 @@ def grant_passport(
         logger.warning("[passport] Cannot relativize path %s to registry %s, storing absolute", target, reg_path.parent)
         registry_branch_path = str(target)
     registry_updated = add_to_registry(
-        reg_path, branch_upper, registry_branch_path, detected_profile,
-        f"@{branch_lower}", purpose or "Birthright citizen - purpose TBD",
+        reg_path,
+        branch_upper,
+        registry_branch_path,
+        detected_profile,
+        f"@{branch_lower}",
+        purpose or "Birthright citizen - purpose TBD",
     )
 
     # Validate

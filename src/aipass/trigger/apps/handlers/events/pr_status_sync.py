@@ -34,7 +34,7 @@ def _log_info(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | INFO | {message}\n")
     except Exception:
         pass  # Meta-logging: cannot log a failure to log
@@ -66,10 +66,13 @@ def handle_pr_created(
         **kwargs: Additional event data (ignored)
     """
     _run_status_sync(f"pr_created by {branch or 'unknown'}")
-    json_handler.log_operation("pr_created_event", {
-        "branch": branch or "unknown",
-        "pr_url": pr_url or "",
-    })
+    json_handler.log_operation(
+        "pr_created_event",
+        {
+            "branch": branch or "unknown",
+            "pr_url": pr_url or "",
+        },
+    )
 
 
 def handle_pr_merged(
@@ -85,7 +88,10 @@ def handle_pr_merged(
         **kwargs: Additional event data (ignored)
     """
     _run_status_sync(f"pr_merged #{pr_number or '?'}")
-    json_handler.log_operation("pr_merged_event", {
-        "pr_number": pr_number or "",
-        "title": title or "",
-    })
+    json_handler.log_operation(
+        "pr_merged_event",
+        {
+            "pr_number": pr_number or "",
+            "title": title or "",
+        },
+    )

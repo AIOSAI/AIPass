@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 # Helpers: build the full mock graph that rollover.py needs at import time
 # ---------------------------------------------------------------------------
 
+
 def _prepare_rollover_mocks(monkeypatch):
     """Insert mocks for every module-level import rollover.py touches.
 
@@ -52,9 +53,9 @@ def _prepare_rollover_mocks(monkeypatch):
     # aipass.memory handler sub-packages
     mock_detector = MagicMock()
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
-    mock_detector.get_rollover_stats = MagicMock(return_value={
-        "success": True, "total_branches": 0, "files_checked": 0, "files_ready": 0, "branches": {}
-    })
+    mock_detector.get_rollover_stats = MagicMock(
+        return_value={"success": True, "total_branches": 0, "files_checked": 0, "files_ready": 0, "branches": {}}
+    )
 
     mock_orchestrator = MagicMock()
     mock_orchestrator.execute_rollover = MagicMock(return_value={"success": True, "triggers_count": 0})
@@ -83,7 +84,9 @@ def _prepare_rollover_mocks(monkeypatch):
 
     # intake (lazy import inside process_plans_command)
     mock_plans_processor = MagicMock()
-    mock_plans_processor.process_plans = MagicMock(return_value={"success": True, "files_processed": 0, "total_chunks": 0})
+    mock_plans_processor.process_plans = MagicMock(
+        return_value={"success": True, "files_processed": 0, "total_chunks": 0}
+    )
     intake_pkg = MagicMock()
     intake_pkg.plans_processor = mock_plans_processor
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", intake_pkg)
@@ -125,6 +128,7 @@ def _import_rollover(monkeypatch):
 # Tests: _SUBCOMMANDS dict
 # ===========================================================================
 
+
 class TestSubcommands:
     """Verify the _SUBCOMMANDS dict exists with expected keys."""
 
@@ -158,6 +162,7 @@ class TestSubcommands:
 # ===========================================================================
 # Tests: handle_command routing
 # ===========================================================================
+
 
 class TestHandleCommand:
     """Verify handle_command routes subcommands correctly."""
@@ -248,6 +253,7 @@ class TestHandleCommand:
 # ===========================================================================
 # Tests: _discover_handlers
 # ===========================================================================
+
 
 class TestDiscoverHandlers:
     """Verify _discover_handlers scans handler directories correctly."""

@@ -23,6 +23,7 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def repo_root(tmp_path):
     """Create a mock repo root with src/aipass/ structure."""
@@ -39,9 +40,7 @@ def mock_branch(repo_root):
     branch = repo_root / "src" / "aipass" / "test_api"
     branch.mkdir(parents=True)
     (branch / ".trinity").mkdir()
-    (branch / ".trinity" / "passport.json").write_text(
-        json.dumps({"name": "TEST_API", "role": "test"}, indent=2)
-    )
+    (branch / ".trinity" / "passport.json").write_text(json.dumps({"name": "TEST_API", "role": "test"}, indent=2))
     (branch / "apps").mkdir()
     (branch / "apps" / "branch.py").write_text("# test api entry\n")
     (branch / "README.md").write_text("# Test API\n")
@@ -112,6 +111,7 @@ def mock_registry(repo_root, mock_branch):
 # DELETE Tests
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteBranch:
     """Tests for delete_branch()."""
 
@@ -120,7 +120,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("test_api", confirm=False)
 
         assert result["success"] is True
@@ -146,7 +145,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("spawn", confirm=False)
 
         assert result["success"] is False
@@ -157,7 +155,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("devpulse", confirm=False)
 
         assert result["success"] is False
@@ -168,7 +165,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("drone", confirm=False)
 
         assert result["success"] is False
@@ -179,7 +175,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("test_api", confirm=False, dry_run=True)
 
         assert result["success"] is True
@@ -198,7 +193,6 @@ class TestDeleteBranch:
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = delete_branch("nonexistent", confirm=False)
 
         assert result["success"] is False
@@ -208,9 +202,10 @@ class TestDeleteBranch:
         """Cancelling confirmation should not delete."""
         from aipass.spawn.apps.handlers.delete_ops import delete_branch
 
-        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry), \
-             patch("builtins.input", return_value="n"):
-
+        with (
+            patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry),
+            patch("builtins.input", return_value="n"),
+        ):
             result = delete_branch("test_api", confirm=True)
 
         assert result["success"] is False
@@ -219,6 +214,7 @@ class TestDeleteBranch:
     def test_handle_delete_no_args(self):
         """handle_delete with no args should show usage."""
         from aipass.spawn.apps.modules.delete import handle_delete
+
         result = handle_delete([])
         assert result == 1
 
@@ -226,6 +222,7 @@ class TestDeleteBranch:
 # ---------------------------------------------------------------------------
 # SYNC REGISTRY Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSyncRegistry:
     """Tests for sync_registry()."""
@@ -237,7 +234,6 @@ class TestSyncRegistry:
         # The registry has DRONE, SPAWN, DEVPULSE entries but those directories
         # don't exist in our tmp_path repo, so they should be stale
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = sync_registry(fix=False)
 
         # DRONE, SPAWN, DEVPULSE dirs don't exist -> stale
@@ -254,12 +250,9 @@ class TestSyncRegistry:
         new_branch = repo_root / "src" / "aipass" / "phantom"
         new_branch.mkdir(parents=True)
         (new_branch / ".trinity").mkdir()
-        (new_branch / ".trinity" / "passport.json").write_text(
-            json.dumps({"name": "PHANTOM"}, indent=2)
-        )
+        (new_branch / ".trinity" / "passport.json").write_text(json.dumps({"name": "PHANTOM"}, indent=2))
 
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = sync_registry(fix=False)
 
         assert "phantom" in result["unregistered"]
@@ -269,7 +262,6 @@ class TestSyncRegistry:
         from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
 
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = sync_registry(fix=False)
 
         assert "test_api" in result["healthy"]
@@ -282,12 +274,9 @@ class TestSyncRegistry:
         new_branch = repo_root / "src" / "aipass" / "phantom"
         new_branch.mkdir(parents=True)
         (new_branch / ".trinity").mkdir()
-        (new_branch / ".trinity" / "passport.json").write_text(
-            json.dumps({"name": "PHANTOM"}, indent=2)
-        )
+        (new_branch / ".trinity" / "passport.json").write_text(json.dumps({"name": "PHANTOM"}, indent=2))
 
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = sync_registry(fix=True)
 
         assert result["fixed"] is True
@@ -317,7 +306,6 @@ class TestSyncRegistry:
         mock_registry.write_text(json.dumps(reg, indent=2) + "\n")
 
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = sync_registry(fix=True)
 
         assert result["stale"] == []
@@ -328,6 +316,7 @@ class TestSyncRegistry:
 # ---------------------------------------------------------------------------
 # CWD-AWARE SYNC Tests (external projects)
 # ---------------------------------------------------------------------------
+
 
 class TestSyncRegistryCwdAware:
     """Tests for CWD-aware sync_registry — external project support."""
@@ -377,7 +366,7 @@ class TestSyncRegistryCwdAware:
             d = tmp_path / name
             d.mkdir()
             (d / ".trinity").mkdir()
-            (d / ".trinity" / "passport.json").write_text('{}')
+            (d / ".trinity" / "passport.json").write_text("{}")
 
         result = _scan_for_branches(tmp_path)
         assert len(result) == 0
@@ -453,6 +442,7 @@ class TestSyncRegistryCwdAware:
 # ADOPT EXISTING Tests
 # ---------------------------------------------------------------------------
 
+
 class TestAdoptExisting:
     """Tests for _spawn_agent adopting existing directories with passports."""
 
@@ -464,16 +454,24 @@ class TestAdoptExisting:
         agent = tmp_path / "my_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
-        (agent / ".trinity" / "passport.json").write_text(json.dumps({
-            "branch_info": {"branch_name": "my_agent"},
-            "identity": {"citizen_class": "builder", "purpose": "Test agent"},
-        }))
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "my_agent"},
+                    "identity": {"citizen_class": "builder", "purpose": "Test agent"},
+                }
+            )
+        )
 
         reg_path = tmp_path / "TEST_REGISTRY.json"
-        reg_path.write_text(json.dumps({
-            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
-            "branches": [],
-        }))
+        reg_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+                    "branches": [],
+                }
+            )
+        )
 
         result = _spawn_agent(str(agent), registry_path=str(reg_path))
 
@@ -507,16 +505,24 @@ class TestAdoptExisting:
         agent = tmp_path / "smart_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
-        (agent / ".trinity" / "passport.json").write_text(json.dumps({
-            "branch_info": {"branch_name": "smart_agent"},
-            "identity": {"citizen_class": "builder", "purpose": "Process reports daily"},
-        }))
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "smart_agent"},
+                    "identity": {"citizen_class": "builder", "purpose": "Process reports daily"},
+                }
+            )
+        )
 
         reg_path = tmp_path / "TEST_REGISTRY.json"
-        reg_path.write_text(json.dumps({
-            "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
-            "branches": [],
-        }))
+        reg_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
+                    "branches": [],
+                }
+            )
+        )
 
         result = _spawn_agent(str(agent), registry_path=str(reg_path))
 
@@ -532,22 +538,30 @@ class TestAdoptExisting:
         agent = tmp_path / "id_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
-        (agent / ".trinity" / "passport.json").write_text(json.dumps({
-            "branch_info": {"branch_name": "id_agent"},
-            "identity": {"citizen_class": "builder", "purpose": "Test"},
-            "citizenship": {"registry_id": "old-uuid-1234"},
-        }))
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "id_agent"},
+                    "identity": {"citizen_class": "builder", "purpose": "Test"},
+                    "citizenship": {"registry_id": "old-uuid-1234"},
+                }
+            )
+        )
 
         reg_path = tmp_path / "TEST_REGISTRY.json"
-        reg_path.write_text(json.dumps({
-            "metadata": {
-                "id": "new-uuid-5678",
-                "version": "1.0.0",
-                "last_updated": "2026-04-11",
-                "total_branches": 0,
-            },
-            "branches": [],
-        }))
+        reg_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "id": "new-uuid-5678",
+                        "version": "1.0.0",
+                        "last_updated": "2026-04-11",
+                        "total_branches": 0,
+                    },
+                    "branches": [],
+                }
+            )
+        )
 
         result = _spawn_agent(str(agent), registry_path=str(reg_path))
 
@@ -562,22 +576,30 @@ class TestAdoptExisting:
         agent = tmp_path / "matched_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
-        (agent / ".trinity" / "passport.json").write_text(json.dumps({
-            "branch_info": {"branch_name": "matched_agent"},
-            "identity": {"citizen_class": "builder", "purpose": "Test"},
-            "citizenship": {"registry_id": "correct-uuid-9999"},
-        }))
+        (agent / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "matched_agent"},
+                    "identity": {"citizen_class": "builder", "purpose": "Test"},
+                    "citizenship": {"registry_id": "correct-uuid-9999"},
+                }
+            )
+        )
 
         reg_path = tmp_path / "TEST_REGISTRY.json"
-        reg_path.write_text(json.dumps({
-            "metadata": {
-                "id": "correct-uuid-9999",
-                "version": "1.0.0",
-                "last_updated": "2026-04-11",
-                "total_branches": 0,
-            },
-            "branches": [],
-        }))
+        reg_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {
+                        "id": "correct-uuid-9999",
+                        "version": "1.0.0",
+                        "last_updated": "2026-04-11",
+                        "total_branches": 0,
+                    },
+                    "branches": [],
+                }
+            )
+        )
 
         # Get mtime before adoption to detect writes
         before_mtime = (agent / ".trinity" / "passport.json").stat().st_mtime
@@ -594,6 +616,7 @@ class TestAdoptExisting:
 # FIX PASSPORT REGISTRY ID Tests
 # ---------------------------------------------------------------------------
 
+
 class TestFixPassportRegistryId:
     """Tests for fix_passport_registry_id() in registry.py."""
 
@@ -604,9 +627,13 @@ class TestFixPassportRegistryId:
         branch = tmp_path / "myagent"
         branch.mkdir()
         (branch / ".trinity").mkdir()
-        (branch / ".trinity" / "passport.json").write_text(json.dumps({
-            "citizenship": {"registry_id": "old-id"},
-        }))
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "citizenship": {"registry_id": "old-id"},
+                }
+            )
+        )
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(json.dumps({"metadata": {"id": "new-id"}, "branches": []}))
@@ -624,9 +651,13 @@ class TestFixPassportRegistryId:
         branch = tmp_path / "myagent"
         branch.mkdir()
         (branch / ".trinity").mkdir()
-        (branch / ".trinity" / "passport.json").write_text(json.dumps({
-            "citizenship": {"registry_id": "same-id"},
-        }))
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "citizenship": {"registry_id": "same-id"},
+                }
+            )
+        )
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(json.dumps({"metadata": {"id": "same-id"}, "branches": []}))
@@ -655,9 +686,13 @@ class TestFixPassportRegistryId:
         branch = tmp_path / "myagent"
         branch.mkdir()
         (branch / ".trinity").mkdir()
-        (branch / ".trinity" / "passport.json").write_text(json.dumps({
-            "citizenship": {"registry_id": "old-id"},
-        }))
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "citizenship": {"registry_id": "old-id"},
+                }
+            )
+        )
 
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text(json.dumps({"metadata": {}, "branches": []}))  # No id field
@@ -674,34 +709,42 @@ class TestFixPassportRegistryId:
         project.mkdir()
 
         reg_path = project / "TEST_REGISTRY.json"
-        reg_path.write_text(json.dumps({
-            "metadata": {
-                "id": "correct-uuid-abc",
-                "version": "1.0.0",
-                "last_updated": "2026-04-11",
-                "total_branches": 1,
-            },
-            "branches": [
+        reg_path.write_text(
+            json.dumps(
                 {
-                    "name": "MYAGENT",
-                    "path": "myagent",
-                    "profile": "library",
-                    "description": "Test",
-                    "email": "@myagent",
-                    "status": "active",
-                    "created": "2026-04-11",
-                    "last_active": "2026-04-11",
+                    "metadata": {
+                        "id": "correct-uuid-abc",
+                        "version": "1.0.0",
+                        "last_updated": "2026-04-11",
+                        "total_branches": 1,
+                    },
+                    "branches": [
+                        {
+                            "name": "MYAGENT",
+                            "path": "myagent",
+                            "profile": "library",
+                            "description": "Test",
+                            "email": "@myagent",
+                            "status": "active",
+                            "created": "2026-04-11",
+                            "last_active": "2026-04-11",
+                        }
+                    ],
                 }
-            ],
-        }))
+            )
+        )
 
         agent_dir = project / "myagent"
         agent_dir.mkdir()
         (agent_dir / ".trinity").mkdir()
         passport_path = agent_dir / ".trinity" / "passport.json"
-        passport_path.write_text(json.dumps({
-            "citizenship": {"registry_id": "old-stale-uuid"},
-        }))
+        passport_path.write_text(
+            json.dumps(
+                {
+                    "citizenship": {"registry_id": "old-stale-uuid"},
+                }
+            )
+        )
 
         monkeypatch.chdir(project)
 
@@ -716,6 +759,7 @@ class TestFixPassportRegistryId:
 # SYNC TEMPLATES Tests
 # ---------------------------------------------------------------------------
 
+
 class TestSyncTemplates:
     """Tests for sync_templates()."""
 
@@ -725,14 +769,20 @@ class TestSyncTemplates:
 
         # Create empty template_owners.json
         owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(json.dumps({
-            "metadata": {"description": "test"},
-            "managed_files": {},
-        }, indent=2))
+        owners_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"description": "test"},
+                    "managed_files": {},
+                },
+                indent=2,
+            )
+        )
 
-        with patch("aipass.spawn.apps.handlers.sync_templates_ops._REPO_ROOT", repo_root), \
-             patch("aipass.spawn.apps.handlers.sync_templates_ops._TEMPLATE_OWNERS_PATH", owners_path):
-
+        with (
+            patch("aipass.spawn.apps.handlers.sync_templates_ops._REPO_ROOT", repo_root),
+            patch("aipass.spawn.apps.handlers.sync_templates_ops._TEMPLATE_OWNERS_PATH", owners_path),
+        ):
             result = sync_templates()
 
         assert result["managed_files"] == 0
@@ -756,16 +806,21 @@ class TestSyncTemplates:
         template_dir.mkdir()
 
         owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(json.dumps({
-            "metadata": {"description": "test"},
-            "managed_files": {
-                "prax_config": {
-                    "source_branch": "prax",
-                    "source_path": "config.json",
-                    "template_path": "config.json",
-                }
-            },
-        }, indent=2))
+        owners_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"description": "test"},
+                    "managed_files": {
+                        "prax_config": {
+                            "source_branch": "prax",
+                            "source_path": "config.json",
+                            "template_path": "config.json",
+                        }
+                    },
+                },
+                indent=2,
+            )
+        )
 
         # Save originals
         orig_root = st_mod._REPO_ROOT
@@ -799,16 +854,21 @@ class TestSyncTemplates:
         template_target_dir.mkdir()
 
         owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(json.dumps({
-            "metadata": {"description": "test"},
-            "managed_files": {
-                "prax_config": {
-                    "source_branch": "prax",
-                    "source_path": "config.json",
-                    "template_path": "config.json",
-                }
-            },
-        }, indent=2))
+        owners_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"description": "test"},
+                    "managed_files": {
+                        "prax_config": {
+                            "source_branch": "prax",
+                            "source_path": "config.json",
+                            "template_path": "config.json",
+                        }
+                    },
+                },
+                indent=2,
+            )
+        )
 
         orig_root = st_mod._REPO_ROOT
         orig_owners = st_mod._TEMPLATE_OWNERS_PATH
@@ -901,12 +961,14 @@ class TestSyncTemplates:
 # HANDLE CLI Tests
 # ---------------------------------------------------------------------------
 
+
 class TestHandleDelete:
     """Tests for handle_delete() CLI entry."""
 
     def test_help_flag(self):
         """--help should show usage (not crash)."""
         from aipass.spawn.apps.modules.delete import handle_delete
+
         # No args -> usage
         result = handle_delete([])
         assert result == 1
@@ -916,7 +978,6 @@ class TestHandleDelete:
         from aipass.spawn.apps.modules.delete import handle_delete
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
-
             result = handle_delete(["--yes", "@spawn"])
 
         assert result == 1
@@ -928,6 +989,7 @@ class TestHandleSyncRegistry:
     def test_help_flag(self):
         """--help should return 0."""
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
+
         result = handle_sync_registry(["--help"])
         assert result == 0
 
@@ -936,7 +998,6 @@ class TestHandleSyncRegistry:
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
-
             result = handle_sync_registry([])
 
         assert result == 0

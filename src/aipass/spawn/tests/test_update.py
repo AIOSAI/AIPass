@@ -22,6 +22,7 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def template_dir(tmp_path):
     """Create a minimal template directory with registry."""
@@ -109,9 +110,7 @@ def template_dir(tmp_path):
         },
     }
 
-    (spawn_meta / ".template_registry.json").write_text(
-        json.dumps(registry, indent=2) + "\n"
-    )
+    (spawn_meta / ".template_registry.json").write_text(json.dumps(registry, indent=2) + "\n")
 
     return tpl
 
@@ -180,12 +179,14 @@ def mock_registry(tmp_path, branch_dir):
 def _hash_content(content: str) -> str:
     """Compute SHA-256 hash (first 12 chars) of content string."""
     import hashlib
+
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateBranch:
     """Tests for update_branch()."""
@@ -198,9 +199,10 @@ class TestUpdateBranch:
         meta_path = branch_dir / ".spawn" / ".branch_meta.json"
         assert not meta_path.exists()
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch")
 
         assert result["success"] is True
@@ -216,9 +218,10 @@ class TestUpdateBranch:
         readme_before = (branch_dir / "README.md").read_text()
         dashboard_before = (branch_dir / "DASHBOARD.local.json").read_text()
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch", dry_run=True)
 
         assert result["success"] is True
@@ -243,9 +246,10 @@ class TestUpdateBranch:
         branch_py_content = '"""test_branch entry"""\ndef main():\n    print("hello")\n'
         original_content = branch_py_content
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch")
 
         # .py file should still have original content
@@ -262,12 +266,15 @@ class TestUpdateBranch:
 
         # Write template with a new key
         (template_dir / "DASHBOARD.local.json").write_text(
-            json.dumps({
-                "status": "active",
-                "branch": "{{branchname}}",
-                "version": "2.0",
-                "new_field": "from_template",
-            }, indent=2)
+            json.dumps(
+                {
+                    "status": "active",
+                    "branch": "{{branchname}}",
+                    "version": "2.0",
+                    "new_field": "from_template",
+                },
+                indent=2,
+            )
         )
 
         # Update template registry hash to differ from branch
@@ -276,9 +283,10 @@ class TestUpdateBranch:
         reg["files"]["f002"]["content_hash"] = "different_hash"
         reg_path.write_text(json.dumps(reg, indent=2) + "\n")
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch")
 
         assert result["success"] is True
@@ -295,9 +303,10 @@ class TestUpdateBranch:
         """Non-existent branch should return failure."""
         from aipass.spawn.apps.handlers.update_ops import update_branch
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("nonexistent_branch")
 
         assert result["success"] is False
@@ -321,9 +330,10 @@ class TestUpdateBranch:
         }
         reg_path.write_text(json.dumps(reg, indent=2) + "\n")
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch")
 
         assert result["success"] is True
@@ -364,9 +374,10 @@ class TestUpdateBranch:
         }
         save_branch_meta(branch_dir, meta)
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = update_branch("test_branch")
 
         assert result["success"] is True
@@ -388,9 +399,10 @@ class TestUpdateAll:
         """update_all should skip spawn itself."""
         from aipass.spawn.apps.handlers.update_ops import update_all
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             results = update_all()
 
         # Should have results for test_branch but NOT for spawn
@@ -413,19 +425,22 @@ class TestUpdateAll:
         # Add it to registry
         reg = json.loads(mock_registry.read_text())
         rel_path = str(branch2.relative_to(tmp_path))
-        reg["branches"].append({
-            "name": "OTHER_BRANCH",
-            "path": rel_path,
-            "profile": "library",
-            "description": "Other branch",
-            "email": "@other_branch",
-            "status": "active",
-        })
+        reg["branches"].append(
+            {
+                "name": "OTHER_BRANCH",
+                "path": rel_path,
+                "profile": "library",
+                "description": "Other branch",
+                "email": "@other_branch",
+                "status": "active",
+            }
+        )
         mock_registry.write_text(json.dumps(reg, indent=2) + "\n")
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             results = update_all()
 
         branch_names = [r["branch"] for r in results]
@@ -440,6 +455,7 @@ class TestHandleUpdate:
     def test_no_args_shows_usage(self):
         """No args should show usage and return 1."""
         from aipass.spawn.apps.modules.update import handle_update
+
         result = handle_update([])
         assert result == 1
 
@@ -447,9 +463,10 @@ class TestHandleUpdate:
         """@branch arg should call update_branch."""
         from aipass.spawn.apps.modules.update import handle_update
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = handle_update(["@test_branch"])
 
         assert result == 0
@@ -458,9 +475,10 @@ class TestHandleUpdate:
         """--dry-run flag should be parsed and passed through."""
         from aipass.spawn.apps.modules.update import handle_update
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = handle_update(["--dry-run", "@test_branch"])
 
         # dry-run should succeed (exit 0) and not create branch_meta
@@ -479,9 +497,10 @@ class TestHandleUpdate:
         """--all with a citizen class should trigger update_all."""
         from aipass.spawn.apps.modules.update import handle_update
 
-        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir), \
-             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry):
-
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
             result = handle_update(["builder", "--all"])
 
         assert result == 0

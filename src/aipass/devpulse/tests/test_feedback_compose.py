@@ -31,12 +31,14 @@ def mock_aipass_root(tmp_path):
 @pytest.fixture
 def empty_inbox(mock_feedback_dir):
     """Start with an empty feedback inbox."""
-    storage.save_inbox({
-        "mailbox": "feedback",
-        "total_messages": 0,
-        "unread_count": 0,
-        "messages": [],
-    })
+    storage.save_inbox(
+        {
+            "mailbox": "feedback",
+            "total_messages": 0,
+            "unread_count": 0,
+            "messages": [],
+        }
+    )
 
 
 class TestSendFeedback:
@@ -91,22 +93,24 @@ class TestReplyTo:
     @pytest.fixture
     def inbox_with_message(self, mock_feedback_dir):
         """Create inbox with a single message to reply to."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 1,
-            "unread_count": 1,
-            "messages": [
-                {
-                    "id": "aaa11111",
-                    "from": "seedgo",
-                    "subject": "Test feedback",
-                    "body": "Original message.",
-                    "timestamp": "2026-04-11T10:00:00",
-                    "read": True,
-                    "thread": [],
-                },
-            ],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 1,
+                "messages": [
+                    {
+                        "id": "aaa11111",
+                        "from": "seedgo",
+                        "subject": "Test feedback",
+                        "body": "Original message.",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": True,
+                        "thread": [],
+                    },
+                ],
+            }
+        )
 
     def test_adds_reply_to_thread(self, inbox_with_message, mock_aipass_root):
         """Should append reply to the message thread."""
@@ -142,22 +146,24 @@ class TestAiMailDelivery:
     @pytest.fixture
     def inbox_with_message(self, mock_feedback_dir):
         """Create inbox with a message from seedgo."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 1,
-            "unread_count": 0,
-            "messages": [
-                {
-                    "id": "aaa11111",
-                    "from": "seedgo",
-                    "subject": "Test feedback",
-                    "body": "Original.",
-                    "timestamp": "2026-04-11T10:00:00",
-                    "read": True,
-                    "thread": [],
-                },
-            ],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 0,
+                "messages": [
+                    {
+                        "id": "aaa11111",
+                        "from": "seedgo",
+                        "subject": "Test feedback",
+                        "body": "Original.",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": True,
+                        "thread": [],
+                    },
+                ],
+            }
+        )
 
     def test_delivers_to_ai_mail(self, inbox_with_message, mock_aipass_root):
         """Should write reply to sender's ai_mail inbox."""
@@ -166,12 +172,15 @@ class TestAiMailDelivery:
         ai_mail_dir.mkdir(parents=True)
         ai_mail_inbox = ai_mail_dir / "inbox.json"
         with open(ai_mail_inbox, "w", encoding="utf-8") as f:
-            json.dump({
-                "mailbox": "inbox",
-                "total_messages": 0,
-                "unread_count": 0,
-                "messages": [],
-            }, f)
+            json.dump(
+                {
+                    "mailbox": "inbox",
+                    "total_messages": 0,
+                    "unread_count": 0,
+                    "messages": [],
+                },
+                f,
+            )
 
         compose.reply_to("aaa11111", "Thanks for the feedback!")
 

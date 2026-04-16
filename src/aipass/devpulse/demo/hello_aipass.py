@@ -27,17 +27,17 @@ CLEAR = "\033[2J\033[H"
 
 # ── Branch Data ──────────────────────────────────────────────────────
 BRANCHES = [
-    ("drone",    "Command Router",     "Routes commands to branches",    CYAN),
-    ("seedgo",   "Standards Engine",   "21-standard compliance pack",    GREEN),
-    ("prax",     "Logging System",     "Stack-aware dual routing",       YELLOW),
-    ("cli",      "CLI Framework",      "Argument parsing & registry",    BLUE),
-    ("flow",     "Plan Manager",       "FPLANs + DPLANs",               MAGENTA),
-    ("ai_mail",  "Communications",     "Inter-branch email & dispatch",  CYAN),
-    ("api",      "LLM Access Layer",   "OpenRouter, multi-provider",     GREEN),
-    ("trigger",  "Event System",       "12 events, error registry",      YELLOW),
-    ("spawn",    "Branch Lifecycle",   "Create, update, delete",         BLUE),
-    ("memory",   "Memory Bank",        "ChromaDB vector search",         MAGENTA),
-    ("devpulse", "Orchestration Hub",  "You are here",                   CYAN),
+    ("drone", "Command Router", "Routes commands to branches", CYAN),
+    ("seedgo", "Standards Engine", "21-standard compliance pack", GREEN),
+    ("prax", "Logging System", "Stack-aware dual routing", YELLOW),
+    ("cli", "CLI Framework", "Argument parsing & registry", BLUE),
+    ("flow", "Plan Manager", "FPLANs + DPLANs", MAGENTA),
+    ("ai_mail", "Communications", "Inter-branch email & dispatch", CYAN),
+    ("api", "LLM Access Layer", "OpenRouter, multi-provider", GREEN),
+    ("trigger", "Event System", "12 events, error registry", YELLOW),
+    ("spawn", "Branch Lifecycle", "Create, update, delete", BLUE),
+    ("memory", "Memory Bank", "ChromaDB vector search", MAGENTA),
+    ("devpulse", "Orchestration Hub", "You are here", CYAN),
 ]
 
 ACTIVITIES = [
@@ -71,7 +71,7 @@ def draw_box(title, content_lines, width=60, color=CYAN):
     print(f"  {color}│{RESET} {BOLD}{WHITE}{title.center(width - 4)}{RESET} {color}│{RESET}")
     print(f"  {color}├{'─' * (width - 2)}┤{RESET}")
     for line in content_lines:
-        padded = f"{line:<{width - 4}}"[:width - 4]
+        padded = f"{line:<{width - 4}}"[: width - 4]
         print(f"  {color}│{RESET} {padded} {color}│{RESET}")
     print(f"  {color}└{'─' * (width - 2)}┘{RESET}")
 
@@ -133,7 +133,9 @@ def show_branch_grid():
 
         is_devpulse = " ◀ YOU" if name == "devpulse" else ""
 
-        print(f"  {status_color}{status}{RESET} {color}{BOLD}@{name:<10}{RESET} {DIM}{role:<18}{RESET} {CYAN}{bar}{RESET}{YELLOW}{is_devpulse}{RESET}")
+        print(
+            f"  {status_color}{status}{RESET} {color}{BOLD}@{name:<10}{RESET} {DIM}{role:<18}{RESET} {CYAN}{bar}{RESET}{YELLOW}{is_devpulse}{RESET}"
+        )
         time.sleep(0.08)
 
     print()
@@ -163,7 +165,7 @@ def show_dispatch_demo():
     print()
 
     # Simulate sending
-    print_slow(f"  {CYAN}📤 drone @ai_mail send @spawn \"Build greeting module\" --dispatch{RESET}", 0.02)
+    print_slow(f'  {CYAN}📤 drone @ai_mail send @spawn "Build greeting module" --dispatch{RESET}', 0.02)
     time.sleep(0.5)
     print(f"  {GREEN}   ✓ Email dispatched to @spawn{RESET}")
     time.sleep(0.3)
@@ -191,7 +193,7 @@ def show_dispatch_demo():
         print()
 
     print()
-    print(f"  {GREEN}{BOLD}  📨 Reply from @spawn: \"Greeting module built. 12 tests passing.\"{RESET}")
+    print(f'  {GREEN}{BOLD}  📨 Reply from @spawn: "Greeting module built. 12 tests passing."{RESET}')
     print()
 
 

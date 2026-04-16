@@ -36,12 +36,12 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -67,98 +67,95 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """
     path = Path(module_path)
 
-    if is_bypassed(module_path, 'json_structure', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "json_structure", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'JSON STRUCTURE'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
         }
 
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'JSON STRUCTURE'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "JSON STRUCTURE",
         }
 
     # Skip __init__.py files
-    if path.name == '__init__.py':
+    if path.name == "__init__.py":
         return {
-            'passed': True,
-            'checks': [{'name': 'JSON structure check', 'passed': True, 'message': '__init__.py file (skipped)'}],
-            'score': 100,
-            'standard': 'JSON STRUCTURE'
+            "passed": True,
+            "checks": [{"name": "JSON structure check", "passed": True, "message": "__init__.py file (skipped)"}],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
         }
 
     try:
-        content = path.read_text(encoding='utf-8')
+        content = path.read_text(encoding="utf-8")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'JSON STRUCTURE'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "JSON STRUCTURE",
         }
 
     path_str = str(path)
 
     # --- Case (a): json_handler.py in a json/ directory ---
-    if 'json_handler' in path.name and path.parent.name == 'json':
+    if "json_handler" in path.name and path.parent.name == "json":
         checks = _check_json_handler_config(path, content, bypass_rules)
-        passed_count = sum(1 for c in checks if c['passed'])
+        passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
-        return {
-            'passed': score >= 75,
-            'checks': checks,
-            'score': score,
-            'standard': 'JSON STRUCTURE'
-        }
+        return {"passed": score >= 75, "checks": checks, "score": score, "standard": "JSON STRUCTURE"}
 
     # --- Determine if the file is in modules/ or handlers/ ---
-    in_modules = 'apps/modules' in path_str or 'apps\\modules' in path_str
-    in_handlers = 'apps/handlers' in path_str or 'apps\\handlers' in path_str
+    in_modules = "apps/modules" in path_str or "apps\\modules" in path_str
+    in_handlers = "apps/handlers" in path_str or "apps\\handlers" in path_str
 
     # Exclude files inside the json/ handler directory itself (they ARE the
     # json infrastructure, not consumers of it)
-    if in_handlers and path.parent.name == 'json':
+    if in_handlers and path.parent.name == "json":
         return {
-            'passed': True,
-            'checks': [{'name': 'JSON structure check', 'passed': True,
-                         'message': 'JSON handler infrastructure file (not applicable)'}],
-            'score': 100,
-            'standard': 'JSON STRUCTURE'
+            "passed": True,
+            "checks": [
+                {
+                    "name": "JSON structure check",
+                    "passed": True,
+                    "message": "JSON handler infrastructure file (not applicable)",
+                }
+            ],
+            "score": 100,
+            "standard": "JSON STRUCTURE",
         }
 
     # --- Cases (b) and (c): code wiring check ---
     if in_modules or in_handlers:
         checks = _check_code_wiring(path, content)
-        passed_count = sum(1 for c in checks if c['passed'])
+        passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
-        return {
-            'passed': passed_count == total,
-            'checks': checks,
-            'score': score,
-            'standard': 'JSON STRUCTURE'
-        }
+        return {"passed": passed_count == total, "checks": checks, "score": score, "standard": "JSON STRUCTURE"}
 
     # --- Case (d): file outside modules/ and handlers/ (entry point, etc.) ---
     return {
-        'passed': True,
-        'checks': [{'name': 'JSON structure check', 'passed': True,
-                     'message': 'Not in modules/ or handlers/ (not applicable)'}],
-        'score': 100,
-        'standard': 'JSON STRUCTURE'
+        "passed": True,
+        "checks": [
+            {"name": "JSON structure check", "passed": True, "message": "Not in modules/ or handlers/ (not applicable)"}
+        ],
+        "score": 100,
+        "standard": "JSON STRUCTURE",
     }
 
 
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
 
 def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     """
@@ -176,25 +173,31 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     #   from aipass.flow.apps.handlers.json import json_handler
     #   from ...handlers.json import json_handler
     has_import = bool(
-        re.search(r'from\s+\S*\.json\s+import\s+json_handler', content)
-        or re.search(r'from\s+\S*json\s+import\s+json_handler', content)
-        or re.search(r'import\s+json_handler', content)
+        re.search(r"from\s+\S*\.json\s+import\s+json_handler", content)
+        or re.search(r"from\s+\S*json\s+import\s+json_handler", content)
+        or re.search(r"import\s+json_handler", content)
     )
-    checks.append({
-        'name': 'json_handler import',
-        'passed': has_import,
-        'message': 'Imports json_handler' if has_import
-                   else 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler'
-    })
+    checks.append(
+        {
+            "name": "json_handler import",
+            "passed": has_import,
+            "message": "Imports json_handler"
+            if has_import
+            else "Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler",
+        }
+    )
 
     # Check 2: calls json_handler.log_operation()
-    has_log_operation = 'json_handler.log_operation' in content
-    checks.append({
-        'name': 'log_operation call',
-        'passed': has_log_operation,
-        'message': 'Calls json_handler.log_operation()' if has_log_operation
-                   else 'Missing json_handler.log_operation() call — every module/handler must log operations'
-    })
+    has_log_operation = "json_handler.log_operation" in content
+    checks.append(
+        {
+            "name": "log_operation call",
+            "passed": has_log_operation,
+            "message": "Calls json_handler.log_operation()"
+            if has_log_operation
+            else "Missing json_handler.log_operation() call — every module/handler must log operations",
+        }
+    )
 
     return checks
 
@@ -212,77 +215,92 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
     checks: List[Dict] = []
 
     # Check 1: No hardcoded absolute paths
-    has_path_home = bool(re.search(r'Path\.home\(\)', content))
+    has_path_home = bool(re.search(r"Path\.home\(\)", content))
     # Only flag _ROOT constants that use Path.home() (legacy pattern)
     # Allow _ROOT = Path(__file__).resolve()... (relative, pip-safe)
     has_branch_root = False
-    for line in content.split('\n'):
+    for line in content.split("\n"):
         stripped = line.strip()
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
-        if re.search(r'\w+_ROOT\s*=', stripped) and 'Path.home()' in stripped:
+        if re.search(r"\w+_ROOT\s*=", stripped) and "Path.home()" in stripped:
             has_branch_root = True
             break
 
     if has_path_home or has_branch_root:
         issues = []
         if has_path_home:
-            issues.append('Path.home()')
+            issues.append("Path.home()")
         if has_branch_root:
-            issues.append('hardcoded _ROOT constant')
-        checks.append({
-            'name': 'No absolute paths',
-            'passed': False,
-            'message': f'Found {", ".join(issues)} — pip packages should use relative paths'
-        })
+            issues.append("hardcoded _ROOT constant")
+        checks.append(
+            {
+                "name": "No absolute paths",
+                "passed": False,
+                "message": f"Found {', '.join(issues)} — pip packages should use relative paths",
+            }
+        )
     else:
-        checks.append({
-            'name': 'No absolute paths',
-            'passed': True,
-            'message': 'No hardcoded absolute paths (correct for pip packages)'
-        })
+        checks.append(
+            {
+                "name": "No absolute paths",
+                "passed": True,
+                "message": "No hardcoded absolute paths (correct for pip packages)",
+            }
+        )
 
     # Check 2: Uses relative path resolution
-    has_relative = bool(re.search(r'Path\(__file__\)', content)
-                        or re.search(r'\.resolve\(\)', content)
-                        or re.search(r'\.parent', content))
+    has_relative = bool(
+        re.search(r"Path\(__file__\)", content)
+        or re.search(r"\.resolve\(\)", content)
+        or re.search(r"\.parent", content)
+    )
 
-    checks.append({
-        'name': 'Relative path resolution',
-        'passed': has_relative,
-        'message': 'Uses relative path resolution (Path(__file__).parent)' if has_relative
-                   else 'Missing relative path resolution — should use Path(__file__).resolve().parent'
-    })
+    checks.append(
+        {
+            "name": "Relative path resolution",
+            "passed": has_relative,
+            "message": "Uses relative path resolution (Path(__file__).parent)"
+            if has_relative
+            else "Missing relative path resolution — should use Path(__file__).resolve().parent",
+        }
+    )
 
     # Check 3: No template directory references
     # The standard says: "The CODE PATTERN is the template -- no json_templates/ directory"
     # Check for path constants or strings referencing json_templates
     has_template_dir = False
-    for line in content.split('\n'):
+    for line in content.split("\n"):
         stripped = line.strip()
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
-        if 'json_templates' in stripped:
+        if "json_templates" in stripped:
             has_template_dir = True
             break
 
-    checks.append({
-        'name': 'No template directory',
-        'passed': not has_template_dir,
-        'message': 'No json_templates/ references (correct — code is the template)' if not has_template_dir
-                   else 'References json_templates/ directory — standard requires auto-create from code defaults, not file templates'
-    })
+    checks.append(
+        {
+            "name": "No template directory",
+            "passed": not has_template_dir,
+            "message": "No json_templates/ references (correct — code is the template)"
+            if not has_template_dir
+            else "References json_templates/ directory — standard requires auto-create from code defaults, not file templates",
+        }
+    )
 
     # Check 4: No load_template() function
     # The correct pattern uses inline defaults (_create_default or similar).
     # A load_template() that reads from files violates the auto-create principle.
-    has_load_template = bool(re.search(r'def\s+load_template\s*\(', content))
+    has_load_template = bool(re.search(r"def\s+load_template\s*\(", content))
 
-    checks.append({
-        'name': 'No file-based templates',
-        'passed': not has_load_template,
-        'message': 'No load_template() function (correct — uses inline code defaults)' if not has_load_template
-                   else 'Has load_template() function — standard requires inline code defaults, not file-based templates'
-    })
+    checks.append(
+        {
+            "name": "No file-based templates",
+            "passed": not has_load_template,
+            "message": "No load_template() function (correct — uses inline code defaults)"
+            if not has_load_template
+            else "Has load_template() function — standard requires inline code defaults, not file-based templates",
+        }
+    )
 
     return checks

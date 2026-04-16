@@ -31,6 +31,7 @@ from .branch_detection import detect_branch_from_pwd
 # USER INFO FUNCTIONS
 # =============================================
 
+
 def get_current_user() -> Dict:
     """
     Get current user's information from branch detection (AIPASS_REGISTRY.json)
@@ -65,6 +66,7 @@ def get_current_user() -> Dict:
 
     # Extract info from branch_info (from AIPASS_REGISTRY.json)
     from .branch_detection import BRANCH_REGISTRY_PATH
+
     _repo_root = BRANCH_REGISTRY_PATH.parent
 
     branch_name = branch_info.get("name")
@@ -92,7 +94,7 @@ def get_current_user() -> Dict:
         "email_address": email,
         "display_name": branch_name,
         "mailbox_path": str(mailbox_path),
-        "timestamp_format": "%Y-%m-%d %H:%M:%S"
+        "timestamp_format": "%Y-%m-%d %H:%M:%S",
     }
 
 
@@ -115,9 +117,10 @@ def get_user_by_email(email: str) -> Optional[Dict]:
 
     try:
         import json
+
         _repo_root = registry_path.parent
 
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
 
         for branch in _get_branches_list(registry):
@@ -129,7 +132,7 @@ def get_user_by_email(email: str) -> Optional[Dict]:
                     "email_address": branch.get("email"),
                     "display_name": branch.get("name"),
                     "mailbox_path": str(branch_path / ".ai_mail.local"),
-                    "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                    "timestamp_format": "%Y-%m-%d %H:%M:%S",
                 }
         return None
     except Exception as e:
@@ -145,13 +148,15 @@ def get_all_users() -> Dict[str, Dict]:
         Dict mapping branch emails to user info dicts
     """
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
+
     registry_path = BRANCH_REGISTRY_PATH
     if not registry_path.exists():
         return {}
 
     try:
         import json
-        with open(registry_path, 'r', encoding='utf-8') as f:
+
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
 
         _repo_root = registry_path.parent
@@ -166,7 +171,7 @@ def get_all_users() -> Dict[str, Dict]:
                     "email_address": email,
                     "display_name": branch.get("name"),
                     "mailbox_path": str(branch_path / ".ai_mail.local"),
-                    "timestamp_format": "%Y-%m-%d %H:%M:%S"
+                    "timestamp_format": "%Y-%m-%d %H:%M:%S",
                 }
         return users
     except Exception as e:

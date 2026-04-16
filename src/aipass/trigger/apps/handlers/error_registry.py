@@ -52,17 +52,17 @@ REGISTRY_FILE = TRIGGER_ROOT / "trigger_json" / "error_registry.json"
 TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
 CB_STATE_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_cb_state.json"
 
-VALID_STATUSES = ('new', 'investigating', 'suppressed', 'resolved')
-VALID_SEVERITIES = ('low', 'medium', 'high', 'critical')
-VALID_FIX_STATUSES = ('none', 'pending_fix', 'fix_requested', 'fix_confirmed')
+VALID_STATUSES = ("new", "investigating", "suppressed", "resolved")
+VALID_SEVERITIES = ("low", "medium", "high", "critical")
+VALID_FIX_STATUSES = ("none", "pending_fix", "fix_requested", "fix_confirmed")
 
 # Patterns that indicate user errors (bad commands, wrong args) rather
 # than system failures.  Matched case-insensitively against the raw message.
 _USER_ERROR_PATTERNS: re.Pattern = re.compile(
-    r'unknown command|invalid argument|unrecognized|'
-    r'missing required argument|usage:|no such command|'
-    r'not a valid command|unrecognized option|'
-    r'unknown option|too few arguments|too many arguments',
+    r"unknown command|invalid argument|unrecognized|"
+    r"missing required argument|usage:|no such command|"
+    r"not a valid command|unrecognized option|"
+    r"unknown option|too few arguments|too many arguments",
     re.IGNORECASE,
 )
 
@@ -87,6 +87,7 @@ class ErrorEvent:
         suppress_reason: Why this error was suppressed (optional)
         source_fix_status: Fix tracking (none, pending_fix, fix_requested, fix_confirmed)
     """
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     fingerprint: str = ""
     error_type: str = ""
@@ -112,6 +113,7 @@ class CircuitBreakerState:
     - open: Paused, no dispatches until cooldown expires
     - half_open: Testing, allows one dispatch to probe recovery
     """
+
     state: str = "closed"  # closed, open, half_open
     opened_at: float = 0.0  # time.time() when breaker opened
     cooldown_seconds: int = 300  # Current cooldown (5 min default)
@@ -128,6 +130,7 @@ class CircuitBreakerState:
 # Circuit Breaker Persistence
 # ---------------------------------------------------------------------------
 
+
 def _save_circuit_breaker_state() -> None:
     """Persist full circuit breaker + per-fingerprint state to trigger_cb_state.json.
 
@@ -137,18 +140,18 @@ def _save_circuit_breaker_state() -> None:
     try:
         with json_file_lock(CB_STATE_FILE):
             state_data = {
-                'circuit_breaker': {
-                    'state': _circuit_breaker.state,
-                    'opened_at': _circuit_breaker.opened_at,
-                    'cooldown_seconds': _circuit_breaker.cooldown_seconds,
-                    'recent_errors': _circuit_breaker.recent_errors,
-                    'summary_sent': _circuit_breaker.summary_sent,
-                    'half_open_allow': _circuit_breaker.half_open_allow,
+                "circuit_breaker": {
+                    "state": _circuit_breaker.state,
+                    "opened_at": _circuit_breaker.opened_at,
+                    "cooldown_seconds": _circuit_breaker.cooldown_seconds,
+                    "recent_errors": _circuit_breaker.recent_errors,
+                    "summary_sent": _circuit_breaker.summary_sent,
+                    "half_open_allow": _circuit_breaker.half_open_allow,
                 },
-                'per_fingerprint': {
+                "per_fingerprint": {
                     fp: {
-                        'last_dispatch': max(times) if times else 0.0,
-                        'count': _fingerprint_dispatch_count.get(fp, 0),
+                        "last_dispatch": max(times) if times else 0.0,
+                        "count": _fingerprint_dispatch_count.get(fp, 0),
                     }
                     for fp, times in _fingerprint_dispatch_times.items()
                 },
@@ -162,8 +165,8 @@ def _restore_fingerprint_tracking(pf_data: dict) -> None:
     """Restore per-fingerprint dispatch tracking from persisted data."""
     global _fingerprint_dispatch_times, _fingerprint_dispatch_count
     for fp, info in pf_data.items():
-        last = float(info.get('last_dispatch', 0.0))
-        count = int(info.get('count', 0))
+        last = float(info.get("last_dispatch", 0.0))
+        count = int(info.get("count", 0))
         if last > 0:
             _fingerprint_dispatch_times[fp] = [last]
         _fingerprint_dispatch_count[fp] = count
@@ -181,21 +184,21 @@ def _load_circuit_breaker_state() -> CircuitBreakerState:
     try:
         if not CB_STATE_FILE.exists():
             return CircuitBreakerState()
-        raw = CB_STATE_FILE.read_text(encoding='utf-8').strip()
+        raw = CB_STATE_FILE.read_text(encoding="utf-8").strip()
         if not raw:
             return CircuitBreakerState()
         data = json.loads(raw)
-        cb_data = data.get('circuit_breaker')
-        if not isinstance(cb_data, dict) or cb_data.get('state') not in ('closed', 'open', 'half_open'):
+        cb_data = data.get("circuit_breaker")
+        if not isinstance(cb_data, dict) or cb_data.get("state") not in ("closed", "open", "half_open"):
             return CircuitBreakerState()
         breaker = CircuitBreakerState()
-        breaker.state = cb_data['state']
-        breaker.opened_at = float(cb_data.get('opened_at', 0.0))
-        breaker.cooldown_seconds = int(cb_data.get('cooldown_seconds', breaker.base_cooldown))
-        breaker.recent_errors = [float(t) for t in cb_data.get('recent_errors', [])]
-        breaker.summary_sent = bool(cb_data.get('summary_sent', False))
-        breaker.half_open_allow = bool(cb_data.get('half_open_allow', True))
-        _restore_fingerprint_tracking(data.get('per_fingerprint', {}))
+        breaker.state = cb_data["state"]
+        breaker.opened_at = float(cb_data.get("opened_at", 0.0))
+        breaker.cooldown_seconds = int(cb_data.get("cooldown_seconds", breaker.base_cooldown))
+        breaker.recent_errors = [float(t) for t in cb_data.get("recent_errors", [])]
+        breaker.summary_sent = bool(cb_data.get("summary_sent", False))
+        breaker.half_open_allow = bool(cb_data.get("half_open_allow", True))
+        _restore_fingerprint_tracking(data.get("per_fingerprint", {}))
         return breaker
     except Exception as exc:
         logger.warning("Failed to load circuit breaker state: %s", exc)
@@ -222,6 +225,7 @@ _circuit_breaker = _load_circuit_breaker_state()
 # ---------------------------------------------------------------------------
 # Circuit Breaker
 # ---------------------------------------------------------------------------
+
 
 def circuit_breaker_allows() -> bool:
     """Check if the circuit breaker allows dispatch.
@@ -279,10 +283,7 @@ def circuit_breaker_record_error() -> None:
 
     if _circuit_breaker.state == "half_open":
         # Error during probe - re-open with doubled cooldown
-        new_cooldown = min(
-            _circuit_breaker.cooldown_seconds * 2,
-            _circuit_breaker.max_cooldown
-        )
+        new_cooldown = min(_circuit_breaker.cooldown_seconds * 2, _circuit_breaker.max_cooldown)
         _circuit_breaker.state = "open"
         _circuit_breaker.opened_at = now
         _circuit_breaker.cooldown_seconds = new_cooldown
@@ -294,9 +295,7 @@ def circuit_breaker_record_error() -> None:
     # Add timestamp and prune old entries
     _circuit_breaker.recent_errors.append(now)
     cutoff = now - _circuit_breaker.trip_window_seconds
-    _circuit_breaker.recent_errors = [
-        t for t in _circuit_breaker.recent_errors if t >= cutoff
-    ]
+    _circuit_breaker.recent_errors = [t for t in _circuit_breaker.recent_errors if t >= cutoff]
 
     # Check if threshold exceeded -> trip
     if len(_circuit_breaker.recent_errors) >= _circuit_breaker.trip_threshold:
@@ -356,6 +355,7 @@ def get_circuit_breaker_status() -> dict:
 # ---------------------------------------------------------------------------
 # Per-Fingerprint Rate Limiting (Exponential Backoff)
 # ---------------------------------------------------------------------------
+
 
 def get_backoff_seconds(dispatch_count: int) -> int:
     """Calculate backoff duration based on dispatch count.
@@ -425,14 +425,14 @@ def record_dispatch(fingerprint: str) -> None:
     if fingerprint not in _fingerprint_dispatch_times:
         _fingerprint_dispatch_times[fingerprint] = []
     _fingerprint_dispatch_times[fingerprint].append(now)
-    _fingerprint_dispatch_count[fingerprint] = \
-        _fingerprint_dispatch_count.get(fingerprint, 0) + 1
+    _fingerprint_dispatch_count[fingerprint] = _fingerprint_dispatch_count.get(fingerprint, 0) + 1
     _save_circuit_breaker_state()
 
 
 # ---------------------------------------------------------------------------
 # Fingerprinting
 # ---------------------------------------------------------------------------
+
 
 def normalize_message(message: str) -> str:
     """Normalize an error message by stripping variable data.
@@ -451,38 +451,34 @@ def normalize_message(message: str) -> str:
 
     # Strip ISO timestamps (2026-02-13T10:30:45.123456, 2026-02-13 10:30:45)
     normalized = re.sub(
-        r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:[+-]\d{2}:?\d{2}|Z)?',
-        '<timestamp>',
-        normalized
+        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:[+-]\d{2}:?\d{2}|Z)?", "<timestamp>", normalized
     )
 
     # Strip date-only patterns (2026-02-13)
-    normalized = re.sub(r'\d{4}-\d{2}-\d{2}', '<date>', normalized)
+    normalized = re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", normalized)
 
     # Strip absolute paths (any /path/to/something)
-    normalized = re.sub(r'/[\w./-]+', '<path>', normalized)
+    normalized = re.sub(r"/[\w./-]+", "<path>", normalized)
 
     # Strip line numbers ("line 42" -> "line N")
-    normalized = re.sub(r'\bline \d+\b', 'line N', normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bline \d+\b", "line N", normalized, flags=re.IGNORECASE)
 
     # Strip UUIDs (8-4-4-4-12 hex format)
     normalized = re.sub(
-        r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
-        '<uuid>',
-        normalized
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "<uuid>", normalized
     )
 
     # Strip hex hashes (8+ hex chars that look like hashes)
-    normalized = re.sub(r'\b[0-9a-fA-F]{8,}\b', '<hash>', normalized)
+    normalized = re.sub(r"\b[0-9a-fA-F]{8,}\b", "<hash>", normalized)
 
     # Strip port numbers (:8080, :3000, :443)
-    normalized = re.sub(r':\d{2,5}\b', ':<port>', normalized)
+    normalized = re.sub(r":\d{2,5}\b", ":<port>", normalized)
 
     # Strip standalone numeric IDs (pure numbers 3+ digits)
-    normalized = re.sub(r'\b\d{3,}\b', '<id>', normalized)
+    normalized = re.sub(r"\b\d{3,}\b", "<id>", normalized)
 
     # Collapse multiple spaces
-    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
 
     return normalized
 
@@ -503,12 +499,13 @@ def compute_fingerprint(error_type: str, normalized_msg: str, component: str) ->
         Full SHA1 hex digest (40 chars). Use [:12] for display.
     """
     content = f"{error_type}:{normalized_msg}:{component}"
-    return hashlib.sha1(content.encode('utf-8')).hexdigest()
+    return hashlib.sha1(content.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
 # Registry I/O
 # ---------------------------------------------------------------------------
+
 
 def _load_registry() -> dict:
     """Load the error registry from disk.
@@ -519,21 +516,15 @@ def _load_registry() -> dict:
     """
     try:
         if REGISTRY_FILE.exists():
-            raw = REGISTRY_FILE.read_text(encoding='utf-8').strip()
+            raw = REGISTRY_FILE.read_text(encoding="utf-8").strip()
             if not raw:
                 return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
             data = json.loads(raw)
-            if isinstance(data, dict) and 'errors' in data:
+            if isinstance(data, dict) and "errors" in data:
                 return data
     except Exception as exc:
         logger.warning("Failed to load error registry: %s", exc)
-    return {
-        "errors": {},
-        "metadata": {
-            "version": "1.0.0",
-            "last_updated": datetime.now().isoformat()
-        }
-    }
+    return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
 
 
 def _save_registry(data: dict) -> bool:
@@ -558,13 +549,8 @@ def _save_registry(data: dict) -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
-def report(
-    error_type: str,
-    message: str,
-    component: str,
-    log_path: str = "",
-    severity: str = "medium"
-) -> dict:
+
+def report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
     """Report an error to the registry.
 
     Normalizes the message, computes a fingerprint, and either creates
@@ -612,7 +598,9 @@ def report(
                 _save_registry(registry)
                 result = dict(entry)
                 result["is_new"] = False
-                json_handler.log_operation("error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]})
+                json_handler.log_operation(
+                    "error_registered", {"fingerprint": fingerprint[:12], "count": entry["count"]}
+                )
                 return result
             else:
                 # New error - create entry
@@ -632,7 +620,7 @@ def report(
                     last_seen=now,
                     log_path=log_path,
                     suppress_reason=initial_suppress_reason,
-                    source_fix_status="none"
+                    source_fix_status="none",
                 )
                 entry_dict = asdict(event)
                 registry["errors"][fingerprint] = entry_dict
@@ -650,15 +638,12 @@ def report(
             "component": component,
             "is_new": True,
             "status": "new",
-            "count": 1
+            "count": 1,
         }
 
 
 def query(
-    status: Optional[str] = None,
-    component: Optional[str] = None,
-    severity: Optional[str] = None,
-    limit: int = 50
+    status: Optional[str] = None, component: Optional[str] = None, severity: Optional[str] = None, limit: int = 50
 ) -> list:
     """Query the error registry with optional filters.
 
@@ -682,8 +667,7 @@ def query(
         if status is not None:
             entries = [e for e in entries if e.get("status") == status]
         if component is not None:
-            entries = [e for e in entries
-                       if e.get("component", "").upper() == component.upper()]
+            entries = [e for e in entries if e.get("component", "").upper() == component.upper()]
         if severity is not None:
             entries = [e for e in entries if e.get("severity") == severity]
 
@@ -820,21 +804,11 @@ def get_stats() -> dict:
             severity = entry.get("severity", "unknown")
             by_severity[severity] = by_severity.get(severity, 0) + 1
 
-        return {
-            "total": len(entries),
-            "by_status": by_status,
-            "by_component": by_component,
-            "by_severity": by_severity
-        }
+        return {"total": len(entries), "by_status": by_status, "by_component": by_component, "by_severity": by_severity}
 
     except Exception as exc:
         logger.warning("Failed to get error registry stats: %s", exc)
-        return {
-            "total": 0,
-            "by_status": {},
-            "by_component": {},
-            "by_severity": {}
-        }
+        return {"total": 0, "by_status": {}, "by_component": {}, "by_severity": {}}
 
 
 def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
@@ -867,6 +841,7 @@ def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
 
 def _find_entry(registry: dict, fingerprint: str) -> Optional[dict]:
     """Find an entry by exact fingerprint or prefix match.

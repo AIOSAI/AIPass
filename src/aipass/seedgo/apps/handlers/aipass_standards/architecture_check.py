@@ -39,14 +39,14 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
         return False
     for rule in bypass_rules:
         # Must match standard
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
         # Must match file (check if rule file path is in the full path)
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
         # Check line-specific bypass
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -79,42 +79,42 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'architecture', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "architecture", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'ARCHITECTURE'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "ARCHITECTURE",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'ARCHITECTURE'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "ARCHITECTURE",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'ARCHITECTURE'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "ARCHITECTURE",
         }
 
     # Determine file location and type
-    is_entry_point = path.name.endswith('.py') and 'apps/' in module_path and path.parent.name == 'apps'
-    is_module = 'apps/modules/' in module_path
-    is_handler = 'apps/handlers/' in module_path
-    is_init = path.name == '__init__.py'
+    is_entry_point = path.name.endswith(".py") and "apps/" in module_path and path.parent.name == "apps"
+    is_module = "apps/modules/" in module_path
+    is_handler = "apps/handlers/" in module_path
+    is_init = path.name == "__init__.py"
 
     # Check 1: 3-Layer Pattern - File location
     if not is_init:
@@ -147,20 +147,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             checks.extend(baseline_checks)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
     # Overall pass if score >= 75%
     overall_passed = score >= 75
 
-    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "architecture"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'ARCHITECTURE'
-    }
+    json_handler.log_operation(
+        "check_completed", {"file": str(module_path), "score": score, "standard": "architecture"}
+    )
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "ARCHITECTURE"}
 
 
 def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool, is_handler: bool) -> Dict:
@@ -173,28 +170,16 @@ def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool
     - apps/handlers/ (implementation)
     """
     if is_entry_point:
-        return {
-            'name': '3-layer pattern',
-            'passed': True,
-            'message': 'Entry point layer (apps/branch.py)'
-        }
+        return {"name": "3-layer pattern", "passed": True, "message": "Entry point layer (apps/branch.py)"}
     elif is_module:
-        return {
-            'name': '3-layer pattern',
-            'passed': True,
-            'message': 'Module layer (apps/modules/)'
-        }
+        return {"name": "3-layer pattern", "passed": True, "message": "Module layer (apps/modules/)"}
     elif is_handler:
-        return {
-            'name': '3-layer pattern',
-            'passed': True,
-            'message': 'Handler layer (apps/handlers/)'
-        }
+        return {"name": "3-layer pattern", "passed": True, "message": "Handler layer (apps/handlers/)"}
     else:
         return {
-            'name': '3-layer pattern',
-            'passed': False,
-            'message': 'File not in standard 3-layer structure (apps/, apps/modules/, apps/handlers/)'
+            "name": "3-layer pattern",
+            "passed": False,
+            "message": "File not in standard 3-layer structure (apps/, apps/modules/, apps/handlers/)",
         }
 
 
@@ -211,28 +196,16 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
     line_count = len(lines)
 
     if line_count < 300:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (perfect - under 300)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (perfect - under 300)"}
     elif line_count < 500:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (good - under 500)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (good - under 500)"}
     elif line_count < 700:
-        return {
-            'name': 'File size',
-            'passed': True,
-            'message': f'{line_count} lines (acceptable but getting heavy)'
-        }
+        return {"name": "File size", "passed": True, "message": f"{line_count} lines (acceptable but getting heavy)"}
     else:
         return {
-            'name': 'File size',
-            'passed': False,
-            'message': f'{line_count} lines (consider splitting - recommended under 700)'
+            "name": "File size",
+            "passed": False,
+            "message": f"{line_count} lines (consider splitting - recommended under 700)",
         }
 
 
@@ -250,8 +223,8 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
     if module_path:
         path_parts = Path(module_path).parts
         for i, part in enumerate(path_parts):
-            if part == 'apps' and i > 0:
-                parent_branch = path_parts[i-1]
+            if part == "apps" and i > 0:
+                parent_branch = path_parts[i - 1]
                 break
 
     in_docstring = False
@@ -271,43 +244,39 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
                 in_docstring = not in_docstring
 
         # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith('#'):
+        if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
         # Check for forbidden module imports
-        if '.apps.modules' in line and ('from ' in line or 'import ' in line):
+        if ".apps.modules" in line and ("from " in line or "import " in line):
             # Extract the import statement
-            if '#' in line:
-                code_part = line.split('#')[0]
+            if "#" in line:
+                code_part = line.split("#")[0]
             else:
                 code_part = line
 
-            if '.apps.modules' in code_part:
+            if ".apps.modules" in code_part:
                 # Allowed service imports
-                if 'prax.apps.modules' in code_part or 'cli.apps.modules' in code_part:
+                if "prax.apps.modules" in code_part or "cli.apps.modules" in code_part:
                     continue
 
                 # Check if importing from parent branch
-                if parent_branch and f'{parent_branch}.apps.modules' in code_part:
+                if parent_branch and f"{parent_branch}.apps.modules" in code_part:
                     return {
-                        'name': 'Handler independence',
-                        'passed': False,
-                        'message': f'Handler importing from parent module on line {i} (violates independence)'
+                        "name": "Handler independence",
+                        "passed": False,
+                        "message": f"Handler importing from parent module on line {i} (violates independence)",
                     }
 
                 # Generic check if no parent branch detected
                 if not parent_branch:
                     return {
-                        'name': 'Handler independence',
-                        'passed': False,
-                        'message': f'Handler importing from branch module on line {i} (violates independence)'
+                        "name": "Handler independence",
+                        "passed": False,
+                        "message": f"Handler importing from branch module on line {i} (violates independence)",
                     }
 
-    return {
-        'name': 'Handler independence',
-        'passed': True,
-        'message': 'No forbidden module imports detected'
-    }
+    return {"name": "Handler independence", "passed": True, "message": "No forbidden module imports detected"}
 
 
 def check_domain_organization(module_path: str) -> Optional[Dict]:
@@ -324,32 +293,24 @@ def check_domain_organization(module_path: str) -> Optional[Dict]:
     # Find 'handlers' in path and get next directory
     handler_domain = None
     for i, part in enumerate(path_parts):
-        if part == 'handlers' and i + 1 < len(path_parts):
+        if part == "handlers" and i + 1 < len(path_parts):
             handler_domain = path_parts[i + 1]
             break
 
     if not handler_domain:
-        return {
-            'name': 'Domain organization',
-            'passed': False,
-            'message': 'Could not detect handler domain from path'
-        }
+        return {"name": "Domain organization", "passed": False, "message": "Could not detect handler domain from path"}
 
     # Check for technical (bad) organization
-    technical_names = ['utils', 'helpers', 'operations', 'common', 'shared', 'lib']
+    technical_names = ["utils", "helpers", "operations", "common", "shared", "lib"]
     if handler_domain.lower() in technical_names:
         return {
-            'name': 'Domain organization',
-            'passed': False,
-            'message': f'Technical organization ({handler_domain}/) - use business domains instead'
+            "name": "Domain organization",
+            "passed": False,
+            "message": f"Technical organization ({handler_domain}/) - use business domains instead",
         }
 
     # Domain-based organization detected
-    return {
-        'name': 'Domain organization',
-        'passed': True,
-        'message': f'Domain-based organization ({handler_domain}/)'
-    }
+    return {"name": "Domain organization", "passed": True, "message": f"Domain-based organization ({handler_domain}/)"}
 
 
 def _load_ignore_patterns(template_path: Path) -> Dict:
@@ -360,12 +321,9 @@ def _load_ignore_patterns(template_path: Path) -> Dict:
         return {"ignore_files": [], "ignore_patterns": []}
 
     try:
-        with open(ignore_file, 'r', encoding='utf-8') as f:
+        with open(ignore_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return {
-                "ignore_files": data.get("ignore_files", []),
-                "ignore_patterns": data.get("ignore_patterns", [])
-            }
+            return {"ignore_files": data.get("ignore_files", []), "ignore_patterns": data.get("ignore_patterns", [])}
     except Exception:
         logger.info("Cannot read ignore config: %s", ignore_file)
         return {"ignore_files": [], "ignore_patterns": []}
@@ -381,11 +339,11 @@ def _should_ignore(item: Path, ignore_config: Dict) -> bool:
 
     # Check patterns
     for pattern in ignore_config["ignore_patterns"]:
-        if pattern.startswith('*'):
+        if pattern.startswith("*"):
             if name.endswith(pattern[1:]):
                 return True
-        elif pattern.startswith('.') and '*' in pattern:
-            prefix = pattern.rstrip('*')
+        elif pattern.startswith(".") and "*" in pattern:
+            prefix = pattern.rstrip("*")
             if name.startswith(prefix):
                 return True
         else:
@@ -401,7 +359,7 @@ def _get_citizen_class(branch_path: Path) -> Optional[str]:
     if not passport.exists():
         return None
     try:
-        with open(passport, 'r', encoding='utf-8') as f:
+        with open(passport, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data.get("identity", {}).get("citizen_class")
     except Exception:
@@ -418,7 +376,7 @@ def _scan_template(template_path: Path) -> Dict:
     ignore_config = _load_ignore_patterns(template_path)
     structure = {"directories": [], "files": []}
 
-    for item in sorted(template_path.rglob('*')):
+    for item in sorted(template_path.rglob("*")):
         if _should_ignore(item, ignore_config):
             continue
 
@@ -442,7 +400,7 @@ def _transform_path(template_relative: str, branch_name: str) -> str:
     to their branch-specific names.
     """
     branch_lower = branch_name.lower().replace("-", "_")
-    entry_point_name = branch_name.lstrip('.').lower()
+    entry_point_name = branch_name.lstrip(".").lower()
 
     # {{BRANCH}} in directory names uses lowercase (e.g., {{BRANCH}}_json → seedgo_json)
     result = template_relative.replace("{{BRANCH}}", branch_lower)
@@ -481,44 +439,48 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
     branch_path = None
     current = path.parent
     while current != current.parent:
-        if current.name == 'apps' and current.parent:
+        if current.name == "apps" and current.parent:
             branch_path = current.parent
             break
         current = current.parent
 
     if not branch_path:
-        return [{
-            'name': 'Template baseline',
-            'passed': False,
-            'message': 'Could not detect branch path from module path'
-        }]
+        return [
+            {"name": "Template baseline", "passed": False, "message": "Could not detect branch path from module path"}
+        ]
 
     branch_name = branch_path.name
 
     # Read citizen class from passport
     citizen_class = _get_citizen_class(branch_path)
     if not citizen_class:
-        return [{
-            'name': 'Template baseline',
-            'passed': False,
-            'message': f'No citizen_class in {branch_name}/.trinity/passport.json'
-        }]
+        return [
+            {
+                "name": "Template baseline",
+                "passed": False,
+                "message": f"No citizen_class in {branch_name}/.trinity/passport.json",
+            }
+        ]
 
     # Find the matching template directory
     if not SPAWN_TEMPLATES_DIR.exists():
-        return [{
-            'name': 'Template baseline',
-            'passed': False,
-            'message': f'Spawn templates directory not found: {SPAWN_TEMPLATES_DIR}'
-        }]
+        return [
+            {
+                "name": "Template baseline",
+                "passed": False,
+                "message": f"Spawn templates directory not found: {SPAWN_TEMPLATES_DIR}",
+            }
+        ]
 
     template_path = SPAWN_TEMPLATES_DIR / citizen_class
     if not template_path.exists():
-        return [{
-            'name': 'Template baseline',
-            'passed': False,
-            'message': f'No template for citizen_class "{citizen_class}" at {template_path}'
-        }]
+        return [
+            {
+                "name": "Template baseline",
+                "passed": False,
+                "message": f'No template for citizen_class "{citizen_class}" at {template_path}',
+            }
+        ]
 
     # Scan template live
     template_structure = _scan_template(template_path)
@@ -529,24 +491,20 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
         full = branch_path / expected
 
         if full.exists():
-            checks.append({
-                'name': f'Dir: {expected}/',
-                'passed': True,
-                'message': 'Template directory exists'
-            })
+            checks.append({"name": f"Dir: {expected}/", "passed": True, "message": "Template directory exists"})
         else:
-            if is_bypassed(expected, 'architecture', bypass_rules=bypass_rules):
-                checks.append({
-                    'name': f'Dir: {expected}/',
-                    'passed': True,
-                    'message': 'Template directory missing (bypassed)'
-                })
+            if is_bypassed(expected, "architecture", bypass_rules=bypass_rules):
+                checks.append(
+                    {"name": f"Dir: {expected}/", "passed": True, "message": "Template directory missing (bypassed)"}
+                )
             else:
-                checks.append({
-                    'name': f'Dir: {expected}/',
-                    'passed': False,
-                    'message': f'Missing dir: {expected}/ (template: {citizen_class})'
-                })
+                checks.append(
+                    {
+                        "name": f"Dir: {expected}/",
+                        "passed": False,
+                        "message": f"Missing dir: {expected}/ (template: {citizen_class})",
+                    }
+                )
 
     # Check files
     for template_file in template_structure["files"]:
@@ -554,33 +512,32 @@ def check_template_baseline(module_path: str, bypass_rules: list | None = None) 
         full = branch_path / expected
 
         if full.exists():
-            checks.append({
-                'name': f'File: {expected}',
-                'passed': True,
-                'message': 'Template file exists'
-            })
+            checks.append({"name": f"File: {expected}", "passed": True, "message": "Template file exists"})
         else:
             file_name = Path(expected).name
-            if is_bypassed(file_name, 'architecture', bypass_rules=bypass_rules):
-                checks.append({
-                    'name': f'File: {expected}',
-                    'passed': True,
-                    'message': 'Template file missing (bypassed)'
-                })
+            if is_bypassed(file_name, "architecture", bypass_rules=bypass_rules):
+                checks.append(
+                    {"name": f"File: {expected}", "passed": True, "message": "Template file missing (bypassed)"}
+                )
             else:
-                checks.append({
-                    'name': f'File: {expected}',
-                    'passed': False,
-                    'message': f'Missing file: {expected} (template: {citizen_class})'
-                })
+                checks.append(
+                    {
+                        "name": f"File: {expected}",
+                        "passed": False,
+                        "message": f"Missing file: {expected} (template: {citizen_class})",
+                    }
+                )
 
     # Summary check
-    missing_count = sum(1 for c in checks if not c['passed'])
+    missing_count = sum(1 for c in checks if not c["passed"])
     total_count = len(checks)
-    checks.insert(0, {
-        'name': f'Template baseline ({citizen_class})',
-        'passed': missing_count == 0,
-        'message': f'{total_count} items checked from spawn/templates/{citizen_class}/, {missing_count} missing'
-    })
+    checks.insert(
+        0,
+        {
+            "name": f"Template baseline ({citizen_class})",
+            "passed": missing_count == 0,
+            "message": f"{total_count} items checked from spawn/templates/{citizen_class}/, {missing_count} missing",
+        },
+    )
 
     return checks

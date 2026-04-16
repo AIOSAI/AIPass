@@ -23,7 +23,7 @@ from typing import Any, List
 
 # Handle broken pipe gracefully (e.g. output piped to head)
 # SIGPIPE does not exist on Windows
-if hasattr(signal, 'SIGPIPE'):
+if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Dashboard integration (optional, provided by prax)
@@ -49,10 +49,11 @@ MODULES_DIR = MODULE_ROOT / "modules"
 # HELP DISPLAY
 # =============================================================================
 
+
 def print_help():
     """Print drone-compliant help output"""
     parser = argparse.ArgumentParser(
-        description='AI_MAIL Branch Operations - Email system for branch communication',
+        description="AI_MAIL Branch Operations - Email system for branch communication",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 COMMANDS:
@@ -93,7 +94,7 @@ EXAMPLES:
   drone @ai_mail close abc123                 # Close single email
   drone @ai_mail close abc123 def456 ghi789   # Close multiple emails
   drone @ai_mail close all                    # Close ALL emails
-        """
+        """,
     )
     console.print(parser.format_help())
 
@@ -101,6 +102,7 @@ EXAMPLES:
 # =============================================================================
 # INTROSPECTION DISPLAY
 # =============================================================================
+
 
 def print_introspection():
     """Display discovered modules only (seedgo pattern)"""
@@ -117,7 +119,7 @@ def print_introspection():
     console.print()
 
     for module in modules:
-        module_name = module.__name__.split('.')[-1]
+        module_name = module.__name__.split(".")[-1]
         console.print(f"  [cyan]•[/cyan] {module_name}")
 
     console.print()
@@ -128,6 +130,7 @@ def print_introspection():
 # =============================================================================
 # MODULE DISCOVERY
 # =============================================================================
+
 
 def discover_modules() -> List[Any]:
     """
@@ -158,7 +161,7 @@ def discover_modules() -> List[Any]:
             module = importlib.import_module(module_name)
 
             # Check for required interface
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"  [+] {module_name}")
             else:
@@ -170,9 +173,11 @@ def discover_modules() -> List[Any]:
     logger.info(f"[{Path(__file__).stem}] Discovered {len(modules)} modules")
     return modules
 
+
 # =============================================================================
 # COMMAND ROUTING
 # =============================================================================
+
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """
@@ -200,9 +205,11 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
     return False
 
+
 # =============================================================================
 # MAIN
 # =============================================================================
+
 
 def main():
     """Main entry point - routes commands to modules"""
@@ -216,12 +223,12 @@ def main():
             return 0
 
         # Show version
-        if args[0] in ['--version', '-V']:
+        if args[0] in ["--version", "-V"]:
             console.print("AI_MAIL v1.0.0")
             return 0
 
         # Show help for explicit help flags
-        if args[0] in ['--help', '-h', 'help']:
+        if args[0] in ["--help", "-h", "help"]:
             print_help()
             return 0
 
@@ -242,8 +249,9 @@ def main():
             return 1
 
     except Exception as exc:
-        logger.error('[ai_mail] Unhandled error in main: %s', exc)
+        logger.error("[ai_mail] Unhandled error in main: %s", exc)
         return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

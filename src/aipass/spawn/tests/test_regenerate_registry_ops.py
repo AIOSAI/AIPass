@@ -23,6 +23,7 @@ from aipass.spawn.apps.handlers.regenerate_registry_ops import (
 # Helpers
 # =============================================================================
 
+
 def _make_template(tmp_path: Path, files: dict[str, str] | None = None, dirs: list[str] | None = None) -> Path:
     """Create a minimal template directory with given files and sub-directories.
 
@@ -51,12 +52,14 @@ def _make_template(tmp_path: Path, files: dict[str, str] | None = None, dirs: li
 def _hash_for(_content: str) -> str:
     """Return a deterministic fake 12-char hex hash for the given content key."""
     import hashlib
+
     return hashlib.sha256(_content.encode()).hexdigest()[:12]
 
 
 # =============================================================================
 # regenerate_template_registry — fresh generation
 # =============================================================================
+
 
 class TestRegenerateFreshTemplate:
     """Test 1 — create template dir with files+dirs, no existing registry."""
@@ -94,6 +97,7 @@ class TestRegenerateFreshTemplate:
 # ID preservation — hash match
 # =============================================================================
 
+
 class TestPreservesIdsByHash:
     """Test 2 — existing registry with hash->ID, same content at different path."""
 
@@ -127,6 +131,7 @@ class TestPreservesIdsByHash:
 # ID preservation — path match
 # =============================================================================
 
+
 class TestPreservesIdsByPath:
     """Test 3 — same path, different content -> ID preserved via path match."""
 
@@ -157,6 +162,7 @@ class TestPreservesIdsByPath:
 # =============================================================================
 # New ID assignment
 # =============================================================================
+
 
 class TestAssignsNewIds:
     """Test 4 — file matching neither hash nor path gets a new sequential ID."""
@@ -194,6 +200,7 @@ class TestAssignsNewIds:
 # Skip __pycache__
 # =============================================================================
 
+
 class TestSkipsPycache:
     """Test 5 — __pycache__ directory and its contents should be excluded."""
 
@@ -224,6 +231,7 @@ class TestSkipsPycache:
 # Skip spawn tracking files
 # =============================================================================
 
+
 class TestSkipsSpawnTrackingFiles:
     """Test 6 — .template_registry.json and .branch_meta.json inside .spawn/ are skipped."""
 
@@ -253,6 +261,7 @@ class TestSkipsSpawnTrackingFiles:
 # Allow .spawn/README.md
 # =============================================================================
 
+
 class TestAllowsSpawnReadme:
     """Test 7 — .spawn/README.md is NOT a tracking file and should be included."""
 
@@ -279,6 +288,7 @@ class TestAllowsSpawnReadme:
 # Non-existent directory
 # =============================================================================
 
+
 class TestNonexistentDir:
     """Test 8 — pass nonexistent path, verify returns error dict."""
 
@@ -295,6 +305,7 @@ class TestNonexistentDir:
 # =============================================================================
 # Placeholder filename detection
 # =============================================================================
+
 
 class TestDetectsPlaceholderFilenames:
     """Test 9 — file named {{BRANCH}}.py should have has_branch_placeholder=True."""
@@ -335,6 +346,7 @@ class TestDetectsPlaceholderFilenames:
 # Directory ID preservation by path
 # =============================================================================
 
+
 class TestDirectoryIdPreservation:
     """Test 10 — existing dir IDs preserved by path match."""
 
@@ -370,6 +382,7 @@ class TestDirectoryIdPreservation:
 # Directory name fallback
 # =============================================================================
 
+
 class TestDirectoryNameFallback:
     """Test 11 — dir ID preserved by name when path changes."""
 
@@ -404,6 +417,7 @@ class TestDirectoryNameFallback:
 # =============================================================================
 # Stats accuracy
 # =============================================================================
+
 
 class TestStatsAccuracy:
     """Test 12 — verify stats dict has correct file/dir counts and template_name."""
@@ -446,6 +460,7 @@ class TestStatsAccuracy:
 # Hash length compatibility (16-char -> 12-char)
 # =============================================================================
 
+
 class TestHashLengthCompat:
     """Test 13 — existing 16-char hashes match against new 12-char hashes by prefix."""
 
@@ -479,6 +494,7 @@ class TestHashLengthCompat:
 # _next_id tests
 # =============================================================================
 
+
 class TestNextId:
     """Tests 14-16 — _next_id function."""
 
@@ -503,6 +519,7 @@ class TestNextId:
 # =============================================================================
 # Scan ordering consistency
 # =============================================================================
+
 
 class TestScanTemplateDirectoryOrdering:
     """Test 17 — files and dirs come from sorted rglob, verify consistent output."""

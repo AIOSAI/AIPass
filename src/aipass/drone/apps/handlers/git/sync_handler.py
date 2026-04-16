@@ -33,7 +33,9 @@ def sync_main() -> dict:
     try:
         checkout = subprocess.run(
             ["git", "checkout", "main"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if checkout.returncode != 0:
             msg = f"Failed to checkout main: {checkout.stderr.strip()}"
@@ -43,7 +45,9 @@ def sync_main() -> dict:
         # Fetch first to get latest remote state
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if fetch.returncode != 0:
             msg = f"Failed to fetch: {fetch.stderr.strip()}"
@@ -53,7 +57,9 @@ def sync_main() -> dict:
         # Check divergence to choose strategy
         rev_list = subprocess.run(
             ["git", "rev-list", "--left-right", "--count", "main...origin/main"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         ahead, behind = 0, 0
         if rev_list.returncode == 0:
@@ -65,7 +71,9 @@ def sync_main() -> dict:
             # Diverged — merge instead of rebase
             result = subprocess.run(
                 ["git", "merge", "origin/main", "--no-edit"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if result.returncode != 0:
                 msg = f"Merge conflict (ahead={ahead}, behind={behind}): {result.stderr.strip()}"
@@ -77,7 +85,9 @@ def sync_main() -> dict:
             # Normal — pull with rebase
             result = subprocess.run(
                 ["git", "pull", "--rebase"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if result.returncode != 0:
                 msg = f"Failed to pull: {result.stderr.strip()}"

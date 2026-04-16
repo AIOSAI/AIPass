@@ -20,12 +20,7 @@ from aipass.flow.apps.handlers.json import json_handler
 
 
 def build_plan_registry_entry(
-    plan_num: int,
-    target_dir: Path,
-    relative_location: str,
-    subject: str,
-    plan_file: Path,
-    template_type: str
+    plan_num: int, target_dir: Path, relative_location: str, subject: str, plan_file: Path, template_type: str
 ) -> Dict[str, Any]:
     """
     Build registry entry for new plan
@@ -72,7 +67,9 @@ def build_plan_registry_entry(
         "subject": subject,
         "status": "open",
         "file_path": str(plan_file),
-        "template_type": template_type
+        "template_type": template_type,
     }
-    json_handler.log_operation("registry_entry_built", {"plan_num": plan_num, "subject": subject, "location": relative_location})
+    json_handler.log_operation(
+        "registry_entry_built", {"plan_num": plan_num, "subject": subject, "location": relative_location}
+    )
     return entry

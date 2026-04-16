@@ -46,7 +46,7 @@ def _notify_failure(subject: str, message: str) -> None:
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=str(_MEMORY_ROOT)
+            cwd=str(_MEMORY_ROOT),
         )
     except Exception as e:
         logger.warning(f"[pool_processor] Failed to send failure notification: {e}")
@@ -64,10 +64,14 @@ def _update_central_and_dashboard() -> None:
     # Update central stats
     try:
         subprocess.run(
-            [sys.executable, "-c",
-             "from aipass.memory.apps.handlers.central_writer import update_central;"
-             "update_central()"],
-            capture_output=True, text=True, timeout=30
+            [
+                sys.executable,
+                "-c",
+                "from aipass.memory.apps.handlers.central_writer import update_central;update_central()",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except Exception as e:
         logger.warning(f"[pool_processor] Central stats update failed: {e}")
@@ -75,10 +79,15 @@ def _update_central_and_dashboard() -> None:
     # Push dashboard to all branches
     try:
         subprocess.run(
-            [sys.executable, "-c",
-             "from aipass.memory.apps.handlers.dashboard_push import push_memory_bank_dashboard;"
-             "push_memory_bank_dashboard()"],
-            capture_output=True, text=True, timeout=60
+            [
+                sys.executable,
+                "-c",
+                "from aipass.memory.apps.handlers.dashboard_push import push_memory_bank_dashboard;"
+                "push_memory_bank_dashboard()",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
     except Exception as e:
         logger.warning(f"[pool_processor] Dashboard push failed: {e}")
@@ -114,10 +123,10 @@ def load_config() -> dict:
     try:
         with open(CONFIG_PATH) as f:
             config = json.load(f)
-        return config.get('memory_pool', {})
+        return config.get("memory_pool", {})
     except Exception as e:
         logger.warning(f"[pool_processor] Failed to load config: {e}")
-        return {'enabled': False, 'error': str(e)}
+        return {"enabled": False, "error": str(e)}
 
 
 def get_pool_files(extensions: List[str] | None = None) -> List[Path]:
@@ -131,14 +140,14 @@ def get_pool_files(extensions: List[str] | None = None) -> List[Path]:
         List of Path objects sorted newest to oldest
     """
     if extensions is None:
-        extensions = ['.md', '.txt']
+        extensions = [".md", ".txt"]
 
     if not MEMORY_POOL_PATH.exists():
         return []
 
     files = []
     for ext in extensions:
-        files.extend(MEMORY_POOL_PATH.glob(f'*{ext}'))
+        files.extend(MEMORY_POOL_PATH.glob(f"*{ext}"))
 
     # Sort by modification time, newest first
     files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
@@ -153,23 +162,23 @@ def read_file_content(file_path: Path) -> dict:
         dict with 'success', 'content', 'metadata'
     """
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
         stat = file_path.stat()
 
         return {
-            'success': True,
-            'content': content,
-            'metadata': {
-                'filename': file_path.name,
-                'path': str(file_path),
-                'size': stat.st_size,
-                'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                'extension': file_path.suffix
-            }
+            "success": True,
+            "content": content,
+            "metadata": {
+                "filename": file_path.name,
+                "path": str(file_path),
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "extension": file_path.suffix,
+            },
         }
     except Exception as e:
         logger.warning(f"[pool_processor] Failed to read file content: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> List[Dict[str, Any]]:
@@ -185,7 +194,7 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
         List of dicts with 'text' and 'chunk_index'
     """
     if len(content) <= chunk_size:
-        return [{'text': content, 'chunk_index': 0}]
+        return [{"text": content, "chunk_index": 0}]
 
     chunks = []
     start = 0
@@ -197,21 +206,18 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
         # Try to break at paragraph or sentence
         if end < len(content):
             # Look for paragraph break
-            para_break = content.rfind('\n\n', start, end)
+            para_break = content.rfind("\n\n", start, end)
             if para_break > start + chunk_size // 2:
                 end = para_break + 2
             else:
                 # Look for sentence break
-                sentence_break = content.rfind('. ', start, end)
+                sentence_break = content.rfind(". ", start, end)
                 if sentence_break > start + chunk_size // 2:
                     end = sentence_break + 2
 
         chunk_text = content[start:end].strip()
         if chunk_text:
-            chunks.append({
-                'text': chunk_text,
-                'chunk_index': chunk_index
-            })
+            chunks.append({"text": chunk_text, "chunk_index": chunk_index})
             chunk_index += 1
 
         start = end - overlap if end < len(content) else len(content)
@@ -219,7 +225,9 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
     return chunks
 
 
-def process_file_to_vectors(file_path: Path, collection_name: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> dict:
+def process_file_to_vectors(
+    file_path: Path, collection_name: str, chunk_size: int = 1000, chunk_overlap: int = 100
+) -> dict:
     """
     Process a single file: read, chunk, and store vectors.
 
@@ -234,11 +242,11 @@ def process_file_to_vectors(file_path: Path, collection_name: str, chunk_size: i
     """
     # Read file
     read_result = read_file_content(file_path)
-    if not read_result['success']:
+    if not read_result["success"]:
         return read_result
 
-    content = read_result['content']
-    metadata = read_result['metadata']
+    content = read_result["content"]
+    metadata = read_result["metadata"]
 
     # Chunk content
     chunks = chunk_content(content, chunk_size, chunk_overlap)
@@ -250,7 +258,7 @@ def process_file_to_vectors(file_path: Path, collection_name: str, chunk_size: i
 
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         collection = client.get_or_create_collection(name=collection_name)
-        model = SentenceTransformer('all-MiniLM-L6-v2')
+        model = SentenceTransformer("all-MiniLM-L6-v2")
 
         # Generate embeddings and store
         documents = []
@@ -259,40 +267,37 @@ def process_file_to_vectors(file_path: Path, collection_name: str, chunk_size: i
 
         for chunk in chunks:
             doc_id = f"{file_path.stem}_{chunk['chunk_index']}"
-            documents.append(chunk['text'])
+            documents.append(chunk["text"])
             ids.append(doc_id)
-            metadatas.append({
-                'source': metadata['filename'],
-                'chunk_index': chunk['chunk_index'],
-                'total_chunks': len(chunks),
-                'processed_at': datetime.now().isoformat(),
-                'type': 'memory_pool'
-            })
+            metadatas.append(
+                {
+                    "source": metadata["filename"],
+                    "chunk_index": chunk["chunk_index"],
+                    "total_chunks": len(chunks),
+                    "processed_at": datetime.now().isoformat(),
+                    "type": "memory_pool",
+                }
+            )
 
         # Batch encode
         embeddings = model.encode(documents).tolist()
 
         # Upsert (update if exists, insert if not)
-        collection.upsert(
-            documents=documents,
-            embeddings=embeddings,
-            ids=ids,
-            metadatas=metadatas
-        )
+        collection.upsert(documents=documents, embeddings=embeddings, ids=ids, metadatas=metadatas)
 
         return {
-            'success': True,
-            'file': metadata['filename'],
-            'chunks_stored': len(chunks),
-            'collection': collection_name
+            "success": True,
+            "file": metadata["filename"],
+            "chunks_stored": len(chunks),
+            "collection": collection_name,
         }
 
     except Exception as e:
         logger.warning(f"[pool_processor] Failed to process file to vectors: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
-def archive_old_files(keep_recent: int, archive_path: str = 'memory_pool_archive') -> dict:
+def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive") -> dict:
     """
     Archive files beyond the keep_recent limit.
 
@@ -304,17 +309,12 @@ def archive_old_files(keep_recent: int, archive_path: str = 'memory_pool_archive
         dict with 'success', 'archived_count', 'kept_count'
     """
     config = load_config()
-    extensions = config.get('supported_extensions', ['.md', '.txt'])
+    extensions = config.get("supported_extensions", [".md", ".txt"])
 
     files = get_pool_files(extensions)
 
     if len(files) <= keep_recent:
-        return {
-            'success': True,
-            'archived_count': 0,
-            'kept_count': len(files),
-            'message': 'No files need archiving'
-        }
+        return {"success": True, "archived_count": 0, "kept_count": len(files), "message": "No files need archiving"}
 
     # Files to keep (most recent)
     keep_files = files[:keep_recent]
@@ -332,7 +332,7 @@ def archive_old_files(keep_recent: int, archive_path: str = 'memory_pool_archive
             dest = archive_dir / file_path.name
             # If file exists in archive, add timestamp
             if dest.exists():
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 dest = archive_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"
 
             shutil.move(str(file_path), str(dest))
@@ -342,17 +342,16 @@ def archive_old_files(keep_recent: int, archive_path: str = 'memory_pool_archive
             errors.append(f"{file_path.name}: {e}")
 
     result = {
-        'success': len(errors) == 0,
-        'archived_count': archived_count,
-        'kept_count': len(keep_files),
-        'errors': errors if errors else None
+        "success": len(errors) == 0,
+        "archived_count": archived_count,
+        "kept_count": len(keep_files),
+        "errors": errors if errors else None,
     }
 
     if errors:
         _notify_failure(
             f"Pool Archive Failed: {len(errors)} files",
-            f"Failed to archive {len(errors)} memory pool files.\n\n"
-            f"Errors:\n" + '\n'.join(errors)
+            f"Failed to archive {len(errors)} memory pool files.\n\nErrors:\n" + "\n".join(errors),
         )
 
     return result
@@ -372,78 +371,76 @@ def process_memory_pool() -> dict:
 
     config = load_config()
 
-    if not config.get('enabled', False):
-        return {'success': False, 'error': 'memory_pool processing is disabled in config'}
+    if not config.get("enabled", False):
+        return {"success": False, "error": "memory_pool processing is disabled in config"}
 
-    keep_recent = config.get('keep_recent', 10)
-    collection_name = config.get('collection_name', 'memory_pool_docs')
-    chunk_size = config.get('chunk_size', 1000)
-    chunk_overlap = config.get('chunk_overlap', 100)
-    extensions = config.get('supported_extensions', ['.md', '.txt'])
-    archive_path = config.get('archive_path', 'memory_pool_archive')
+    keep_recent = config.get("keep_recent", 10)
+    collection_name = config.get("collection_name", "memory_pool_docs")
+    chunk_size = config.get("chunk_size", 1000)
+    chunk_overlap = config.get("chunk_overlap", 100)
+    extensions = config.get("supported_extensions", [".md", ".txt"])
+    archive_path = config.get("archive_path", "memory_pool_archive")
 
     # Get all files
     files = get_pool_files(extensions)
 
     if not files:
-        return {
-            'success': True,
-            'message': 'No files in memory_pool to process',
-            'files_processed': 0
-        }
+        return {"success": True, "message": "No files in memory_pool to process", "files_processed": 0}
 
     results = {
-        'success': True,
-        'files_found': len(files),
-        'files_processed': 0,
-        'total_chunks': 0,
-        'errors': [],
-        'processed_files': []
+        "success": True,
+        "files_found": len(files),
+        "files_processed": 0,
+        "total_chunks": 0,
+        "errors": [],
+        "processed_files": [],
     }
 
     # Process each file
     for file_path in files:
-        result = process_file_to_vectors(
-            file_path,
-            collection_name,
-            chunk_size,
-            chunk_overlap
-        )
+        result = process_file_to_vectors(file_path, collection_name, chunk_size, chunk_overlap)
 
-        if result['success']:
-            results['files_processed'] += 1
-            results['total_chunks'] += result.get('chunks_stored', 0)
-            results['processed_files'].append(result['file'])
+        if result["success"]:
+            results["files_processed"] += 1
+            results["total_chunks"] += result.get("chunks_stored", 0)
+            results["processed_files"].append(result["file"])
         else:
-            results['errors'].append(f"{file_path.name}: {result.get('error')}")
+            results["errors"].append(f"{file_path.name}: {result.get('error')}")
 
     # Archive old files
     archive_result = archive_old_files(keep_recent, archive_path)
-    results['archive'] = archive_result
+    results["archive"] = archive_result
 
-    if results['errors']:
-        results['success'] = False
+    if results["errors"]:
+        results["success"] = False
 
         # Notify @devpulse about processing failures
-        error_count = len(results['errors'])
-        total_files = results['files_found']
-        error_summary = '\n'.join(results['errors'][:10])  # Cap at 10 for readability
+        error_count = len(results["errors"])
+        total_files = results["files_found"]
+        error_summary = "\n".join(results["errors"][:10])  # Cap at 10 for readability
         if error_count > 10:
-            error_summary += f'\n... and {error_count - 10} more errors'
+            error_summary += f"\n... and {error_count - 10} more errors"
 
         _notify_failure(
             f"Pool Processing Failed: {error_count}/{total_files} files",
             f"Memory pool processing encountered {error_count} failures "
             f"out of {total_files} files.\n\n"
             f"Errors:\n{error_summary}\n\n"
-            f"Successfully processed: {results['files_processed']}/{total_files}"
+            f"Successfully processed: {results['files_processed']}/{total_files}",
         )
 
     # Update central stats and push dashboard after processing vectors
-    if results['files_processed'] > 0:
+    if results["files_processed"] > 0:
         _update_central_and_dashboard()
 
-    json_handler.log_operation("process_memory_pool", {"files_processed": results['files_processed'], "total_chunks": results['total_chunks'], "success": results['success']})
+    json_handler.log_operation(
+        "process_memory_pool",
+        {
+            "files_processed": results["files_processed"],
+            "total_chunks": results["total_chunks"],
+            "success": results["success"],
+        },
+    )
 
     return results
 
@@ -456,15 +453,16 @@ def get_pool_status() -> dict:
         dict with file counts, config, and collection info
     """
     config = load_config()
-    extensions = config.get('supported_extensions', ['.md', '.txt'])
+    extensions = config.get("supported_extensions", [".md", ".txt"])
     files = get_pool_files(extensions)
 
     # Get collection count
     collection_count = 0
     try:
         import chromadb
+
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        collection_name = config.get('collection_name', 'memory_pool_docs')
+        collection_name = config.get("collection_name", "memory_pool_docs")
         if collection_name in [c.name for c in client.list_collections()]:
             collection = client.get_collection(name=collection_name)
             collection_count = collection.count()
@@ -472,13 +470,13 @@ def get_pool_status() -> dict:
         logger.warning(f"[pool_processor] Failed to get collection count: {e}")
 
     return {
-        'enabled': config.get('enabled', False),
-        'files_in_pool': len(files),
-        'keep_recent': config.get('keep_recent', 10),
-        'vectors_stored': collection_count,
-        'collection_name': config.get('collection_name', 'memory_pool_docs'),
-        'newest_file': files[0].name if files else None,
-        'oldest_file': files[-1].name if files else None
+        "enabled": config.get("enabled", False),
+        "files_in_pool": len(files),
+        "keep_recent": config.get("keep_recent", 10),
+        "vectors_stored": collection_count,
+        "collection_name": config.get("collection_name", "memory_pool_docs"),
+        "newest_file": files[0].name if files else None,
+        "oldest_file": files[-1].name if files else None,
     }
 
 
@@ -486,7 +484,7 @@ def get_pool_status() -> dict:
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'status':
+    if len(sys.argv) > 1 and sys.argv[1] == "status":
         status = get_pool_status()
         print(json.dumps(status, indent=2))
     else:

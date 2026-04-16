@@ -22,9 +22,7 @@ class TestReturnTypeContracts:
         """handle_command returns bool."""
         from aipass.spawn.apps.modules.regenerate_registry import handle_command
 
-        with patch(
-            "aipass.spawn.apps.modules.regenerate_registry.print_introspection"
-        ):
+        with patch("aipass.spawn.apps.modules.regenerate_registry.print_introspection"):
             result = handle_command("regenerate-registry", [])
         assert isinstance(result, bool)
 

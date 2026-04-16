@@ -17,6 +17,7 @@ from pathlib import Path
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock all heavy infrastructure imports so the module loads cleanly.
@@ -99,15 +100,18 @@ def _mock_infrastructure(monkeypatch):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     assert handle_command("not_audit", []) is False
 
 
 def test_handle_command_accepts_audit_name():
     """handle_command recognises 'audit' as its command."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("audit", [])
     assert result is True
 
@@ -115,6 +119,7 @@ def test_handle_command_accepts_audit_name():
 def test_handle_command_accepts_standards_audit_name():
     """handle_command recognises 'standards_audit' as its command."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("standards_audit", [])
     assert result is True
 
@@ -122,6 +127,7 @@ def test_handle_command_accepts_standards_audit_name():
 def test_handle_command_help_flag():
     """--help flag is handled without error."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("audit", ["--help"])
     assert result is True
 
@@ -129,6 +135,7 @@ def test_handle_command_help_flag():
 def test_handle_command_h_flag():
     """-h flag is handled without error."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("audit", ["-h"])
     assert result is True
 
@@ -136,6 +143,7 @@ def test_handle_command_h_flag():
 def test_handle_command_help_word():
     """'help' word is handled without error."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("audit", ["help"])
     assert result is True
 
@@ -144,31 +152,32 @@ def test_print_introspection_runs():
     """print_introspection produces console output."""
     import sys
     from aipass.seedgo.apps.modules.standards_audit import print_introspection
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_introspection should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
 
 
 def test_print_help_runs():
     """print_help produces console output."""
     import sys
     from aipass.seedgo.apps.modules.standards_audit import print_help
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_help should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
 
 
 def test_handle_command_unknown_pack():
     """Passing an unknown pack name still returns True (error is displayed)."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     result = handle_command("audit", ["nonexistent_pack"])
     assert result is True
 
@@ -207,12 +216,14 @@ def test_discover_packs_returns_dict(tmp_path, monkeypatch):
 def test_handle_command_unknown_command_returns_false():
     """unknown_command: handle_command returns False for unrecognized commands."""
     from aipass.seedgo.apps.modules.standards_audit import handle_command
+
     assert handle_command("invalid_command", []) is False
 
 
 def test_handle_command_output_capture(capsys):
     """output_capture: print_help output can be captured."""
     from aipass.seedgo.apps.modules.standards_audit import print_help
+
     print_help()
     # capsys captures stdout — print_help uses Rich console, so captured may be empty
     # but the capsys fixture inclusion satisfies the pattern requirement
@@ -237,14 +248,26 @@ def test_help_text_at_prefix_consistency():
     # a known branch name without @ prefix. We check for bare branch names
     # after command keywords in string literals.
     known_branches = {
-        "drone", "seedgo", "prax", "cli", "flow", "ai_mail", "api",
-        "trigger", "spawn", "devpulse", "backup", "daemon", "memory",
-        "commons", "skills",
+        "drone",
+        "seedgo",
+        "prax",
+        "cli",
+        "flow",
+        "ai_mail",
+        "api",
+        "trigger",
+        "spawn",
+        "devpulse",
+        "backup",
+        "daemon",
+        "memory",
+        "commons",
+        "skills",
     }
     # Match: a command keyword followed by a bare branch name (no @)
     bare_branch_re = re.compile(
-        r'(?:audit\s+aipass|diagnostics(?:_audit)?|readme(?:_update)?)\s+'
-        r'(' + '|'.join(known_branches) + r')\b'
+        r"(?:audit\s+aipass|diagnostics(?:_audit)?|readme(?:_update)?)\s+"
+        r"(" + "|".join(known_branches) + r")\b"
     )
 
     violations = []
@@ -260,7 +283,6 @@ def test_help_text_at_prefix_consistency():
             if match:
                 violations.append(f"{fpath.name}:{i}: bare '{match.group(1)}' (should be '@{match.group(1)}')")
 
-    assert not violations, (
-        f"Help text has {len(violations)} bare branch references (missing @):\n"
-        + "\n".join(violations)
+    assert not violations, f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
+        violations
     )

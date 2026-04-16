@@ -1,4 +1,3 @@
-
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: plugins/__init__.py
@@ -19,5 +18,4 @@ Usage:
     from aipass.cli.apps.plugins import PluginManager
 """
 
-__version__ = '1.0.0'
-
+__version__ = "1.0.0"

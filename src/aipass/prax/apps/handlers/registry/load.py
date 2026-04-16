@@ -46,6 +46,7 @@ REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
+
 def load_module_registry() -> Dict[str, Dict[str, Any]]:
     """Load module registry from prax_registry.json (system registry)
 
@@ -76,9 +77,9 @@ def load_module_registry() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
-        with open(REGISTRY_FILE, 'r', encoding='utf-8') as f:
+        with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            modules = data.get('modules', {})
+            modules = data.get("modules", {})
             json_handler.log_operation("registry_loaded", {"module_count": len(modules)})
             return modules
     except Exception as e:

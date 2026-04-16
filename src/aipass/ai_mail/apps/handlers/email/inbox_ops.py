@@ -29,9 +29,9 @@ def _get_inbox_lock():
     global _inbox_lock
     if _inbox_lock is None:
         from aipass.ai_mail.apps.handlers.email.inbox_lock import inbox_lock
+
         _inbox_lock = inbox_lock
     return _inbox_lock
-
 
 
 def load_inbox(inbox_file: Path) -> Dict:
@@ -52,7 +52,7 @@ def load_inbox(inbox_file: Path) -> Dict:
         return {"messages": []}
 
     try:
-        with open(inbox_file, 'r', encoding='utf-8') as f:
+        with open(inbox_file, "r", encoding="utf-8") as f:
             inbox_data = json.load(f)
 
         # Validate structure
@@ -80,7 +80,8 @@ def load_inbox(inbox_file: Path) -> Dict:
 
         if "unread_count" not in inbox_data:
             inbox_data["unread_count"] = sum(
-                1 for msg in inbox_data["messages"]
+                1
+                for msg in inbox_data["messages"]
                 if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
             )
             migrated = True
@@ -89,7 +90,7 @@ def load_inbox(inbox_file: Path) -> Dict:
         if migrated:
             try:
                 with _get_inbox_lock()(inbox_file):
-                    with open(inbox_file, 'w', encoding='utf-8') as f:
+                    with open(inbox_file, "w", encoding="utf-8") as f:
                         json.dump(inbox_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 logger.warning("[inbox] Migration persist failed for %s: %s", inbox_file, e)
@@ -104,9 +105,10 @@ def load_inbox(inbox_file: Path) -> Dict:
 
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
-    console.print("\n" + "="*70)
+
+    console.print("\n" + "=" * 70)
     console.print("INBOX OPERATIONS HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Handles inbox file I/O operations")
     console.print()
@@ -123,4 +125,4 @@ if __name__ == "__main__":
     console.print("  from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox")
     console.print("  inbox_data = load_inbox(Path('/path/to/inbox.json'))")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

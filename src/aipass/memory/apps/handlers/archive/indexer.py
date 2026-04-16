@@ -45,7 +45,7 @@ def extract_file_info(file_path: Path) -> Dict[str, Any]:
         Dict with filename, docstring, functions, classes
     """
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding="utf-8")
 
         # Parse AST
         try:
@@ -53,12 +53,12 @@ def extract_file_info(file_path: Path) -> Dict[str, Any]:
         except SyntaxError:
             logger.info(f"[indexer] Syntax error parsing {file_path.name}, skipping AST extraction")
             return {
-                'filename': file_path.name,
-                'path': str(file_path.relative_to(CODE_ARCHIVE_PATH)),
-                'docstring': None,
-                'error': 'Syntax error - could not parse',
-                'size': file_path.stat().st_size,
-                'indexed_at': datetime.now().isoformat()
+                "filename": file_path.name,
+                "path": str(file_path.relative_to(CODE_ARCHIVE_PATH)),
+                "docstring": None,
+                "error": "Syntax error - could not parse",
+                "size": file_path.stat().st_size,
+                "indexed_at": datetime.now().isoformat(),
             }
 
         # Get module docstring
@@ -75,22 +75,22 @@ def extract_file_info(file_path: Path) -> Dict[str, Any]:
                 classes.append(node.name)
 
         return {
-            'filename': file_path.name,
-            'path': str(file_path.relative_to(CODE_ARCHIVE_PATH)),
-            'docstring': docstring[:200] + '...' if docstring and len(docstring) > 200 else docstring,
-            'functions': functions[:10],  # Limit to first 10
-            'classes': classes[:10],
-            'size': file_path.stat().st_size,
-            'lines': len(content.splitlines()),
-            'indexed_at': datetime.now().isoformat()
+            "filename": file_path.name,
+            "path": str(file_path.relative_to(CODE_ARCHIVE_PATH)),
+            "docstring": docstring[:200] + "..." if docstring and len(docstring) > 200 else docstring,
+            "functions": functions[:10],  # Limit to first 10
+            "classes": classes[:10],
+            "size": file_path.stat().st_size,
+            "lines": len(content.splitlines()),
+            "indexed_at": datetime.now().isoformat(),
         }
     except Exception as e:
         logger.warning(f"[indexer] Failed to extract file info from {file_path.name}: {e}")
         return {
-            'filename': file_path.name,
-            'path': str(file_path),
-            'error': str(e),
-            'indexed_at': datetime.now().isoformat()
+            "filename": file_path.name,
+            "path": str(file_path),
+            "error": str(e),
+            "indexed_at": datetime.now().isoformat(),
         }
 
 
@@ -104,9 +104,9 @@ def get_archive_files() -> List[Path]:
     if not CODE_ARCHIVE_PATH.exists():
         return []
 
-    files = list(CODE_ARCHIVE_PATH.rglob('*.py'))
+    files = list(CODE_ARCHIVE_PATH.rglob("*.py"))
     # Exclude __init__.py files
-    files = [f for f in files if f.name != '__init__.py']
+    files = [f for f in files if f.name != "__init__.py"]
     return sorted(files)
 
 
@@ -125,15 +125,15 @@ def load_index() -> Dict[str, Any]:
             logger.warning(f"[indexer] Failed to load index file: {e}")
 
     return {
-        'metadata': {
-            'name': 'Code Archive Index',
-            'description': 'Catalog of archived Python modules from old system',
-            'created': datetime.now().isoformat(),
-            'last_updated': None,
-            'total_files': 0
+        "metadata": {
+            "name": "Code Archive Index",
+            "description": "Catalog of archived Python modules from old system",
+            "created": datetime.now().isoformat(),
+            "last_updated": None,
+            "total_files": 0,
         },
-        'categories': {},
-        'files': {}
+        "categories": {},
+        "files": {},
     }
 
 
@@ -148,16 +148,16 @@ def save_index(index: Dict[str, Any]) -> Dict[str, Any]:
         Dict with success status
     """
     try:
-        index['metadata']['last_updated'] = datetime.now().isoformat()
-        index['metadata']['total_files'] = len(index['files'])
+        index["metadata"]["last_updated"] = datetime.now().isoformat()
+        index["metadata"]["total_files"] = len(index["files"])
 
-        with open(INDEX_PATH, 'w') as f:
+        with open(INDEX_PATH, "w") as f:
             json.dump(index, f, indent=2)
 
-        return {'success': True}
+        return {"success": True}
     except Exception as e:
         logger.error(f"[indexer] Failed to save index: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 def build_index() -> Dict[str, Any]:
@@ -172,11 +172,7 @@ def build_index() -> Dict[str, Any]:
     files = get_archive_files()
 
     if not files:
-        return {
-            'success': True,
-            'message': 'No files to index',
-            'files_indexed': 0
-        }
+        return {"success": True, "message": "No files to index", "files_indexed": 0}
 
     index = load_index()
     categories = {}
@@ -185,28 +181,24 @@ def build_index() -> Dict[str, Any]:
         info = extract_file_info(file_path)
 
         # Use relative path as key
-        key = info['path']
-        index['files'][key] = info
+        key = info["path"]
+        index["files"][key] = info
 
         # Track categories (subdirectories)
         category = file_path.parent.name
-        if category != 'code_archive':
+        if category != "code_archive":
             if category not in categories:
                 categories[category] = []
-            categories[category].append(info['filename'])
+            categories[category].append(info["filename"])
 
-    index['categories'] = categories
+    index["categories"] = categories
 
     save_result = save_index(index)
 
-    if not save_result['success']:
+    if not save_result["success"]:
         return save_result
 
-    return {
-        'success': True,
-        'files_indexed': len(files),
-        'categories': list(categories.keys())
-    }
+    return {"success": True, "files_indexed": len(files), "categories": list(categories.keys())}
 
 
 def check_for_new_files() -> Dict[str, Any]:
@@ -221,68 +213,65 @@ def check_for_new_files() -> Dict[str, Any]:
     index = load_index()
     current_files = get_archive_files()
 
-    indexed_paths = set(index.get('files', {}).keys())
+    indexed_paths = set(index.get("files", {}).keys())
     current_paths = {str(f.relative_to(CODE_ARCHIVE_PATH)) for f in current_files}
 
     new_files = current_paths - indexed_paths
     deleted_files = indexed_paths - current_paths
 
     if not new_files and not deleted_files:
-        return {
-            'success': True,
-            'new_files': 0,
-            'deleted_files': 0,
-            'action': 'none'
-        }
+        return {"success": True, "new_files": 0, "deleted_files": 0, "action": "none"}
 
     # Index new files
     for rel_path in new_files:
         file_path = CODE_ARCHIVE_PATH / rel_path
         if file_path.exists():
             info = extract_file_info(file_path)
-            index['files'][rel_path] = info
+            index["files"][rel_path] = info
 
             # Update category
             category = file_path.parent.name
-            if category != 'code_archive':
-                if category not in index['categories']:
-                    index['categories'][category] = []
-                if info['filename'] not in index['categories'][category]:
-                    index['categories'][category].append(info['filename'])
+            if category != "code_archive":
+                if category not in index["categories"]:
+                    index["categories"][category] = []
+                if info["filename"] not in index["categories"][category]:
+                    index["categories"][category].append(info["filename"])
 
     # Remove deleted files from index
     for rel_path in deleted_files:
-        if rel_path in index['files']:
-            filename = index['files'][rel_path].get('filename')
-            del index['files'][rel_path]
+        if rel_path in index["files"]:
+            filename = index["files"][rel_path].get("filename")
+            del index["files"][rel_path]
 
             # Clean up category
-            for cat, files in index['categories'].items():
+            for cat, files in index["categories"].items():
                 if filename in files:
                     files.remove(filename)
 
     # Rebuild categories from current files
-    index['categories'] = {}
-    for rel_path, info in index['files'].items():
+    index["categories"] = {}
+    for rel_path, info in index["files"].items():
         file_path = CODE_ARCHIVE_PATH / rel_path
         category = file_path.parent.name
-        if category != 'code_archive':
-            if category not in index['categories']:
-                index['categories'][category] = []
-            if info['filename'] not in index['categories'][category]:
-                index['categories'][category].append(info['filename'])
+        if category != "code_archive":
+            if category not in index["categories"]:
+                index["categories"][category] = []
+            if info["filename"] not in index["categories"][category]:
+                index["categories"][category].append(info["filename"])
 
     save_index(index)
 
-    json_handler.log_operation("index_sync", {"new_files": len(new_files), "deleted_files": len(deleted_files), "success": True})
+    json_handler.log_operation(
+        "index_sync", {"new_files": len(new_files), "deleted_files": len(deleted_files), "success": True}
+    )
 
     return {
-        'success': True,
-        'new_files': len(new_files),
-        'deleted_files': len(deleted_files),
-        'files_added': list(new_files) if new_files else None,
-        'files_removed': list(deleted_files) if deleted_files else None,
-        'action': 'synced'
+        "success": True,
+        "new_files": len(new_files),
+        "deleted_files": len(deleted_files),
+        "files_added": list(new_files) if new_files else None,
+        "files_removed": list(deleted_files) if deleted_files else None,
+        "action": "synced",
     }
 
 
@@ -296,15 +285,15 @@ def get_index_status() -> Dict[str, Any]:
     index = load_index()
     current_files = get_archive_files()
 
-    indexed_count = len(index.get('files', {}))
+    indexed_count = len(index.get("files", {}))
     current_count = len(current_files)
 
     return {
-        'indexed_files': indexed_count,
-        'current_files': current_count,
-        'unindexed': current_count - indexed_count if current_count > indexed_count else 0,
-        'categories': list(index.get('categories', {}).keys()),
-        'last_updated': index.get('metadata', {}).get('last_updated')
+        "indexed_files": indexed_count,
+        "current_files": current_count,
+        "unindexed": current_count - indexed_count if current_count > indexed_count else 0,
+        "categories": list(index.get("categories", {}).keys()),
+        "last_updated": index.get("metadata", {}).get("last_updated"),
     }
 
 
@@ -315,16 +304,16 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
 
-        if cmd == 'status':
+        if cmd == "status":
             status = get_index_status()
             print(json.dumps(status, indent=2))
 
-        elif cmd == 'build':
+        elif cmd == "build":
             print("Building index...")
             result = build_index()
             print(json.dumps(result, indent=2))
 
-        elif cmd == 'check':
+        elif cmd == "check":
             result = check_for_new_files()
             print(json.dumps(result, indent=2))
 

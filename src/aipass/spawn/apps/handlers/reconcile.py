@@ -27,6 +27,7 @@ _SKIP_NAMES = {"__pycache__", ".git", ".branch_meta.json", ".template_registry.j
 # HELPERS
 # =============================================================================
 
+
 def _compute_hash(file_path: Path) -> str:
     """Compute SHA-256 hash, first 12 hex chars."""
     try:
@@ -48,6 +49,7 @@ def _should_skip(name: str) -> bool:
 # =============================================================================
 # RECONCILIATION
 # =============================================================================
+
 
 def reconcile_branch_state(
     branch_dir: Path,
@@ -121,8 +123,7 @@ def reconcile_branch_state(
                     hash_mismatches.append(entry)
                     if trace:
                         logger.info(
-                            f"[reconcile] HASH MISMATCH: {file_id} "
-                            f"tracked={tracked_hash} current={current_hash}"
+                            f"[reconcile] HASH MISMATCH: {file_id} tracked={tracked_hash} current={current_hash}"
                         )
 
     # -------------------------------------------------------------------------

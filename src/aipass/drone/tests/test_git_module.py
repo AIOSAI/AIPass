@@ -431,7 +431,10 @@ class TestPRHandler:
             return result
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_subprocess_run):
-            with patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", return_value={"success": True, "message": "ok"}):
+            with patch(
+                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
+                return_value={"success": True, "message": "ok"},
+            ):
                 with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
                     result = create_pr("api", "test desc", tmp_path / "src" / "aipass" / "api")
 
@@ -577,9 +580,13 @@ class TestDetectBranchDir:
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "mybranch"},
-        }))
+        passport.write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "mybranch"},
+                }
+            )
+        )
 
         # CWD is inside a subdirectory of the branch
         sub_dir = branch_dir / "apps" / "modules"
@@ -604,9 +611,13 @@ class TestDetectBranchDir:
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "commons"},
-        }))
+        passport.write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "commons"},
+                }
+            )
+        )
 
         monkeypatch.chdir(branch_dir)
 
@@ -655,12 +666,14 @@ class TestModuleRegistration:
     def test_git_in_registry(self) -> None:
         """git module is registered in _INTERNAL_MODULES."""
         from aipass.drone.apps.handlers.module_registry_handler import _INTERNAL_MODULES
+
         assert "git" in _INTERNAL_MODULES
         assert _INTERNAL_MODULES["git"] == "aipass.drone.apps.modules.git_module"
 
     def test_module_importable(self) -> None:
         """The registered module path is importable."""
         import importlib
+
         mod = importlib.import_module("aipass.drone.apps.modules.git_module")
         assert hasattr(mod, "DRONE_MODULE")
         assert hasattr(mod, "handle_command")
@@ -718,7 +731,10 @@ class TestTriggerFireIntegration:
         mock_trigger = MagicMock()
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_run):
-            with patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", return_value={"success": True, "message": "ok"}):
+            with patch(
+                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
+                return_value={"success": True, "message": "ok"},
+            ):
                 with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
                     with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
                         result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
@@ -753,7 +769,10 @@ class TestTriggerFireIntegration:
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_run):
-            with patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", return_value={"success": True, "message": "ok"}):
+            with patch(
+                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
+                return_value={"success": True, "message": "ok"},
+            ):
                 with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
                     with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
                         result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")

@@ -13,8 +13,8 @@ Provides formatted Trigger event bus standards content.
 Module orchestrates, handler implements.
 """
 
-
 from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_trigger_standards() -> str:
     """Return formatted trigger standards content with Rich markup

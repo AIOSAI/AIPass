@@ -29,17 +29,18 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -65,43 +66,43 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    if is_bypassed(module_path, 'log_level', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "log_level", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'LOG_LEVEL'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "LOG_LEVEL",
         }
 
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'LOG_LEVEL'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "LOG_LEVEL",
         }
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'LOG_LEVEL'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "LOG_LEVEL",
         }
 
     # Only check files that use logger
-    has_logger = re.search(r'\blogger\.(error|warning|info|debug)\s*\(', content)
+    has_logger = re.search(r"\blogger\.(error|warning|info|debug)\s*\(", content)
     if not has_logger:
         return {
-            'passed': True,
-            'checks': [{'name': 'Log level check', 'passed': True, 'message': 'No logger calls found (skipped)'}],
-            'score': 100,
-            'standard': 'LOG_LEVEL'
+            "passed": True,
+            "checks": [{"name": "Log level check", "passed": True, "message": "No logger calls found (skipped)"}],
+            "score": 100,
+            "standard": "LOG_LEVEL",
         }
 
     # Check 1: ERROR not used for user input errors
@@ -114,18 +115,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(command_routing_check)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "log_level"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'LOG_LEVEL'
-    }
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "LOG_LEVEL"}
 
 
 def _get_non_code_lines(lines: List[str]) -> set:
@@ -154,7 +150,7 @@ def _get_non_code_lines(lines: List[str]) -> set:
             skip.add(i)
             continue
 
-        if in_docstring or stripped.startswith('#'):
+        if in_docstring or stripped.startswith("#"):
             skip.add(i)
 
     return skip
@@ -176,16 +172,16 @@ def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: l
       "unrecognized", "no such command", "bad syntax", "missing required"
     """
     user_input_patterns = [
-        r'unknown\s+command',
-        r'unknown\s+action',
-        r'unrecognized',
-        r'invalid\s+arg',
-        r'invalid\s+command',
-        r'invalid\s+option',
-        r'bad\s+syntax',
-        r'no\s+module\s+handled',
-        r'not\s+a\s+valid\s+command',
-        r'command\s+not\s+(found|recognized|supported)',
+        r"unknown\s+command",
+        r"unknown\s+action",
+        r"unrecognized",
+        r"invalid\s+arg",
+        r"invalid\s+command",
+        r"invalid\s+option",
+        r"bad\s+syntax",
+        r"no\s+module\s+handled",
+        r"not\s+a\s+valid\s+command",
+        r"command\s+not\s+(found|recognized|supported)",
     ]
 
     violations = []
@@ -195,33 +191,35 @@ def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: l
         if i in skip_lines:
             continue
 
-        if re.search(r'logger\.error\s*\(', line):
+        if re.search(r"logger\.error\s*\(", line):
             if _matches_user_input_pattern(line.lower(), user_input_patterns):
-                if not is_bypassed(file_path, 'log_level', i, bypass_rules):
+                if not is_bypassed(file_path, "log_level", i, bypass_rules):
                     violations.append(i)
 
     if violations:
         return {
-            'name': 'ERROR reserved for system failures',
-            'passed': False,
-            'message': f'ERROR level used for user input on lines {violations[:5]} - use WARNING level instead'
+            "name": "ERROR reserved for system failures",
+            "passed": False,
+            "message": f"ERROR level used for user input on lines {violations[:5]} - use WARNING level instead",
         }
 
     return {
-        'name': 'ERROR reserved for system failures',
-        'passed': True,
-        'message': 'ERROR level correctly used for system failures only'
+        "name": "ERROR reserved for system failures",
+        "passed": True,
+        "message": "ERROR level correctly used for system failures only",
     }
 
 
-def check_command_routing_level(content: str, lines: List[str], file_path: str, bypass_rules: list | None = None) -> Optional[Dict]:
+def check_command_routing_level(
+    content: str, lines: List[str], file_path: str, bypass_rules: list | None = None
+) -> Optional[Dict]:
     """
     Check that command routing failures use WARNING, not ERROR.
 
     Entry points and modules that route commands should log unrecognized
     commands as WARNING (user typed wrong thing) not ERROR (system broke).
     """
-    has_command_routing = bool(re.search(r'(route_command|handle_command|args\.command)', content))
+    has_command_routing = bool(re.search(r"(route_command|handle_command|args\.command)", content))
     if not has_command_routing:
         return None
 
@@ -232,21 +230,21 @@ def check_command_routing_level(content: str, lines: List[str], file_path: str, 
         if i in skip_lines:
             continue
 
-        if re.search(r'logger\.error\s*\(', line):
+        if re.search(r"logger\.error\s*\(", line):
             line_lower = line.lower()
-            if re.search(r'(unknown\s+command|unrecognized|not\s+handled|no\s+module\s+handled)', line_lower):
-                if not is_bypassed(file_path, 'log_level', i, bypass_rules):
+            if re.search(r"(unknown\s+command|unrecognized|not\s+handled|no\s+module\s+handled)", line_lower):
+                if not is_bypassed(file_path, "log_level", i, bypass_rules):
                     violations.append(i)
 
     if violations:
         return {
-            'name': 'Command routing uses WARNING',
-            'passed': False,
-            'message': f'Command routing failures logged as ERROR on lines {violations[:5]} - should be WARNING'
+            "name": "Command routing uses WARNING",
+            "passed": False,
+            "message": f"Command routing failures logged as ERROR on lines {violations[:5]} - should be WARNING",
         }
 
     return {
-        'name': 'Command routing uses WARNING',
-        'passed': True,
-        'message': 'Command routing failures correctly use WARNING level'
+        "name": "Command routing uses WARNING",
+        "passed": True,
+        "message": "Command routing failures correctly use WARNING level",
     }

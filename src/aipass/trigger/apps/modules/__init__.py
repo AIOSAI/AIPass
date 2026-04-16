@@ -2,4 +2,4 @@
 
 from .core import trigger
 
-__all__ = ['trigger']
+__all__ = ["trigger"]

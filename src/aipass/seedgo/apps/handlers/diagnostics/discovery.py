@@ -44,27 +44,24 @@ def discover_branches() -> List[Dict]:
         return branches
 
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
 
         registry_dir = registry_path.parent
 
-        for branch in registry_data.get('branches', []):
-            branch_name = branch.get('name', '')
-            raw_path = branch.get('path', '')
+        for branch in registry_data.get("branches", []):
+            branch_name = branch.get("name", "")
+            raw_path = branch.get("path", "")
             branch_path = Path(raw_path)
 
             if not branch_path.is_absolute():
                 branch_path = (registry_dir / branch_path).resolve()
 
             if branch_path.exists():
-                branches.append({
-                    'name': branch_name,
-                    'path': str(branch_path)
-                })
+                branches.append({"name": branch_name, "path": str(branch_path)})
 
         json_handler.log_operation("diagnostics_discovered", {"count": len(branches)})
-        return sorted(branches, key=lambda x: x['name'])
+        return sorted(branches, key=lambda x: x["name"])
 
     except (json.JSONDecodeError, IOError) as e:
         logger.warning(f"Error discovering branches: {e}")

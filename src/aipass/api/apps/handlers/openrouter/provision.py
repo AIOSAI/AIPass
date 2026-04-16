@@ -37,6 +37,7 @@ from aipass.api.apps.handlers.json import json_handler
 # JSON UTILITIES
 # ===========================================
 
+
 def read_json(file_path: Path) -> Optional[Dict[str, Any]]:
     """
     Read JSON file safely
@@ -51,7 +52,7 @@ def read_json(file_path: Path) -> Optional[Dict[str, Any]]:
         if not file_path.exists():
             return None
 
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to read {file_path}: {e}")
@@ -72,7 +73,7 @@ def write_json(file_path: Path, data: Dict[str, Any]) -> bool:
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         return True
@@ -84,6 +85,7 @@ def write_json(file_path: Path, data: Dict[str, Any]) -> bool:
 # ===========================================
 # DEFAULT CONFIGURATION
 # ===========================================
+
 
 def get_default_caller_config() -> Dict[str, Any]:
     """
@@ -101,8 +103,8 @@ def get_default_caller_config() -> Dict[str, Any]:
             "ai_model": "",  # Caller must set their own model
             "ai_temperature": 0.7,
             "ai_max_tokens": 4000,
-            "enabled": True
-        }
+            "enabled": True,
+        },
     }
 
 
@@ -121,8 +123,8 @@ def get_default_caller_data() -> Dict[str, Any]:
             "successful_requests": 0,
             "failed_requests": 0,
             "models_used": {},
-            "last_request": None
-        }
+            "last_request": None,
+        },
     }
 
 
@@ -133,16 +135,13 @@ def get_default_caller_log() -> Dict[str, Any]:
     Returns:
         Dict with empty log structure
     """
-    return {
-        "module_name": "openrouter",
-        "timestamp": datetime.now().isoformat(),
-        "logs": []
-    }
+    return {"module_name": "openrouter", "timestamp": datetime.now().isoformat(), "logs": []}
 
 
 # ===========================================
 # PROVISIONING FUNCTIONS
 # ===========================================
+
 
 def provision_json_folder(json_folder: Path) -> bool:
     """
@@ -274,5 +273,3 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Config provisioning failed: {e}")
         return {}
-
-

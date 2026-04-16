@@ -57,13 +57,9 @@ else:
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
     if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
     else:
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -74,6 +70,7 @@ cli_handler = _mod
 # ---------------------------------------------------------------------------
 # Function discovery helpers
 # ---------------------------------------------------------------------------
+
 
 def _find_handle_command():
     """Locate the handle_command function on the CLI handler module."""
@@ -105,6 +102,7 @@ def _find_print_introspection():
 # ============================================================================
 # Group 1 -- handle_command routing (6 tests)
 # ============================================================================
+
 
 def test_handle_command_help_flag() -> None:  # CR-001
     """handle_command with --help flag returns True."""
@@ -168,6 +166,7 @@ def test_handle_command_return_bool() -> None:  # CR-006
 # Group 2 -- print_help / print_introspection output (2 tests)
 # ============================================================================
 
+
 def test_print_help(capsys: pytest.CaptureFixture[str]) -> None:  # CR-007
     """print_help() runs without error and produces stdout output."""
     print_help = _find_print_help()
@@ -191,6 +190,7 @@ def test_print_introspection(capsys: pytest.CaptureFixture[str]) -> None:  # CR-
 # ============================================================================
 # Group 3 -- help preemption (1 test)
 # ============================================================================
+
 
 def test_help_preempts_execution(capsys: pytest.CaptureFixture[str]) -> None:  # CR-009
     """--help flag causes help text output, preempting normal execution."""

@@ -53,6 +53,7 @@ _TRIGGER_LOADED = False
 # MODULE PATTERN FUNCTIONS (SEEDGO compliant)
 # ============================================================================
 
+
 def print_introspection():
     """Display module info and connected handlers"""
     CONSOLE.print()
@@ -102,7 +103,9 @@ def print_help():
     CONSOLE.print("Display is the [bold]CLI's universal output service[/bold] that provides:")
     # RICH FORMATTING TIP: Use [green]✓[/green] for checkmarks in lists
     CONSOLE.print("  [green]✓[/green] Consistent Rich-formatted output across all branches")
-    CONSOLE.print("  [green]✓[/green] Six core display functions ([green]header, success, error, warning, fatal, section[/green])")
+    CONSOLE.print(
+        "  [green]✓[/green] Six core display functions ([green]header, success, error, warning, fatal, section[/green])"
+    )
     CONSOLE.print("  [green]✓[/green] Beautiful terminal output with colors, panels, and formatting")
     CONSOLE.print("  [green]✓[/green] Integration with CLI error handler for advanced error display")
     CONSOLE.print()
@@ -143,7 +146,7 @@ def print_help():
     usage_examples = [
         "[yellow]Module Info:[/yellow]\n  [dim]drone @cli display[/dim]",
         "[yellow]Run Demo:[/yellow]\n  [dim]drone @cli display demo[/dim]",
-        "[yellow]Show Help:[/yellow]\n  [dim]drone @cli display --help[/dim]"
+        "[yellow]Show Help:[/yellow]\n  [dim]drone @cli display --help[/dim]",
     ]
 
     # RICH FORMATTING TIP: Columns creates side-by-side layout
@@ -188,7 +191,9 @@ def print_help():
     CONSOLE.print("[bold cyan]INTEGRATION:[/bold cyan]")
     CONSOLE.print()
     CONSOLE.print("  [green]✓[/green] [bold]Rich Formatting:[/bold] Beautiful terminal output with colors and styles")
-    CONSOLE.print("  [green]✓[/green] [bold]All Branches:[/bold] Import and use display functions for consistent output")
+    CONSOLE.print(
+        "  [green]✓[/green] [bold]All Branches:[/bold] Import and use display functions for consistent output"
+    )
     CONSOLE.print("  [green]✓[/green] [bold]Rich Library:[/bold] Built on Rich for beautiful terminal formatting")
     CONSOLE.print()
     CONSOLE.print("─" * 70)
@@ -277,6 +282,7 @@ def run_demo():
 # PUBLIC API FUNCTIONS (Keep existing - don't break compatibility)
 # ============================================================================
 
+
 def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
     """
     Display bordered section header using Rich Panel
@@ -299,11 +305,12 @@ def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
         _TRIGGER_LOADED = True
         try:
             from aipass.trigger.apps.modules.core import trigger as t
+
             _TRIGGER = t
         except ImportError:
             pass
     if _TRIGGER:
-        _TRIGGER.fire('cli_header_displayed', title=title)
+        _TRIGGER.fire("cli_header_displayed", title=title)
     CONSOLE.print()
 
 
@@ -395,15 +402,15 @@ def section(title: str) -> None:
 
 # Note: __all__ uses lowercase by convention (Python standard library pattern)
 __all__ = [
-    'console',  # Primary export (service instance pattern)
-    'CONSOLE',  # Internal constant (kept for backward compatibility)
-    'err_console',  # Stderr console for error/warning output
-    'header',
-    'success',
-    'error',
-    'warning',
-    'fatal',
-    'section',
+    "console",  # Primary export (service instance pattern)
+    "CONSOLE",  # Internal constant (kept for backward compatibility)
+    "err_console",  # Stderr console for error/warning output
+    "header",
+    "success",
+    "error",
+    "warning",
+    "fatal",
+    "section",
 ]
 
 # ============================================================================
@@ -418,7 +425,7 @@ if __name__ == "__main__":
             sys.exit(0)
 
         # Handle help flag (drone compliance)
-        if sys.argv[1] in ['--help', '-h', 'help']:
+        if sys.argv[1] in ["--help", "-h", "help"]:
             print_help()
             sys.exit(0)
 

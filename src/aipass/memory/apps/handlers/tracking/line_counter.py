@@ -36,6 +36,7 @@ logger = get_system_logger()
 # LINE COUNTING
 # =============================================================================
 
+
 def _count_physical_lines(file_path: Path) -> int:
     """
     Count physical lines in file
@@ -47,7 +48,7 @@ def _count_physical_lines(file_path: Path) -> int:
         Number of lines
     """
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return len(f.readlines())
     except Exception as e:
         logger.warning(f"[line_counter] Failed to count lines in {file_path}: {e}")
@@ -57,6 +58,7 @@ def _count_physical_lines(file_path: Path) -> int:
 # =============================================================================
 # METADATA UPDATE
 # =============================================================================
+
 
 def update_line_count(file_path: Path) -> Dict[str, Any]:
     """
@@ -71,34 +73,20 @@ def update_line_count(file_path: Path) -> Dict[str, Any]:
         Dict with success status and updated line count
     """
     if not file_path.exists():
-        return {
-            'success': False,
-            'error': f"File not found: {file_path}"
-        }
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     # Count lines
     line_count = _count_physical_lines(file_path)
 
     # Update metadata using safe handler (atomic write)
-    result = update_metadata(
-        file_path,
-        current_lines=line_count,
-        last_health_check=datetime.now().strftime("%Y-%m-%d")
-    )
+    result = update_metadata(file_path, current_lines=line_count, last_health_check=datetime.now().strftime("%Y-%m-%d"))
 
-    if not result['success']:
-        return {
-            'success': False,
-            'error': f"Failed to update metadata: {result['error']}"
-        }
+    if not result["success"]:
+        return {"success": False, "error": f"Failed to update metadata: {result['error']}"}
 
     json_handler.log_operation("update_line_count", {"file": file_path.name, "lines": line_count, "success": True})
 
-    return {
-        'success': True,
-        'file': str(file_path),
-        'lines': line_count
-    }
+    return {"success": True, "file": str(file_path), "lines": line_count}
 
 
 def update_all_memory_files() -> Dict[str, Any]:
@@ -112,20 +100,15 @@ def update_all_memory_files() -> Dict[str, Any]:
 
     branches = _read_registry()
     if not branches:
-        return {
-            'success': True,
-            'updated': 0,
-            'failed': 0,
-            'message': 'No branches in registry'
-        }
+        return {"success": True, "updated": 0, "failed": 0, "message": "No branches in registry"}
 
     updated = 0
     failed = []
 
     for branch in branches:
-        branch_name = branch.get('name', 'UNKNOWN')
+        branch_name = branch.get("name", "UNKNOWN")
 
-        for memory_type in ['observations', 'local']:
+        for memory_type in ["observations", "local"]:
             file_path = _get_memory_file_path(branch, memory_type)
 
             if file_path is None:
@@ -133,14 +116,9 @@ def update_all_memory_files() -> Dict[str, Any]:
 
             result = update_line_count(file_path)
 
-            if result['success']:
+            if result["success"]:
                 updated += 1
             else:
-                failed.append((branch_name, memory_type, result.get('error')))
+                failed.append((branch_name, memory_type, result.get("error")))
 
-    return {
-        'success': True,
-        'updated': updated,
-        'failed': len(failed),
-        'failures': failed
-    }
+    return {"success": True, "updated": updated, "failed": len(failed), "failures": failed}

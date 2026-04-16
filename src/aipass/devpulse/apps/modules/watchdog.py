@@ -33,9 +33,7 @@ from aipass.cli.apps.modules import console, error, warning
 
 _VALID_SUBCOMMANDS = ["agent", "timer", "schedule", "status", "cancel", "list"]
 _DEFAULT_AGENT_TIMEOUT = 1800
-_NOT_IMPLEMENTED_MSG = (
-    "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
-)
+_NOT_IMPLEMENTED_MSG = "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
 # Phase 4 wired cancel + list for real. Left the map so future deferrals can reuse the shape.
 _PHASE_BY_SUB: dict[str, int] = {}
 
@@ -152,8 +150,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     sub_args = args[1:]
 
     if subcommand not in _VALID_SUBCOMMANDS:
-        error(f"Unknown watchdog subcommand: {subcommand}",
-              suggestion="Use 'watchdog --help' for usage")
+        error(f"Unknown watchdog subcommand: {subcommand}", suggestion="Use 'watchdog --help' for usage")
         return True
 
     logger.info("[watchdog] subcommand=%s args=%s", subcommand, sub_args)
@@ -194,9 +191,7 @@ def _handle_timer(sub_args: List[str]) -> bool:
         console.print(_TIMER_HELP_TEXT)
         return True
 
-    timer_mod = importlib.import_module(
-        "aipass.devpulse.apps.handlers.watchdog.timer"
-    )
+    timer_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.timer")
 
     action = sub_args[0]
 
@@ -254,9 +249,7 @@ def _handle_schedule(sub_args: List[str]) -> bool:
     time_str = sub_args[0]
     command = sub_args[1] if len(sub_args) >= 2 else None
 
-    schedule_mod = importlib.import_module(
-        "aipass.devpulse.apps.handlers.watchdog.schedule"
-    )
+    schedule_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.schedule")
 
     try:
         result = schedule_mod.wake_at(time_str, command=command)
@@ -273,15 +266,10 @@ def _print_schedule_result(result: dict) -> None:
     """Render a schedule handler return dict as CLI output."""
     scheduled_for = result.get("scheduled_for", "?")
     elapsed = result.get("elapsed", 0)
-    console.print(
-        f"[bold]watchdog schedule[/bold] woke after {elapsed}s "
-        f"(scheduled_for={scheduled_for})"
-    )
+    console.print(f"[bold]watchdog schedule[/bold] woke after {elapsed}s (scheduled_for={scheduled_for})")
     if result.get("command"):
         exit_code = result.get("command_exit_code")
-        console.print(
-            f"  command: {result['command']} -> exit={exit_code}"
-        )
+        console.print(f"  command: {result['command']} -> exit={exit_code}")
         stdout = result.get("command_stdout") or ""
         stderr = result.get("command_stderr") or ""
         if stdout:
@@ -298,17 +286,13 @@ def _print_timer_result(result: dict) -> None:
         error(f"timer {name}: {result.get('reason', 'unknown error')}")
         return
     if state == "stopped":
-        console.print(
-            f"[bold]timer[/bold] {name} stopped -> elapsed={result.get('human', '?')}"
-        )
+        console.print(f"[bold]timer[/bold] {name} stopped -> elapsed={result.get('human', '?')}")
         return
     if state == "started":
         console.print(f"[bold]timer[/bold] {name} started at {result.get('started_at', '?')}")
         return
     if state == "woke":
-        console.print(
-            f"[bold]timer[/bold] {name} woke after {result.get('elapsed', 0)}s"
-        )
+        console.print(f"[bold]timer[/bold] {name} woke after {result.get('elapsed', 0)}s")
         return
     console.print(f"[dim]timer result:[/dim] {result}")
 
@@ -320,18 +304,14 @@ def _print_timer_list(snapshot: dict) -> None:
     console.print("[bold]Active timers:[/bold]")
     if active:
         for item in active:
-            console.print(
-                f"  - {item['name']}  elapsed {item['human']}  "
-                f"(started {item.get('started_at', '?')})"
-            )
+            console.print(f"  - {item['name']}  elapsed {item['human']}  (started {item.get('started_at', '?')})")
     else:
         console.print("  (none)")
     console.print("[bold]History:[/bold]")
     if history:
         for item in history:
             console.print(
-                f"  - {item['name']}  {item['human']}  "
-                f"({item.get('started_at', '?')} -> {item.get('stopped_at', '?')})"
+                f"  - {item['name']}  {item['human']}  ({item.get('started_at', '?')} -> {item.get('stopped_at', '?')})"
             )
     else:
         console.print("  (none)")
@@ -366,33 +346,24 @@ def _handle_agent(sub_args: List[str]) -> bool:
 
     agent_id = positional[0]
 
-    agent_mod = importlib.import_module(
-        "aipass.devpulse.apps.handlers.watchdog.agent"
-    )
+    agent_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.agent")
     result = agent_mod.watch_agent(agent_id, timeout_seconds=timeout)
 
     state = result.get("agent_state", "unknown")
     reason = result.get("reason", "")
     elapsed = result.get("elapsed", 0)
-    console.print(
-        f"[bold]watchdog agent[/bold] {agent_id} -> "
-        f"state={state} elapsed={elapsed}s reason={reason}"
-    )
+    console.print(f"[bold]watchdog agent[/bold] {agent_id} -> state={state} elapsed={elapsed}s reason={reason}")
     return True
 
 
 def _load_registry_module():
     """Lazy-import the watch registry. Keeps cold startup fast."""
-    return importlib.import_module(
-        "aipass.devpulse.apps.handlers.watchdog.registry"
-    )
+    return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.registry")
 
 
 def _load_timer_module_for_format():
     """Lazy-import timer for ``format_human`` (reused in the status output)."""
-    return importlib.import_module(
-        "aipass.devpulse.apps.handlers.watchdog.timer"
-    )
+    return importlib.import_module("aipass.devpulse.apps.handlers.watchdog.timer")
 
 
 def _format_status_line(watch: dict, format_human) -> str:
@@ -404,10 +375,7 @@ def _format_status_line(watch: dict, format_human) -> str:
     meta = watch.get("metadata") or {}
 
     if wtype == "agent":
-        tail = (
-            f"{meta.get('agent_id', '?')} "
-            f"(timeout={meta.get('timeout_seconds', '?')}s)"
-        )
+        tail = f"{meta.get('agent_id', '?')} (timeout={meta.get('timeout_seconds', '?')}s)"
     elif wtype == "timer":
         tail = f"duration={meta.get('duration', '?')}"
     elif wtype == "schedule":
@@ -418,10 +386,7 @@ def _format_status_line(watch: dict, format_human) -> str:
         tail = str(meta)
 
     # Escape the [ so Rich console doesn't interpret it as a style tag.
-    return (
-        f"  \\[{handle}]  {wtype:<8}  {format_human(elapsed):<10}  "
-        f"pid={pid}  {tail}"
-    )
+    return f"  \\[{handle}]  {wtype:<8}  {format_human(elapsed):<10}  pid={pid}  {tail}"
 
 
 def _handle_status() -> bool:
@@ -472,9 +437,7 @@ def _print_kill_result(result: dict) -> None:
     was_alive = result.get("was_alive", False)
     reason = result.get("reason", "")
     status = "KILLED" if killed else "FAILED"
-    console.print(
-        f"  \\[{handle}] {status} was_alive={was_alive} reason={reason}"
-    )
+    console.print(f"  \\[{handle}] {status} was_alive={was_alive} reason={reason}")
 
 
 def _handle_cancel(sub_args: List[str]) -> bool:

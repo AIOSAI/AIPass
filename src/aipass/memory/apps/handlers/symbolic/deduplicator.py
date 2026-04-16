@@ -61,17 +61,15 @@ DEDUP_SYSTEM_PROMPT = (
     "- Return ONLY the JSON object, no other text"
 )
 
-VALID_ACTIONS = {'ADD', 'UPDATE', 'DELETE', 'NOOP'}
+VALID_ACTIONS = {"ADD", "UPDATE", "DELETE", "NOOP"}
 
 
 # =============================================================================
 # DEDUPLICATION
 # =============================================================================
 
-def deduplicate_fragment(
-    new_fragment: Dict[str, Any],
-    existing_fragments: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+
+def deduplicate_fragment(new_fragment: Dict[str, Any], existing_fragments: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compare a new LLM-extracted fragment against existing similar fragments
     and decide the AUDN action via LLM.
@@ -86,20 +84,15 @@ def deduplicate_fragment(
         'fragment' (updated or original), 'reason' (explanation)
     """
     if not new_fragment:
-        return {
-            'success': False,
-            'action': 'NOOP',
-            'fragment': new_fragment,
-            'reason': 'No fragment provided'
-        }
+        return {"success": False, "action": "NOOP", "fragment": new_fragment, "reason": "No fragment provided"}
 
     # If no existing fragments to compare, always ADD
     if not existing_fragments:
         return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': 'No existing fragments to compare against'
+            "success": True,
+            "action": "ADD",
+            "fragment": new_fragment,
+            "reason": "No existing fragments to compare against",
         }
 
     # Build prompt and call LLM
@@ -112,6 +105,7 @@ def deduplicate_fragment(
     # Load API key via api branch's key management
     try:
         from aipass.api.apps.handlers.auth.keys import get_api_key
+
         api_key = get_api_key("openrouter")
     except ImportError as e:
         logger.warning(f"[deduplicator] api branch not available for key loading: {e}")
@@ -119,18 +113,15 @@ def deduplicate_fragment(
 
     if not api_key:
         return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': 'No OpenRouter API key found (api branch unavailable or key missing), defaulting to ADD'
+            "success": True,
+            "action": "ADD",
+            "fragment": new_fragment,
+            "reason": "No OpenRouter API key found (api branch unavailable or key missing), defaulting to ADD",
         }
 
-    payload = json.dumps({
-        "model": LLM_MODEL,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 500
-    }).encode("utf-8")
+    payload = json.dumps({"model": LLM_MODEL, "messages": messages, "temperature": 0.2, "max_tokens": 500}).encode(
+        "utf-8"
+    )
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=payload,
@@ -138,8 +129,8 @@ def deduplicate_fragment(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://aipass.dev",
-            "X-Title": "AIPass Memory"
-        }
+            "X-Title": "AIPass Memory",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -148,85 +139,70 @@ def deduplicate_fragment(
     except (urllib.error.URLError, json.JSONDecodeError, KeyError, IndexError) as e:
         logger.warning(f"[deduplicator] LLM dedup request failed, defaulting to ADD: {e}")
         return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': 'LLM request failed, defaulting to ADD'
+            "success": True,
+            "action": "ADD",
+            "fragment": new_fragment,
+            "reason": "LLM request failed, defaulting to ADD",
         }
 
     if not content:
         return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': 'Empty LLM response, defaulting to ADD'
+            "success": True,
+            "action": "ADD",
+            "fragment": new_fragment,
+            "reason": "Empty LLM response, defaulting to ADD",
         }
-    data = {'content': content}
+    data = {"content": content}
 
     # Parse LLM decision
-    parsed = _parse_dedup_response(data['content'])
+    parsed = _parse_dedup_response(data["content"])
     if parsed is None:
         return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': 'Failed to parse LLM dedup response, defaulting to ADD'
+            "success": True,
+            "action": "ADD",
+            "fragment": new_fragment,
+            "reason": "Failed to parse LLM dedup response, defaulting to ADD",
         }
 
-    action = parsed['action']
-    reason = parsed.get('reason', 'No reason provided')
+    action = parsed["action"]
+    reason = parsed.get("reason", "No reason provided")
 
-    json_handler.log_operation("symbolic_dedup", {"action": action, "existing_count": len(existing_fragments), "success": True})
+    json_handler.log_operation(
+        "symbolic_dedup", {"action": action, "existing_count": len(existing_fragments), "success": True}
+    )
 
     # Apply action to fragment
-    if action == 'UPDATE':
+    if action == "UPDATE":
         # Merge content from LLM response into fragment
         updated_fragment = new_fragment.copy()
-        if parsed.get('merged_summary'):
-            updated_fragment['summary'] = parsed['merged_summary']
-        if parsed.get('merged_insight'):
-            updated_fragment['insight'] = parsed['merged_insight']
+        if parsed.get("merged_summary"):
+            updated_fragment["summary"] = parsed["merged_summary"]
+        if parsed.get("merged_insight"):
+            updated_fragment["insight"] = parsed["merged_insight"]
+        return {"success": True, "action": "UPDATE", "fragment": updated_fragment, "reason": reason}
+
+    elif action == "DELETE":
         return {
-            'success': True,
-            'action': 'UPDATE',
-            'fragment': updated_fragment,
-            'reason': reason
+            "success": True,
+            "action": "DELETE",
+            "fragment": new_fragment,
+            "delete_id": parsed.get("delete_id", ""),
+            "reason": reason,
         }
 
-    elif action == 'DELETE':
-        return {
-            'success': True,
-            'action': 'DELETE',
-            'fragment': new_fragment,
-            'delete_id': parsed.get('delete_id', ''),
-            'reason': reason
-        }
-
-    elif action == 'NOOP':
-        return {
-            'success': True,
-            'action': 'NOOP',
-            'fragment': new_fragment,
-            'reason': reason
-        }
+    elif action == "NOOP":
+        return {"success": True, "action": "NOOP", "fragment": new_fragment, "reason": reason}
 
     else:  # ADD
-        return {
-            'success': True,
-            'action': 'ADD',
-            'fragment': new_fragment,
-            'reason': reason
-        }
+        return {"success": True, "action": "ADD", "fragment": new_fragment, "reason": reason}
 
 
 # =============================================================================
 # PROMPT BUILDING
 # =============================================================================
 
-def _build_dedup_prompt(
-    new_fragment: Dict[str, Any],
-    existing_fragments: List[Dict[str, Any]]
-) -> List[Dict[str, str]]:
+
+def _build_dedup_prompt(new_fragment: Dict[str, Any], existing_fragments: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """
     Build system/user messages for the deduplication LLM call.
 
@@ -251,15 +227,15 @@ def _build_dedup_prompt(
     # Format existing fragments (limit to top 3)
     existing_parts = []
     for i, frag in enumerate(existing_fragments[:3]):
-        frag_id = frag.get('id', f'unknown_{i}')
-        content = frag.get('content', '')
-        metadata = frag.get('metadata', {})
+        frag_id = frag.get("id", f"unknown_{i}")
+        content = frag.get("content", "")
+        metadata = frag.get("metadata", {})
 
         # Extract summary/insight from metadata if available (v2 fragments)
-        summary = metadata.get('summary', content[:200] if content else '')
-        insight = metadata.get('insight', '')
-        frag_type = metadata.get('type', '')
-        triggers = metadata.get('triggers', '')
+        summary = metadata.get("summary", content[:200] if content else "")
+        insight = metadata.get("insight", "")
+        frag_type = metadata.get("type", "")
+        triggers = metadata.get("triggers", "")
 
         existing_parts.append(
             f"EXISTING FRAGMENT {i + 1} (ID: {frag_id}):\n"
@@ -280,15 +256,13 @@ def _build_dedup_prompt(
         f"DELETE an existing one, or NOOP (skip as duplicate)?"
     )
 
-    return [
-        {"role": "system", "content": DEDUP_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content}
-    ]
+    return [{"role": "system", "content": DEDUP_SYSTEM_PROMPT}, {"role": "user", "content": user_content}]
 
 
 # =============================================================================
 # RESPONSE PARSING
 # =============================================================================
+
 
 def _parse_dedup_response(raw_text: str) -> Optional[Dict[str, Any]]:
     """
@@ -317,7 +291,7 @@ def _parse_dedup_response(raw_text: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"[deduplicator] Direct JSON parse failed, trying fallback: {e}")
 
     # Attempt 2: Strip markdown fences
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', text, re.DOTALL)
+    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     if match:
         try:
             result = json.loads(match.group(1).strip())
@@ -349,9 +323,9 @@ def _validate_dedup_result(result: Dict[str, Any]) -> bool:
     Returns:
         True if action is valid
     """
-    action = result.get('action', '').upper()
+    action = result.get("action", "").upper()
     if action not in VALID_ACTIONS:
         return False
     # Normalize action to uppercase
-    result['action'] = action
+    result["action"] = action
     return True

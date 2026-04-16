@@ -154,9 +154,7 @@ def test_handle_command_logs_operation(mock_console, mock_header, mock_jh, mock_
 
     openrouter_client.handle_command("test", [])
 
-    mock_jh.log_operation.assert_called_once_with(
-        "openrouter_test", {"command": "test"}
-    )
+    mock_jh.log_operation.assert_called_once_with("openrouter_test", {"command": "test"})
 
 
 # =============================================
@@ -241,7 +239,9 @@ def test_test_connection_no_key_no_success(mock_console, mock_header, mock_keys,
 @patch(f"{_MOD}.keys")
 @patch(f"{_MOD}.header")
 @patch(f"{_MOD}.console")
-def test_test_connection_api_failure_no_success(mock_console, mock_header, mock_keys, mock_models, mock_error, mock_success):
+def test_test_connection_api_failure_no_success(
+    mock_console, mock_header, mock_keys, mock_models, mock_error, mock_success
+):
     """API failure path must not call success()."""
     from aipass.api.apps.modules import openrouter_client
 
@@ -381,15 +381,14 @@ def test_list_models_limits_to_10(mock_console, mock_header, mock_keys, mock_mod
 
     # Count data rows: calls that contain a model ID pattern
     data_row_calls = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "provider/model-" in c.args[0]
     ]
     assert len(data_row_calls) == 10
 
     # Should show "Showing 10 of 25" truncation notice
-    all_output = " ".join(
-        str(c) for c in mock_console.print.call_args_list
-    )
+    all_output = " ".join(str(c) for c in mock_console.print.call_args_list)
     assert "10 of 25" in all_output
 
 
@@ -416,7 +415,8 @@ def test_list_models_all_flag_shows_everything(mock_console, mock_header, mock_k
     openrouter_client.list_models(["--all"])
 
     data_row_calls = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "provider/model-" in c.args[0]
     ]
     assert len(data_row_calls) == 25
@@ -537,7 +537,8 @@ def test_list_models_formats_million_context(mock_console, mock_header, mock_key
     openrouter_client.list_models([])
 
     data_rows = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "big/model" in c.args[0]
     ]
     assert len(data_rows) == 1
@@ -561,7 +562,8 @@ def test_list_models_formats_thousand_context(mock_console, mock_header, mock_ke
     openrouter_client.list_models([])
 
     data_rows = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "med/model" in c.args[0]
     ]
     assert len(data_rows) == 1
@@ -585,7 +587,8 @@ def test_list_models_formats_free_pricing(mock_console, mock_header, mock_keys, 
     openrouter_client.list_models([])
 
     data_rows = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "free/model" in c.args[0]
     ]
     assert len(data_rows) == 1

@@ -177,9 +177,7 @@ def test_handle_command_logs_operation(mock_jh, mock_header, mock_console):
 
     usage_tracker.handle_command("stats", [])
 
-    mock_jh.log_operation.assert_called_once_with(
-        "usage_stats", {"command": "stats"}
-    )
+    mock_jh.log_operation.assert_called_once_with("usage_stats", {"command": "stats"})
 
 
 # =============================================
@@ -229,7 +227,8 @@ def test_show_stats_no_data(mock_agg, mock_header, mock_console, mock_warning):
     mock_warning.assert_called_once_with("No usage data available")
     # Verify no stat data was printed to console
     stat_calls = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "Total Requests" in c.args[0]
     ]
     assert len(stat_calls) == 0, "No stat rows should be printed when data is empty"
@@ -279,7 +278,8 @@ def test_show_session_no_data(mock_agg, mock_header, mock_console, mock_warning)
     mock_warning.assert_called_once_with("No session data available")
     # Verify no session stat data was printed to console
     stat_calls = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "Session Requests" in c.args[0]
     ]
     assert len(stat_calls) == 0, "No session rows should be printed when data is empty"
@@ -330,7 +330,8 @@ def test_show_caller_usage_no_data(mock_agg, mock_header, mock_console, mock_war
     mock_warning.assert_called_once_with("No usage data found for caller: ghost_caller")
     # Verify no usage data rows were printed to console
     usage_calls = [
-        c for c in mock_console.print.call_args_list
+        c
+        for c in mock_console.print.call_args_list
         if c.args and isinstance(c.args[0], str) and "Requests" in c.args[0]
     ]
     assert len(usage_calls) == 0, "No usage rows should be printed when data is empty"

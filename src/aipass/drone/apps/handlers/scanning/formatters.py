@@ -18,8 +18,10 @@ try:
     from aipass.cli.apps.modules import console
 except ImportError:
     from aipass.prax import logger
+
     logger.warning("formatters: aipass.cli.apps.modules.console unavailable, using fallback Rich Console")
     from rich.console import Console
+
     console = Console()
 
 from rich.table import Table

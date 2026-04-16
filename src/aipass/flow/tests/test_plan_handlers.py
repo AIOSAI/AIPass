@@ -29,6 +29,7 @@ from aipass.flow.apps.handlers.json.json_handler import update_data_metrics
 # slugify_subject
 # =========================================================================
 
+
 class TestSlugifySubject:
     """Tests for slugify_subject()."""
 
@@ -74,6 +75,7 @@ class TestSlugifySubject:
 # create_plan_file
 # =========================================================================
 
+
 class TestCreatePlanFile:
     """Tests for create_plan_file()."""
 
@@ -115,6 +117,7 @@ class TestCreatePlanFile:
 # =========================================================================
 # build_plan_registry_entry
 # =========================================================================
+
 
 class TestBuildPlanRegistryEntry:
     """Tests for build_plan_registry_entry()."""
@@ -169,6 +172,7 @@ class TestBuildPlanRegistryEntry:
 # calculate_relative_location
 # =========================================================================
 
+
 class TestCalculateRelativeLocation:
     """Tests for calculate_relative_location()."""
 
@@ -206,6 +210,7 @@ class TestCalculateRelativeLocation:
 # =========================================================================
 # resolve_plan_location
 # =========================================================================
+
 
 class TestResolvePlanLocation:
     """Tests for resolve_plan_location()."""
@@ -272,6 +277,7 @@ class TestResolvePlanLocation:
 # =========================================================================
 # auto_close_orphaned_plans
 # =========================================================================
+
 
 class TestAutoCloseOrphanedPlans:
     """Tests for auto_close_orphaned_plans()."""
@@ -389,6 +395,7 @@ class TestAutoCloseOrphanedPlans:
 # get_closed_plans
 # =========================================================================
 
+
 class TestGetClosedPlans:
     """Tests for get_closed_plans()."""
 
@@ -398,8 +405,7 @@ class TestGetClosedPlans:
 
     def test_returns_only_closed_plans(self, mock_registry):
         _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), \
-             patch(self._LOAD_PATH, return_value=registry):
+        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
         assert len(result) == 1
@@ -413,15 +419,16 @@ class TestGetClosedPlans:
                 "1": {"status": "open", "subject": "active"},
             }
         }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), \
-             patch(self._LOAD_PATH, return_value=registry):
+        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
         assert result == []
 
     def test_returns_empty_on_empty_registry(self):
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), \
-             patch(self._LOAD_PATH, return_value={"plans": {}}):
+        with (
+            patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG),
+            patch(self._LOAD_PATH, return_value={"plans": {}}),
+        ):
             result = get_closed_plans()
 
         assert result == []
@@ -434,8 +441,7 @@ class TestGetClosedPlans:
                 "3": {"status": "open", "subject": "still going"},
             }
         }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), \
-             patch(self._LOAD_PATH, return_value=registry):
+        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
         assert len(result) == 2
@@ -444,8 +450,7 @@ class TestGetClosedPlans:
 
     def test_result_tuples_contain_plan_num_and_info(self, mock_registry):
         _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), \
-             patch(self._LOAD_PATH, return_value=registry):
+        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
             result = get_closed_plans()
 
         for plan_num, plan_info in result:
@@ -457,6 +462,7 @@ class TestGetClosedPlans:
 # =========================================================================
 # update_data_metrics (json_handler)
 # =========================================================================
+
 
 class TestUpdateDataMetrics:
     """Tests for update_data_metrics() in json_handler."""
@@ -499,12 +505,15 @@ class TestUpdateDataMetrics:
         assert saved["total"] == 8
 
     def test_returns_false_when_data_load_fails(self, tmp_path: Path):
-        with patch(
-            "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-            tmp_path / "nonexistent",
-        ), patch(
-            "aipass.flow.apps.handlers.json.json_handler.load_json",
-            return_value=None,
+        with (
+            patch(
+                "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
+                tmp_path / "nonexistent",
+            ),
+            patch(
+                "aipass.flow.apps.handlers.json.json_handler.load_json",
+                return_value=None,
+            ),
         ):
             result = update_data_metrics("broken_mod", x=1)
 
@@ -517,11 +526,13 @@ class TestUpdateDataMetrics:
         ):
             data_file = tmp_path / "testmod_data.json"
             data_file.write_text(
-                json.dumps({
-                    "created": "2026-01-01",
-                    "last_updated": "2026-01-01",
-                    "counter": 10,
-                }),
+                json.dumps(
+                    {
+                        "created": "2026-01-01",
+                        "last_updated": "2026-01-01",
+                        "counter": 10,
+                    }
+                ),
                 encoding="utf-8",
             )
 
@@ -550,6 +561,7 @@ class TestUpdateDataMetrics:
 # =========================================================================
 # create_plan_impl
 # =========================================================================
+
 
 class TestCreatePlanImpl:
     """Tests for create_plan_impl()."""
@@ -600,9 +612,7 @@ class TestCreatePlanImpl:
         deps = self._make_deps()
         deps["get_template"] = None  # Missing dep
 
-        success, plan_num, loc, tmpl, err, msgs = create_plan_impl(
-            subject="anything", **deps
-        )
+        success, plan_num, loc, tmpl, err, msgs = create_plan_impl(subject="anything", **deps)
 
         assert success is False
         assert "Missing required dependency" in err
@@ -617,9 +627,7 @@ class TestCreatePlanImpl:
             ),
         )
 
-        success, _, _, _, err, _ = create_plan_impl(
-            location="/bad/path", subject="test", **deps
-        )
+        success, _, _, _, err, _ = create_plan_impl(location="/bad/path", subject="test", **deps)
 
         assert success is False
         assert err == "Dir not found"
@@ -631,9 +639,7 @@ class TestCreatePlanImpl:
             create_plan_file=MagicMock(return_value=(False, "File exists")),
         )
 
-        success, _, _, _, err, _ = create_plan_impl(
-            subject="test", **deps
-        )
+        success, _, _, _, err, _ = create_plan_impl(subject="test", **deps)
 
         assert success is False
         assert err == "File exists"
@@ -650,9 +656,7 @@ class TestCreatePlanImpl:
             ),
         )
 
-        success, plan_num, _, _, _, msgs = create_plan_impl(
-            subject="test", **deps
-        )
+        success, plan_num, _, _, _, msgs = create_plan_impl(subject="test", **deps)
 
         assert success is True
         assert plan_num == 5
@@ -692,9 +696,7 @@ class TestCreatePlanImpl:
             get_template=MagicMock(side_effect=ValueError("bad template")),
         )
 
-        success, _, _, _, err, _ = create_plan_impl(
-            subject="test", **deps
-        )
+        success, _, _, _, err, _ = create_plan_impl(subject="test", **deps)
 
         assert success is False
         assert "Failed to load template" in err
@@ -708,9 +710,7 @@ class TestCreatePlanImpl:
             push_flow_to_branch_dashboard=MagicMock(return_value=False),
         )
 
-        success, _, _, _, err, msgs = create_plan_impl(
-            subject="test", **deps
-        )
+        success, _, _, _, err, msgs = create_plan_impl(subject="test", **deps)
 
         assert success is True
         assert err == ""
@@ -720,9 +720,7 @@ class TestCreatePlanImpl:
     def test_empty_subject_produces_filename_without_slug(self, mock_log, mock_jh):
         deps = self._make_deps()
 
-        success, _, _, _, _, _ = create_plan_impl(
-            subject="", **deps
-        )
+        success, _, _, _, _, _ = create_plan_impl(subject="", **deps)
 
         assert success is True
         call_args = deps["create_plan_file"].call_args
@@ -745,9 +743,7 @@ class TestCreatePlanImpl:
             save_registry=save_mock,
         )
 
-        success, _, _, _, _, msgs = create_plan_impl(
-            subject="test", **deps
-        )
+        success, _, _, _, _, msgs = create_plan_impl(subject="test", **deps)
 
         assert success is True
         warning_msgs = [m for m in msgs if m.get("type") == "warning"]

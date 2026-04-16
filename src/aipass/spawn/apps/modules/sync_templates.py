@@ -13,6 +13,7 @@ All implementation logic lives in apps/handlers/sync_templates_ops.py.
 """
 
 from aipass.prax import logger
+
 # CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, error, warning
 
@@ -35,6 +36,7 @@ def print_introspection():
 # =============================================================================
 # DRONE ROUTING
 # =============================================================================
+
 
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point.
@@ -64,6 +66,7 @@ def handle_command(command: str, args: list) -> bool:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def handle_sync_templates(args: list[str]) -> int:
     """Parse args and execute template sync.
@@ -104,6 +107,7 @@ def handle_sync_templates(args: list[str]) -> int:
 # =============================================================================
 # OUTPUT HELPERS
 # =============================================================================
+
 
 def _print_summary(result: dict, dry_run: bool) -> None:
     """Print a rich summary of the template sync operation."""

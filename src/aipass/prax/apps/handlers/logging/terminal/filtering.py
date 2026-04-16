@@ -13,6 +13,7 @@ Filters terminal output to reduce noise from internal modules.
 """
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 import json
@@ -29,9 +30,14 @@ CONFIG_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_config.json"
 
 # Default modules to filter (prax internal modules)
 DEFAULT_FILTERED_MODULES = {
-    'prax_logger', 'prax_handlers', 'prax_config',
-    'prax_registry', 'prax_discovery', 'prax_terminal'
+    "prax_logger",
+    "prax_handlers",
+    "prax_config",
+    "prax_registry",
+    "prax_discovery",
+    "prax_terminal",
 }
+
 
 def load_filtered_modules() -> Set[str]:
     """Load filtered modules from config
@@ -44,13 +50,14 @@ def load_filtered_modules() -> Set[str]:
     """
     if CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                return set(config.get('filtered_modules', DEFAULT_FILTERED_MODULES))
+                return set(config.get("filtered_modules", DEFAULT_FILTERED_MODULES))
         except Exception as e:
             logger.warning("Failed to load terminal filter config %s: %s", CONFIG_FILE, e)
 
     return DEFAULT_FILTERED_MODULES
+
 
 def should_display_terminal(module_name: str, filtered_modules: Optional[Set[str]] = None) -> bool:
     """Determine if module should be displayed in terminal output

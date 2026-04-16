@@ -86,17 +86,17 @@ class MonitoringFileHandler(FileSystemEventHandler):
     def on_created(self, event):
         """Handle file creation events."""
         if not event.is_directory:
-            self._handle_event('created', event.src_path)
+            self._handle_event("created", event.src_path)
 
     def on_modified(self, event):
         """Handle file modification events."""
         if not event.is_directory:
-            self._handle_event('modified', event.src_path)
+            self._handle_event("modified", event.src_path)
 
     def on_deleted(self, event):
         """Handle file deletion events."""
         if not event.is_directory:
-            self._handle_event('deleted', event.src_path)
+            self._handle_event("deleted", event.src_path)
 
     def on_moved(self, event):
         """Handle file move/rename events."""
@@ -104,13 +104,13 @@ class MonitoringFileHandler(FileSystemEventHandler):
             # dest_path can be bytes or str, normalize to str for comparison
             dest_path_str = event.dest_path.decode() if isinstance(event.dest_path, bytes) else event.dest_path
             src_path_str = event.src_path.decode() if isinstance(event.src_path, bytes) else event.src_path
-            if 'Trash' in dest_path_str or '.local/share/Trash' in dest_path_str:
-                self._handle_event('deleted', src_path_str)
-            elif '.tmp.' in src_path_str or src_path_str.endswith('.tmp'):
+            if "Trash" in dest_path_str or ".local/share/Trash" in dest_path_str:
+                self._handle_event("deleted", src_path_str)
+            elif ".tmp." in src_path_str or src_path_str.endswith(".tmp"):
                 # Atomic write: tmp file moved to real file = modification
-                self._handle_event('modified', dest_path_str)
+                self._handle_event("modified", dest_path_str)
             else:
-                self._handle_event('moved', dest_path_str)
+                self._handle_event("moved", dest_path_str)
 
     # =========================================================================
     # AGENT ACTIVITY PARSING (Claude Code JSONL sessions)
@@ -119,56 +119,56 @@ class MonitoringFileHandler(FileSystemEventHandler):
     @staticmethod
     def _format_tool_action(item: dict) -> Optional[str]:
         """Format a tool_use JSONL item into a display string."""
-        tool_name = item.get('name', '')
-        inp = item.get('input', {})
-        if tool_name in ('Read', 'Edit', 'Write'):
-            fp = inp.get('file_path', '')
-            short = fp.split('/')[-1] if '/' in fp else fp
+        tool_name = item.get("name", "")
+        inp = item.get("input", {})
+        if tool_name in ("Read", "Edit", "Write"):
+            fp = inp.get("file_path", "")
+            short = fp.split("/")[-1] if "/" in fp else fp
             return f"🔧 {tool_name}: {short}"
-        if tool_name == 'Bash':
-            desc = inp.get('description', '') or inp.get('command', '')[:120]
+        if tool_name == "Bash":
+            desc = inp.get("description", "") or inp.get("command", "")[:120]
             return f"⚡ Bash: {desc[:120]}"
-        if tool_name in ('Grep', 'Glob'):
+        if tool_name in ("Grep", "Glob"):
             return f"🔍 {tool_name}: {inp.get('pattern', '')[:80]}"
-        if tool_name == 'Task':
+        if tool_name == "Task":
             return f"🚀 Agent: {inp.get('description', '')[:80]}"
         return f"🔧 {tool_name}"
 
     @staticmethod
     def _extract_model_from_entry(entry: dict) -> Optional[str]:
         """Extract model name from a Claude Code JSONL entry."""
-        msg = entry.get('message', {}) if isinstance(entry.get('message'), dict) else {}
-        return msg.get('model')
+        msg = entry.get("message", {}) if isinstance(entry.get("message"), dict) else {}
+        return msg.get("model")
 
     @staticmethod
     def _extract_action_from_entry(entry: dict) -> Optional[str]:
         """Extract a display action string from a JSONL entry."""
-        entry_type = entry.get('type', '')
-        msg = entry.get('message', {}) if isinstance(entry.get('message'), dict) else {}
-        content = msg.get('content', [])
+        entry_type = entry.get("type", "")
+        msg = entry.get("message", {}) if isinstance(entry.get("message"), dict) else {}
+        content = msg.get("content", [])
 
-        if entry_type in ('progress', 'system', 'file-history-snapshot', 'queue-operation'):
+        if entry_type in ("progress", "system", "file-history-snapshot", "queue-operation"):
             return None
 
-        if entry_type == 'assistant' and isinstance(content, list):
+        if entry_type == "assistant" and isinstance(content, list):
             for item in content:
                 if not isinstance(item, dict):
                     continue
-                item_type = item.get('type', '')
-                if item_type == 'thinking':
-                    return '💭 Thinking'
-                if item_type == 'tool_use':
+                item_type = item.get("type", "")
+                if item_type == "thinking":
+                    return "💭 Thinking"
+                if item_type == "tool_use":
                     return MonitoringFileHandler._format_tool_action(item)
-                if item_type == 'text':
-                    text = item.get('text', '').strip()
+                if item_type == "text":
+                    text = item.get("text", "").strip()
                     return f"💬 {text}" if text else None
 
-        if entry_type == 'user':
+        if entry_type == "user":
             if isinstance(content, list):
                 for item in content:
-                    if isinstance(item, dict) and item.get('type') == 'tool_result':
+                    if isinstance(item, dict) and item.get("type") == "tool_result":
                         return None
-            return '📩 User message'
+            return "📩 User message"
 
         return None
 
@@ -182,23 +182,23 @@ class MonitoringFileHandler(FileSystemEventHandler):
         if not cwd:
             return None
         parts = Path(cwd).parts
-        if 'aipass' in parts:
-            idx = parts.index('aipass')
+        if "aipass" in parts:
+            idx = parts.index("aipass")
             if idx + 1 < len(parts):
                 return parts[idx + 1].upper()
         # External project under ~/Projects/: use branch_detector for full label
         # e.g. ~/Projects/AIPL/src/polyglot/ → AIPL/POLYGLOT
-        projects_base = Path.home() / 'Projects'
+        projects_base = Path.home() / "Projects"
         try:
             Path(cwd).relative_to(projects_base)
             result = detect_branch_from_path(cwd)
-            if result and result != 'UNKNOWN':
+            if result and result != "UNKNOWN":
                 return result
         except ValueError:
             logger.info(f"[monitor] CWD not under ~/Projects/: {cwd}")
         # Fallback: check src/{name} for branches outside aipass namespace
-        if 'src' in parts:
-            idx = parts.index('src')
+        if "src" in parts:
+            idx = parts.index("src")
             if idx + 1 < len(parts):
                 return parts[idx + 1].upper()
         return None
@@ -206,14 +206,14 @@ class MonitoringFileHandler(FileSystemEventHandler):
     def _read_codex_cwd(self, file_path) -> Optional[str]:
         """Read CWD from the first line (session_meta) of a Codex JSONL file."""
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 first_line = f.readline().strip()
             if not first_line:
                 return None
             meta = _json.loads(first_line)
-            if meta.get('type') != 'session_meta':
+            if meta.get("type") != "session_meta":
                 return None
-            return meta.get('payload', {}).get('cwd', '')
+            return meta.get("payload", {}).get("cwd", "")
         except (OSError, _json.JSONDecodeError) as e:
             logger.info(f"[monitor] Could not read Codex session_meta: {e}")
             return None
@@ -225,13 +225,13 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
         cwd = self._read_codex_cwd(file_path)
         branch = self._branch_from_cwd(cwd) if cwd else None
-        result = branch or 'CODEX'
+        result = branch or "CODEX"
         self._session_branches[path_key] = result
         return result
 
     def _resolve_gemini_slug(self, slug: str) -> Optional[str]:
         """Resolve a Gemini project slug to a branch name via projects.json."""
-        projects_file = Path.home() / '.gemini' / 'projects.json'
+        projects_file = Path.home() / ".gemini" / "projects.json"
         if not projects_file.exists():
             return None
         try:
@@ -239,7 +239,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
         except (OSError, _json.JSONDecodeError) as e:
             logger.info(f"[monitor] Could not read Gemini projects.json: {e}")
             return None
-        for project_path, project_slug in data.get('projects', {}).items():
+        for project_path, project_slug in data.get("projects", {}).items():
             if project_slug == slug:
                 return self._branch_from_cwd(project_path)
         return None
@@ -252,14 +252,14 @@ class MonitoringFileHandler(FileSystemEventHandler):
         # Path: ~/.gemini/tmp/<project-slug>/chats/session-*.json
         parts = Path(file_path).parts
         slug = None
-        if 'tmp' in parts:
-            idx = parts.index('tmp')
+        if "tmp" in parts:
+            idx = parts.index("tmp")
             if idx + 1 < len(parts):
                 slug = parts[idx + 1]
 
         if not slug:
-            self._session_branches[path_key] = 'GEMINI'
-            return 'GEMINI'
+            self._session_branches[path_key] = "GEMINI"
+            return "GEMINI"
 
         branch = self._resolve_gemini_slug(slug) or slug.upper()
         self._session_branches[path_key] = branch
@@ -273,31 +273,31 @@ class MonitoringFileHandler(FileSystemEventHandler):
     def _shorten_model(model: str) -> str:
         """Shorten a model identifier for display."""
         if not model:
-            return ''
+            return ""
         m = model.lower()
         # Claude models
-        if 'opus' in m:
-            return 'opus'
-        if 'sonnet' in m:
-            return 'sonnet'
-        if 'haiku' in m:
-            return 'haiku'
+        if "opus" in m:
+            return "opus"
+        if "sonnet" in m:
+            return "sonnet"
+        if "haiku" in m:
+            return "haiku"
         # OpenAI/Codex models
-        if m.startswith('gpt-'):
+        if m.startswith("gpt-"):
             return m  # already short: gpt-4o, gpt-5.4
-        if m.startswith('o') and any(c.isdigit() for c in m):
+        if m.startswith("o") and any(c.isdigit() for c in m):
             return m  # o1, o3, o4-mini
         # Gemini models
-        if 'gemini' in m:
+        if "gemini" in m:
             # gemini-3-flash-preview → gemini-3-flash
-            parts = m.replace('gemini-', '').split('-')
-            return 'gemini-' + '-'.join(p for p in parts if p != 'preview')
+            parts = m.replace("gemini-", "").split("-")
+            return "gemini-" + "-".join(p for p in parts if p != "preview")
         # Fallback: first 15 chars
         return model[:15]
 
     def _tag_branch_with_model(self, path_key: str, branch: str) -> str:
         """Append model tag to branch if known for this session."""
-        model = self._session_models.get(path_key, '')
+        model = self._session_models.get(path_key, "")
         if model:
             return f"{branch}/{model}"
         return branch
@@ -309,30 +309,30 @@ class MonitoringFileHandler(FileSystemEventHandler):
     @staticmethod
     def _extract_codex_action(entry: dict) -> Optional[str]:
         """Extract a display action string from a Codex JSONL entry."""
-        entry_type = entry.get('type', '')
-        payload = entry.get('payload', {})
+        entry_type = entry.get("type", "")
+        payload = entry.get("payload", {})
 
-        if entry_type == 'event_msg':
-            event_type = payload.get('type', '')
-            if event_type == 'agent_message':
-                text = payload.get('text', '') or payload.get('message', '')
+        if entry_type == "event_msg":
+            event_type = payload.get("type", "")
+            if event_type == "agent_message":
+                text = payload.get("text", "") or payload.get("message", "")
                 if text:
                     return f"💬 {str(text)[:120]}"
-                return '💬 Agent response'
-            if event_type == 'user_message':
-                return '📩 User message'
-            if event_type == 'token_count':
-                return '💭 Thinking'
-            if event_type == 'task_started':
-                return '🚀 Task started'
-            if event_type == 'task_complete':
-                return '✅ Task complete'
+                return "💬 Agent response"
+            if event_type == "user_message":
+                return "📩 User message"
+            if event_type == "token_count":
+                return "💭 Thinking"
+            if event_type == "task_started":
+                return "🚀 Task started"
+            if event_type == "task_complete":
+                return "✅ Task complete"
             return None
 
-        if entry_type == 'response_item':
+        if entry_type == "response_item":
             return MonitoringFileHandler._parse_codex_response_item(payload)
 
-        if entry_type in ('session_meta', 'turn_context'):
+        if entry_type in ("session_meta", "turn_context"):
             return None
 
         return None
@@ -340,21 +340,21 @@ class MonitoringFileHandler(FileSystemEventHandler):
     @staticmethod
     def _parse_codex_response_item(payload: dict) -> Optional[str]:
         """Parse a Codex response_item payload into a display string."""
-        item = payload.get('item', payload)
-        item_type = item.get('type', '')
-        if item_type == 'function_call':
+        item = payload.get("item", payload)
+        item_type = item.get("type", "")
+        if item_type == "function_call":
             return f"🔧 {item.get('name', 'tool')}"
-        if item_type == 'function_call_output':
+        if item_type == "function_call_output":
             return None
-        if item_type != 'message':
+        if item_type != "message":
             return None
-        content = item.get('content', [])
+        content = item.get("content", [])
         if not isinstance(content, list):
-            return '💬 Agent response'
+            return "💬 Agent response"
         for part in content:
-            if isinstance(part, dict) and part.get('text'):
+            if isinstance(part, dict) and part.get("text"):
                 return f"💬 {part['text'][:120]}"
-        return '💬 Agent response'
+        return "💬 Agent response"
 
     # =========================================================================
     # GEMINI AGENT ACTIVITY PARSING (full JSON sessions)
@@ -363,21 +363,21 @@ class MonitoringFileHandler(FileSystemEventHandler):
     @staticmethod
     def _extract_gemini_action(message: dict) -> Optional[str]:
         """Extract a display action string from a Gemini session message."""
-        msg_type = message.get('type', '')
-        if msg_type == 'user':
-            return '📩 User message'
-        if msg_type != 'gemini':
+        msg_type = message.get("type", "")
+        if msg_type == "user":
+            return "📩 User message"
+        if msg_type != "gemini":
             return None
 
-        tool_calls = message.get('toolCalls', [])
+        tool_calls = message.get("toolCalls", [])
         if tool_calls:
             last_tool = tool_calls[-1]
             return f"🔧 {last_tool.get('displayName', last_tool.get('name', 'tool'))}"
 
-        if message.get('thoughts'):
-            return '💭 Thinking'
+        if message.get("thoughts"):
+            return "💭 Thinking"
 
-        return MonitoringFileHandler._extract_text_from_content(message.get('content', []))
+        return MonitoringFileHandler._extract_text_from_content(message.get("content", []))
 
     @staticmethod
     def _extract_text_from_content(content) -> str:
@@ -386,9 +386,9 @@ class MonitoringFileHandler(FileSystemEventHandler):
             return f"💬 {content.strip()[:120]}"
         if isinstance(content, list):
             for part in content:
-                if isinstance(part, dict) and part.get('text', '').strip():
+                if isinstance(part, dict) and part.get("text", "").strip():
                     return f"💬 {part['text'].strip()[:120]}"
-        return '💬 Agent response'
+        return "💬 Agent response"
 
     def _parse_gemini_activity(self, file_path, branch):
         """Parse Gemini session JSON to show agent actions.
@@ -398,10 +398,10 @@ class MonitoringFileHandler(FileSystemEventHandler):
         """
         try:
             path_key = str(file_path)
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 data = _json.load(f)
 
-            messages = data.get('messages', [])
+            messages = data.get("messages", [])
             last_count = self._jsonl_positions.get(path_key, 0)
 
             if len(messages) <= last_count:
@@ -411,7 +411,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             # Extract model from gemini messages
             for msg in messages:
-                model = msg.get('model', '')
+                model = msg.get("model", "")
                 if model:
                     self._session_models[path_key] = self._shorten_model(model)
                     break
@@ -429,8 +429,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
                 tagged_branch = self._tag_branch_with_model(path_key, branch)
                 evt = MonitoringEvent(
-                    priority=1, event_type='agent', branch=tagged_branch,
-                    action='activity', message=action_text, level='info',
+                    priority=1,
+                    event_type="agent",
+                    branch=tagged_branch,
+                    action="activity",
+                    message=action_text,
+                    level="info",
                 )
                 if self._event_queue:
                     self._event_queue.enqueue(evt)
@@ -449,11 +453,11 @@ class MonitoringFileHandler(FileSystemEventHandler):
             last_pos = 0
         if current_size <= last_pos:
             return None
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             f.seek(last_pos)
             new_data = f.read()
             self._jsonl_positions[path_key] = f.tell()
-        lines = [line for line in new_data.strip().split('\n') if line.strip()]
+        lines = [line for line in new_data.strip().split("\n") if line.strip()]
         return lines if lines else None
 
     def _safe_parse_json(self, line: str, label: str) -> Optional[dict]:
@@ -471,8 +475,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
         self._last_agent_action[path_key] = action_text
         tagged_branch = self._tag_branch_with_model(path_key, branch)
         evt = MonitoringEvent(
-            priority=1, event_type='agent', branch=tagged_branch,
-            action='activity', message=action_text, level='info',
+            priority=1,
+            event_type="agent",
+            branch=tagged_branch,
+            action="activity",
+            message=action_text,
+            level="info",
         )
         if self._event_queue:
             self._event_queue.enqueue(evt)
@@ -480,11 +488,11 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
     def _extract_codex_model(self, entry: dict, path_key: str) -> None:
         """Extract model from a Codex JSONL entry if present."""
-        entry_type = entry.get('type', '')
-        payload = entry.get('payload', {})
-        model = ''
-        if entry_type == 'turn_context':
-            model = payload.get('model', '')
+        entry_type = entry.get("type", "")
+        payload = entry.get("payload", {})
+        model = ""
+        if entry_type == "turn_context":
+            model = payload.get("model", "")
         if model:
             self._session_models[path_key] = self._shorten_model(model)
 
@@ -530,12 +538,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
             if current_size <= last_pos:
                 return True
 
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 f.seek(last_pos)
                 new_data = f.read()
                 self._jsonl_positions[path_key] = f.tell()
 
-            lines = [line for line in new_data.strip().split('\n') if line.strip()]
+            lines = [line for line in new_data.strip().split("\n") if line.strip()]
             if not lines:
                 return True
 
@@ -561,8 +569,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
                 tagged_branch = self._tag_branch_with_model(path_key, branch)
                 evt = MonitoringEvent(
-                    priority=1, event_type='agent', branch=tagged_branch,
-                    action='activity', message=action_text, level='info',
+                    priority=1,
+                    event_type="agent",
+                    branch=tagged_branch,
+                    action="activity",
+                    message=action_text,
+                    level="info",
                 )
                 if self._event_queue:
                     self._event_queue.enqueue(evt)
@@ -580,7 +592,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
     def _check_command_indicator(self, action, file_path, branch):
         """Check if file event indicates a command and emit separator if so."""
-        if action != 'modified' or file_path.name not in self._command_indicator_files:
+        if action != "modified" or file_path.name not in self._command_indicator_files:
             return
         cmd = self._command_indicator_files[file_path.name]
         dedup_key = f"{branch}:{cmd}"
@@ -588,8 +600,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
             return
         self._last_file_command[file_path.name] = dedup_key
         cmd_event = MonitoringEvent(
-            priority=2, event_type='command', branch=branch,
-            action='executed', message=cmd, level='info',
+            priority=2,
+            event_type="command",
+            branch=branch,
+            action="executed",
+            message=cmd,
+            level="info",
         )
         if self._event_queue:
             self._event_queue.enqueue(cmd_event)
@@ -605,20 +621,20 @@ class MonitoringFileHandler(FileSystemEventHandler):
             branch = detect_branch_from_path(str(file_path))
 
             # Claude Code JSONL files: parse agent activity
-            if file_path.suffix == '.jsonl' and '.claude/projects/' in path_str:
-                if '/subagents/' in path_str:
-                    branch = branch + ' agent'
+            if file_path.suffix == ".jsonl" and ".claude/projects/" in path_str:
+                if "/subagents/" in path_str:
+                    branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
             # Codex JSONL files: parse agent activity
-            if file_path.suffix == '.jsonl' and '.codex/sessions/' in path_str:
+            if file_path.suffix == ".jsonl" and ".codex/sessions/" in path_str:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):
                     return
 
             # Gemini JSON session files: parse agent activity
-            if file_path.suffix == '.json' and '.gemini/tmp/' in path_str and '/chats/' in path_str:
+            if file_path.suffix == ".json" and ".gemini/tmp/" in path_str and "/chats/" in path_str:
                 gemini_branch = self._get_gemini_branch(file_path, path_str)
                 if self._parse_gemini_activity(file_path, gemini_branch):
                     return
@@ -629,9 +645,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
             display_name = self._build_display_name(file_path)
 
             evt = MonitoringEvent(
-                priority=0, event_type='file', branch=branch, action=action,
+                priority=0,
+                event_type="file",
+                branch=branch,
+                action=action,
                 message=f"{action.upper()}: {display_name}",
-                level=priority_level if priority_level in ['error', 'warning', 'info'] else 'info',
+                level=priority_level if priority_level in ["error", "warning", "info"] else "info",
             )
             if self._event_queue:
                 self._event_queue.enqueue(evt)
@@ -643,6 +662,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
         """Build branch-relative display name for a file path."""
         parts = file_path.parts
         for i, part in enumerate(parts):
-            if part in ('apps', 'handlers', 'modules', 'docs', 'templates'):
-                return '/'.join(parts[i:])
+            if part in ("apps", "handlers", "modules", "docs", "templates"):
+                return "/".join(parts[i:])
         return file_path.name

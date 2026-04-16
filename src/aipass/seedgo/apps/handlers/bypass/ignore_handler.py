@@ -28,9 +28,9 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Template files that exist in spawn template but aren't required in branches
 # Used by architecture_check.py when checking template baseline
 TEMPLATE_IGNORE_PATTERNS = [
-    '.gitkeep',       # Git placeholder files - not actual requirements
-    'notepad.md',     # Optional scratch file
-    '.gitignore',     # Optional - branches inherit from root
+    ".gitkeep",  # Git placeholder files - not actual requirements
+    "notepad.md",  # Optional scratch file
+    ".gitignore",  # Optional - branches inherit from root
 ]
 
 # =============================================
@@ -40,15 +40,15 @@ TEMPLATE_IGNORE_PATTERNS = [
 # Patterns for files/directories to skip during audit
 # Used by standards_audit.py
 AUDIT_IGNORE_PATTERNS = [
-    '__pycache__',
-    '/.archive/',      # Temp archive directories
-    '/.backup/',       # Temp backup directories
-    '/backups/',       # Actual backup storage (backup/backups/)
-    '/artifacts/',     # Build artifacts
-    '.temp',           # Temp files
-    '.old',            # Old files
-    '/deprecated/',    # Deprecated code
-    '/test/'           # Test directories
+    "__pycache__",
+    "/.archive/",  # Temp archive directories
+    "/.backup/",  # Temp backup directories
+    "/backups/",  # Actual backup storage (backup/backups/)
+    "/artifacts/",  # Build artifacts
+    ".temp",  # Temp files
+    ".old",  # Old files
+    "/deprecated/",  # Deprecated code
+    "/test/",  # Test directories
 ]
 
 # =============================================
@@ -57,14 +57,12 @@ AUDIT_IGNORE_PATTERNS = [
 
 # Patterns that have been removed from the system
 # Used by standards_verify.py to detect leftover usage
-DEPRECATED_PATTERNS = {
-    "--verbose": "removed from audit (v0.4.0)",
-    "--full": "removed from audit (v0.4.0)"
-}
+DEPRECATED_PATTERNS = {"--verbose": "removed from audit (v0.4.0)", "--full": "removed from audit (v0.4.0)"}
 
 # =============================================
 # HELPER FUNCTIONS
 # =============================================
+
 
 def get_template_ignore_patterns() -> List[str]:
     """Return list of template files to skip in architecture baseline check

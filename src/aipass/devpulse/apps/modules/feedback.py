@@ -10,7 +10,6 @@ Auto-discovered by devpulse.py via handle_command() convention.
 Routes feedback subcommands to the appropriate handler functions.
 """
 
-
 from rich.console import Console
 
 from aipass.devpulse.apps.handlers.feedback.inbox import (

@@ -68,38 +68,23 @@ DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
 # Required sections with their default data (must match template)
 REQUIRED_SECTIONS = {
-    "ai_mail": {
-        "managed_by": "ai_mail",
-        "new": 0,
-        "opened": 0,
-        "total": 0,
-        "last_updated": ""
-    },
-    "flow": {
-        "managed_by": "flow",
-        "active_plans": 0,
-        "recently_closed": [],
-        "last_updated": ""
-    },
-    "memory": {
-        "managed_by": "memory",
-        "vectors_stored": 0,
-        "notes": {},
-        "last_updated": ""
-    },
+    "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
+    "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
+    "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
     "commons_activity": {
         "managed_by": "the_commons",
         "mentions": 0,
         "new_posts_since_last_visit": 0,
         "new_comments_since_last_visit": 0,
-        "last_updated": ""
-    }
+        "last_updated": "",
+    },
 }
 
 
 # =============================================================================
 # PLACEHOLDER REPLACEMENT
 # =============================================================================
+
 
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
     """
@@ -112,6 +97,7 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
     Returns:
         New dict with placeholders replaced
     """
+
     def _walk(val: Any) -> Any:
         if isinstance(val, str):
             return val.replace("{{BRANCHNAME}}", branch_name)
@@ -129,6 +115,7 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
 # =============================================================================
 # QUICK STATUS CALCULATION (SELF-CONTAINED)
 # =============================================================================
+
 
 def _calculate_quick_status(sections: Dict) -> Dict:
     """
@@ -178,13 +165,14 @@ def _calculate_quick_status(sections: Dict) -> Dict:
         "active_plans": active_plans,
         "commons_mentions": mentions,
         "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear"
+        "summary": ", ".join(parts) if parts else "All clear",
     }
 
 
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
 
 def _create_from_template(template: dict, branch_name: str) -> dict:
     """Create a new dashboard from template with placeholders replaced."""
@@ -208,9 +196,7 @@ def _safe_write_dashboard(
         return False
 
 
-def _apply_structural_updates(
-    data: dict, template: dict, branch_actions: List[str]
-) -> tuple:
+def _apply_structural_updates(data: dict, template: dict, branch_actions: List[str]) -> tuple:
     """Apply structural updates from template to existing dashboard data.
 
     Returns (changed: bool, branch_actions: list).
@@ -260,6 +246,7 @@ def _apply_structural_updates(
 # =============================================================================
 # MAIN PUSH FUNCTION
 # =============================================================================
+
 
 def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     """
@@ -369,12 +356,15 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     if not dry_run and branches_updated_list:
         _update_version_file(branches_updated_list)
 
-    json_handler.log_operation("template_pushed", {
-        "dry_run": dry_run,
-        "branches_scanned": result["branches_scanned"],
-        "branches_updated": result["branches_updated"],
-        "branches_created": result["branches_created"],
-    })
+    json_handler.log_operation(
+        "template_pushed",
+        {
+            "dry_run": dry_run,
+            "branches_scanned": result["branches_scanned"],
+            "branches_updated": result["branches_updated"],
+            "branches_created": result["branches_created"],
+        },
+    )
 
     return result
 
@@ -382,6 +372,7 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
 # =============================================================================
 # VERSION TRACKING
 # =============================================================================
+
 
 def _update_version_file(branches_pushed: List[str]) -> bool:
     """
@@ -427,7 +418,7 @@ def get_template_status() -> Dict[str, Any]:
         "updated_by": None,
         "changes": [],
         "last_push": None,
-        "last_push_branches": []
+        "last_push_branches": [],
     }
 
     if VERSION_FILE.exists():
@@ -450,8 +441,9 @@ def get_template_status() -> Dict[str, Any]:
 # CLI INTERFACE
 # =============================================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys as _sys
+
     _out = _sys.stdout.write
 
     args = _sys.argv[1:]
@@ -498,8 +490,8 @@ if __name__ == '__main__':
         _out(f"Last push:         {tmpl_status.get('last_push', 'never')}\n")
         pushed = tmpl_status.get("last_push_branches", [])
         if pushed:
-            preview = ', '.join(pushed[:5])
-            suffix = '...' if len(pushed) > 5 else ''
+            preview = ", ".join(pushed[:5])
+            suffix = "..." if len(pushed) > 5 else ""
             _out(f"Branches pushed:   {len(pushed)} ({preview}{suffix})\n")
         _out("\n")
         _sys.exit(0)

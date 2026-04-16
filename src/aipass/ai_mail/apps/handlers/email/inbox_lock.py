@@ -33,7 +33,6 @@ else:
     import fcntl
 
 
-
 @contextmanager
 def inbox_lock(inbox_file: Path):
     """
@@ -58,7 +57,7 @@ def inbox_lock(inbox_file: Path):
 
     try:
         # Create/open lock file
-        lock_fd = open(lock_file, 'w', encoding='utf-8')
+        lock_fd = open(lock_file, "w", encoding="utf-8")
 
         # Acquire exclusive lock (blocking - waits for other processes)
         if sys.platform == "win32":

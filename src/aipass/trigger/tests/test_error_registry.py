@@ -20,6 +20,7 @@ from pathlib import Path
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock heavy infrastructure imports and redirect file paths to tmp_path."""
@@ -47,6 +48,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
     from aipass.trigger.apps.config import atomic_write_json
+
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
@@ -59,12 +61,14 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 def _import_registry():
     """Import the error_registry module fresh (after mocking)."""
     import aipass.trigger.apps.handlers.error_registry as er
+
     return er
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _seed_registry(tmp_path: Path, errors: dict | None = None) -> Path:
     """Write a registry JSON file into tmp_path and return its path."""
@@ -82,6 +86,7 @@ def _seed_registry(tmp_path: Path, errors: dict | None = None) -> Path:
 # ===========================================================================
 # 1. Error fingerprinting
 # ===========================================================================
+
 
 def test_same_error_produces_same_fingerprint() -> None:
     """Identical inputs always produce the same SHA1 fingerprint."""
@@ -111,6 +116,7 @@ def test_different_error_type_produces_different_fingerprint() -> None:
 # ===========================================================================
 # 2. Message normalization
 # ===========================================================================
+
 
 def test_normalize_strips_timestamps() -> None:
     """normalize_message replaces ISO timestamps with a placeholder."""
@@ -158,6 +164,7 @@ def test_normalize_collapses_whitespace() -> None:
 # ===========================================================================
 # 3. Error registration -- report() creates new entry
 # ===========================================================================
+
 
 def test_report_creates_new_entry(tmp_path: Path) -> None:
     """report() creates a new registry entry and returns is_new=True."""
@@ -215,6 +222,7 @@ def test_report_invalid_severity_defaults_to_medium(tmp_path: Path) -> None:
 # 4. Duplicate detection
 # ===========================================================================
 
+
 def test_duplicate_report_increments_count(tmp_path: Path) -> None:
     """Reporting the same error twice increments count and returns is_new=False."""
     _seed_registry(tmp_path)
@@ -256,6 +264,7 @@ def test_different_components_are_not_duplicates(tmp_path: Path) -> None:
 # ===========================================================================
 # 5. resolve / update_status
 # ===========================================================================
+
 
 def test_update_status_resolves_error(tmp_path: Path) -> None:
     """update_status sets status to 'resolved' for an existing entry."""
@@ -312,6 +321,7 @@ def test_update_status_suppressed_stores_reason(tmp_path: Path) -> None:
 # ===========================================================================
 # 6. Circuit breaker
 # ===========================================================================
+
 
 def test_circuit_breaker_closed_allows_dispatch(tmp_path: Path) -> None:
     """Circuit breaker in closed state allows dispatch."""
@@ -416,6 +426,7 @@ def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path:
 # 7. should_dispatch -- per-fingerprint backoff
 # ===========================================================================
 
+
 def test_should_dispatch_true_for_new_fingerprint(tmp_path: Path) -> None:
     """should_dispatch returns True for a never-dispatched fingerprint."""
     _seed_registry(tmp_path)
@@ -478,6 +489,7 @@ def test_record_dispatch_increments_count(tmp_path: Path) -> None:
 # ===========================================================================
 # 8. list / query
 # ===========================================================================
+
 
 def test_query_returns_all_entries(tmp_path: Path) -> None:
     """query() with no filters returns all entries."""
@@ -557,6 +569,7 @@ def test_query_empty_registry(tmp_path: Path) -> None:
 # 9. get_entry / prefix matching
 # ===========================================================================
 
+
 def test_get_entry_exact_match(tmp_path: Path) -> None:
     """get_entry returns the entry for an exact fingerprint."""
     _seed_registry(tmp_path)
@@ -594,6 +607,7 @@ def test_get_entry_not_found(tmp_path: Path) -> None:
 # ===========================================================================
 # 10. clear_resolved
 # ===========================================================================
+
 
 def test_clear_resolved_removes_old_resolved(tmp_path: Path) -> None:
     """clear_resolved removes resolved entries older than N days."""
@@ -652,6 +666,7 @@ def test_clear_resolved_keeps_non_resolved(tmp_path: Path) -> None:
 # 11. get_stats
 # ===========================================================================
 
+
 def test_get_stats_empty_registry(tmp_path: Path) -> None:
     """get_stats on empty registry returns zeroed counters."""
     _seed_registry(tmp_path)
@@ -684,6 +699,7 @@ def test_get_stats_counts_correctly(tmp_path: Path) -> None:
 # ===========================================================================
 # 12. update_source_fix_status
 # ===========================================================================
+
 
 def test_update_source_fix_status_valid(tmp_path: Path) -> None:
     """update_source_fix_status sets fix tracking on an existing entry."""
@@ -726,6 +742,7 @@ def test_update_source_fix_status_missing_fingerprint(tmp_path: Path) -> None:
 # 13. User-error auto-suppression
 # ===========================================================================
 
+
 def test_user_error_auto_suppressed(tmp_path: Path) -> None:
     """Errors matching user-error patterns are auto-suppressed on report."""
     _seed_registry(tmp_path)
@@ -756,6 +773,7 @@ def test_non_user_error_not_suppressed(tmp_path: Path) -> None:
 # ===========================================================================
 # 14. Registry I/O edge cases
 # ===========================================================================
+
 
 def test_load_registry_creates_default_when_file_missing(tmp_path: Path) -> None:
     """_load_registry returns a default structure when the file does not exist."""
@@ -795,6 +813,7 @@ def test_save_registry_creates_parent_dirs(tmp_path: Path) -> None:
 # ===========================================================================
 # 15. Contract gap tests
 # ===========================================================================
+
 
 def test_normalize_message_empty_string() -> None:
     """normalize_message('') returns empty string."""
@@ -843,6 +862,7 @@ def test_report_return_type_is_dict(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Empty / corrupt JSON file resilience
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyJsonResilience:
     """Verify no crashes when JSON files are empty or corrupt."""

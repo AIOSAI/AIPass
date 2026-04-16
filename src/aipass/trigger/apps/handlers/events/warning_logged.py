@@ -27,7 +27,6 @@ from typing import Any
 from aipass.trigger.apps.handlers.json import json_handler
 
 
-
 def handle_warning_logged(
     branch: str | None = None,
     message: str | None = None,
@@ -36,7 +35,7 @@ def handle_warning_logged(
     log_file: str | None = None,
     module_name: str | None = None,
     level: str | None = None,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> None:
     """
     Handle warning_logged event.

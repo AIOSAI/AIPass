@@ -34,9 +34,9 @@ MAX_HASHES = 500
 MAX_LOOKBACK_HOURS = 24
 
 # DPLAN-037: Safeguards to prevent unbounded scanning
-MAX_ERRORS_PER_SCAN = 50          # Stop after this many new errors found
-MAX_FILE_SIZE_BYTES = 512_000     # Skip files larger than 500KB
-SCAN_TIME_BUDGET_SECONDS = 5.0    # Abort entire scan after this many seconds
+MAX_ERRORS_PER_SCAN = 50  # Stop after this many new errors found
+MAX_FILE_SIZE_BYTES = 512_000  # Skip files larger than 500KB
+SCAN_TIME_BUDGET_SECONDS = 5.0  # Abort entire scan after this many seconds
 
 _HANDLER_LOG = TRIGGER_ROOT / "logs" / "startup_handler.log"
 
@@ -46,7 +46,7 @@ def _log_warning(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass
@@ -56,32 +56,32 @@ def _load_trigger_data() -> Dict[str, Any]:
     """Load trigger_data.json with error_catchup section."""
     try:
         if TRIGGER_DATA_FILE.exists():
-            with open(TRIGGER_DATA_FILE, 'r', encoding='utf-8') as f:
+            with open(TRIGGER_DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if 'error_catchup' not in data:
-                data['error_catchup'] = {
-                    'last_scan_timestamp': None,
-                    'processed_hashes': [],
-                    'max_hashes': MAX_HASHES,
-                    'max_lookback_hours': MAX_LOOKBACK_HOURS
+            if "error_catchup" not in data:
+                data["error_catchup"] = {
+                    "last_scan_timestamp": None,
+                    "processed_hashes": [],
+                    "max_hashes": MAX_HASHES,
+                    "max_lookback_hours": MAX_LOOKBACK_HOURS,
                 }
             return data
     except Exception as exc:
         _log_warning(f"load trigger data failed: {exc}")
         return {
-            'error_catchup': {
-                'last_scan_timestamp': None,
-                'processed_hashes': [],
-                'max_hashes': MAX_HASHES,
-                'max_lookback_hours': MAX_LOOKBACK_HOURS
+            "error_catchup": {
+                "last_scan_timestamp": None,
+                "processed_hashes": [],
+                "max_hashes": MAX_HASHES,
+                "max_lookback_hours": MAX_LOOKBACK_HOURS,
             }
         }
     return {
-        'error_catchup': {
-            'last_scan_timestamp': None,
-            'processed_hashes': [],
-            'max_hashes': MAX_HASHES,
-            'max_lookback_hours': MAX_LOOKBACK_HOURS
+        "error_catchup": {
+            "last_scan_timestamp": None,
+            "processed_hashes": [],
+            "max_hashes": MAX_HASHES,
+            "max_lookback_hours": MAX_LOOKBACK_HOURS,
         }
     }
 
@@ -103,7 +103,7 @@ def _log_suppression(reason: str) -> None:
     """
     try:
         SUPPRESSED_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(SUPPRESSED_LOG, 'a', encoding='utf-8') as f:
+        with open(SUPPRESSED_LOG, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} | error_catchup: {reason}\n")
     except Exception as exc:
         _log_warning(f"log suppression write failed: {exc}")
@@ -131,30 +131,30 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
     """
     try:
         # Prax format: timestamp | module | LEVEL | message
-        if ' | ' in log_line:
-            parts = log_line.split(' | ', 3)
+        if " | " in log_line:
+            parts = log_line.split(" | ", 3)
             if len(parts) >= 4:
                 level = parts[2].strip().upper()
-                if level in ('ERROR', 'CRITICAL'):
+                if level in ("ERROR", "CRITICAL"):
                     return {
-                        'timestamp': parts[0].strip(),
-                        'module': parts[1].strip(),
-                        'level': level,
-                        'message': parts[3].strip()
+                        "timestamp": parts[0].strip(),
+                        "module": parts[1].strip(),
+                        "level": level,
+                        "message": parts[3].strip(),
                     }
             return None
 
         # Python logging format: timestamp - module - LEVEL - message
-        if ' - ' in log_line:
-            parts = log_line.split(' - ', 3)
+        if " - " in log_line:
+            parts = log_line.split(" - ", 3)
             if len(parts) >= 4:
                 level = parts[2].strip().upper()
-                if level in ('ERROR', 'CRITICAL'):
+                if level in ("ERROR", "CRITICAL"):
                     return {
-                        'timestamp': parts[0].strip(),
-                        'module': parts[1].strip(),
-                        'level': level,
-                        'message': parts[3].strip()
+                        "timestamp": parts[0].strip(),
+                        "module": parts[1].strip(),
+                        "level": level,
+                        "message": parts[3].strip(),
                     }
 
         return None
@@ -173,9 +173,9 @@ def _extract_timestamp(timestamp_str: str) -> Optional[datetime]:
         datetime object, or None if unparseable
     """
     formats = [
-        '%Y-%m-%d %H:%M:%S,%f',
-        '%Y-%m-%d %H:%M:%S.%f',
-        '%Y-%m-%d %H:%M:%S',
+        "%Y-%m-%d %H:%M:%S,%f",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d %H:%M:%S",
     ]
     for fmt in formats:
         try:
@@ -189,12 +189,12 @@ def _detect_branch_from_log(log_file: str) -> str:
     """Detect branch from log filename (e.g., drone_ops.log -> DRONE)."""
     try:
         name = Path(log_file).stem
-        if '_' in name:
-            return name.split('_')[0].upper()
+        if "_" in name:
+            return name.split("_")[0].upper()
         return name.upper()
     except Exception as exc:
         _log_warning(f"detect branch from log failed: {exc}")
-        return 'UNKNOWN'
+        return "UNKNOWN"
 
 
 def _scan_single_log_file(
@@ -209,12 +209,11 @@ def _scan_single_log_file(
     Returns:
         True if scanning should continue, False if a limit was hit.
     """
-    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             if len(errors) >= MAX_ERRORS_PER_SCAN:
                 _log_suppression(
-                    f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached. "
-                    f"Stopping scan to prevent event storm."
+                    f"MAX_ERRORS_PER_SCAN ({MAX_ERRORS_PER_SCAN}) reached. Stopping scan to prevent event storm."
                 )
                 return False
 
@@ -230,35 +229,36 @@ def _scan_single_log_file(
             if not parsed:
                 continue
 
-            line_ts = _extract_timestamp(parsed['timestamp'])
+            line_ts = _extract_timestamp(parsed["timestamp"])
             if line_ts and line_ts < cutoff:
                 continue
 
-            module = parsed['module']
-            message = parsed['message']
+            module = parsed["module"]
+            message = parsed["message"]
             error_hash = _generate_error_hash(module, message)
 
             if error_hash in processed_hashes:
                 continue
 
             branch = _detect_branch_from_log(str(log_file))
-            errors.append({
-                'branch': branch,
-                'module': module,
-                'message': message,
-                'log_file': str(log_file),
-                'error_hash': error_hash,
-                'timestamp': line_ts.isoformat() if line_ts else datetime.now().isoformat(),
-                'level': parsed['level'].lower()
-            })
+            errors.append(
+                {
+                    "branch": branch,
+                    "module": module,
+                    "message": message,
+                    "log_file": str(log_file),
+                    "error_hash": error_hash,
+                    "timestamp": line_ts.isoformat() if line_ts else datetime.now().isoformat(),
+                    "level": parsed["level"].lower(),
+                }
+            )
             processed_hashes.add(error_hash)
 
     return True
 
 
 def _scan_system_logs_for_errors(
-    since_timestamp: Optional[datetime],
-    processed_hashes: Set[str]
+    since_timestamp: Optional[datetime], processed_hashes: Set[str]
 ) -> List[Dict[str, Any]]:
     """Scan system logs for ERROR entries since timestamp.
 
@@ -301,9 +301,7 @@ def _scan_system_logs_for_errors(
             continue
 
         try:
-            should_continue = _scan_single_log_file(
-                log_file, cutoff, processed_hashes, errors, scan_start
-            )
+            should_continue = _scan_single_log_file(log_file, cutoff, processed_hashes, errors, scan_start)
             if not should_continue:
                 break
         except Exception as exc:
@@ -311,10 +309,7 @@ def _scan_system_logs_for_errors(
             continue
 
     if files_skipped_size > 0:
-        _log_suppression(
-            f"Skipped {files_skipped_size} file(s) exceeding "
-            f"MAX_FILE_SIZE_BYTES ({MAX_FILE_SIZE_BYTES})"
-        )
+        _log_suppression(f"Skipped {files_skipped_size} file(s) exceeding MAX_FILE_SIZE_BYTES ({MAX_FILE_SIZE_BYTES})")
 
     return errors
 
@@ -333,9 +328,9 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
     """
     try:
         data = _load_trigger_data()
-        catchup = data.get('error_catchup', {})
+        catchup = data.get("error_catchup", {})
 
-        last_scan = catchup.get('last_scan_timestamp')
+        last_scan = catchup.get("last_scan_timestamp")
         since_ts = None
         if last_scan:
             try:
@@ -343,22 +338,22 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
             except Exception as exc:
                 _log_warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
 
-        processed_hashes = set(catchup.get('processed_hashes', []))
+        processed_hashes = set(catchup.get("processed_hashes", []))
 
         errors = _scan_system_logs_for_errors(since_ts, processed_hashes)
 
         if errors and fire_event is not None:
             for error in errors:
-                fire_event('error_detected', **error)
+                fire_event("error_detected", **error)
 
         hash_list = list(processed_hashes)
-        max_h = catchup.get('max_hashes', MAX_HASHES)
+        max_h = catchup.get("max_hashes", MAX_HASHES)
         if len(hash_list) > max_h:
             hash_list = hash_list[-max_h:]
 
-        catchup['last_scan_timestamp'] = datetime.now().isoformat()
-        catchup['processed_hashes'] = hash_list
-        data['error_catchup'] = catchup
+        catchup["last_scan_timestamp"] = datetime.now().isoformat()
+        catchup["processed_hashes"] = hash_list
+        data["error_catchup"] = catchup
 
         _save_trigger_data(data)
 
@@ -377,6 +372,7 @@ def _run_memory_check() -> None:
     """
     try:
         from aipass.memory.apps.modules.rollover import check_and_rollover
+
         check_and_rollover()
     except ImportError:
         return  # Memory not available
@@ -392,7 +388,7 @@ def handle_startup(**kwargs: Any) -> None:
         **kwargs: Event data, may include 'fire_event' callback
     """
     # Error catch-up (scan for missed errors)
-    fire_event = kwargs.get('fire_event')
+    fire_event = kwargs.get("fire_event")
     _run_error_catchup(fire_event)
 
     # Memory rollover check

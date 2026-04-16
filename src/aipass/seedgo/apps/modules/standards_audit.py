@@ -54,6 +54,7 @@ from aipass.drone.apps.modules import normalize_branch_arg
 # COMMAND HANDLER
 # =============================================================================
 
+
 def _discover_packs() -> dict:
     """Discover available checker packs from handlers/ directory.
 
@@ -189,23 +190,23 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     positional = []
     for arg in args:
-        if arg in ['--show-bypasses', '--bypasses', '-b']:
+        if arg in ["--show-bypasses", "--bypasses", "-b"]:
             show_bypasses = True
-        elif arg in ['--help', '-h', 'help']:
+        elif arg in ["--help", "-h", "help"]:
             # Pack-specific help (placeholder)
             print_help()
             return True
-        elif not arg.startswith('-'):
+        elif not arg.startswith("-"):
             positional.append(arg)
 
     if len(positional) >= 1:
         pack_name = positional[0]
     if len(positional) >= 2:
         branch_arg = positional[1]
-        if not branch_arg.startswith('@'):
+        if not branch_arg.startswith("@"):
             error(
                 f"Branch name must use @ prefix: '@{branch_arg}'",
-                suggestion=f"Usage: drone @seedgo audit {pack_name} @{branch_arg}"
+                suggestion=f"Usage: drone @seedgo audit {pack_name} @{branch_arg}",
             )
             return True
         specific_branch = normalize_branch_arg(branch_arg)
@@ -216,7 +217,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         available = ", ".join(packs.keys())
         error(
             f"Unknown pack: '{pack_name}'",
-            suggestion=f"Available packs: {available}. Usage: drone @seedgo audit {next(iter(packs), '<pack>')}"
+            suggestion=f"Available packs: {available}. Usage: drone @seedgo audit {next(iter(packs), '<pack>')}",
         )
         return True
 
@@ -235,16 +236,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     if specific_branch and _is_branch_private(specific_branch):
         if not check_internal_access(specific_branch):
             console.print(
-                f"[red]Branch '{specific_branch}' is private "
-                f"— audit access restricted to internal use only[/red]"
+                f"[red]Branch '{specific_branch}' is private — audit access restricted to internal use only[/red]"
             )
             return True
 
     # Log audit start
-    json_handler.log_operation(
-        "standards_audit_started",
-        {"pack": pack_name, "specific_branch": specific_branch}
-    )
+    json_handler.log_operation("standards_audit_started", {"pack": pack_name, "specific_branch": specific_branch})
 
     # Discover branches
     # When targeting a specific private branch from inside its CWD,
@@ -257,7 +254,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     branches = discover_branches(include_private=_include_private)
 
     if specific_branch:
-        branches = [b for b in branches if b['name'].upper() == specific_branch.upper()]
+        branches = [b for b in branches if b["name"].upper() == specific_branch.upper()]
         if not branches:
             console.print(f"[red]Branch '{specific_branch}' not found[/red]")
             return True
@@ -286,21 +283,21 @@ def handle_command(command: str, args: List[str]) -> bool:
         task = progress.add_task("Scanning...", total=total_branches)
 
         for idx, branch in enumerate(branches, 1):
-            branch_name = branch['name']
+            branch_name = branch["name"]
             progress.update(task, description=f"[cyan]{branch_name}[/cyan]")
 
             # Load bypass rules for this branch
-            bypass_rules = load_bypass_rules(branch['path'])
+            bypass_rules = load_bypass_rules(branch["path"])
 
             branch_start = time.monotonic()
             result = audit_branch(branch, bypass_rules, pack_path=pack_path)
             branch_elapsed = time.monotonic() - branch_start
 
-            result['elapsed'] = branch_elapsed
+            result["elapsed"] = branch_elapsed
             audit_results.append(result)
 
             # Print completed branch result (persists above progress bar)
-            avg = result.get('average', 0)
+            avg = result.get("average", 0)
             style = "green" if avg >= 90 else "yellow" if avg >= 75 else "red"
             progress.console.print(
                 f"  [dim][{idx}/{total_branches}][/dim] [cyan]{branch_name:<12}[/cyan] [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]"
@@ -315,15 +312,12 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Calculate system-wide averages for each standard
     standard_scores = defaultdict(list)
     for result in audit_results:
-        for standard, score in result['scores'].items():
+        for standard, score in result["scores"].items():
             standard_scores[standard].append(score)
 
-    system_averages = {
-        standard: int(sum(scores) / len(scores))
-        for standard, scores in standard_scores.items()
-    }
+    system_averages = {standard: int(sum(scores) / len(scores)) for standard, scores in standard_scores.items()}
 
-    overall_system_avg = int(sum(r['average'] for r in audit_results) / len(audit_results)) if audit_results else 0
+    overall_system_avg = int(sum(r["average"] for r in audit_results) / len(audit_results)) if audit_results else 0
 
     # Print results — detailed for single branch, skip for full audit
     if not is_compact:
@@ -340,8 +334,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         {
             "pack": pack_name,
             "branches_audited": len(audit_results),
-            "average_compliance": int(sum(r['average'] for r in audit_results) / len(audit_results)) if audit_results else 0
-        }
+            "average_compliance": int(sum(r["average"] for r in audit_results) / len(audit_results))
+            if audit_results
+            else 0,
+        },
     )
 
     return True
@@ -377,7 +373,7 @@ def print_help():
 
 if __name__ == "__main__":
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
@@ -385,10 +381,7 @@ if __name__ == "__main__":
     logger.info("Prax logger connected to standards_audit")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "audit_run",
-        {"command": "standalone", "args": sys.argv[1:]}
-    )
+    json_handler.log_operation("audit_run", {"command": "standalone", "args": sys.argv[1:]})
 
     # Run audit
     handle_command("audit", sys.argv[1:])

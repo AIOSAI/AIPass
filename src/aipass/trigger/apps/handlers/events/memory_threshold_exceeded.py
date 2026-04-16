@@ -41,18 +41,13 @@ def _log_warning(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass
 
 
-def _build_compression_message(
-    branch: str,
-    file_name: str,
-    line_count: int,
-    threshold: int
-) -> str:
+def _build_compression_message(branch: str, file_name: str, line_count: int, threshold: int) -> str:
     """
     Build compression notification message.
 
@@ -110,7 +105,7 @@ def handle_memory_threshold_exceeded(
     line_count: int | None = None,
     threshold: int | None = None,
     timestamp: str | None = None,
-    **_kwargs: Any
+    **_kwargs: Any,
 ) -> None:
     """
     Handle memory_threshold_exceeded event - send compression notification.
@@ -151,22 +146,19 @@ def handle_memory_threshold_exceeded(
         subject = f"[MEMORY] {file_name} exceeded {threshold} lines - compress needed"
 
         notification_message = _build_compression_message(
-            branch=branch,
-            file_name=file_name,
-            line_count=line_count,
-            threshold=threshold
+            branch=branch, file_name=file_name, line_count=line_count, threshold=threshold
         )
 
         # Build and deliver email
         email_data = {
-            'from': '@trigger',
-            'from_name': 'Trigger',
-            'to': target_branch,
-            'subject': subject,
-            'message': notification_message,
-            'timestamp': timestamp,
-            'auto_execute': False,
-            'priority': 'normal'
+            "from": "@trigger",
+            "from_name": "Trigger",
+            "to": target_branch,
+            "subject": subject,
+            "message": notification_message,
+            "timestamp": timestamp,
+            "auto_execute": False,
+            "priority": "normal",
         }
 
         deliver_email_to_branch(target_branch, email_data)

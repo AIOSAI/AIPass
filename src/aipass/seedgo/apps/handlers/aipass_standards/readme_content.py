@@ -12,8 +12,8 @@ README Standards Content
 Provides Rich-formatted reference text for the README standard.
 """
 
-
 from aipass.seedgo.apps.handlers.json import json_handler
+
 
 def get_readme_standards() -> str:
     """Return Rich-formatted README standards text"""

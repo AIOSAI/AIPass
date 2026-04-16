@@ -20,6 +20,7 @@ from pathlib import Path
 # HELPERS
 # =============================================
 
+
 def _fresh_import_load(monkeypatch, tmp_path):
     """Import load module with a fresh state and patched paths.
 
@@ -75,6 +76,7 @@ def _fresh_import_ignore(monkeypatch, tmp_path):
 # TESTS: get_system_logs_dir
 # =============================================
 
+
 class TestGetSystemLogsDir:
     """Tests for get_system_logs_dir()."""
 
@@ -116,6 +118,7 @@ class TestGetSystemLogsDir:
 # =============================================
 # TESTS: get_module_logs_dir
 # =============================================
+
 
 class TestGetModuleLogsDir:
     """Tests for get_module_logs_dir(module_name)."""
@@ -182,6 +185,7 @@ class TestGetModuleLogsDir:
 # TESTS: lines_to_bytes
 # =============================================
 
+
 class TestLinesToBytes:
     """Tests for lines_to_bytes(num_lines, avg_line_length)."""
 
@@ -215,6 +219,7 @@ class TestLinesToBytes:
 # TESTS: get_debug_prints_enabled
 # =============================================
 
+
 class TestGetDebugPrintsEnabled:
     """Tests for get_debug_prints_enabled()."""
 
@@ -232,18 +237,14 @@ class TestGetDebugPrintsEnabled:
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({
-            "config": {"debug_prints_enabled": True}
-        }), encoding="utf-8")
+        config_file.write_text(json.dumps({"config": {"debug_prints_enabled": True}}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is True
 
     def test_false_when_disabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         load_mod = _fresh_import_load(monkeypatch, tmp_path)
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({
-            "config": {"debug_prints_enabled": False}
-        }), encoding="utf-8")
+        config_file.write_text(json.dumps({"config": {"debug_prints_enabled": False}}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_false_when_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
@@ -271,6 +272,7 @@ class TestGetDebugPrintsEnabled:
 # =============================================
 # TESTS: load_log_config
 # =============================================
+
 
 class TestLoadLogConfig:
     """Tests for load_log_config()."""
@@ -302,18 +304,10 @@ class TestLoadLogConfig:
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_data = {
             "config": {
-                "system_logs": {
-                    "max_lines": 2000,
-                    "backup_count": 3,
-                    "log_level": "DEBUG"
-                },
-                "local_logs": {
-                    "max_lines": 500,
-                    "backup_count": 2,
-                    "log_level": "WARNING"
-                },
+                "system_logs": {"max_lines": 2000, "backup_count": 3, "log_level": "DEBUG"},
+                "local_logs": {"max_lines": 500, "backup_count": 2, "log_level": "WARNING"},
                 "log_format": "%(message)s",
-                "date_format": "%H:%M:%S"
+                "date_format": "%H:%M:%S",
             }
         }
         config_file.write_text(json.dumps(config_data), encoding="utf-8")
@@ -342,15 +336,7 @@ class TestLoadLogConfig:
         config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         # Config with only system_logs — local_logs should fall back to default
-        config_data = {
-            "config": {
-                "system_logs": {
-                    "max_lines": 3000,
-                    "backup_count": 5,
-                    "log_level": "ERROR"
-                }
-            }
-        }
+        config_data = {"config": {"system_logs": {"max_lines": 3000, "backup_count": 5, "log_level": "ERROR"}}}
         config_file.write_text(json.dumps(config_data), encoding="utf-8")
 
         result = load_mod.load_log_config()
@@ -378,6 +364,7 @@ class TestLoadLogConfig:
 # TESTS: load_ignore_patterns_from_config
 # =============================================
 
+
 class TestLoadIgnorePatternsFromConfig:
     """Tests for load_ignore_patterns_from_config()."""
 
@@ -403,11 +390,7 @@ class TestLoadIgnorePatternsFromConfig:
         ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_data = {
-            "config": {
-                "ignore_patterns": ["custom_dir", "another_dir", ".hidden"]
-            }
-        }
+        config_data = {"config": {"ignore_patterns": ["custom_dir", "another_dir", ".hidden"]}}
         config_file.write_text(json.dumps(config_data), encoding="utf-8")
 
         result = ip_mod.load_ignore_patterns_from_config()
@@ -418,11 +401,7 @@ class TestLoadIgnorePatternsFromConfig:
         ip_mod = _fresh_import_ignore(monkeypatch, tmp_path)
         config_file = ip_mod.PRAX_LOGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_data = {
-            "config": {
-                "ignore_patterns": ["a", "b", "a"]
-            }
-        }
+        config_data = {"config": {"ignore_patterns": ["a", "b", "a"]}}
         config_file.write_text(json.dumps(config_data), encoding="utf-8")
 
         result = ip_mod.load_ignore_patterns_from_config()

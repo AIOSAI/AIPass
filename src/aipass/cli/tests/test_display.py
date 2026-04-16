@@ -15,6 +15,7 @@ from aipass.cli.apps.modules import display
 # Helpers
 # =============================================================================
 
+
 def _make_capture_console():
     """Return (console, get_output) for capturing Rich output.
 
@@ -32,6 +33,7 @@ def _make_capture_console():
 # =============================================================================
 # handle_command routing tests
 # =============================================================================
+
 
 class TestHandleCommandRouting:
     """Verify handle_command dispatches to the correct function and returns the right bool."""
@@ -102,23 +104,28 @@ class TestHandleCommandRouting:
 # header() output tests
 # =============================================================================
 
+
 class TestHeader:
     """Verify header() renders title and optional details."""
 
     def test_header_contains_title(self):
         cons, get_output = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.header("My Title")
         output = get_output()
         assert "My Title" in output
 
     def test_header_renders_details(self):
         cons, get_output = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.header("Build", details={"Branch": "main", "Status": "ok"})
         output = get_output()
         assert "Branch:" in output
@@ -128,9 +135,11 @@ class TestHeader:
 
     def test_header_without_details_omits_kv(self):
         cons, get_output = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.header("Solo Title")
         output = get_output()
         # Should have the title but not a key-value separator pattern
@@ -139,9 +148,11 @@ class TestHeader:
     def test_header_fires_trigger_when_available(self):
         cons, _get_output = _make_capture_console()
         mock_trigger = MagicMock()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "_TRIGGER", mock_trigger), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", mock_trigger),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.header("Triggered Title")
         mock_trigger.fire.assert_called_once_with("cli_header_displayed", title="Triggered Title")
 
@@ -149,6 +160,7 @@ class TestHeader:
 # =============================================================================
 # success() output tests
 # =============================================================================
+
 
 class TestSuccess:
     """Verify success() renders message and kwargs."""
@@ -172,6 +184,7 @@ class TestSuccess:
 # =============================================================================
 # error() output tests
 # =============================================================================
+
 
 class TestError:
     """Verify error() renders to stderr console with optional suggestion."""
@@ -203,6 +216,7 @@ class TestError:
 # warning() output tests
 # =============================================================================
 
+
 class TestWarning:
     """Verify warning() renders to stderr console with optional details."""
 
@@ -224,6 +238,7 @@ class TestWarning:
 # =============================================================================
 # section() output tests
 # =============================================================================
+
 
 class TestSection:
     """Verify section() renders title and separator."""
@@ -247,6 +262,7 @@ class TestSection:
 # run_demo() integration test
 # =============================================================================
 
+
 class TestRunDemo:
     """Verify run_demo logs operation and produces output."""
 
@@ -254,10 +270,12 @@ class TestRunDemo:
     def test_run_demo_logs_operation(self, mock_log):
         cons, _ = _make_capture_console()
         err_cons, _ = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.run_demo()
         mock_log.assert_called_once_with("display_demo")
 
@@ -265,10 +283,12 @@ class TestRunDemo:
     def test_run_demo_renders_expected_content(self, mock_log):
         cons, get_output = _make_capture_console()
         err_cons, get_err_output = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True):
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
             display.run_demo()
         output = get_output()
         assert "Demo" in output
@@ -279,6 +299,7 @@ class TestRunDemo:
 # =============================================================================
 # fatal() output tests
 # =============================================================================
+
 
 class TestFatal:
     """Verify fatal() renders error to stderr console and exits with code 1."""
@@ -315,6 +336,7 @@ class TestFatal:
 # =============================================================================
 # Infrastructure mocking tests
 # =============================================================================
+
 
 class TestInfrastructureMocking:
     """Verify display module can be safely reloaded after sys.modules mocking."""

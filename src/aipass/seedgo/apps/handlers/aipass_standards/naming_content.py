@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_naming_standards() -> str:
     """Return formatted naming standards content with Rich markup
 

@@ -14,6 +14,7 @@ Provides Rich-formatted reference text for the log handler rotation standard.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_log_handler_standards() -> str:
     """Return Rich-formatted log handler standards text"""
     json_handler.log_operation("standard_content_queried", {"standard": "log_handler"})

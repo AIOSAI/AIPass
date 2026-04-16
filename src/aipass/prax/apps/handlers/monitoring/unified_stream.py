@@ -30,6 +30,7 @@ try:
 except ImportError as e:
     logger.info(f"[unified_stream] CLI console not available, falling back to rich.Console: {e}")
     from rich.console import Console
+
     console = Console()
 
 # Thread safety
@@ -37,31 +38,31 @@ _print_lock = Lock()
 
 # Color schemes by event type and level
 COLORS = {
-    'file_created': 'green',
-    'file_modified': 'yellow',
-    'file_deleted': 'red',
-    'file_moved': 'blue',
-    'log_info': 'white',
-    'log_warning': 'yellow',
-    'log_error': 'red',
-    'log_critical': 'bold red',
-    'module_loaded': 'cyan',
-    'module_error': 'red',
-    'system_info': 'blue',
-    'system_warning': 'yellow',
-    'system_error': 'bold red',
+    "file_created": "green",
+    "file_modified": "yellow",
+    "file_deleted": "red",
+    "file_moved": "blue",
+    "log_info": "white",
+    "log_warning": "yellow",
+    "log_error": "red",
+    "log_critical": "bold red",
+    "module_loaded": "cyan",
+    "module_error": "red",
+    "system_info": "blue",
+    "system_warning": "yellow",
+    "system_error": "bold red",
 }
 
 # Symbols for different event types
 SYMBOLS = {
-    'file': '📁',
-    'log': '📝',
-    'module': '⚡',
-    'system': '🔧',
-    'error': '❌',
-    'warning': '⚠️',
-    'success': '✅',
-    'info': 'ℹ️',
+    "file": "📁",
+    "log": "📝",
+    "module": "⚡",
+    "system": "🔧",
+    "error": "❌",
+    "warning": "⚠️",
+    "success": "✅",
+    "info": "ℹ️",
 }
 
 # Branch display width — wide enough for three-tier labels like AIPASS/DEVPULSE/OPUS
@@ -69,11 +70,11 @@ BRANCH_WIDTH = 24
 
 # Level-based color mapping (simplified)
 LEVEL_COLORS = {
-    'error': 'red',
-    'warning': 'yellow',
-    'critical': 'bold red',
-    'info': 'white',
-    'success': 'green',
+    "error": "red",
+    "warning": "yellow",
+    "critical": "bold red",
+    "info": "white",
+    "success": "green",
 }
 
 # Branch-specific colors for visual distinction.
@@ -81,29 +82,29 @@ LEVEL_COLORS = {
 # Internal AIPass branches also appear as bare names for non-session events.
 BRANCH_COLORS = {
     # Internal AIPass branches — individually colored for non-session events
-    'SEEDGO': 'green',
-    'DRONE': 'cyan',
-    'FLOW': 'blue',
-    'PRAX': 'magenta',
-    'CLI': 'yellow',
-    'AI_MAIL': 'bright_cyan',
-    'BACKUP': 'bright_green',
-    'MEMORY': 'bright_magenta',
-    'DEVPULSE': 'bright_yellow',
-    'API': 'bright_red',
-    'SECURITY': 'red',
-    'TRIGGER': 'bright_red',
-    'SPEAKEASY': 'bright_white',
-    'THE_COMMONS': 'bright_green',
-    'ASSISTANT': 'bright_yellow',
+    "SEEDGO": "green",
+    "DRONE": "cyan",
+    "FLOW": "blue",
+    "PRAX": "magenta",
+    "CLI": "yellow",
+    "AI_MAIL": "bright_cyan",
+    "BACKUP": "bright_green",
+    "MEMORY": "bright_magenta",
+    "DEVPULSE": "bright_yellow",
+    "API": "bright_red",
+    "SECURITY": "red",
+    "TRIGGER": "bright_red",
+    "SPEAKEASY": "bright_white",
+    "THE_COMMONS": "bright_green",
+    "ASSISTANT": "bright_yellow",
     # Project-level keys — used for three-tier labels (first segment of PROJECT/AGENT/MODEL)
-    'AIPASS': 'bold white',      # All internal AIPass agent sessions
-    'AIPL': 'bright_blue',       # AIPL external project
-    'VERA-STUDIO': 'bright_cyan', # Vera Studio external project
+    "AIPASS": "bold white",  # All internal AIPass agent sessions
+    "AIPL": "bright_blue",  # AIPL external project
+    "VERA-STUDIO": "bright_cyan",  # Vera Studio external project
 }
 
 
-def print_event(event_type: str, branch: str, message: str, level: str = 'info', pid: Optional[int] = None):
+def print_event(event_type: str, branch: str, message: str, level: str = "info", pid: Optional[int] = None):
     """
     Format and print event with branch attribution
 
@@ -131,10 +132,10 @@ def print_event(event_type: str, branch: str, message: str, level: str = 'info',
         # Get branch color (unique per branch)
         # Strip suffixes for color lookup: 'DEVPULSE AGENT' → DEVPULSE, 'DEVPULSE/opus' → DEVPULSE
         branch_upper = branch.upper()
-        base_branch = branch_upper.split('/')[0]  # strip model tag
-        if base_branch.endswith(' AGENT'):
+        base_branch = branch_upper.split("/")[0]  # strip model tag
+        if base_branch.endswith(" AGENT"):
             base_branch = base_branch[:-6]
-        branch_color = BRANCH_COLORS.get(base_branch, 'white')
+        branch_color = BRANCH_COLORS.get(base_branch, "white")
 
         # Format branch label with optional PID
         if pid:
@@ -144,7 +145,7 @@ def print_event(event_type: str, branch: str, message: str, level: str = 'info',
         branch_formatted = f"[{branch_color}][{branch_label:<{BRANCH_WIDTH}}][/{branch_color}]"
 
         # Get message color based on level
-        msg_color = LEVEL_COLORS.get(level, 'white')
+        msg_color = LEVEL_COLORS.get(level, "white")
 
         # Format and print - timestamp, branch colored, message colored by level
         console.print(f"[dim]{timestamp}[/dim] {branch_formatted} [{msg_color}]{message}[/{msg_color}]")
@@ -161,17 +162,17 @@ def print_command_separator(branch: str, command: str, caller: Optional[str] = N
         target: Branch being acted upon (optional, e.g. audit target)
     """
     with _print_lock:
-        branch_color = BRANCH_COLORS.get(branch.upper(), 'white')
+        branch_color = BRANCH_COLORS.get(branch.upper(), "white")
         console.print()
         console.print(f"[bold {branch_color}]{'─' * 60}[/bold {branch_color}]")
 
         # Build context line: CALLER → TARGET
         context_parts = []
-        if caller and caller.upper() != 'UNKNOWN':
-            caller_color = BRANCH_COLORS.get(caller.upper(), 'cyan')
+        if caller and caller.upper() != "UNKNOWN":
+            caller_color = BRANCH_COLORS.get(caller.upper(), "cyan")
             context_parts.append(f"[{caller_color}]{caller}[/{caller_color}]")
         if target:
-            target_color = BRANCH_COLORS.get(target.upper(), 'cyan')
+            target_color = BRANCH_COLORS.get(target.upper(), "cyan")
             if context_parts:
                 context_parts.append(f"→ [{target_color}]{target}[/{target_color}]")
             else:
@@ -182,7 +183,6 @@ def print_command_separator(branch: str, command: str, caller: Optional[str] = N
 
         console.print(f"[bold {branch_color}]▶ {command}[/bold {branch_color}]")
         console.print(f"[bold {branch_color}]{'─' * 60}[/bold {branch_color}]")
-
 
 
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):
@@ -201,11 +201,11 @@ def print_status(watched_branches: List[str], verbosity: int, filters: Optional[
 
         if filters:
             console.print("  Filters:")
-            if filters.get('file_types'):
+            if filters.get("file_types"):
                 console.print(f"    File types: {', '.join(filters['file_types'])}")
-            if filters.get('log_levels'):
+            if filters.get("log_levels"):
                 console.print(f"    Log levels: {', '.join(filters['log_levels'])}")
-            if filters.get('exclude_patterns'):
+            if filters.get("exclude_patterns"):
                 console.print(f"    Excluded: {', '.join(filters['exclude_patterns'])}")
         console.print()
 

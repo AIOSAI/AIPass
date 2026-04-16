@@ -44,6 +44,7 @@ def _get_all_registry_files() -> List[str]:
     """
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
+
         files: List[str] = []
         for _key, config in discover_plan_types().items():
             rf = config.get("registry_file")
@@ -59,6 +60,7 @@ def _get_all_registry_files() -> List[str]:
 # =============================================
 # HANDLER FUNCTION
 # =============================================
+
 
 def get_closed_plans() -> List[Tuple[str, Dict[str, Any]]]:
     """

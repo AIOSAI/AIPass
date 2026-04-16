@@ -11,6 +11,7 @@ List registered integration contracts.
 Accepts a pre-fetched list of contract names from the calling module layer.
 No module imports — the module layer owns bridge access and passes data in.
 """
+
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 

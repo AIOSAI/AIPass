@@ -33,6 +33,7 @@ _PROTECTED_BRANCHES = {"spawn", "devpulse", "drone"}
 # PUBLIC API
 # =============================================================================
 
+
 def _resolve_branch_dir(branch_name, registry_path, registry):
     """Find branch entry and directory from registry.
 
@@ -89,10 +90,7 @@ def _remove_from_registry(registry, branch_name, registry_path):
                 del branches[key]
         registry["branches"] = branches
     else:
-        registry["branches"] = [
-            b for b in branches
-            if b.get("name", "").lower() != branch_name.lower()
-        ]
+        registry["branches"] = [b for b in branches if b.get("name", "").lower() != branch_name.lower()]
     registry["metadata"]["total_branches"] = len(_branches_as_list(registry["branches"]))
     return save_registry(registry_path, registry)
 

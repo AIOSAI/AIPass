@@ -31,6 +31,7 @@ def json_handler(tmp_path, monkeypatch):
 # default_factory: _get_default_template returns correct structures
 # ---------------------------------------------------------------------------
 
+
 class TestDefaultFactory:
     def test_config_template_has_required_keys(self, json_handler):
         result = json_handler._get_default_template("config", "test_mod")
@@ -60,6 +61,7 @@ class TestDefaultFactory:
 # validate: validate_json_structure
 # ---------------------------------------------------------------------------
 
+
 class TestValidate:
     def test_valid_config(self, json_handler):
         data = {"module_name": "x", "version": "1.0", "config": {}}
@@ -85,6 +87,7 @@ class TestValidate:
 # get_path: get_json_path returns correct Path
 # ---------------------------------------------------------------------------
 
+
 class TestGetPath:
     def test_returns_path_object(self, json_handler):
         result = json_handler.get_json_path("mymod", "config")
@@ -103,6 +106,7 @@ class TestGetPath:
 # ---------------------------------------------------------------------------
 # ensure_exists: ensure_json_exists creates files
 # ---------------------------------------------------------------------------
+
 
 class TestEnsureExists:
     def test_creates_config_file(self, json_handler, tmp_path):
@@ -140,6 +144,7 @@ class TestEnsureExists:
 # load: load_json
 # ---------------------------------------------------------------------------
 
+
 class TestLoad:
     def test_load_auto_creates_and_returns(self, json_handler):
         result = json_handler.load_json("loadtest", "config")
@@ -162,6 +167,7 @@ class TestLoad:
 # ---------------------------------------------------------------------------
 # save: save_json
 # ---------------------------------------------------------------------------
+
 
 class TestSave:
     def test_save_valid_data(self, json_handler, tmp_path):
@@ -186,6 +192,7 @@ class TestSave:
 # ensure_module: ensure_module_jsons creates all 3 files
 # ---------------------------------------------------------------------------
 
+
 class TestEnsureModule:
     def test_creates_all_three(self, json_handler, tmp_path):
         json_handler.ensure_module_jsons("trio")
@@ -200,6 +207,7 @@ class TestEnsureModule:
 # ---------------------------------------------------------------------------
 # log_operation + infrastructure
 # ---------------------------------------------------------------------------
+
 
 class TestLogOperation:
     def test_log_operation_appends_entry(self, json_handler, tmp_path):
@@ -224,6 +232,7 @@ class TestLogOperation:
         """infrastructure_mocking: module works after reimport with mocked paths."""
         import importlib
         import aipass.trigger.apps.handlers.json.json_handler as mod
+
         new_dir = tmp_path / "reimport_test"
         new_dir.mkdir()
         monkeypatch.setattr(mod, "TRIGGER_JSON_DIR", new_dir)

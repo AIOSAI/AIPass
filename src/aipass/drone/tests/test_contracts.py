@@ -43,13 +43,9 @@ else:
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
     if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
     else:
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -77,8 +73,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 
 if _JSON_DIR_ATTR is None:
     pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler -- "
-        f"tried: {_JSON_DIR_CANDIDATES}",
+        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler -- tried: {_JSON_DIR_CANDIDATES}",
         allow_module_level=True,
     )
 
@@ -86,6 +81,7 @@ if _JSON_DIR_ATTR is None:
 # ---------------------------------------------------------------------------
 # Isolation fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -102,6 +98,7 @@ def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # ---------------------------------------------------------------------------
 # Default factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_default_for_type(json_type: str, module_name: str = "test_mod") -> Any:
     """Call whichever default factory the branch exposes."""
@@ -150,6 +147,7 @@ def _default_factory_raises_on_unknown() -> bool:
 # Group 1 -- Return type contracts (4 tests)
 # ============================================================================
 
+
 def test_handle_command_returns_bool() -> None:  # CT-001
     """handle_command must return a bool (not int, not None, not truthy)."""
     try:
@@ -172,31 +170,26 @@ def test_handle_command_returns_bool() -> None:  # CT-001
 def test_get_json_path_returns_path() -> None:  # CT-002
     """get_json_path must return a Path or str (filesystem path type)."""
     result = json_handler.get_json_path("contract_mod", "config")
-    assert isinstance(result, (Path, str)), (
-        f"get_json_path must return Path or str, got {type(result)}"
-    )
+    assert isinstance(result, (Path, str)), f"get_json_path must return Path or str, got {type(result)}"
 
 
 def test_ensure_json_exists_returns_bool(tmp_path: Path) -> None:  # CT-003
     """ensure_json_exists must return a bool."""
     result = json_handler.ensure_json_exists("contract_mod", "data")
-    assert isinstance(result, bool), (
-        f"ensure_json_exists must return bool, got {type(result)}"
-    )
+    assert isinstance(result, bool), f"ensure_json_exists must return bool, got {type(result)}"
     assert result is True
 
 
 def test_load_json_returns_dict_for_config(tmp_path: Path) -> None:  # CT-004
     """load_json for config type must return a dict."""
     result = json_handler.load_json("contract_mod", "config")
-    assert isinstance(result, dict), (
-        f"load_json('...', 'config') must return dict, got {type(result)}"
-    )
+    assert isinstance(result, dict), f"load_json('...', 'config') must return dict, got {type(result)}"
 
 
 # ============================================================================
 # Group 2 -- Exception contracts (3 tests)
 # ============================================================================
+
 
 def test_create_default_unknown_raises_value_error() -> None:  # CT-005
     """_create_default (or equivalent) must raise ValueError for unknown type."""
@@ -228,6 +221,7 @@ def test_validate_rejects_invalid_mode() -> None:  # CT-007
 # Group 3 -- Data structure contracts (3 tests)
 # ============================================================================
 
+
 def test_config_has_required_keys(tmp_path: Path) -> None:  # CT-008
     """Config data structure must contain module_name and version."""
     json_handler.ensure_json_exists("struct_mod", "config")
@@ -254,9 +248,7 @@ def test_log_entry_has_operation(tmp_path: Path) -> None:  # CT-010
     val = getattr(_mod, _JSON_DIR_ATTR)
     json_dir = Path(val) if isinstance(val, str) else val
 
-    log = json.loads(
-        (json_dir / "struct_mod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "struct_mod_log.json").read_text(encoding="utf-8"))
     assert len(log) >= 1, "log_operation must append at least one entry"
     assert "operation" in log[-1], "Log entry must have 'operation' key"
     assert log[-1]["operation"] == "contract_test"

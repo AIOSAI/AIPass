@@ -12,7 +12,6 @@ PRAX Logging Operations
 Operation logging and configuration management for prax logger.
 """
 
-
 import json
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -30,6 +29,7 @@ CONFIG_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_config.json"
 DATA_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_data.json"
 LOG_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_log.json"
 
+
 def log_operation(message: str, data: Optional[Dict] = None):
     """Log prax_logging operations to JSON log file
 
@@ -37,17 +37,13 @@ def log_operation(message: str, data: Optional[Dict] = None):
         message: Operation description
         data: Optional operation data dict
     """
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "operation": message,
-        "data": data or {}
-    }
+    entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "operation": message, "data": data or {}}
 
     # Load existing log
     log_entries = []
     if LOG_FILE.exists():
         try:
-            with open(LOG_FILE, 'r', encoding='utf-8') as f:
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
                 log_entries = json.load(f)
         except Exception as e:
             logger.warning("Failed to load log file %s, resetting entries: %s", LOG_FILE, e)
@@ -61,9 +57,10 @@ def log_operation(message: str, data: Optional[Dict] = None):
         log_entries = log_entries[-1000:]
 
     # Save log
-    with open(LOG_FILE, 'w', encoding='utf-8') as f:
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(log_entries, f, indent=2, ensure_ascii=False)
     json_handler.log_operation("log_operation_performed", {"message": message})
+
 
 def create_config_file():
     """Create default config file if it doesn't exist"""
@@ -81,15 +78,11 @@ def create_config_file():
                 "file_output": True,
                 "rotation_enabled": True,
                 "debug_prints": False,
-                "log_directories": [
-                    "system_logs",
-                    "skill_logs",
-                    "error_logs"
-                ]
-            }
+                "log_directories": ["system_logs", "skill_logs", "error_logs"],
+            },
         }
         try:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(default_config, f, indent=2, ensure_ascii=False)
             logger.info("Config file created: %s", CONFIG_FILE)
         except Exception as e:

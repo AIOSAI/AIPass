@@ -67,13 +67,16 @@ def test_parse_schedule_equal_to_now_rolls_tomorrow(fixed_now):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("text,delta_seconds", [
-    ("+30m", 1800),
-    ("+1h", 3600),
-    ("+45s", 45),
-    ("+1h30m", 5400),
-    ("+2h", 7200),
-])
+@pytest.mark.parametrize(
+    "text,delta_seconds",
+    [
+        ("+30m", 1800),
+        ("+1h", 3600),
+        ("+45s", 45),
+        ("+1h30m", 5400),
+        ("+2h", 7200),
+    ],
+)
 def test_parse_schedule_relative(fixed_now, text, delta_seconds):
     target = schedule_handler.parse_schedule(text, now=fixed_now)
     assert target == fixed_now + timedelta(seconds=delta_seconds)
@@ -84,17 +87,20 @@ def test_parse_schedule_relative(fixed_now, text, delta_seconds):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("text", [
-    "",
-    "   ",
-    "abc",
-    "25:00",
-    "12:60",
-    "-5m",
-    "+xyz",
-    "+",
-    "14:30:99",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "   ",
+        "abc",
+        "25:00",
+        "12:60",
+        "-5m",
+        "+xyz",
+        "+",
+        "14:30:99",
+    ],
+)
 def test_parse_schedule_invalid(text):
     with pytest.raises(ValueError):
         schedule_handler.parse_schedule(text, now=datetime(2026, 4, 14, 10, 0, 0))
@@ -285,17 +291,20 @@ def _fake_schedule_module(**overrides):
 
     def wake_at(time_str, command=None, now_fn=None):
         fake.calls.append(("wake_at", time_str, command))
-        return overrides.get("wake_at", {
-            "woke": True,
-            "reason": "schedule fired",
-            "elapsed": 0,
-            "scheduled_for": "2026-04-14T10:00:00",
-            "state": "woke",
-            "command": command,
-            "command_exit_code": 0 if command else None,
-            "command_stdout": "hi\n" if command else None,
-            "command_stderr": "" if command else None,
-        })
+        return overrides.get(
+            "wake_at",
+            {
+                "woke": True,
+                "reason": "schedule fired",
+                "elapsed": 0,
+                "scheduled_for": "2026-04-14T10:00:00",
+                "state": "woke",
+                "command": command,
+                "command_exit_code": 0 if command else None,
+                "command_stdout": "hi\n" if command else None,
+                "command_stderr": "" if command else None,
+            },
+        )
 
     fake.wake_at = wake_at
     return fake

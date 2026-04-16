@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from aipass.prax import logger
+
 # logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -34,6 +35,7 @@ from aipass.flow.apps.handlers.json import json_handler
 _PKG_ROOT = Path(__file__).resolve().parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
+
 def _find_repo_root() -> Path:
     """Walk up to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -41,6 +43,7 @@ def _find_repo_root() -> Path:
         if (parent / "AIPASS_REGISTRY.json").exists():
             return parent
     return Path.cwd()
+
 
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
@@ -50,6 +53,7 @@ MODULE_NAME = "restore_plan"
 # =============================================
 # RECOVERY IMPLEMENTATION
 # =============================================
+
 
 def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_registry: Any = None) -> tuple[bool, str]:
     """
@@ -81,12 +85,12 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
 
     # Read plan file to extract original location from header
     try:
-        with open(plan_file, 'r', encoding='utf-8') as f:
+        with open(plan_file, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Parse location from header (e.g., "**Location**: /path/to/dir")
         original_location = None
-        for line in content.split('\n')[:20]:  # Check first 20 lines
+        for line in content.split("\n")[:20]:  # Check first 20 lines
             if line.startswith("**Location**:"):
                 original_location = line.split("**Location**:")[1].strip()
                 break
@@ -97,7 +101,7 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
 
         # CRITICAL: Convert relative paths to absolute paths
         # If location is relative (like "flow"), resolve it
-        if not original_location.startswith('/'):
+        if not original_location.startswith("/"):
             # Relative path - resolve against _PKG_ROOT
             if original_location == "flow":
                 original_location = str(FLOW_ROOT)
@@ -124,7 +128,9 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
                 relative_path = str(original_path)
 
     except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to parse plan file '{plan_file}' for recovery, defaulting to FLOW_ROOT: {e}")
+        logger.warning(
+            f"[{MODULE_NAME}] Failed to parse plan file '{plan_file}' for recovery, defaulting to FLOW_ROOT: {e}"
+        )
         original_location = str(FLOW_ROOT)
         relative_path = "flow"
 
@@ -146,7 +152,7 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
         "subject": "Recovered from backup",
         "closed": datetime.now(timezone.utc).isoformat(),
         "closed_reason": "recovered_from_backup",
-        "template_type": "default"
+        "template_type": "default",
     }
     save_registry(registry)
 
@@ -156,6 +162,7 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
 # =============================================
 # RESTORE PLAN IMPLEMENTATION
 # =============================================
+
 
 def restore_plan_impl(
     plan_num: str | None = None,
@@ -258,14 +265,14 @@ def restore_plan_impl(
         messages.append({"type": "restore_header", "plan_key": plan_key, "plan_info": plan_info})
 
         # 7. UPDATE REGISTRY: Restore to open status
-        plan_info['status'] = 'open'
+        plan_info["status"] = "open"
 
         # Remove all close-related metadata
-        plan_info.pop('closed', None)
-        plan_info.pop('closed_reason', None)
-        plan_info.pop('memory_created', None)
-        plan_info.pop('memory_created_date', None)
-        plan_info.pop('memory_file', None)
+        plan_info.pop("closed", None)
+        plan_info.pop("closed_reason", None)
+        plan_info.pop("memory_created", None)
+        plan_info.pop("memory_created_date", None)
+        plan_info.pop("memory_file", None)
 
         save_registry(registry)
         logger.info(f"[{MODULE_NAME}] Restored plan {plan_key} to open status")
@@ -287,11 +294,14 @@ def restore_plan_impl(
         # Fire trigger event for plan restore
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_restored', plan_number=plan_key, location=restored_location)
+
+            trigger.fire("plan_restored", plan_number=plan_key, location=restored_location)
         except ImportError:
             logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping event fire")
 
-        json_handler.log_operation("plan_restored", {"plan_key": plan_key, "location": restored_location, "success": True})
+        json_handler.log_operation(
+            "plan_restored", {"plan_key": plan_key, "location": restored_location, "success": True}
+        )
         return {
             "success": True,
             "messages": messages,

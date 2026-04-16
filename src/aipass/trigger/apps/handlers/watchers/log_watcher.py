@@ -43,6 +43,7 @@ SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 try:
     from watchdog.observers import Observer as WatchdogObserver
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
+
     WATCHDOG_AVAILABLE = True
 except ImportError:
     logger.info("watchdog not available, log watcher disabled")
@@ -84,13 +85,13 @@ def _detect_branch_from_log(log_file: str) -> str:
     """
     try:
         name = Path(log_file).stem
-        if '_' in name:
-            parts = name.split('_')
+        if "_" in name:
+            parts = name.split("_")
             return parts[0].upper()
         return name.upper()
     except Exception as exc:
         logger.warning("Failed to detect branch from log '%s': %s", log_file, exc)
-        return 'UNKNOWN'
+        return "UNKNOWN"
 
 
 def _detect_log_level(log_line: str) -> str:
@@ -103,15 +104,15 @@ def _detect_log_level(log_line: str) -> str:
     Returns:
         'error', 'warning', 'info', or 'debug'
     """
-    if ' - ERROR - ' in log_line or ' ERROR ' in log_line or '[ERROR]' in log_line:
-        return 'error'
-    if ' - WARNING - ' in log_line or ' WARNING ' in log_line or '[WARNING]' in log_line:
-        return 'warning'
-    if ' - CRITICAL - ' in log_line or ' CRITICAL ' in log_line or '[CRITICAL]' in log_line:
-        return 'error'
-    if ' - DEBUG - ' in log_line or ' DEBUG ' in log_line or '[DEBUG]' in log_line:
-        return 'debug'
-    return 'info'
+    if " - ERROR - " in log_line or " ERROR " in log_line or "[ERROR]" in log_line:
+        return "error"
+    if " - WARNING - " in log_line or " WARNING " in log_line or "[WARNING]" in log_line:
+        return "warning"
+    if " - CRITICAL - " in log_line or " CRITICAL " in log_line or "[CRITICAL]" in log_line:
+        return "error"
+    if " - DEBUG - " in log_line or " DEBUG " in log_line or "[DEBUG]" in log_line:
+        return "debug"
+    return "info"
 
 
 def _parse_log_message(log_line: str) -> str:
@@ -126,10 +127,10 @@ def _parse_log_message(log_line: str) -> str:
     Returns:
         Cleaned message content
     """
-    if ' | ' in log_line:
-        parts = log_line.split(' | ')
+    if " | " in log_line:
+        parts = log_line.split(" | ")
         if len(parts) >= 4:
-            return ' | '.join(parts[3:]).strip()
+            return " | ".join(parts[3:]).strip()
         if len(parts) >= 2:
             return parts[-1].strip()
     return log_line.strip()
@@ -145,11 +146,11 @@ def _extract_module_name(log_line: str) -> str:
     Returns:
         Module name or 'unknown'
     """
-    if ' | ' in log_line:
-        parts = log_line.split(' | ')
+    if " | " in log_line:
+        parts = log_line.split(" | ")
         if len(parts) >= 2:
             return parts[1].strip()
-    return 'unknown'
+    return "unknown"
 
 
 def _should_skip_log(log_line: str) -> bool:
@@ -200,12 +201,12 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         if current_size <= last_pos:
             return
 
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             f.seek(last_pos)
             new_lines = f.read()
             if new_lines.strip():
                 branch = _detect_branch_from_log(file_path)
-                for line in new_lines.strip().split('\n'):
+                for line in new_lines.strip().split("\n"):
                     if line.strip() and not _should_skip_log(line):
                         self._process_log_line(branch, line, file_path)
             self.log_positions[file_path] = f.tell()
@@ -220,7 +221,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             return
 
         file_path = str(event.src_path)
-        if not file_path.endswith('.log') or str(SYSTEM_LOGS_DIR) not in file_path:
+        if not file_path.endswith(".log") or str(SYSTEM_LOGS_DIR) not in file_path:
             return
 
         try:
@@ -247,43 +248,44 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             error_hash = _generate_error_hash(module_name, message)
 
             event_data = {
-                'branch': branch,
-                'message': message,
-                'level': level,
-                'module_name': module_name,
-                'timestamp': timestamp,
-                'log_file': log_file,
-                'error_hash': error_hash
+                "branch": branch,
+                "message": message,
+                "level": level,
+                "module_name": module_name,
+                "timestamp": timestamp,
+                "log_file": log_file,
+                "error_hash": error_hash,
             }
 
-            if level == 'error':
+            if level == "error":
                 # Route through Medic v2: registry_report() for dedup/count, then error_detected
                 try:
                     from aipass.trigger.apps.handlers.error_registry import report as registry_report
+
                     result = registry_report(
-                        error_type='ERROR',
-                        message=message,
-                        component=branch,
-                        log_path=log_file,
-                        severity='medium'
+                        error_type="ERROR", message=message, component=branch, log_path=log_file, severity="medium"
                     )
-                    error_count = result.get('count', 1)
-                    trigger.fire('error_detected',
-                        branch=branch, module=module_name, message=message,
-                        log_path=log_file, error_hash=result.get('id', error_hash),
+                    error_count = result.get("count", 1)
+                    trigger.fire(
+                        "error_detected",
+                        branch=branch,
+                        module=module_name,
+                        message=message,
+                        log_path=log_file,
+                        error_hash=result.get("id", error_hash),
                         timestamp=timestamp,
-                        fingerprint=result.get('fingerprint', ''),
-                        registry_id=result.get('id', ''),
-                        first_seen=result.get('first_seen', ''),
-                        last_seen=result.get('last_seen', ''),
+                        fingerprint=result.get("fingerprint", ""),
+                        registry_id=result.get("id", ""),
+                        first_seen=result.get("first_seen", ""),
+                        last_seen=result.get("last_seen", ""),
                         count=error_count,
                     )
                 except Exception:
                     # Registry unavailable — fire error_logged as monitoring-only fallback
-                    trigger.fire('error_logged', **event_data)
+                    trigger.fire("error_logged", **event_data)
                 json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
-            elif level == 'warning':
-                trigger.fire('warning_logged', **event_data)
+            elif level == "warning":
+                trigger.fire("warning_logged", **event_data)
                 json_handler.log_operation("system_log_event", {"level": level, "module": module_name})
 
         except Exception as exc:
@@ -357,7 +359,7 @@ def is_log_watcher_active() -> bool:
     return _log_observer is not None and _log_observer.is_alive()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """Standalone test for log watcher."""
     import time
 

@@ -47,6 +47,7 @@ seedgo = []
 dev = [
     "pytest",
     "pytest-cov",
+    "pytest-timeout",
     "ruff",
     "coverage",
     "pyright",

@@ -41,6 +41,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 FLOW_ROOT = _PKG_ROOT / "flow"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
+
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -64,6 +66,7 @@ def _get_all_registry_files() -> List[str]:
     """Return per-type registry filenames via plan-type discovery."""
     try:
         from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types  # type: ignore[import-not-found]
+
         files: List[str] = []
         for _key, config in discover_plan_types().items():
             rf = config.get("registry_file")
@@ -80,26 +83,29 @@ def _get_all_registry_files() -> List[str]:
 # REGISTRY OPERATIONS
 # =============================================
 
+
 def load_flow_registry(registry_file: str | None = None) -> Dict[str, Any]:
     """Load a plan registry."""
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
     if not target.exists():
         raise Exception(f"Flow registry not found at {target}")
     try:
-        with open(target, 'r', encoding='utf-8') as f:
+        with open(target, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         raise Exception(f"Failed to load flow registry: {e}")
+
 
 def save_flow_registry(registry: Dict[str, Any], registry_file: str | None = None) -> None:
     """Save a plan registry."""
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
     try:
         registry["last_updated"] = datetime.now(timezone.utc).isoformat()
-        with open(target, 'w', encoding='utf-8') as f:
+        with open(target, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
     except Exception as e:
         raise Exception(f"Failed to save flow registry: {e}")
+
 
 def get_closed_plans() -> List[Dict[str, Any]]:
     """Get closed PLANs from ALL per-type registries.
@@ -119,17 +125,21 @@ def get_closed_plans() -> List[Dict[str, Any]]:
             if plan_info.get("status") == "closed" and plan_info.get("processed") is not True:
                 file_path = Path(plan_info.get("file_path", ""))
                 if file_path.exists():
-                    closed_plans.append({
-                        "number": plan_num,
-                        "path": file_path,
-                        "info": plan_info,
-                        "registry_file": reg_file,
-                    })
+                    closed_plans.append(
+                        {
+                            "number": plan_num,
+                            "path": file_path,
+                            "info": plan_info,
+                            "registry_file": reg_file,
+                        }
+                    )
     return closed_plans
+
 
 # =============================================
 # TEMPLATE DETECTION
 # =============================================
+
 
 def is_template_content(content: str) -> bool:
     """Check if plan content is still unedited template (v4.0)
@@ -146,10 +156,10 @@ def is_template_content(content: str) -> bool:
     """
     # User content indicators — if ANY of these are found, plan has real work
     user_content_signals = [
-        "- [x] Agent deployed",       # Checked execution log item
-        "- [x] Agent completed",       # Checked execution log item
-        "- [x] Seedgo checklist",      # Checked completion item
-        "- [x] All goals achieved",    # Checked completion item
+        "- [x] Agent deployed",  # Checked execution log item
+        "- [x] Agent completed",  # Checked execution log item
+        "- [x] Seedgo checklist",  # Checked completion item
+        "- [x] All goals achieved",  # Checked completion item
     ]
     for signal in user_content_signals:
         if signal in content:
@@ -157,7 +167,8 @@ def is_template_content(content: str) -> bool:
 
     # Check Notes section for user content (not just the placeholder)
     import re
-    notes_match = re.search(r'## Notes\s*\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
+
+    notes_match = re.search(r"## Notes\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if notes_match:
         notes_content = notes_match.group(1).strip()
         # If notes has content beyond the template placeholder, it's real work
@@ -165,10 +176,10 @@ def is_template_content(content: str) -> bool:
             return False
 
     # Check Execution Log for user-added entries beyond template
-    exec_match = re.search(r'## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
+    exec_match = re.search(r"## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if exec_match:
         exec_content = exec_match.group(1).strip()
-        lines = [line.strip() for line in exec_content.split('\n') if line.strip()]
+        lines = [line.strip() for line in exec_content.split("\n") if line.strip()]
         # Template has ~6 lines (date header + checkbox items). More = user added content.
         if len(lines) > 8:
             return False
@@ -204,6 +215,7 @@ def is_template_content(content: str) -> bool:
             return True
 
     return False
+
 
 # =============================================
 # CONTENT ANALYSIS (DISABLED)
@@ -394,6 +406,7 @@ def is_template_content(content: str) -> bool:
 # PLAN ARCHIVAL
 # =============================================
 
+
 def archive_plan(plan_path: Path) -> bool:
     """Move processed plan file to flow/processed_plans/
 
@@ -438,9 +451,11 @@ def archive_plan(plan_path: Path) -> bool:
         logger.error("[mbank] Failed to archive plan '%s': %s", plan_path, exc)
         return False
 
+
 # =============================================
 # TEMP FILE CLEANUP
 # =============================================
+
 
 def cleanup_temp_files() -> Dict[str, Any]:
     """Remove old -TEMP files from @memory (empty template plans)
@@ -473,48 +488,39 @@ def cleanup_temp_files() -> Dict[str, Any]:
                     # Verify deletion
                     if not temp_file.exists():
                         files_deleted += 1
-                        details.append({
-                            "file": temp_file.name,
-                            "status": "deleted"
-                        })
+                        details.append({"file": temp_file.name, "status": "deleted"})
                     else:
                         failed_deletes += 1
-                        details.append({
-                            "file": temp_file.name,
-                            "status": "delete_failed",
-                            "error": "File still exists after deletion"
-                        })
+                        details.append(
+                            {
+                                "file": temp_file.name,
+                                "status": "delete_failed",
+                                "error": "File still exists after deletion",
+                            }
+                        )
 
                 except Exception as e:
                     logger.warning("[mbank] Failed to delete temp file '%s': %s", temp_file.name, e)
                     failed_deletes += 1
-                    details.append({
-                        "file": temp_file.name,
-                        "status": "delete_failed",
-                        "error": str(e)
-                    })
+                    details.append({"file": temp_file.name, "status": "delete_failed", "error": str(e)})
 
     except Exception as e:
         # Failed to scan directory
         logger.error("[mbank] Failed to scan @memory for temp files: %s", e)
-        return {
-            "files_found": 0,
-            "files_deleted": 0,
-            "failed_deletes": 0,
-            "details": [],
-            "scan_error": str(e)
-        }
+        return {"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": [], "scan_error": str(e)}
 
     return {
         "files_found": files_found,
         "files_deleted": files_deleted,
         "failed_deletes": failed_deletes,
-        "details": details
+        "details": details,
     }
+
 
 # =============================================
 # ORPHAN HEALING
 # =============================================
+
 
 def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
     """Cross-check ALL registries vs filesystem and auto-heal orphaned plans."""
@@ -547,24 +553,43 @@ def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
                         original_path.rename(destination)
                         if destination.exists() and not original_path.exists():
                             successfully_healed += 1
-                            orphan_details.append({"plan": plan_label, "status": "healed",
-                                                   "original_path": str(original_path), "destination": str(destination)})
+                            orphan_details.append(
+                                {
+                                    "plan": plan_label,
+                                    "status": "healed",
+                                    "original_path": str(original_path),
+                                    "destination": str(destination),
+                                }
+                            )
                         else:
                             failed_to_heal += 1
-                            orphan_details.append({"plan": plan_label, "status": "heal_failed",
-                                                   "error": "Verification failed", "path": str(original_path)})
+                            orphan_details.append(
+                                {
+                                    "plan": plan_label,
+                                    "status": "heal_failed",
+                                    "error": "Verification failed",
+                                    "path": str(original_path),
+                                }
+                            )
                     except Exception as e:
                         logger.warning("[mbank] Failed to heal orphaned plan '%s': %s", plan_label, e)
                         failed_to_heal += 1
-                        orphan_details.append({"plan": plan_label, "status": "heal_failed",
-                                               "error": str(e), "path": str(original_path)})
+                        orphan_details.append(
+                            {"plan": plan_label, "status": "heal_failed", "error": str(e), "path": str(original_path)}
+                        )
 
-    return {"orphans_found": orphans_found, "successfully_healed": successfully_healed,
-            "failed_to_heal": failed_to_heal, "orphans": orphan_details}
+    return {
+        "orphans_found": orphans_found,
+        "successfully_healed": successfully_healed,
+        "failed_to_heal": failed_to_heal,
+        "orphans": orphan_details,
+    }
+
 
 # =============================================
 # MAIN PROCESSING
 # =============================================
+
 
 def process_closed_plans() -> Dict[str, Any]:
     """Process all closed plans across all plan types.
@@ -606,9 +631,14 @@ def process_closed_plans() -> Dict[str, Any]:
                     results.append({"plan": plan_label, "status": "archived", "correlation_id": correlation_id})
                 else:
                     error_count += 1
-                    results.append({"plan": plan_label, "status": "archive_failed",
-                                    "error": "Failed to move plan to backup/processed_plans/",
-                                    "correlation_id": correlation_id})
+                    results.append(
+                        {
+                            "plan": plan_label,
+                            "status": "archive_failed",
+                            "error": "Failed to move plan to backup/processed_plans/",
+                            "correlation_id": correlation_id,
+                        }
+                    )
             except Exception as e:
                 logger.error("[mbank] Error processing closed plan '%s': %s", plan.get("path", "unknown"), e)
                 error_count += 1
@@ -616,15 +646,23 @@ def process_closed_plans() -> Dict[str, Any]:
 
         cleanup_result = cleanup_temp_files()
 
-        json_handler.log_operation("closed_plans_processed", {
+        json_handler.log_operation(
+            "closed_plans_processed",
+            {
+                "processed": processed_count,
+                "errors": error_count,
+                "cleanup_deleted": cleanup_result.get("files_deleted", 0),
+                "success": True,
+            },
+        )
+
+        return {
+            "success": True,
             "processed": processed_count,
             "errors": error_count,
-            "cleanup_deleted": cleanup_result.get("files_deleted", 0),
-            "success": True,
-        })
-
-        return {"success": True, "processed": processed_count, "errors": error_count,
-                "results": results, "cleanup": cleanup_result}
+            "results": results,
+            "cleanup": cleanup_result,
+        }
 
     except Exception as e:
         logger.error("[mbank] Unexpected error in process_closed_plans: %s", e)

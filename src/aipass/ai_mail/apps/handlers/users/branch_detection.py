@@ -45,6 +45,7 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
     """
     try:
         from aipass.ai_mail.apps.handlers.email.contacts import get_contact
+
         contact = get_contact(branch_name)
         if not contact:
             return None
@@ -103,6 +104,7 @@ def _get_branches_list(registry: dict) -> list:
 # =============================================
 # BRANCH DETECTION FUNCTIONS
 # =============================================
+
 
 def detect_branch_from_pwd() -> Optional[Dict]:
     """
@@ -196,7 +198,7 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
 
     if BRANCH_REGISTRY_PATH.exists():
         try:
-            with open(BRANCH_REGISTRY_PATH, 'r', encoding='utf-8') as f:
+            with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
@@ -208,13 +210,15 @@ def _lookup_branch_by_name(branch_name: str) -> Optional[Dict]:
     caller_registry = _find_caller_registry()
     if caller_registry:
         try:
-            with open(caller_registry, 'r', encoding='utf-8') as f:
+            with open(caller_registry, "r", encoding="utf-8") as f:
                 registry = json.load(f)
             for branch in _get_branches_list(registry):
                 if branch.get("name", "").lower() == name_lower:
                     return branch
         except Exception as e:
-            logger.warning("[identity] _lookup_branch_by_name(%s) caller registry %s failed: %s", branch_name, caller_registry, e)
+            logger.warning(
+                "[identity] _lookup_branch_by_name(%s) caller registry %s failed: %s", branch_name, caller_registry, e
+            )
 
     return None
 
@@ -263,7 +267,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
 
     if BRANCH_REGISTRY_PATH.exists():
         try:
-            with open(BRANCH_REGISTRY_PATH, 'r', encoding='utf-8') as f:
+            with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
                 registry = json.load(f)
             registry_dir = BRANCH_REGISTRY_PATH.parent
             for branch in _get_branches_list(registry):
@@ -281,7 +285,7 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
     caller_registry = _find_caller_registry()
     if caller_registry:
         try:
-            with open(caller_registry, 'r', encoding='utf-8') as f:
+            with open(caller_registry, "r", encoding="utf-8") as f:
                 registry = json.load(f)
             registry_dir = caller_registry.parent
             for branch in _get_branches_list(registry):
@@ -301,9 +305,9 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict]:
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
 
-    console.print("\n" + "="*70)
+    console.print("\n" + "=" * 70)
     console.print("BRANCH AUTO-DETECTION HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Detects which branch is calling AI_MAIL based on PWD/CWD")
     console.print("  Walks up directory tree to find branch root")
@@ -325,4 +329,4 @@ if __name__ == "__main__":
     console.print("  3. Look up branch path in AIPASS_REGISTRY.json")
     console.print("  4. Return branch info (name, email, path, etc.)")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

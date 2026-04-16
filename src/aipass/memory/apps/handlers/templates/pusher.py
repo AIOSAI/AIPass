@@ -33,16 +33,15 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
 # Handler imports (same-branch allowed per handler boundaries)
-from aipass.memory.apps.handlers.json.memory_files import (
-    read_memory_file_data,
-    write_memory_file_simple
-)
+from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 
 # =============================================================================
 # PATH SETUP
 # =============================================================================
 
-MEMORY_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # handlers/templates/pusher.py -> apps -> handlers -> templates -> memory/
+MEMORY_ROOT = (
+    Path(__file__).resolve().parent.parent.parent.parent
+)  # handlers/templates/pusher.py -> apps -> handlers -> templates -> memory/
 
 
 def _find_repo_root() -> Path:
@@ -78,6 +77,7 @@ DEPRECATED_GUIDELINES_KEYS = ["emoji_usage", "high_value_patterns", "low_value_p
 # PLACEHOLDER REPLACEMENT
 # =============================================================================
 
+
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
     """Replace {{BRANCHNAME}} and {{DATE}} in template values. Returns new dict."""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -99,6 +99,7 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
 # =============================================================================
 # DEPRECATED SECTION REMOVAL
 # =============================================================================
+
 
 def _remove_deprecated(data: dict, file_type: str) -> List[str]:
     """Remove deprecated sections from data (in-place). Returns list of changes."""
@@ -141,6 +142,7 @@ def _remove_deprecated(data: dict, file_type: str) -> List[str]:
 # =============================================================================
 # SHARED METADATA MERGE
 # =============================================================================
+
 
 def _merge_metadata(curr_meta: dict, tmpl_meta: dict) -> List[str]:
     """
@@ -195,6 +197,7 @@ def _merge_metadata(curr_meta: dict, tmpl_meta: dict) -> List[str]:
 # STRUCTURAL MERGE: LOCAL FILES
 # =============================================================================
 
+
 def _apply_template_to_local(current: dict, template: dict, branch_name: str) -> Tuple[dict, List[str]]:
     """Apply LOCAL template structural updates. Returns (updated_dict, list_of_changes)."""
     changes = []
@@ -239,6 +242,7 @@ def _apply_template_to_local(current: dict, template: dict, branch_name: str) ->
 # STRUCTURAL MERGE: OBSERVATIONS FILES
 # =============================================================================
 
+
 def _apply_template_to_observations(current: dict, template: dict, branch_name: str) -> Tuple[dict, List[str]]:
     """Apply OBSERVATIONS template structural updates. Returns (updated_dict, list_of_changes)."""
     changes = []
@@ -276,21 +280,22 @@ def _apply_template_to_observations(current: dict, template: dict, branch_name: 
 # BRANCH DISCOVERY
 # =============================================================================
 
+
 def _load_registry() -> Optional[List[Dict[str, Any]]]:
     """Load AIPASS_REGISTRY.json and return list of active branches."""
     if not REGISTRY_PATH.exists():
         return None
     try:
-        with open(REGISTRY_PATH, 'r', encoding='utf-8') as f:
+        with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
             registry = json.load(f)
         branches = registry.get("branches", [])
         # Resolve relative paths against repo root
         for branch in branches:
-            raw_path = branch.get('path', '')
+            raw_path = branch.get("path", "")
             resolved = Path(raw_path)
             if not resolved.is_absolute():
                 resolved = _REPO_ROOT / raw_path
-            branch['path'] = str(resolved)
+            branch["path"] = str(resolved)
         return [b for b in branches if b.get("status") == "active"]
     except (json.JSONDecodeError, KeyError) as e:
         logger.warning(f"[pusher] Failed to load registry {REGISTRY_PATH}: {e}")
@@ -318,6 +323,7 @@ def _find_memory_files(branch_path: Path) -> Dict[str, List[Path]]:
 # TEMPLATE LOADING
 # =============================================================================
 
+
 def _load_templates() -> Optional[Dict[str, dict]]:
     """Load living templates from memory templates directory."""
     templates = {}
@@ -325,7 +331,7 @@ def _load_templates() -> Optional[Dict[str, dict]]:
         if not path.exists():
             return None
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 templates[name] = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"[pusher] Failed to load template {path}: {e}")
@@ -336,6 +342,7 @@ def _load_templates() -> Optional[Dict[str, dict]]:
 # =============================================================================
 # MAIN PUSH FUNCTION
 # =============================================================================
+
 
 def push_templates(dry_run: bool = False) -> dict:
     """
@@ -360,7 +367,7 @@ def push_templates(dry_run: bool = False) -> dict:
         "files_modified": 0,
         "changes": [],
         "errors": [],
-        "branches_list": []
+        "branches_list": [],
     }
 
     templates = _load_templates()
@@ -422,7 +429,15 @@ def push_templates(dry_run: bool = False) -> dict:
         if not _update_version_file(result["branches_list"]):
             result["errors"].append("Failed to update template version file")
 
-    json_handler.log_operation("template_push", {"branches": result["branches_updated"], "files": result["files_modified"], "dry_run": dry_run, "success": True})
+    json_handler.log_operation(
+        "template_push",
+        {
+            "branches": result["branches_updated"],
+            "files": result["files_modified"],
+            "dry_run": dry_run,
+            "success": True,
+        },
+    )
     return result
 
 
@@ -430,18 +445,19 @@ def push_templates(dry_run: bool = False) -> dict:
 # VERSION TRACKING
 # =============================================================================
 
+
 def _update_version_file(branches_pushed: List[str]) -> bool:
     """Update .template_version.json with push record."""
     try:
         version_data = {}
         if VERSION_FILE_PATH.exists():
-            with open(VERSION_FILE_PATH, 'r', encoding='utf-8') as f:
+            with open(VERSION_FILE_PATH, "r", encoding="utf-8") as f:
                 version_data = json.load(f)
         version_data["last_push"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         version_data["last_push_branches"] = branches_pushed
-        with open(VERSION_FILE_PATH, 'w', encoding='utf-8') as f:
+        with open(VERSION_FILE_PATH, "w", encoding="utf-8") as f:
             json.dump(version_data, f, indent=2, ensure_ascii=False)
-            f.write('\n')
+            f.write("\n")
         return True
     except Exception as e:
         logger.warning(f"[pusher] Failed to update version file: {e}")
@@ -457,11 +473,11 @@ def get_template_status() -> dict:
         "observations_template_exists": OBS_TEMPLATE_PATH.exists(),
         "version": None,
         "last_push": None,
-        "last_push_branches": []
+        "last_push_branches": [],
     }
     if VERSION_FILE_PATH.exists():
         try:
-            with open(VERSION_FILE_PATH, 'r', encoding='utf-8') as f:
+            with open(VERSION_FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
             status["version"] = data.get("version")
             status["last_push"] = data.get("last_push")
@@ -476,8 +492,9 @@ def get_template_status() -> dict:
 # CLI INTERFACE
 # =============================================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys as _sys
+
     _out = _sys.stdout.write
 
     args = _sys.argv[1:]
@@ -524,8 +541,8 @@ if __name__ == '__main__':
         _out(f"Last push:         {tmpl_status.get('last_push', 'never')}\n")
         pushed = tmpl_status.get("last_push_branches", [])
         if pushed:
-            preview = ', '.join(pushed[:5])
-            suffix = '...' if len(pushed) > 5 else ''
+            preview = ", ".join(pushed[:5])
+            suffix = "..." if len(pushed) > 5 else ""
             _out(f"Branches pushed:   {len(pushed)} ({preview}{suffix})\n")
         _out("\n")
         _sys.exit(0)

@@ -39,7 +39,7 @@ def _get_caller_module_name() -> str:
             module_name = caller_path.stem
 
             # Validate module name
-            if module_name and not module_name.startswith('_'):
+            if module_name and not module_name.startswith("_"):
                 return module_name
 
         # Fallback
@@ -87,16 +87,16 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
             return False
         required = ["module_name", "version", "config"]
         return all(key in data for key in required)
-    
+
     elif json_type == "data":
         if not isinstance(data, dict):
             return False
         required = ["created", "last_updated"]
         return all(key in data for key in required)
-    
+
     elif json_type == "log":
         return isinstance(data, list)
-    
+
     return False
 
 
@@ -109,14 +109,14 @@ def get_json_path(module_name: str, json_type: str) -> Path:
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
     """Ensure JSON file exists, create from template if missing"""
     API_JSON_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     json_path = get_json_path(module_name, json_type)
-    
+
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             if validate_json_structure(data, json_type):
                 return True
             else:
@@ -126,7 +126,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     template = _create_default(json_type, module_name)
 
-    with open(json_path, 'w', encoding='utf-8') as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(template, f, indent=2, ensure_ascii=False)
     return True
 
@@ -135,11 +135,11 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     """Load JSON file, auto-create if missing"""
     if not ensure_json_exists(module_name, json_type):
         return None
-    
+
     json_path = get_json_path(module_name, json_type)
-    
+
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to load JSON from {json_path}: {e}")
@@ -152,12 +152,12 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
 
     if not validate_json_structure(data, json_type):
         return False
-    
+
     if json_type == "data" and isinstance(data, dict):
         data["last_updated"] = datetime.now().date().isoformat()
-    
+
     try:
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -207,10 +207,7 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         log = []
 
     # Create new entry
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation
-    }
+    entry = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
     if data:
         entry["data"] = data  # type: ignore[assignment]
@@ -232,10 +229,7 @@ if __name__ == "__main__":
     console = Console()
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]",
-        border_style="bright_blue"
-    ))
+    console.print(Panel.fit("[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]", border_style="bright_blue"))
     console.print()
     console.print("[yellow]TESTING:[/yellow] Creating API JSONs...")
 

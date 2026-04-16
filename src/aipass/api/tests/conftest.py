@@ -1,4 +1,3 @@
-
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: tests/conftest.py
@@ -16,6 +15,7 @@
 # =============================================
 
 """Shared pytest fixtures for api tests"""
+
 import os
 import tempfile
 
@@ -48,9 +48,7 @@ _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = (
-        Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    )
+    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -78,6 +76,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def temp_test_dir(tmp_path: Path) -> Generator[Path, None, None]:

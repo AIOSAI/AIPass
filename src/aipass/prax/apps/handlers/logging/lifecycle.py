@@ -74,13 +74,8 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
 
     # Log system startup
     system_logger_instance.info("Prax logging system initialized")
-    system_logger_instance.info(
-        f"System logs: {get_system_logs_dir()}, "
-        f"Module logs: {get_module_logs_dir('prax')}"
-    )
-    system_logger_instance.info(
-        f"Found {len(modules)} modules for logging setup"
-    )
+    system_logger_instance.info(f"System logs: {get_system_logs_dir()}, Module logs: {get_module_logs_dir('prax')}")
+    system_logger_instance.info(f"Found {len(modules)} modules for logging setup")
 
     # Install logger override
     install_logger_override()
@@ -89,10 +84,7 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
     # Start file watcher
     start_file_watcher()
 
-    log_operation("Logging system initialized", {
-        "modules_discovered": len(modules),
-        "consolidated_logger": True
-    })
+    log_operation("Logging system initialized", {"modules_discovered": len(modules), "consolidated_logger": True})
 
     json_handler.log_operation("lifecycle_event", {"event": "initialized", "modules_count": len(modules)})
 

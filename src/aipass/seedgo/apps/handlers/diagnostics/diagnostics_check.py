@@ -45,6 +45,7 @@ HANDLERS_DIR = DIAGNOSTICS_DIR.parent
 # FILE / DIRECTORY HELPERS (used by runners)
 # =============================================
 
+
 def should_ignore_file(file_path: str, ignore_patterns: List[str]) -> bool:
     """Check if file should be ignored based on audit patterns"""
     for pattern in ignore_patterns:
@@ -72,29 +73,20 @@ def check_file(file_path: str) -> Dict:
 
     if not path.exists():
         return {
-            'file': str(file_path),
-            'errors': 0,
-            'warnings': 0,
-            'diagnostics': [],
-            'error': f'File not found: {file_path}'
+            "file": str(file_path),
+            "errors": 0,
+            "warnings": 0,
+            "diagnostics": [],
+            "error": f"File not found: {file_path}",
         }
 
-    if not path.suffix == '.py':
-        return {
-            'file': str(file_path),
-            'errors': 0,
-            'warnings': 0,
-            'diagnostics': [],
-            'skipped': 'Not a Python file'
-        }
+    if not path.suffix == ".py":
+        return {"file": str(file_path), "errors": 0, "warnings": 0, "diagnostics": [], "skipped": "Not a Python file"}
 
     try:
         # Run pyright with JSON output
         result = subprocess.run(
-            ['python3', '-m', 'pyright', '--outputjson', str(path)],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["python3", "-m", "pyright", "--outputjson", str(path)], capture_output=True, text=True, timeout=30
         )
 
         # Parse JSON output
@@ -103,56 +95,41 @@ def check_file(file_path: str) -> Dict:
         except json.JSONDecodeError:
             logger.info("Failed to parse pyright JSON output for %s", file_path)
             return {
-                'file': str(file_path),
-                'errors': 0,
-                'warnings': 0,
-                'diagnostics': [],
-                'error': f'Failed to parse pyright output: {result.stderr or result.stdout}'
+                "file": str(file_path),
+                "errors": 0,
+                "warnings": 0,
+                "diagnostics": [],
+                "error": f"Failed to parse pyright output: {result.stderr or result.stdout}",
             }
 
         diagnostics = []
         errors = 0
         warnings = 0
 
-        for diag in output.get('generalDiagnostics', []):
-            severity = diag.get('severity', 'error')
-            if severity == 'error':
+        for diag in output.get("generalDiagnostics", []):
+            severity = diag.get("severity", "error")
+            if severity == "error":
                 errors += 1
-            elif severity == 'warning':
+            elif severity == "warning":
                 warnings += 1
 
-            diagnostics.append({
-                'line': diag.get('range', {}).get('start', {}).get('line', 0) + 1,
-                'severity': severity,
-                'message': diag.get('message', 'Unknown error'),
-                'rule': diag.get('rule', '')
-            })
+            diagnostics.append(
+                {
+                    "line": diag.get("range", {}).get("start", {}).get("line", 0) + 1,
+                    "severity": severity,
+                    "message": diag.get("message", "Unknown error"),
+                    "rule": diag.get("rule", ""),
+                }
+            )
 
-        return {
-            'file': str(file_path),
-            'errors': errors,
-            'warnings': warnings,
-            'diagnostics': diagnostics
-        }
+        return {"file": str(file_path), "errors": errors, "warnings": warnings, "diagnostics": diagnostics}
 
     except subprocess.TimeoutExpired:
         logger.info("Pyright timed out for %s", file_path)
-        return {
-            'file': str(file_path),
-            'errors': 0,
-            'warnings': 0,
-            'diagnostics': [],
-            'error': 'Pyright timed out'
-        }
+        return {"file": str(file_path), "errors": 0, "warnings": 0, "diagnostics": [], "error": "Pyright timed out"}
     except Exception as e:
         logger.info("Pyright check failed for %s: %s", file_path, e)
-        return {
-            'file': str(file_path),
-            'errors': 0,
-            'warnings': 0,
-            'diagnostics': [],
-            'error': str(e)
-        }
+        return {"file": str(file_path), "errors": 0, "warnings": 0, "diagnostics": [], "error": str(e)}
 
 
 def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
@@ -176,21 +153,21 @@ def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
 
     if not path.exists():
         return {
-            'total_files': 0,
-            'files_with_errors': 0,
-            'total_errors': 0,
-            'total_warnings': 0,
-            'results': [],
-            'error': f'Directory not found: {directory}'
+            "total_files": 0,
+            "files_with_errors": 0,
+            "total_errors": 0,
+            "total_warnings": 0,
+            "results": [],
+            "error": f"Directory not found: {directory}",
         }
 
     # Run pyright on entire directory for efficiency
     try:
         result = subprocess.run(
-            ['python3', '-m', 'pyright', '--outputjson', str(path)],
+            ["python3", "-m", "pyright", "--outputjson", str(path)],
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes for full directory
+            timeout=300,  # 5 minutes for full directory
         )
 
         try:
@@ -198,12 +175,12 @@ def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
         except json.JSONDecodeError:
             logger.info("Failed to parse pyright JSON output for directory %s", directory)
             return {
-                'total_files': 0,
-                'files_with_errors': 0,
-                'total_errors': 0,
-                'total_warnings': 0,
-                'results': [],
-                'error': 'Failed to parse pyright output'
+                "total_files": 0,
+                "files_with_errors": 0,
+                "total_errors": 0,
+                "total_warnings": 0,
+                "results": [],
+                "error": "Failed to parse pyright output",
             }
 
         # Get ignore patterns
@@ -212,71 +189,69 @@ def check_directory(directory: str, pattern: str = "**/*.py") -> Dict:
         # Group diagnostics by file (filtering ignored files)
         file_diagnostics = {}
 
-        for diag in output.get('generalDiagnostics', []):
-            file_path = diag.get('file', 'unknown')
+        for diag in output.get("generalDiagnostics", []):
+            file_path = diag.get("file", "unknown")
 
             # Skip files matching ignore patterns
             if should_ignore_file(file_path, ignore_patterns):
                 continue
             if file_path not in file_diagnostics:
-                file_diagnostics[file_path] = {
-                    'file': file_path,
-                    'errors': 0,
-                    'warnings': 0,
-                    'diagnostics': []
+                file_diagnostics[file_path] = {"file": file_path, "errors": 0, "warnings": 0, "diagnostics": []}
+
+            severity = diag.get("severity", "error")
+            if severity == "error":
+                file_diagnostics[file_path]["errors"] += 1
+            elif severity == "warning":
+                file_diagnostics[file_path]["warnings"] += 1
+
+            file_diagnostics[file_path]["diagnostics"].append(
+                {
+                    "line": diag.get("range", {}).get("start", {}).get("line", 0) + 1,
+                    "severity": severity,
+                    "message": diag.get("message", "Unknown error"),
+                    "rule": diag.get("rule", ""),
                 }
-
-            severity = diag.get('severity', 'error')
-            if severity == 'error':
-                file_diagnostics[file_path]['errors'] += 1
-            elif severity == 'warning':
-                file_diagnostics[file_path]['warnings'] += 1
-
-            file_diagnostics[file_path]['diagnostics'].append({
-                'line': diag.get('range', {}).get('start', {}).get('line', 0) + 1,
-                'severity': severity,
-                'message': diag.get('message', 'Unknown error'),
-                'rule': diag.get('rule', '')
-            })
+            )
 
         results = list(file_diagnostics.values())
-        total_errors = sum(r['errors'] for r in results)
-        total_warnings = sum(r['warnings'] for r in results)
-        files_with_errors = len([r for r in results if r['errors'] > 0])
+        total_errors = sum(r["errors"] for r in results)
+        total_warnings = sum(r["warnings"] for r in results)
+        files_with_errors = len([r for r in results if r["errors"] > 0])
 
         return {
-            'total_files': output.get('summary', {}).get('filesAnalyzed', 0),
-            'files_with_errors': files_with_errors,
-            'total_errors': total_errors,
-            'total_warnings': total_warnings,
-            'results': sorted(results, key=lambda x: x['errors'], reverse=True)
+            "total_files": output.get("summary", {}).get("filesAnalyzed", 0),
+            "files_with_errors": files_with_errors,
+            "total_errors": total_errors,
+            "total_warnings": total_warnings,
+            "results": sorted(results, key=lambda x: x["errors"], reverse=True),
         }
 
     except subprocess.TimeoutExpired:
         logger.info("Pyright timed out for directory %s", directory)
         return {
-            'total_files': 0,
-            'files_with_errors': 0,
-            'total_errors': 0,
-            'total_warnings': 0,
-            'results': [],
-            'error': 'Pyright timed out (directory too large?)'
+            "total_files": 0,
+            "files_with_errors": 0,
+            "total_errors": 0,
+            "total_warnings": 0,
+            "results": [],
+            "error": "Pyright timed out (directory too large?)",
         }
     except Exception as e:
         logger.info("Pyright directory check failed for %s: %s", directory, e)
         return {
-            'total_files': 0,
-            'files_with_errors': 0,
-            'total_errors': 0,
-            'total_warnings': 0,
-            'results': [],
-            'error': str(e)
+            "total_files": 0,
+            "files_with_errors": 0,
+            "total_errors": 0,
+            "total_warnings": 0,
+            "results": [],
+            "error": str(e),
         }
 
 
 # =============================================
 # RUNNER DISCOVERY & DISPATCH
 # =============================================
+
 
 def _discover_pack_configs() -> List[Dict]:
     """
@@ -296,21 +271,17 @@ def _discover_pack_configs() -> List[Dict]:
     for subdir in sorted(HANDLERS_DIR.iterdir()):
         if not subdir.is_dir():
             continue
-        if not subdir.name.endswith('_standards'):
+        if not subdir.name.endswith("_standards"):
             continue
 
-        config_file = subdir / 'diagnostics.json'
+        config_file = subdir / "diagnostics.json"
         if not config_file.exists():
             continue
 
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 config = json.load(f)
-            configs.append({
-                'pack_name': subdir.name,
-                'pack_path': subdir,
-                'config': config
-            })
+            configs.append({"pack_name": subdir.name, "pack_path": subdir, "config": config})
         except (json.JSONDecodeError, IOError):
             logger.info("Skipped malformed diagnostics config: %s", config_file)
             continue
@@ -332,12 +303,12 @@ def _get_enabled_runners_from_config(config: Dict) -> List[str]:
         List of enabled runner names (e.g. ["python"])
     """
     enabled = []
-    runners = config.get('runners', {})
+    runners = config.get("runners", {})
 
     for name, value in runners.items():
         if isinstance(value, bool) and value:
             enabled.append(name)
-        elif isinstance(value, dict) and value.get('enabled', False):
+        elif isinstance(value, dict) and value.get("enabled", False):
             enabled.append(name)
 
     return enabled
@@ -376,7 +347,7 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
 
         # Check if file has actual content (not just whitespace/comments)
         try:
-            content = runner_path.read_text(encoding='utf-8').strip()
+            content = runner_path.read_text(encoding="utf-8").strip()
             if not content:
                 continue
         except IOError:
@@ -392,7 +363,7 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
             continue
 
         # Call check_branch if it exists
-        check_fn = getattr(runner_module, 'check_branch', None)
+        check_fn = getattr(runner_module, "check_branch", None)
         if check_fn is None:
             continue
 
@@ -408,6 +379,7 @@ def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list]
 # =============================================
 # BRANCH-LEVEL CHECK (audit pipeline entry)
 # =============================================
+
 
 def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
     """
@@ -430,13 +402,13 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
 
     if not apps_path.exists():
         return {
-            'passed': True,
-            'score': 100,
-            'total_files': 0,
-            'total_errors': 0,
-            'checks': [],
-            'standard': 'DIAGNOSTICS',
-            'error': f'No apps/ directory found in {branch_path}'
+            "passed": True,
+            "score": 100,
+            "total_files": 0,
+            "total_errors": 0,
+            "checks": [],
+            "standard": "DIAGNOSTICS",
+            "error": f"No apps/ directory found in {branch_path}",
         }
 
     # Step 1: Discover pack configs
@@ -445,7 +417,7 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
     # Step 2: Collect enabled runners across all packs
     all_runners = []
     for pack_info in pack_configs:
-        runners = _get_enabled_runners_from_config(pack_info['config'])
+        runners = _get_enabled_runners_from_config(pack_info["config"])
         for runner in runners:
             if runner not in all_runners:
                 all_runners.append(runner)
@@ -467,53 +439,55 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
 
         if runner_result is not None:
             runner_executed = True
-            total_errors += runner_result.get('total_errors', 0)
-            total_warnings += runner_result.get('total_warnings', 0)
-            total_files += runner_result.get('total_files', 0)
-            merged_checks.extend(runner_result.get('checks', []))
-            all_results.extend(runner_result.get('results', []))
+            total_errors += runner_result.get("total_errors", 0)
+            total_warnings += runner_result.get("total_warnings", 0)
+            total_files += runner_result.get("total_files", 0)
+            merged_checks.extend(runner_result.get("checks", []))
+            all_results.extend(runner_result.get("results", []))
         # If runner doesn't exist or is empty, skip gracefully
 
     # Step 5: If no runner executed, fall back to direct pyright check
     if not runner_executed:
         result = check_directory(str(apps_path))
 
-        total_errors = result.get('total_errors', 0)
-        total_warnings = result.get('total_warnings', 0)
-        total_files = result.get('total_files', 0)
-        all_results = result.get('results', [])
+        total_errors = result.get("total_errors", 0)
+        total_warnings = result.get("total_warnings", 0)
+        total_files = result.get("total_files", 0)
+        all_results = result.get("results", [])
 
         # Build checks from file results
         for file_result in all_results:
-            if file_result['errors'] > 0:
-                merged_checks.append({
-                    'name': f"Type errors in {Path(file_result['file']).name}",
-                    'passed': False,
-                    'message': f"{file_result['errors']} errors"
-                })
+            if file_result["errors"] > 0:
+                merged_checks.append(
+                    {
+                        "name": f"Type errors in {Path(file_result['file']).name}",
+                        "passed": False,
+                        "message": f"{file_result['errors']} errors",
+                    }
+                )
 
     # Default passing check if nothing failed
     if not merged_checks:
-        merged_checks.append({
-            'name': 'Type check',
-            'passed': True,
-            'message': f"No type errors ({total_files} files analyzed)"
-        })
+        merged_checks.append(
+            {"name": "Type check", "passed": True, "message": f"No type errors ({total_files} files analyzed)"}
+        )
 
     # Calculate score
     score = 100 if total_errors == 0 else max(0, 100 - (total_errors * 5))
 
-    json_handler.log_operation("diagnostics_run", {"branch": branch_path, "total_errors": total_errors, "runners": len(all_runners)})
+    json_handler.log_operation(
+        "diagnostics_run", {"branch": branch_path, "total_errors": total_errors, "runners": len(all_runners)}
+    )
     return {
-        'passed': total_errors == 0,
-        'score': score,
-        'total_files': total_files,
-        'total_errors': total_errors,
-        'total_warnings': total_warnings,
-        'files_with_errors': len([r for r in all_results if r.get('errors', 0) > 0]),
-        'checks': merged_checks,
-        'results': all_results,
-        'standard': 'DIAGNOSTICS'
+        "passed": total_errors == 0,
+        "score": score,
+        "total_files": total_files,
+        "total_errors": total_errors,
+        "total_warnings": total_warnings,
+        "files_with_errors": len([r for r in all_results if r.get("errors", 0) > 0]),
+        "checks": merged_checks,
+        "results": all_results,
+        "standard": "DIAGNOSTICS",
     }
 
 
@@ -522,7 +496,7 @@ def format_summary(results: Dict) -> str:
 
     Note: Used by tests/test_diagnostics.py — not called in production audit pipeline.
     """
-    if 'error' in results and results['error']:
+    if "error" in results and results["error"]:
         return f"Error: {results['error']}"
 
     lines = []
@@ -531,10 +505,10 @@ def format_summary(results: Dict) -> str:
     lines.append(f"Total errors: {results['total_errors']}")
     lines.append(f"Total warnings: {results['total_warnings']}")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # CLI usage: drone @seedgo diagnostics [file_or_directory]
     if len(sys.argv) < 2:
         console.print("[yellow]Usage:[/yellow] drone @seedgo diagnostics <file_or_directory>")
@@ -554,18 +528,18 @@ if __name__ == '__main__':
         console.print(f"  Files analyzed:     {result['total_files']}")
         console.print(f"  Files with errors:  {result['files_with_errors']}")
 
-        if result['total_errors'] > 0:
+        if result["total_errors"] > 0:
             console.print(f"  [red]Total errors:       {result['total_errors']}[/red]")
         else:
             console.print("  [green]Total errors:       0[/green]")
 
-        if result['total_warnings'] > 0:
+        if result["total_warnings"] > 0:
             console.print(f"  [yellow]Total warnings:     {result['total_warnings']}[/yellow]")
 
         # File details
-        for file_result in result.get('results', [])[:20]:  # Top 20
-            if file_result['errors'] > 0:
+        for file_result in result.get("results", [])[:20]:  # Top 20
+            if file_result["errors"] > 0:
                 console.print()
                 console.print(f"[red]\u2717[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
-                for diag in file_result['diagnostics'][:5]:  # Top 5 per file
+                for diag in file_result["diagnostics"][:5]:  # Top 5 per file
                     console.print(f"  [dim]Line {diag['line']}:[/dim] {diag['message']}")

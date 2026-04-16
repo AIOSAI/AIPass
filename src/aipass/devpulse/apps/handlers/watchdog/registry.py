@@ -91,7 +91,7 @@ def _load_store_unlocked(storage_path: Path) -> dict:
     if not storage_path.exists():
         return _empty_store()
     try:
-        data = json.loads(storage_path.read_text(encoding='utf-8'))
+        data = json.loads(storage_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("[watchdog.registry] could not load %s: %s", storage_path, exc)
         return _empty_store()
@@ -110,7 +110,7 @@ def _atomic_write_unlocked(storage_path: Path, data: dict) -> None:
     storage_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = storage_path.with_suffix(storage_path.suffix + ".tmp")
     try:
-        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding='utf-8')
+        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp_path, storage_path)
     finally:
         if tmp_path.exists():
@@ -136,9 +136,10 @@ class _FileLock:
         if sys.platform == "win32":
             return self  # Windows: skip file locking (single-user typical)
         import fcntl
+
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         # 'a+' so the file is created if missing and lock survives concurrent opens.
-        self._fh = open(self._lock_path, "a+", encoding='utf-8')
+        self._fh = open(self._lock_path, "a+", encoding="utf-8")
         fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         return self
 
@@ -146,6 +147,7 @@ class _FileLock:
         if self._fh is not None:
             try:
                 import fcntl
+
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
             finally:
                 self._fh.close()
@@ -160,7 +162,7 @@ def _generate_handle(watch_type: str) -> str:
 def _is_zombie_linux(pid: int) -> bool:
     """Linux-only zombie check via /proc. Returns True only if state is 'Z'."""
     try:
-        status_text = Path(f"/proc/{pid}/status").read_text(encoding='utf-8')
+        status_text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
     except OSError as exc:
         logger.info("[watchdog.registry] /proc/%s/status unreadable: %s", pid, exc)
         return False
@@ -228,8 +230,7 @@ def register(
         store["watches"].append(entry)
         _atomic_write_unlocked(path, store)
 
-    logger.info("[watchdog.registry] register type=%s handle=%s pid=%s",
-                watch_type, handle, entry["pid"])
+    logger.info("[watchdog.registry] register type=%s handle=%s pid=%s", watch_type, handle, entry["pid"])
     return handle
 
 

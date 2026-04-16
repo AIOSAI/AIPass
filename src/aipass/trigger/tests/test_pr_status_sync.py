@@ -19,6 +19,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     import sys
 
     from aipass.trigger.apps.config import atomic_write_json
+
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
@@ -37,6 +38,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 def _import_module():
     """Import fresh after mocking."""
     import aipass.trigger.apps.handlers.events.pr_status_sync as m
+
     return m
 
 
@@ -73,6 +75,7 @@ class TestHandlePrCreated:
         """Logs the event via json_handler."""
         mod = _import_module()
         from aipass.trigger.apps.handlers.json import json_handler
+
         json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
         mod.handle_pr_created(branch="spawn", pr_url="https://example.com/pr/1")
@@ -114,6 +117,7 @@ class TestHandlePrMerged:
         """Logs the event via json_handler."""
         mod = _import_module()
         from aipass.trigger.apps.handlers.json import json_handler
+
         json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
         mod.handle_pr_merged(pr_number="7", title="Add feature")

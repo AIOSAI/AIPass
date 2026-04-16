@@ -37,10 +37,10 @@ from aipass.spawn.apps.handlers.registry import find_registry, load_registry, _b
 from aipass.spawn.apps.handlers.json import json_handler
 
 
-
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) -> dict:
     """Update a single branch from template.
@@ -168,9 +168,17 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
             elif tp.endswith(".json"):
                 counts["updates"] += 1
 
-        return _result(branch_name, True, counts, errors, dry_run,
-                       _additions_detail=additions, _updates_detail=updates_list,
-                       _renames_detail=renames, _pruned_detail=pruned)
+        return _result(
+            branch_name,
+            True,
+            counts,
+            errors,
+            dry_run,
+            _additions_detail=additions,
+            _updates_detail=updates_list,
+            _renames_detail=renames,
+            _pruned_detail=pruned,
+        )
 
     # ------------------------------------------------------------------
     # 7. Execute changes
@@ -296,17 +304,19 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
             results.append(result)
         except Exception as exc:
             logger.error(f"[update] Error updating {name}: {exc}")
-            results.append({
-                "branch": lower_name,
-                "success": False,
-                "additions": 0,
-                "renames": 0,
-                "updates": 0,
-                "pruned": 0,
-                "skipped_py": 0,
-                "errors": [str(exc)],
-                "dry_run": dry_run,
-            })
+            results.append(
+                {
+                    "branch": lower_name,
+                    "success": False,
+                    "additions": 0,
+                    "renames": 0,
+                    "updates": 0,
+                    "pruned": 0,
+                    "skipped_py": 0,
+                    "errors": [str(exc)],
+                    "dry_run": dry_run,
+                }
+            )
 
     return results
 
@@ -314,6 +324,7 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
 # =============================================================================
 # INTERNAL EXECUTION FUNCTIONS
 # =============================================================================
+
 
 def _read_citizen_class(branch_dir: Path) -> str:
     """Read citizen_class from a branch's passport.json.
@@ -331,8 +342,7 @@ def _read_citizen_class(branch_dir: Path) -> str:
         citizen_class = data.get("identity", {}).get("citizen_class", "builder")
         if not validate_class(citizen_class):
             logger.warning(
-                f"[update] Unknown citizen_class '{citizen_class}' in {passport_path}, "
-                "falling back to 'builder'"
+                f"[update] Unknown citizen_class '{citizen_class}' in {passport_path}, falling back to 'builder'"
             )
             return "builder"
         return citizen_class
@@ -548,6 +558,7 @@ def _execute_prune(branch_dir: Path, prune_info: dict, trace: bool) -> None:
 # =============================================================================
 # RESULT HELPERS
 # =============================================================================
+
 
 def _result(
     branch_name: str,

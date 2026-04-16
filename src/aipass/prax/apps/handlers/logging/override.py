@@ -13,16 +13,12 @@ Global logging.getLogger() override for automatic log routing.
 Intercepts logging.getLogger() calls and routes to module-specific logs.
 """
 
-
 import logging
 import sys
 from typing import Optional
 
 # Import from prax config
-from aipass.prax.apps.handlers.config.load import (
-    DEFAULT_LOG_LEVEL,
-    get_debug_prints_enabled
-)
+from aipass.prax.apps.handlers.config.load import DEFAULT_LOG_LEVEL, get_debug_prints_enabled
 
 # Import logging setup
 from aipass.prax.apps.handlers.logging.setup import setup_individual_logger
@@ -35,6 +31,7 @@ from aipass.prax.apps.handlers.json import json_handler
 # Store original logging functions for restoration
 _original_getLogger = logging.getLogger
 _original_basicConfig = logging.basicConfig
+
 
 def enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
     """Enhanced getLogger that redirects to our individual module loggers
@@ -64,7 +61,7 @@ def enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
         sys.stderr.write(f"[DEBUG] Detected calling module: {module_name}\n")
 
     # If we can detect the module, add our custom handler
-    if module_name != 'unknown_module':
+    if module_name != "unknown_module":
         # sys.stderr used intentionally: runs during logging override setup
         if get_debug_prints_enabled():
             sys.stderr.write(f"[DEBUG] Setting up individual logger for: {module_name}\n")
@@ -86,6 +83,7 @@ def enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
 
     return original_logger
 
+
 def install_logger_override():
     """Install the enhanced getLogger function globally
 
@@ -97,6 +95,7 @@ def install_logger_override():
     sys.stderr.write("[prax] Global logger override installed\n")
     json_handler.log_operation("logger_override_applied", {"action": "install"})
 
+
 def restore_original_logger():
     """Restore original getLogger function
 
@@ -105,6 +104,7 @@ def restore_original_logger():
     logging.getLogger = _original_getLogger
     # sys.stderr used intentionally: logging system is being restored, cannot use prax logger here
     sys.stderr.write("[prax] Original logger function restored\n")
+
 
 def is_override_active() -> bool:
     """Check if logger override is currently active

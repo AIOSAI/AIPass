@@ -41,14 +41,8 @@ class TestCapturedMode:
 
     def test_captured_both_streams(self, temp_test_dir: Path):
         """Both stdout and stderr are captured simultaneously."""
-        code = (
-            "import sys; "
-            "print('out'); "
-            "sys.stderr.write('err\\n')"
-        )
-        result = execute_command(
-            sys.executable, ["-c", code], cwd=str(temp_test_dir)
-        )
+        code = "import sys; print('out'); sys.stderr.write('err\\n')"
+        result = execute_command(sys.executable, ["-c", code], cwd=str(temp_test_dir))
         assert "out" in result.stdout
         assert "err" in result.stderr
 
@@ -133,9 +127,7 @@ class TestInteractiveNoTimeout:
     def test_no_timeout_kwarg(self, temp_test_dir: Path):
         """subprocess.run is called without a timeout arg in interactive mode."""
         with patch("aipass.drone.apps.handlers.executor.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             execute_command(
                 sys.executable,
                 ["-c", "pass"],
@@ -362,9 +354,7 @@ class TestShellSecurity:
     def test_captured_mode_shell_false(self, temp_test_dir: Path):
         """Captured mode calls subprocess.run with shell=False."""
         with patch("aipass.drone.apps.handlers.executor.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=b"", stderr=b""
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
             execute_command(
                 sys.executable,
                 ["-c", "pass"],
@@ -376,9 +366,7 @@ class TestShellSecurity:
     def test_interactive_mode_shell_false(self, temp_test_dir: Path):
         """Interactive mode calls subprocess.run with shell=False."""
         with patch("aipass.drone.apps.handlers.executor.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[], returncode=0
-            )
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             execute_command(
                 sys.executable,
                 ["-c", "pass"],

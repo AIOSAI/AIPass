@@ -1,13 +1,13 @@
 """Tests for plan display handler -- formatting and display functions."""
 
 
-
-
 # ─── Helpers ─────────────────────────────────────────────
+
 
 def _import(name: str):
     """Import a function from display module inside test scope."""
     import aipass.flow.apps.handlers.plan.display as mod
+
     return getattr(mod, name)
 
 
@@ -15,8 +15,8 @@ def _import(name: str):
 # 1. display_plan_created
 # ═══════════════════════════════════════════════════════════
 
-class TestDisplayPlanCreated:
 
+class TestDisplayPlanCreated:
     def test_basic_output(self):
         fn = _import("display_plan_created")
         result = fn(plan_num=1, relative_location="flow", subject="My plan", template_type="default")
@@ -27,7 +27,9 @@ class TestDisplayPlanCreated:
 
     def test_custom_prefix_and_digits(self):
         fn = _import("display_plan_created")
-        result = fn(plan_num=42, relative_location="dev", subject="Dev plan", template_type="sprint", prefix="DPLAN", digits=6)
+        result = fn(
+            plan_num=42, relative_location="dev", subject="Dev plan", template_type="sprint", prefix="DPLAN", digits=6
+        )
         assert "DPLAN-000042" in result
         assert "dev" in result
 
@@ -55,8 +57,8 @@ class TestDisplayPlanCreated:
 # 2. display_plan_result
 # ═══════════════════════════════════════════════════════════
 
-class TestDisplayPlanResult:
 
+class TestDisplayPlanResult:
     def test_success_result(self):
         fn = _import("display_plan_result")
         result = fn(success=True, plan_num=3, location="flow", template_type="default", error="")
@@ -72,7 +74,9 @@ class TestDisplayPlanResult:
 
     def test_custom_prefix_success(self):
         fn = _import("display_plan_result")
-        result = fn(success=True, plan_num=10, location="dev", template_type="sprint", error="", prefix="DPLAN", digits=6)
+        result = fn(
+            success=True, plan_num=10, location="dev", template_type="sprint", error="", prefix="DPLAN", digits=6
+        )
         assert "DPLAN-000010" in result
 
     def test_failure_ignores_plan_details(self):
@@ -86,8 +90,8 @@ class TestDisplayPlanResult:
 # 3. format_plan_deletion_header
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatPlanDeletionHeader:
 
+class TestFormatPlanDeletionHeader:
     def test_basic_header(self):
         fn = _import("format_plan_deletion_header")
         plan_info = {
@@ -118,8 +122,8 @@ class TestFormatPlanDeletionHeader:
 # 4. format_plan_error
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatPlanError:
 
+class TestFormatPlanError:
     def test_not_found(self):
         fn = _import("format_plan_error")
         result = fn("not_found", plan_num="0001")
@@ -150,8 +154,8 @@ class TestFormatPlanError:
 # 5. format_plan_deletion_success
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatPlanDeletionSuccess:
 
+class TestFormatPlanDeletionSuccess:
     def test_default_prefix(self):
         fn = _import("format_plan_deletion_success")
         result = fn("0001")
@@ -167,8 +171,8 @@ class TestFormatPlanDeletionSuccess:
 # 6. format_deletion_cancelled
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatDeletionCancelled:
 
+class TestFormatDeletionCancelled:
     def test_output(self):
         fn = _import("format_deletion_cancelled")
         assert fn() == "Deletion cancelled"
@@ -178,8 +182,8 @@ class TestFormatDeletionCancelled:
 # 7. format_delete_usage_error
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatDeleteUsageError:
 
+class TestFormatDeleteUsageError:
     def test_contains_usage_instructions(self):
         fn = _import("format_delete_usage_error")
         result = fn()
@@ -192,8 +196,8 @@ class TestFormatDeleteUsageError:
 # 8. format_restore_header
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatRestoreHeader:
 
+class TestFormatRestoreHeader:
     def test_basic_header(self):
         fn = _import("format_restore_header")
         plan_info = {
@@ -227,8 +231,8 @@ class TestFormatRestoreHeader:
 # 9. format_restore_success
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatRestoreSuccess:
 
+class TestFormatRestoreSuccess:
     def test_with_location(self):
         fn = _import("format_restore_success")
         result = fn("0001", restored_location="/home/user/plans")
@@ -251,8 +255,8 @@ class TestFormatRestoreSuccess:
 # 10. format_restore_error
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatRestoreError:
 
+class TestFormatRestoreError:
     def test_not_found(self):
         fn = _import("format_restore_error")
         assert "not found" in fn("not_found", plan_key="0001")
@@ -286,8 +290,8 @@ class TestFormatRestoreError:
 # 11. format_restore_usage_error
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatRestoreUsageError:
 
+class TestFormatRestoreUsageError:
     def test_contains_usage(self):
         fn = _import("format_restore_usage_error")
         result = fn()
@@ -299,8 +303,8 @@ class TestFormatRestoreUsageError:
 # 12. format_plan_info
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatPlanInfo:
 
+class TestFormatPlanInfo:
     def test_basic_plan_info(self):
         fn = _import("format_plan_info")
         plan_info = {
@@ -362,8 +366,8 @@ class TestFormatPlanInfo:
 # 13. format_plans_list
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatPlansList:
 
+class TestFormatPlansList:
     def test_empty_plans(self):
         fn = _import("format_plans_list")
         result = fn({})
@@ -423,8 +427,8 @@ class TestFormatPlansList:
 # 14. format_statistics_summary
 # ═══════════════════════════════════════════════════════════
 
-class TestFormatStatisticsSummary:
 
+class TestFormatStatisticsSummary:
     def test_basic_stats(self):
         fn = _import("format_statistics_summary")
         stats = {"total_plans": 10, "open_plans": 7, "closed_plans": 3, "other_plans": 0}

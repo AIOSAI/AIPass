@@ -33,6 +33,7 @@ MODULES_DIR = SEEDGO_ROOT / "modules"
 # MODULE DISCOVERY
 # =============================================================================
 
+
 def discover_modules() -> List[Any]:
     """Auto-discover seedgo-level modules in modules/ directory."""
     modules = []
@@ -73,6 +74,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 # PACK DISCOVERY (handler-based)
 # =============================================================================
 
+
 def discover_handler_packs() -> list:
     """Discover checker packs from handlers/*_standards/ directories.
 
@@ -89,18 +91,21 @@ def discover_handler_packs() -> list:
         check_files = list(d.glob("*_check.py"))
         content_files = list(d.glob("*_content.py"))
         if check_files:
-            packs.append({
-                "name": d.name,
-                "path": d,
-                "check_count": len(check_files),
-                "content_count": len(content_files),
-            })
+            packs.append(
+                {
+                    "name": d.name,
+                    "path": d,
+                    "check_count": len(check_files),
+                    "content_count": len(content_files),
+                }
+            )
     return packs
 
 
 # =============================================================================
 # DISPLAY
 # =============================================================================
+
 
 def print_introspection() -> None:
     """Display discovered modules and handler packs."""
@@ -181,48 +186,71 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Audit:[/yellow]")
-    console.print("  [green]drone @seedgo audit[/green]                          [dim]# Show available checker packs[/dim]")
+    console.print(
+        "  [green]drone @seedgo audit[/green]                          [dim]# Show available checker packs[/dim]"
+    )
     console.print("  [green]drone @seedgo audit aipass[/green]                   [dim]# Audit all branches[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]             [dim]# Audit single branch[/dim]")
     console.print()
 
     console.print("[yellow]Query Standards:[/yellow]")
     console.print("  [green]drone @seedgo standards_query[/green]                [dim]# List available packs[/dim]")
-    console.print("  [green]drone @seedgo standards_query aipass_standards[/green]        [dim]# List standards in pack[/dim]")
-    console.print("  [green]drone @seedgo standards_query aipass_standards cli[/green]    [dim]# Show standard content[/dim]")
+    console.print(
+        "  [green]drone @seedgo standards_query aipass_standards[/green]        [dim]# List standards in pack[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo standards_query aipass_standards cli[/green]    [dim]# Show standard content[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Checklist:[/yellow]")
-    console.print("  [green]drone @seedgo checklist[/green]                      [dim]# Show checklist introspection[/dim]")
-    console.print("  [green]drone @seedgo checklist <file>[/green]               [dim]# Run per-standard checklist on file[/dim]")
+    console.print(
+        "  [green]drone @seedgo checklist[/green]                      [dim]# Show checklist introspection[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo checklist <file>[/green]               [dim]# Run per-standard checklist on file[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Diagnostics:[/yellow]")
-    console.print("  [green]drone @seedgo diagnostics[/green]                    [dim]# Pyright errors across all branches[/dim]")
-    console.print("  [green]drone @seedgo diagnostics @flow[/green]              [dim]# Single branch diagnostics[/dim]")
+    console.print(
+        "  [green]drone @seedgo diagnostics[/green]                    [dim]# Pyright errors across all branches[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo diagnostics @flow[/green]              [dim]# Single branch diagnostics[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Proof (Self-Check):[/yellow]")
-    console.print("  [green]drone @seedgo proof[/green]                          [dim]# List available proof packs[/dim]")
-    console.print("  [green]drone @seedgo proof aipass[/green]                   [dim]# Run all proofs for aipass pack[/dim]")
+    console.print(
+        "  [green]drone @seedgo proof[/green]                          [dim]# List available proof packs[/dim]"
+    )
+    console.print(
+        "  [green]drone @seedgo proof aipass[/green]                   [dim]# Run all proofs for aipass pack[/dim]"
+    )
     console.print("  [green]drone @seedgo proof_query[/green]                    [dim]# Query proof pack content[/dim]")
     console.print()
 
     console.print("[yellow]Test Map:[/yellow]")
-    console.print("  [green]drone @seedgo test_map @flow[/green]                 [dim]# Function test coverage map for branch[/dim]")
+    console.print(
+        "  [green]drone @seedgo test_map @flow[/green]                 [dim]# Function test coverage map for branch[/dim]"
+    )
     console.print()
 
     console.print("─" * 70)
     console.print()
 
     # Commands line for drone discovery
-    console.print("[dim]Commands: audit, standards_audit, standards_query, checklist, diagnostics, diagnostics_audit, proof, proof_query, test_map, readme, readme_update, --help[/dim]")
+    console.print(
+        "[dim]Commands: audit, standards_audit, standards_query, checklist, diagnostics, diagnostics_audit, proof, proof_query, test_map, readme, readme_update, --help[/dim]"
+    )
     console.print()
 
 
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
+
 
 def main() -> int:
     """Main entry point - routes to modules."""
@@ -254,7 +282,7 @@ def main() -> int:
         error(f"Unknown command: {command}", suggestion="Run 'seedgo --help' for usage")
         return 1
     except Exception as exc:
-        logger.error('[seedgo] Unhandled error in main: %s', exc)
+        logger.error("[seedgo] Unhandled error in main: %s", exc)
         raise
 
 

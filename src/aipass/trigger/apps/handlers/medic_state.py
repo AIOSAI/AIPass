@@ -41,7 +41,7 @@ def read_config() -> dict:
     """
     try:
         if TRIGGER_CONFIG_FILE.exists():
-            return json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
+            return json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("read_config failed: %s", exc)
         return {}
@@ -74,7 +74,7 @@ def is_enabled() -> bool:
         True if medic_enabled is True in config (defaults to True)
     """
     data = read_config()
-    return bool(data.get('config', {}).get('medic_enabled', True))
+    return bool(data.get("config", {}).get("medic_enabled", True))
 
 
 def set_enabled(enabled: bool) -> bool:
@@ -89,10 +89,10 @@ def set_enabled(enabled: bool) -> bool:
     """
     with json_file_lock(TRIGGER_CONFIG_FILE):
         data = read_config()
-        if 'config' not in data:
-            data['config'] = {}
-        data['config']['medic_enabled'] = enabled
-        data['timestamp'] = datetime.now().strftime("%Y-%m-%d")
+        if "config" not in data:
+            data["config"] = {}
+        data["config"]["medic_enabled"] = enabled
+        data["timestamp"] = datetime.now().strftime("%Y-%m-%d")
 
         if write_config(data):
             json_handler.log_operation("state_persisted", {"key": "medic_enabled", "value": enabled})
@@ -110,8 +110,8 @@ def _normalize_branch_name(name: str) -> str:
     Returns:
         Lowercase branch name (e.g., 'speakeasy')
     """
-    cleaned = name.lstrip('@')
-    if '/' in cleaned:
+    cleaned = name.lstrip("@")
+    if "/" in cleaned:
         cleaned = Path(cleaned).name
     return cleaned.lower()
 
@@ -124,9 +124,8 @@ def get_muted_branches() -> List[str]:
         List of muted branch names (lowercase, e.g., ['speakeasy', 'api'])
     """
     data = read_config()
-    raw = data.get('config', {}).get('muted_branches', [])
+    raw = data.get("config", {}).get("muted_branches", [])
     return [_normalize_branch_name(b) for b in raw]
-
 
 
 def mute_branch(branch_name: str) -> bool:
@@ -145,13 +144,13 @@ def mute_branch(branch_name: str) -> bool:
     clean = _normalize_branch_name(branch_name)
     with json_file_lock(TRIGGER_CONFIG_FILE):
         data = read_config()
-        if 'config' not in data:
-            data['config'] = {}
-        muted = [_normalize_branch_name(b) for b in data['config'].get('muted_branches', [])]
+        if "config" not in data:
+            data["config"] = {}
+        muted = [_normalize_branch_name(b) for b in data["config"].get("muted_branches", [])]
         if clean not in muted:
             muted.append(clean)
-        data['config']['muted_branches'] = muted
-        data['timestamp'] = datetime.now().strftime("%Y-%m-%d")
+        data["config"]["muted_branches"] = muted
+        data["timestamp"] = datetime.now().strftime("%Y-%m-%d")
         return write_config(data)
 
 
@@ -168,12 +167,12 @@ def unmute_branch(branch_name: str) -> bool:
     clean = _normalize_branch_name(branch_name)
     with json_file_lock(TRIGGER_CONFIG_FILE):
         data = read_config()
-        if 'config' not in data:
-            data['config'] = {}
-        muted = [_normalize_branch_name(b) for b in data['config'].get('muted_branches', [])]
+        if "config" not in data:
+            data["config"] = {}
+        muted = [_normalize_branch_name(b) for b in data["config"].get("muted_branches", [])]
         muted = [b for b in muted if b != clean]
-        data['config']['muted_branches'] = muted
-        data['timestamp'] = datetime.now().strftime("%Y-%m-%d")
+        data["config"]["muted_branches"] = muted
+        data["timestamp"] = datetime.now().strftime("%Y-%m-%d")
         return write_config(data)
 
 
@@ -188,18 +187,18 @@ def get_suppression_stats() -> Dict[str, Any]:
     last_suppressed = "never"
     try:
         if MEDIC_SUPPRESSED_LOG.exists():
-            lines = MEDIC_SUPPRESSED_LOG.read_text(encoding='utf-8').strip().splitlines()
+            lines = MEDIC_SUPPRESSED_LOG.read_text(encoding="utf-8").strip().splitlines()
             suppressed_count = len(lines)
             if lines:
                 last_line = lines[-1]
-                last_suppressed = last_line.split(' | ')[0] if ' | ' in last_line else "unknown"
+                last_suppressed = last_line.split(" | ")[0] if " | " in last_line else "unknown"
     except Exception as exc:
         logger.warning("get_suppression_stats failed: %s", exc)
-        return {'suppressed_count': 0, 'last_suppressed': 'error reading log'}
+        return {"suppressed_count": 0, "last_suppressed": "error reading log"}
 
     return {
-        'suppressed_count': suppressed_count,
-        'last_suppressed': last_suppressed,
+        "suppressed_count": suppressed_count,
+        "last_suppressed": last_suppressed,
     }
 
 
@@ -214,16 +213,16 @@ def get_rate_limit_stats() -> Dict[str, Any]:
     last_dispatch = "never"
     try:
         if RATE_LIMITED_LOG.exists():
-            lines = RATE_LIMITED_LOG.read_text(encoding='utf-8').strip().splitlines()
+            lines = RATE_LIMITED_LOG.read_text(encoding="utf-8").strip().splitlines()
             dispatch_count = len(lines)
             if lines:
                 last_line = lines[-1]
-                last_dispatch = last_line.split(' | ')[0] if ' | ' in last_line else "unknown"
+                last_dispatch = last_line.split(" | ")[0] if " | " in last_line else "unknown"
     except Exception as exc:
         logger.warning("get_rate_limit_stats failed: %s", exc)
-        return {'rate_limited_count': 0, 'last_rate_limited': 'error reading log'}
+        return {"rate_limited_count": 0, "last_rate_limited": "error reading log"}
 
     return {
-        'rate_limited_count': dispatch_count,
-        'last_rate_limited': last_dispatch,
+        "rate_limited_count": dispatch_count,
+        "last_rate_limited": last_dispatch,
     }

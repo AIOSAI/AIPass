@@ -77,13 +77,9 @@ class TestExecuteBranchCommand:
         return temp_test_dir
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_valid_command_returns_command_result(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_valid_command_returns_command_result(self, mock_exec, branch_dir: Path):
         """A valid command returns a CommandResult with correct fields."""
-        mock_exec.return_value = CommandResult(
-            stdout="ok\n", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="ok\n", stderr="", exit_code=0, branch="", command="")
 
         result = execute_branch_command(
             branch_path=str(branch_dir),
@@ -98,9 +94,7 @@ class TestExecuteBranchCommand:
         assert result.command == "status"
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_introspection_with_command_none(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_introspection_with_command_none(self, mock_exec, branch_dir: Path):
         """When command=None the entry point is invoked with no command args."""
         mock_exec.return_value = CommandResult(
             stdout="introspect output", stderr="", exit_code=0, branch="", command=""
@@ -118,13 +112,9 @@ class TestExecuteBranchCommand:
         assert result.command == ""
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_interactive_flag_passed_through(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_interactive_flag_passed_through(self, mock_exec, branch_dir: Path):
         """interactive=True is forwarded to execute_command."""
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         execute_branch_command(
             branch_path=str(branch_dir),
@@ -137,13 +127,9 @@ class TestExecuteBranchCommand:
         assert call_kwargs.get("interactive") is True
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_sets_aipass_caller_cwd_env(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_sets_aipass_caller_cwd_env(self, mock_exec, branch_dir: Path):
         """AIPASS_CALLER_CWD is set in the env dict passed to execute_command."""
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         execute_branch_command(
             branch_path=str(branch_dir),
@@ -157,13 +143,9 @@ class TestExecuteBranchCommand:
         assert env["AIPASS_CALLER_CWD"] == str(Path.cwd())
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_timeout_propagated_to_executor(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_timeout_propagated_to_executor(self, mock_exec, branch_dir: Path):
         """Timeout value is forwarded to execute_command."""
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         execute_branch_command(
             branch_path=str(branch_dir),
@@ -176,13 +158,9 @@ class TestExecuteBranchCommand:
         assert call_kwargs.get("timeout") == 120
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_args_appended_to_command(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_args_appended_to_command(self, mock_exec, branch_dir: Path):
         """Extra args are appended after the command in the args list."""
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         execute_branch_command(
             branch_path=str(branch_dir),
@@ -196,13 +174,9 @@ class TestExecuteBranchCommand:
         assert args_list[-3:] == ["deploy", "--force", "--env=prod"]
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_uses_sys_executable(
-        self, mock_exec, branch_dir: Path
-    ):
+    def test_uses_sys_executable(self, mock_exec, branch_dir: Path):
         """execute_command is called with sys.executable as the executable."""
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         execute_branch_command(
             branch_path=str(branch_dir),
@@ -231,9 +205,7 @@ class TestExecuteBranchCommand:
 class TestRouteCommand:
     """Tests for route_command() in the router module."""
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_valid_branch_and_command(self, mock_resolve, mock_exec):
         """route_command resolves target and delegates to execute_branch_command."""
@@ -257,48 +229,36 @@ class TestRouteCommand:
         with pytest.raises(BranchNotFoundError, match="not found"):
             route_command("@ghost", "status")
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_timeout_forwarded(self, mock_resolve, mock_exec):
         """route_command passes timeout through to execute_branch_command."""
         mock_resolve.return_value = "/fake/path"
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="b", command="c"
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
 
         route_command("@somebranch", "cmd", timeout=90)
 
         call_kwargs = mock_exec.call_args.kwargs
         assert call_kwargs["timeout"] == 90
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_interactive_forwarded(self, mock_resolve, mock_exec):
         """route_command passes interactive flag through."""
         mock_resolve.return_value = "/fake/path"
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="b", command="c"
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
 
         route_command("@somebranch", "monitor", interactive=True)
 
         call_kwargs = mock_exec.call_args.kwargs
         assert call_kwargs["interactive"] is True
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_introspection_no_command(self, mock_resolve, mock_exec):
         """route_command with command=None triggers introspection."""
         mock_resolve.return_value = "/fake/path"
-        mock_exec.return_value = CommandResult(
-            stdout="info", stderr="", exit_code=0, branch="b", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="info", stderr="", exit_code=0, branch="b", command="")
 
         result = route_command("@somebranch", None)
 
@@ -306,32 +266,24 @@ class TestRouteCommand:
         assert call_kwargs["command"] is None
         assert result.stdout == "info"
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_args_forwarded(self, mock_resolve, mock_exec):
         """route_command forwards args list to execute_branch_command."""
         mock_resolve.return_value = "/fake/path"
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="b", command="c"
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="c")
 
         route_command("@mybranch", "deploy", args=["--env=staging"])
 
         call_kwargs = mock_exec.call_args.kwargs
         assert call_kwargs["args"] == ["--env=staging"]
 
-    @patch(
-        "aipass.drone.apps.modules.router.execute_branch_command"
-    )
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_branch_name_stripped_and_lowered(self, mock_resolve, mock_exec):
         """route_command strips @ prefix and lowercases for branch_name."""
         mock_resolve.return_value = "/fake/path"
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="mybranch", command="test"
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="mybranch", command="test")
 
         route_command("@MyBranch", "test")
 
@@ -352,9 +304,7 @@ class TestRouteAll:
     def test_routes_to_all_active_branches(self, mock_list, mock_route):
         """route_all dispatches the command to every active branch."""
         mock_list.return_value = ["@alpha", "@beta"]
-        mock_route.return_value = CommandResult(
-            stdout="ok", stderr="", exit_code=0, branch="", command="status"
-        )
+        mock_route.return_value = CommandResult(stdout="ok", stderr="", exit_code=0, branch="", command="status")
 
         results = route_all("status")
 
@@ -393,9 +343,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "alpha"}
-        }))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}))
 
         result = detect_caller_branch_name(temp_test_dir)
         assert result == "alpha"
@@ -405,9 +353,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "identity": {"name": "beta"}
-        }))
+        passport.write_text(json.dumps({"identity": {"name": "beta"}}))
 
         result = detect_caller_branch_name(temp_test_dir)
         assert result == "beta"
@@ -417,10 +363,14 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "v1name"},
-            "identity": {"name": "v2name"},
-        }))
+        passport.write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "v1name"},
+                    "identity": {"name": "v2name"},
+                }
+            )
+        )
 
         result = detect_caller_branch_name(temp_test_dir)
         assert result == "v1name"
@@ -445,9 +395,7 @@ class TestDetectCallerBranchName:
         trinity = temp_test_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "found_it"}
-        }))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "found_it"}}))
 
         sub = temp_test_dir / "deep" / "nested" / "dir"
         sub.mkdir(parents=True)
@@ -479,13 +427,9 @@ class TestCallerBranchEnvVar:
         trinity = cwd_dir / ".trinity"
         trinity.mkdir()
         passport = trinity / "passport.json"
-        passport.write_text(json.dumps({
-            "branch_info": {"branch_name": "caller_branch"}
-        }))
+        passport.write_text(json.dumps({"branch_info": {"branch_name": "caller_branch"}}))
 
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
             # Make Path.cwd() return our fake cwd
@@ -514,9 +458,7 @@ class TestCallerBranchEnvVar:
         cwd_dir = temp_test_dir / "empty_cwd"
         cwd_dir.mkdir()
 
-        mock_exec.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="", command=""
-        )
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
 
         with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
             mock_path_cls.cwd.return_value = cwd_dir
@@ -551,9 +493,7 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.router.route_command")
     def test_route_with_target_and_command(self, mock_route):
         """handle_command('route', ['@branch', 'cmd']) delegates to route_command."""
-        mock_route.return_value = CommandResult(
-            stdout="output", stderr="", exit_code=0, branch="branch", command="cmd"
-        )
+        mock_route.return_value = CommandResult(stdout="output", stderr="", exit_code=0, branch="branch", command="cmd")
 
         result = handle_command("route", ["@branch", "cmd"])
 
@@ -563,9 +503,7 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.router.route_command")
     def test_route_with_extra_args(self, mock_route):
         """handle_command('route', ['@b', 'cmd', '--flag']) passes extra args."""
-        mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="b", command="cmd"
-        )
+        mock_route.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="b", command="cmd")
 
         result = handle_command("route", ["@b", "cmd", "--flag"])
 
@@ -575,9 +513,7 @@ class TestHandleCommand:
     @patch("aipass.drone.apps.modules.router.route_command")
     def test_route_nonzero_exit_returns_false(self, mock_route):
         """handle_command('route', ...) returns False when exit_code != 0."""
-        mock_route.return_value = CommandResult(
-            stdout="", stderr="err", exit_code=1, branch="b", command="cmd"
-        )
+        mock_route.return_value = CommandResult(stdout="", stderr="err", exit_code=1, branch="b", command="cmd")
 
         result = handle_command("route", ["@b", "cmd"])
 

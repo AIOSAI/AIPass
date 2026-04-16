@@ -72,6 +72,7 @@ _PROTECTED_TYPES: frozenset[str] = frozenset({"flow_plans", "dev_plans"})
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _today() -> str:
     """Return today's date as ISO string."""
     return datetime.now().date().isoformat()
@@ -101,6 +102,7 @@ def _empty_registry() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Core CRUD
 # ---------------------------------------------------------------------------
+
 
 def load_registry() -> Dict[str, Any]:
     """Load the template registry from disk, auto-creating if missing.
@@ -162,10 +164,7 @@ def _prune_orphaned_types(data: Dict[str, Any]) -> bool:
     Returns True if any entries were pruned.
     """
     templates_dir = FLOW_ROOT / "templates"
-    orphaned = [
-        d for d in data["types"]
-        if d not in _PROTECTED_TYPES and not (templates_dir / d).is_dir()
-    ]
+    orphaned = [d for d in data["types"] if d not in _PROTECTED_TYPES and not (templates_dir / d).is_dir()]
     if not orphaned:
         return False
 
@@ -206,8 +205,10 @@ def _auto_register_new_types(data: Dict[str, Any]) -> bool:
             continue  # Collision — needs manual registration
         shorthand = prefix.lower()
         data["types"][child.name] = {
-            "prefix": prefix, "shorthand": shorthand,
-            "created": _today(), "registered_by": "auto",
+            "prefix": prefix,
+            "shorthand": shorthand,
+            "created": _today(),
+            "registered_by": "auto",
         }
         used_prefixes.add(prefix)
         registered.add(child.name)
@@ -306,7 +307,9 @@ def add_type(
     # Validate: dir_name not already registered
     if dir_name in registry["types"]:
         logger.error(
-            "[%s] Type '%s' is already registered", MODULE_NAME, dir_name,
+            "[%s] Type '%s' is already registered",
+            MODULE_NAME,
+            dir_name,
         )
         return False
 
@@ -323,7 +326,9 @@ def add_type(
     templates_dir = FLOW_ROOT / "templates" / dir_name
     if not templates_dir.is_dir():
         logger.error(
-            "[%s] Templates directory not found: %s", MODULE_NAME, templates_dir,
+            "[%s] Templates directory not found: %s",
+            MODULE_NAME,
+            templates_dir,
         )
         return False
 
@@ -331,7 +336,9 @@ def add_type(
     md_files = list(templates_dir.glob("*.md"))
     if not md_files:
         logger.error(
-            "[%s] No .md template files found in %s", MODULE_NAME, templates_dir,
+            "[%s] No .md template files found in %s",
+            MODULE_NAME,
+            templates_dir,
         )
         return False
 
@@ -397,7 +404,9 @@ def remove_type(dir_name: str) -> bool:
 
     if dir_name in _PROTECTED_TYPES:
         logger.error(
-            "[%s] Cannot remove protected type '%s'", MODULE_NAME, dir_name,
+            "[%s] Cannot remove protected type '%s'",
+            MODULE_NAME,
+            dir_name,
         )
         return False
 
@@ -417,6 +426,7 @@ def remove_type(dir_name: str) -> bool:
 # Lookup helpers
 # ---------------------------------------------------------------------------
 
+
 def prefix_exists(prefix: str) -> bool:
     """Check whether any registered type uses *prefix* (case-insensitive).
 
@@ -428,10 +438,7 @@ def prefix_exists(prefix: str) -> bool:
     """
     registry = load_registry()
     upper = prefix.upper()
-    return any(
-        entry.get("prefix", "").upper() == upper
-        for entry in registry["types"].values()
-    )
+    return any(entry.get("prefix", "").upper() == upper for entry in registry["types"].values())
 
 
 def get_prefix_map() -> Dict[str, str]:
@@ -441,11 +448,7 @@ def get_prefix_map() -> Dict[str, str]:
     :mod:`plan_type_loader`.
     """
     registry = load_registry()
-    return {
-        dir_name: entry["prefix"]
-        for dir_name, entry in registry["types"].items()
-        if "prefix" in entry
-    }
+    return {dir_name: entry["prefix"] for dir_name, entry in registry["types"].items() if "prefix" in entry}
 
 
 def get_type_map() -> Dict[str, str]:
@@ -467,6 +470,7 @@ def get_type_map() -> Dict[str, str]:
 # Discovery
 # ---------------------------------------------------------------------------
 
+
 def scan_unregistered() -> list[Dict[str, str | int | list[str]]]:
     """Scan ``templates/`` for directories not yet in the registry.
 
@@ -483,7 +487,9 @@ def scan_unregistered() -> list[Dict[str, str | int | list[str]]]:
 
     if not templates_dir.is_dir():
         logger.warning(
-            "[%s] Templates directory not found: %s", MODULE_NAME, templates_dir,
+            "[%s] Templates directory not found: %s",
+            MODULE_NAME,
+            templates_dir,
         )
         return []
 
@@ -502,10 +508,12 @@ def scan_unregistered() -> list[Dict[str, str | int | list[str]]]:
             continue
 
         stems = [p.stem for p in md_files]
-        unregistered.append({
-            "dir_name": child.name,
-            "template_count": len(stems),
-            "templates": stems,
-        })
+        unregistered.append(
+            {
+                "dir_name": child.name,
+                "template_count": len(stems),
+                "templates": stems,
+            }
+        )
 
     return unregistered

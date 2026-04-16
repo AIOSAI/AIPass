@@ -38,6 +38,7 @@ def _load_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
     implementation used by both delivery and wake for cross-project resolution.
     """
     from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
+
     return get_caller_project_branches(caller_cwd)
 
 
@@ -53,6 +54,7 @@ def _auto_register_contact(email: str, branch_path: Path, inbox_file: Path) -> N
     """
     try:
         from aipass.ai_mail.apps.handlers.email.contacts import register_contact
+
         name_key = email.lstrip("@").lower()
         register_contact(name_key, "AIPass", str(inbox_file))
     except Exception as e:
@@ -75,6 +77,7 @@ def _auto_register_sender(branch_name: str, caller_cwd: str) -> None:
             inbox_file = path / ".ai_mail.local" / "inbox.json"
             if inbox_file.exists():
                 from aipass.ai_mail.apps.handlers.email.contacts import register_contact
+
                 name_key = branch_name.lstrip("@").lower()
                 register_contact(name_key, "", str(inbox_file))
                 return
@@ -87,9 +90,9 @@ def _get_inbox_lock():
     global _INBOX_LOCK
     if _INBOX_LOCK is None:
         from aipass.ai_mail.apps.handlers.email.inbox_lock import inbox_lock
+
         _INBOX_LOCK = inbox_lock
     return _INBOX_LOCK
-
 
 
 def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
@@ -137,7 +140,8 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
 
     if "unread_count" not in inbox_data:
         inbox_data["unread_count"] = sum(
-            1 for msg in inbox_data["messages"]
+            1
+            for msg in inbox_data["messages"]
             if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
         )
         migrated = True
@@ -145,7 +149,7 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
     # Persist migration to disk
     if migrated:
         try:
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.warning("[delivery] _migrate_inbox_format() failed to persist migration for %s: %s", inbox_file, e)
@@ -170,7 +174,7 @@ def _is_private_branch_email(email: str) -> bool:
     if not registry_path.exists():
         return False
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
         for branch in registry.get("branches", []):
             if branch.get("email", "") == email:
@@ -202,9 +206,7 @@ def _resolve_reply_path() -> str:
 
 
 def deliver_email_to_branch(
-    to_branch: str,
-    email_data: Dict,
-    on_delivered: Optional[Callable] = None
+    to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None
 ) -> Tuple[bool, str]:
     """
     Deliver email to target branch's .ai_mail.local/inbox.json file.
@@ -230,18 +232,18 @@ def deliver_email_to_branch(
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
     # Handle path input from DRONE's @ resolution
-    if to_branch.startswith('/'):
+    if to_branch.startswith("/"):
         branches_list = get_all_branches()
         path_to_email = {b["path"]: b["email"] for b in branches_list}
         if to_branch in path_to_email:
             to_branch = path_to_email[to_branch]
         else:
             # Stage 2: Longest-path-first prefix matching against registry
-            sorted_branches = sorted(branches_list, key=lambda b: len(b['path']), reverse=True)
+            sorted_branches = sorted(branches_list, key=lambda b: len(b["path"]), reverse=True)
             matched = False
             for b in sorted_branches:
-                if to_branch.startswith(b['path'] + '/') or to_branch == b['path']:
-                    to_branch = b['email']
+                if to_branch.startswith(b["path"] + "/") or to_branch == b["path"]:
+                    to_branch = b["email"]
                     matched = True
                     break
             if not matched:
@@ -264,7 +266,7 @@ def deliver_email_to_branch(
 
     # Private branch inbound blocking: reject delivery to private branches
     # Self-send is allowed (private branch can send to itself)
-    sender_email = email_data.get('from', '')
+    sender_email = email_data.get("from", "")
     if _is_private_branch_email(to_branch) and sender_email != to_branch:
         return False, f"Cannot deliver to private branch: {to_branch}"
 
@@ -285,13 +287,8 @@ def deliver_email_to_branch(
             mailbox_dir = inbox_file.parent
             mailbox_dir.mkdir(parents=True, exist_ok=True)
             (mailbox_dir / "sent").mkdir(exist_ok=True)
-            inbox_data_init = {
-                "mailbox": "inbox",
-                "total_messages": 0,
-                "unread_count": 0,
-                "messages": []
-            }
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            inbox_data_init = {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data_init, f, indent=2)
         except Exception as e:
             logger.warning("[delivery] auto-provision inbox failed for %s: %s", to_branch, e)
@@ -301,7 +298,7 @@ def deliver_email_to_branch(
     try:
         with _get_inbox_lock()(inbox_file):
             try:
-                with open(inbox_file, 'r', encoding='utf-8') as f:
+                with open(inbox_file, "r", encoding="utf-8") as f:
                     inbox_data = json.load(f)
             except Exception as e:
                 logger.warning("[delivery] failed to read inbox %s: %s", inbox_file, e)
@@ -313,21 +310,21 @@ def deliver_email_to_branch(
             # Create message object (v2 schema: status instead of read)
             message = {
                 "id": str(uuid.uuid4())[:8],
-                "timestamp": email_data['timestamp'],
-                "from": email_data['from'],
-                "from_name": email_data['from_name'],
-                "subject": email_data['subject'],
-                "message": email_data['message'],
+                "timestamp": email_data["timestamp"],
+                "from": email_data["from"],
+                "from_name": email_data["from_name"],
+                "subject": email_data["subject"],
+                "message": email_data["message"],
                 "status": "new",
-                "auto_execute": email_data.get('auto_execute', False),
-                "priority": email_data.get('priority', 'normal')
+                "auto_execute": email_data.get("auto_execute", False),
+                "priority": email_data.get("priority", "normal"),
             }
 
-            if email_data.get('reply_to'):
-                message["reply_to"] = email_data['reply_to']
+            if email_data.get("reply_to"):
+                message["reply_to"] = email_data["reply_to"]
 
-            if email_data.get('dispatched_to'):
-                message["dispatched_to"] = email_data['dispatched_to']
+            if email_data.get("dispatched_to"):
+                message["dispatched_to"] = email_data["dispatched_to"]
 
             # Store reply_path for cross-project replies.
             # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
@@ -340,14 +337,15 @@ def deliver_email_to_branch(
             inbox_data["total_messages"] = len(inbox_data["messages"])
             messages = inbox_data["messages"]
             new_count = sum(
-                1 for msg in messages
+                1
+                for msg in messages
                 if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
             )
             opened_count = sum(1 for msg in messages if msg.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
             try:
-                with open(inbox_file, 'w', encoding='utf-8') as f:
+                with open(inbox_file, "w", encoding="utf-8") as f:
                     json.dump(inbox_data, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 logger.warning("[delivery] failed to write inbox %s: %s", inbox_file, e)
@@ -367,7 +365,7 @@ def deliver_email_to_branch(
         _auto_register_sender(caller_branch, caller_cwd)
 
     # Send desktop notification for new email
-    _send_desktop_notification(email_data['from'], to_branch, email_data['subject'], email_data.get('message', ''))
+    _send_desktop_notification(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
 
     # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
@@ -406,9 +404,7 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
     cutoff = now - _NOTIFICATION_WINDOW
 
     if recipient in _NOTIFICATION_TIMESTAMPS:
-        _NOTIFICATION_TIMESTAMPS[recipient] = [
-            t for t in _NOTIFICATION_TIMESTAMPS[recipient] if t > cutoff
-        ]
+        _NOTIFICATION_TIMESTAMPS[recipient] = [t for t in _NOTIFICATION_TIMESTAMPS[recipient] if t > cutoff]
     else:
         _NOTIFICATION_TIMESTAMPS[recipient] = []
 
@@ -416,17 +412,18 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
         return
 
     # Build informative notification
-    sender_name = sender.replace('@', '').upper()
-    recipient_name = recipient.replace('@', '').upper()
+    sender_name = sender.replace("@", "").upper()
+    recipient_name = recipient.replace("@", "").upper()
     title = f"{sender_name} -> {recipient_name}"
     body = subject
     if message:
-        preview = message[:100].replace('\n', ' ').strip()
+        preview = message[:100].replace("\n", " ").strip()
         if preview:
             body = f"{subject}\n{preview}"
 
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
+
         send_notification(title, body, source=sender_name)
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
     except Exception as e:
@@ -436,10 +433,11 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
 
 if __name__ == "__main__":
     from rich.console import Console
+
     console = Console()
-    console.print("\n" + "="*70)
+    console.print("\n" + "=" * 70)
     console.print("EMAIL DELIVERY HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Delivers emails to branch inboxes")
     console.print()
@@ -457,4 +455,4 @@ if __name__ == "__main__":
     console.print("  from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch")
     console.print("  from aipass.ai_mail.apps.handlers.registry.read import get_all_branches")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

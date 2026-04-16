@@ -32,16 +32,17 @@ def _log_warning(message: str) -> None:
     try:
         _CONFIG_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_CONFIG_LOG, 'a', encoding='utf-8') as f:
+        with open(_CONFIG_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass  # Meta-logging: cannot log a failure to log
+
 
 # AIPass package root: .../aipass/
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 
 
-def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = 'utf-8') -> None:
+def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
     """Write JSON data to a file atomically using write-to-tmp + os.replace.
 
     Prevents file corruption from process crashes mid-write by writing to
@@ -55,9 +56,9 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
         encoding: File encoding
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix='.tmp')
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
-        with os.fdopen(fd, 'w', encoding=encoding) as f:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
             json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
         os.replace(tmp_path, path)
     except BaseException:
@@ -79,14 +80,15 @@ def json_file_lock(path: Path):
     Args:
         path: The JSON file to lock (lock acquired on path.with_suffix('.lock'))
     """
-    lock_path = path.with_suffix('.lock')
+    lock_path = path.with_suffix(".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "win32":
         # Windows: no fcntl, skip file locking (single-user typical)
         yield
     else:
         import fcntl
-        with open(lock_path, 'w', encoding='utf-8') as lock_f:
+
+        with open(lock_path, "w", encoding="utf-8") as lock_f:
             fcntl.flock(lock_f, fcntl.LOCK_EX)
             try:
                 yield
@@ -101,6 +103,7 @@ def print_introspection():
     except ImportError:
         _log_warning("CLI console not available, using rich fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()

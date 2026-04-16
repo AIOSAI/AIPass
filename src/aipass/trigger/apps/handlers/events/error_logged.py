@@ -29,7 +29,7 @@ def _log_warning(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass
@@ -41,7 +41,7 @@ def handle_error_logged(
     error_hash: str | None = None,
     source_module: str | None = None,
     module_name: str | None = None,
-    **_kwargs: Any
+    **_kwargs: Any,
 ) -> None:
     """Handle error_logged event — monitor-only, no dispatch.
 
@@ -62,11 +62,14 @@ def handle_error_logged(
 
         effective_module = source_module or module_name or "unknown"
 
-        json_handler.log_operation("error_logged_event", {
-            "branch": branch,
-            "module": effective_module,
-            "error_hash": error_hash,
-        })
+        json_handler.log_operation(
+            "error_logged_event",
+            {
+                "branch": branch,
+                "module": effective_module,
+                "error_hash": error_hash,
+            },
+        )
 
     except Exception as exc:
         _log_warning(f"handle_error_logged failed: {exc}")

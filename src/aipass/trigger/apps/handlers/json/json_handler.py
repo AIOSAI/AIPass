@@ -27,7 +27,7 @@ def _log_warning(msg: str) -> None:
     """File-based warning logger to avoid circular imports with prax."""
     try:
         _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(_LOG_FILE, 'a', encoding='utf-8') as f:
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | WARNING | {msg}\n")
     except Exception:
         pass  # Meta-logging: cannot log a failure to log
@@ -53,7 +53,7 @@ def _get_caller_module_name() -> str:
         module_name = caller_path.stem
 
         # Validate module name
-        if module_name and not module_name.startswith('_'):
+        if module_name and not module_name.startswith("_"):
             return module_name
 
     # Fallback
@@ -68,10 +68,7 @@ def _get_default_template(json_type: str, module_name: str) -> Any:
             "module_name": module_name,
             "version": "1.0.0",
             "timestamp": today,
-            "config": {
-                "auto_save": True,
-                "enabled": True
-            }
+            "config": {"auto_save": True, "enabled": True},
         }
     elif json_type == "data":
         return {
@@ -80,7 +77,7 @@ def _get_default_template(json_type: str, module_name: str) -> Any:
             "last_updated": today,
             "operations_total": 0,
             "operations_successful": 0,
-            "operations_failed": 0
+            "operations_failed": 0,
         }
     elif json_type == "log":
         return []
@@ -94,16 +91,16 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
             return False
         required = ["module_name", "version", "config"]
         return all(key in data for key in required)
-    
+
     elif json_type == "data":
         if not isinstance(data, dict):
             return False
         required = ["created", "last_updated"]
         return all(key in data for key in required)
-    
+
     elif json_type == "log":
         return isinstance(data, list)
-    
+
     return False
 
 
@@ -121,7 +118,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             if validate_json_structure(data, json_type):
@@ -149,17 +146,17 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        content = json_path.read_text(encoding='utf-8').strip()
+        content = json_path.read_text(encoding="utf-8").strip()
         if not content:
             _log_warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
             ensure_json_exists(module_name, json_type)
-            content = json_path.read_text(encoding='utf-8').strip()
+            content = json_path.read_text(encoding="utf-8").strip()
         return json.loads(content)
     except (json.JSONDecodeError, OSError) as exc:
         _log_warning(f"load_json failed for {module_name}_{json_type}: {exc}")
         ensure_json_exists(module_name, json_type)
         try:
-            return json.loads(json_path.read_text(encoding='utf-8'))
+            return json.loads(json_path.read_text(encoding="utf-8"))
         except Exception:
             return _get_default_template(json_type, module_name)
 
@@ -220,10 +217,7 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         log = []
 
     # Create new entry
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation
-    }
+    entry = {"timestamp": datetime.now().isoformat(), "operation": operation}
 
     if data:
         entry["data"] = data  # type: ignore[assignment]
@@ -241,30 +235,30 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
 def increment_counter(module_name: str, counter_name: str, amount: int = 1) -> bool:
     """Increment a counter in data JSON"""
     ensure_module_jsons(module_name)
-    
+
     data = load_json(module_name, "data")
     if data is None:
         return False
-    
+
     if counter_name not in data:
         data[counter_name] = 0
-    
+
     data[counter_name] += amount
-    
+
     return save_json(module_name, "data", data)
 
 
 def update_data_metrics(module_name: str, **metrics) -> bool:
     """Update data metrics"""
     ensure_module_jsons(module_name)
-    
+
     data = load_json(module_name, "data")
     if data is None:
         return False
-    
+
     for key, value in metrics.items():
         data[key] = value
-    
+
     return save_json(module_name, "data", data)
 
 
@@ -275,10 +269,7 @@ if __name__ == "__main__":
     console = Console()
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]",
-        border_style="bright_blue"
-    ))
+    console.print(Panel.fit("[bold cyan]JSON HANDLER - Working Implementation[/bold cyan]", border_style="bright_blue"))
     console.print()
     console.print("[yellow]TESTING:[/yellow] Creating trigger JSONs...")
 

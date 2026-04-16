@@ -40,28 +40,18 @@ API_JSON_DIR = API_ROOT / "api_json"
 
 # Provider validation rules (embedded - no config dependency for core validation)
 VALIDATION_RULES = {
-    "openrouter": {
-        "prefix": "sk-or-v1-",
-        "min_length": 40
-    },
-    "openai": {
-        "prefix": "sk-",
-        "min_length": 40
-    },
-    "anthropic": {
-        "prefix": "sk-ant-",
-        "min_length": 40
-    },
+    "openrouter": {"prefix": "sk-or-v1-", "min_length": 40},
+    "openai": {"prefix": "sk-", "min_length": 40},
+    "anthropic": {"prefix": "sk-ant-", "min_length": 40},
     # Generic fallback
-    "generic": {
-        "min_length": 10
-    }
+    "generic": {"min_length": 10},
 }
 
 
 # ==============================================
 # KEY RETRIEVAL
 # ==============================================
+
 
 def get_api_key(provider: str = "openrouter") -> Optional[str]:
     """
@@ -124,13 +114,13 @@ def _read_key_from_secrets(provider: str) -> Optional[str]:
 
     try:
         env_var = f"{provider.upper()}_API_KEY"
-        with open(secrets_path, 'r', encoding='utf-8') as f:
+        with open(secrets_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
+                if "=" in line:
+                    key, value = line.split("=", 1)
                     if key.strip() == env_var:
                         return value.strip()
         return None
@@ -162,7 +152,8 @@ def get_key_from_config(provider: str) -> Optional[str]:
             return None
 
         import json
-        with open(config_path, 'r', encoding='utf-8') as f:
+
+        with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
 
         # Navigate config structure
@@ -182,10 +173,10 @@ def get_key_from_config(provider: str) -> Optional[str]:
         return None
 
 
-
 # ==============================================
 # KEY VALIDATION
 # ==============================================
+
 
 def validate_key(key: str, provider: str = "openrouter") -> bool:
     """
@@ -259,6 +250,7 @@ def get_validation_rules(provider: str) -> Dict[str, Any]:
 # KEY FORMAT CHECKING
 # ==============================================
 
+
 def diagnose_key(provider: str = "openrouter") -> str:
     """
     Diagnose why get_api_key() returned None.
@@ -293,12 +285,10 @@ def diagnose_key(provider: str = "openrouter") -> str:
     rules = get_validation_rules(provider)
 
     if "prefix" in rules and not key.startswith(rules["prefix"]):
-        actual_prefix = key[:len(rules["prefix"])] if len(key) >= len(rules["prefix"]) else key[:6]
+        actual_prefix = key[: len(rules["prefix"])] if len(key) >= len(rules["prefix"]) else key[:6]
         return f"Key found ({source}) but invalid — expected prefix '{rules['prefix']}', got '{actual_prefix}...'"
 
     if "min_length" in rules and len(key) < rules["min_length"]:
         return f"Key found ({source}) but too short — {len(key)} chars, need {rules['min_length']}+"
 
     return f"Key found ({source}) but failed validation"
-
-

@@ -36,10 +36,10 @@ from aipass.prax.apps.handlers.json import json_handler
 
 # Monitoring handlers (connected subsystems)
 from aipass.prax.apps.handlers.monitoring import (
-    print_event,              # unified_stream.py
+    print_event,  # unified_stream.py
     print_command_separator,  # unified_stream.py - command headers
-    MonitoringQueue,          # event_queue.py
-    ModuleTracker,            # module_tracker.py
+    MonitoringQueue,  # event_queue.py
+    ModuleTracker,  # module_tracker.py
 )
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent
 from aipass.prax.apps.modules.monitor_info import print_introspection as _print_introspection, print_help
@@ -79,6 +79,7 @@ def _refresh_pid_cache() -> None:
     """Scan dispatch lock files to build branch→PID mapping."""
     global _pid_cache_last_refresh
     import time as _time
+
     now = _time.time()
     with _pid_cache_lock:
         if now - _pid_cache_last_refresh < _PID_CACHE_TTL:
@@ -87,6 +88,7 @@ def _refresh_pid_cache() -> None:
 
     try:
         from aipass.prax.apps.handlers.config.load import _find_repo_root
+
         registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
         if not registry_path.exists():
             return
@@ -105,7 +107,7 @@ def _get_pid_for_branch(branch: str) -> Optional[int]:
     """Look up PID for a branch from the cache."""
     _refresh_pid_cache()
     base = branch.upper()
-    if base.endswith(' AGENT'):
+    if base.endswith(" AGENT"):
         base = base[:-6]
     with _pid_cache_lock:
         return _pid_cache.get(base)
@@ -133,6 +135,7 @@ def print_introspection():
 # CORE COMMAND HANDLER (Required for auto-discovery)
 # =============================================================================
 
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle monitor command - required for auto-discovery by prax.py
@@ -145,7 +148,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command was handled (command == "monitor")
         False if not our command (pass to next handler)
     """
-    if command != 'monitor':
+    if command != "monitor":
         return False
 
     # Introspection gate — bare command shows module info
@@ -154,13 +157,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Help intercept
-    if args[0] in ('--help', '-h', 'help'):
+    if args[0] in ("--help", "-h", "help"):
         print_help()
         return True
 
     # Subcommand routing
     subcmd = args[0]
-    if subcmd == 'run':
+    if subcmd == "run":
         return _run_monitor(args[1:])
 
     # Unknown subcommand
@@ -251,11 +254,11 @@ def _render_event(event) -> None:
     """Render a single monitoring event to the console."""
     branch_pid = _get_pid_for_branch(event.branch)
 
-    if event.event_type == 'command':
-        caller = getattr(event, 'caller', None)
+    if event.event_type == "command":
+        caller = getattr(event, "caller", None)
         target = None
-        if hasattr(event, 'action') and event.action and ':' in event.action:
-            parts = event.action.split(':', 1)
+        if hasattr(event, "action") and event.action and ":" in event.action:
+            parts = event.action.split(":", 1)
             if len(parts) == 2 and parts[1]:
                 target = parts[1]
         print_command_separator(event.branch, event.message, caller, target)
@@ -330,23 +333,31 @@ def _emit_watcher_event(level: str, message: str) -> None:
     """Push a monitoring event about watcher status to the queue."""
     if not _event_queue:
         return
-    priority = 1 if level == 'error' else 2
-    _event_queue.enqueue(MonitoringEvent(
-        priority=priority, event_type='log', branch='PRAX',
-        action=level, level=level, timestamp=datetime.now(),
-        message=message,
-    ))
+    priority = 1 if level == "error" else 2
+    _event_queue.enqueue(
+        MonitoringEvent(
+            priority=priority,
+            event_type="log",
+            branch="PRAX",
+            action=level,
+            level=level,
+            timestamp=datetime.now(),
+            message=message,
+        )
+    )
 
 
 def _inotify_fix_message(err: OSError) -> str:
     """Return the correct sysctl fix for the specific inotify limit hit."""
     import errno as _errno
+
     if err.errno == _errno.ENOSPC:  # Errno 28 — max_user_watches
-        return ("inotify watch limit reached (max_user_watches). "
-                "Fix: sudo sysctl -w fs.inotify.max_user_watches=524288")
+        return "inotify watch limit reached (max_user_watches). Fix: sudo sysctl -w fs.inotify.max_user_watches=524288"
     elif err.errno == _errno.EMFILE:  # Errno 24 — max_user_instances
-        return ("inotify instance limit reached (max_user_instances). "
-                "Fix: sudo sysctl -w fs.inotify.max_user_instances=1024")
+        return (
+            "inotify instance limit reached (max_user_instances). "
+            "Fix: sudo sysctl -w fs.inotify.max_user_instances=1024"
+        )
     else:
         return f"inotify error ({err}). Check system inotify limits."
 
@@ -368,10 +379,11 @@ def _start_observer_with_fallback(handler, watch_dirs):
     except OSError as e:
         fix_msg = _inotify_fix_message(e)
         logger.warning(f"[monitor] inotify unavailable: {e} — switching to polling")
-        _emit_watcher_event('warning', f"File watcher: {fix_msg} Using polling fallback (slower).")
+        _emit_watcher_event("warning", f"File watcher: {fix_msg} Using polling fallback (slower).")
 
     try:
         from watchdog.observers.polling import PollingObserver
+
         observer = PollingObserver(timeout=2)
         for watch_dir, recursive in watch_dirs:
             observer.schedule(handler, str(watch_dir), recursive=recursive)
@@ -380,7 +392,7 @@ def _start_observer_with_fallback(handler, watch_dirs):
         return observer
     except Exception as e2:
         logger.error(f"[monitor] Polling fallback also failed: {e2}")
-        _emit_watcher_event('error', "File watcher: completely unavailable — no file events")
+        _emit_watcher_event("error", "File watcher: completely unavailable — no file events")
         return None
 
 
@@ -391,8 +403,8 @@ def _file_watcher_worker():
     from aipass.prax.apps.handlers.monitoring.filesystem_handler import MonitoringFileHandler
 
     COMMAND_INDICATOR_FILES = {
-        'standards_audit_log.json': 'seedgo audit',
-        'standards_checklist_log.json': 'seedgo checklist',
+        "standards_audit_log.json": "seedgo audit",
+        "standards_checklist_log.json": "seedgo checklist",
     }
 
     handler = MonitoringFileHandler(
@@ -401,12 +413,13 @@ def _file_watcher_worker():
     )
 
     from aipass.prax.apps.handlers.config.load import _find_repo_root
+
     repo_root = _find_repo_root()
     watch_dirs = _get_watch_directories(repo_root)
 
     if not watch_dirs:
         logger.error("[monitor] No watch directories found — file watcher disabled")
-        _emit_watcher_event('warning', "File watcher: no watch directories found — file events disabled")
+        _emit_watcher_event("warning", "File watcher: no watch directories found — file events disabled")
         return
 
     logger.info(f"[monitor] File watcher: {len(watch_dirs)} watches scheduled")
@@ -435,14 +448,14 @@ def _start_log_watcher_with_fallback(event_queue) -> bool:
     except OSError as e:
         fix_msg = _inotify_fix_message(e)
         logger.warning(f"[monitor] Log watcher inotify failed: {e} — switching to polling")
-        _emit_watcher_event('warning', f"Log watcher: {fix_msg} Using polling fallback (slower).")
+        _emit_watcher_event("warning", f"Log watcher: {fix_msg} Using polling fallback (slower).")
 
     try:
         start_log_watcher(event_queue, use_polling=True)
         return True
     except Exception as e2:
         logger.error(f"[monitor] Log watcher polling fallback failed: {e2}")
-        _emit_watcher_event('error', "Log watcher: completely unavailable — no log events")
+        _emit_watcher_event("error", "Log watcher: completely unavailable — no log events")
         return False
 
 
@@ -468,10 +481,10 @@ def _log_watcher_worker():
 
 def _handle_interactive_cmd(cmd: str, get_help_text) -> None:
     """Dispatch an interactive monitor command."""
-    if cmd == 'help':
+    if cmd == "help":
         console.print(get_help_text())
         return
-    if cmd == 'status':
+    if cmd == "status":
         _print_status()
         return
     error(f"Unknown command: {cmd}")
@@ -493,10 +506,7 @@ def _interactive_loop():
             console.print("\n[yellow]Stopping monitoring...[/yellow]")
         return
 
-    from aipass.prax.apps.handlers.monitoring.interactive_filter import (
-        parse_command,
-        get_help_text
-    )
+    from aipass.prax.apps.handlers.monitoring.interactive_filter import parse_command, get_help_text
 
     while not _stop_event.is_set():
         try:
@@ -508,7 +518,7 @@ def _interactive_loop():
             if not cmd:
                 continue
 
-            if cmd in ['quit', 'exit', 'q']:
+            if cmd in ["quit", "exit", "q"]:
                 console.print("[yellow]Stopping monitoring...[/yellow]")
                 break
 
@@ -544,13 +554,10 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="PRAX Unified Monitoring - Mission Control",
-        add_help=False
-    )
-    parser.add_argument('--help', action='store_true', help='Show help message')
-    parser.add_argument('--introspect', action='store_true', help='Show module introspection')
-    parser.add_argument('branches', nargs='?', help='Branches to monitor (comma-separated)')
+    parser = argparse.ArgumentParser(description="PRAX Unified Monitoring - Mission Control", add_help=False)
+    parser.add_argument("--help", action="store_true", help="Show help message")
+    parser.add_argument("--introspect", action="store_true", help="Show module introspection")
+    parser.add_argument("branches", nargs="?", help="Branches to monitor (comma-separated)")
 
     args = parser.parse_args()
 
@@ -569,5 +576,5 @@ if __name__ == "__main__":
         _cmd_args = [args.branches]
 
     # Execute monitor command
-    handled = handle_command('monitor', _cmd_args)
+    handled = handle_command("monitor", _cmd_args)
     sys.exit(0 if handled else 1)

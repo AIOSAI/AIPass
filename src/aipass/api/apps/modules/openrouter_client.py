@@ -87,7 +87,7 @@ EXAMPLES:
 
   # Check connection status
   drone @api status
-        """
+        """,
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -187,7 +187,7 @@ def make_call(args: List[str]):
     console.print()
 
     if not args:
-        error("Prompt required", suggestion="drone @api call \"your prompt\" --model MODEL")
+        error("Prompt required", suggestion='drone @api call "your prompt" --model MODEL')
         return
 
     # Parse args: first non-flag arg is prompt, --model MODEL is optional
@@ -205,11 +205,11 @@ def make_call(args: List[str]):
             i += 1
 
     if not prompt:
-        error("Prompt required", suggestion="drone @api call \"your prompt\" --model MODEL")
+        error("Prompt required", suggestion='drone @api call "your prompt" --model MODEL')
         return
 
     if not model:
-        error("Model required", suggestion="drone @api call \"your prompt\" --model anthropic/claude-3.5-sonnet")
+        error("Model required", suggestion='drone @api call "your prompt" --model anthropic/claude-3.5-sonnet')
         return
 
     console.print(f"[dim]Calling {model}...[/dim]")
@@ -310,6 +310,7 @@ def check_status():
     # OpenAI SDK availability
     try:
         import openai  # noqa: F401
+
         console.print("  [cyan]OpenAI SDK:[/cyan]     [green]available[/green]")
     except ImportError:
         logger.warning("OpenAI SDK not installed")
@@ -324,6 +325,7 @@ def check_status():
 # =============================================
 # PUBLIC API - Re-export handler functions
 # =============================================
+
 
 def get_response(prompt: str, caller: str | None = None, model: str | None = None, **kwargs):
     """
@@ -361,7 +363,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Show help for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

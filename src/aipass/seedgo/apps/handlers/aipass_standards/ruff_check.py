@@ -121,8 +121,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         )
         return {
             "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True,
-                        "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "checks": [{"name": "Ruff check", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
             "score": 100,
             "standard": "RUFF_CHECK",
             "advisory": True,
@@ -136,8 +135,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         )
         return {
             "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True,
-                        "message": "ruff not installed — check skipped"}],
+            "checks": [{"name": "Ruff check", "passed": True, "message": "ruff not installed — check skipped"}],
             "score": 100,
             "status": "skipped",
             "standard": "RUFF_CHECK",
@@ -166,8 +164,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         )
         return {
             "passed": False,
-            "checks": [{"name": "Ruff check", "passed": False,
-                        "message": "ruff check timed out after 60s"}],
+            "checks": [{"name": "Ruff check", "passed": False, "message": "ruff check timed out after 60s"}],
             "score": 0,
             "standard": "RUFF_CHECK",
             "advisory": True,
@@ -189,8 +186,9 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             )
             return {
                 "passed": False,
-                "checks": [{"name": "Ruff check", "passed": False,
-                            "message": f"ruff JSON parse failed: {stderr_snippet}"}],
+                "checks": [
+                    {"name": "Ruff check", "passed": False, "message": f"ruff JSON parse failed: {stderr_snippet}"}
+                ],
                 "score": 0,
                 "standard": "RUFF_CHECK",
                 "advisory": True,
@@ -206,15 +204,17 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         check_passed = True
     else:
         top = active[:5]
-        codes = ", ".join(f"{v.get('code', '?')} {Path(v.get('filename', '?')).name}:{v.get('location', {}).get('row', '?')}" for v in top)
+        codes = ", ".join(
+            f"{v.get('code', '?')} {Path(v.get('filename', '?')).name}:{v.get('location', {}).get('row', '?')}"
+            for v in top
+        )
         suffix = f" (and {count - 5} more)" if count > 5 else ""
         message = f"{count} violation(s) — {codes}{suffix}"
         check_passed = False
 
     json_handler.log_operation(
         "check_completed",
-        {"branch": branch_path, "score": score, "standard": "ruff_check",
-         "violations": count, "advisory": True},
+        {"branch": branch_path, "score": score, "standard": "ruff_check", "violations": count, "advisory": True},
     )
 
     return {

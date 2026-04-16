@@ -49,11 +49,7 @@ def scan_modules_directory(branch_path: str) -> List[str]:
         return []
 
     excluded = {"__init__", "__main__"}
-    return sorted(
-        f.stem
-        for f in modules_dir.glob("*.py")
-        if f.stem not in excluded
-    )
+    return sorted(f.stem for f in modules_dir.glob("*.py") if f.stem not in excluded)
 
 
 def parse_help_for_commands(help_text: str) -> List[str]:
@@ -135,8 +131,7 @@ def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) 
     entry_point = get_entry_point(branch_path, branch_name)
     if entry_point is None:
         raise CommandExecutionError(
-            f"Entry point not found for branch '{branch_name}': "
-            f"{Path(branch_path) / 'apps' / (branch_name + '.py')}"
+            f"Entry point not found for branch '{branch_name}': {Path(branch_path) / 'apps' / (branch_name + '.py')}"
         )
 
     relative_entry = str(entry_point.relative_to(branch_path))
@@ -154,13 +149,9 @@ def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) 
             shell=False,
         )
     except subprocess.TimeoutExpired as e:
-        raise CommandExecutionError(
-            f"Help command timed out for branch '{branch_name}'"
-        ) from e
+        raise CommandExecutionError(f"Help command timed out for branch '{branch_name}'") from e
     except OSError as e:
-        raise CommandExecutionError(
-            f"OS error getting help for branch '{branch_name}': {e}"
-        ) from e
+        raise CommandExecutionError(f"OS error getting help for branch '{branch_name}': {e}") from e
 
     stdout = result.stdout.decode("utf-8", errors="replace")
     stderr = result.stderr.decode("utf-8", errors="replace")
@@ -203,7 +194,8 @@ def get_system_help(active_branches: List[str]) -> Dict[str, HelpResult]:
         except Exception as exc:
             logger.info(
                 "get_system_help: skipping branch '%s': %s",
-                branch_name, exc,
+                branch_name,
+                exc,
             )
 
     return results

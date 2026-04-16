@@ -79,9 +79,7 @@ def capture_main(
         except Exception as exc:
             captured_err.write(str(exc))
             exit_code = 1
-            logger.warning(
-                "capture_main: exception from '%s': %s", entry_point_module, exc
-            )
+            logger.warning("capture_main: exception from '%s': %s", entry_point_module, exc)
         finally:
             sys.argv = original_argv
             sys.stdout = old_stdout

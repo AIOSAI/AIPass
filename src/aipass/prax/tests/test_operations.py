@@ -26,6 +26,7 @@ def _load_ops():
     """Import (or reimport) the operations module under active mocks."""
     sys.modules.pop(MODULE_PATH, None)
     import aipass.prax.apps.handlers.dashboard.operations as mod
+
     importlib.reload(mod)
     return mod
 
@@ -33,6 +34,7 @@ def _load_ops():
 # =============================================
 # get_dashboard_path
 # =============================================
+
 
 class TestGetDashboardPath:
     """Tests for get_dashboard_path — pure path joining."""
@@ -58,6 +60,7 @@ class TestGetDashboardPath:
 # load_dashboard
 # =============================================
 
+
 class TestLoadDashboard:
     """Tests for load_dashboard — file I/O with fallback to template."""
 
@@ -80,9 +83,7 @@ class TestLoadDashboard:
             "last_updated": "2026-01-01",
             "sections": {"flow": {"active_plans": 5}},
         }
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps(dashboard_data), encoding="utf-8"
-        )
+        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps(dashboard_data), encoding="utf-8")
 
         result = ops.load_dashboard(branch_dir, self._make_template())
         assert result["branch"] == "MYBRANCH"
@@ -103,9 +104,7 @@ class TestLoadDashboard:
         ops = _load_ops()
         branch_dir = tmp_path / "broken"
         branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            "{not valid json!!!", encoding="utf-8"
-        )
+        (branch_dir / "DASHBOARD.local.json").write_text("{not valid json!!!", encoding="utf-8")
         template = self._make_template()
 
         result = ops.load_dashboard(branch_dir, template)
@@ -127,9 +126,7 @@ class TestLoadDashboard:
         ops = _load_ops()
         branch_dir = tmp_path / "arrayfile"
         branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps([1, 2, 3]), encoding="utf-8"
-        )
+        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
         template = self._make_template()
 
         result = ops.load_dashboard(branch_dir, template)
@@ -156,6 +153,7 @@ class TestLoadDashboard:
 # =============================================
 # save_dashboard
 # =============================================
+
 
 class TestSaveDashboard:
     """Tests for save_dashboard — file write with timestamp update."""
@@ -189,9 +187,7 @@ class TestSaveDashboard:
         data = {"branch": "TIMESTAMP", "sections": {}}
 
         ops.save_dashboard(branch_dir, data)
-        content = json.loads(
-            (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
-        )
+        content = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         assert "last_updated" in content
         # Should be a non-empty ISO-format string
         assert len(content["last_updated"]) > 0
@@ -209,6 +205,7 @@ class TestSaveDashboard:
 # =============================================
 # write_section
 # =============================================
+
 
 class TestWriteSection:
     """Tests for write_section — orchestration of load/update/save."""
@@ -238,14 +235,10 @@ class TestWriteSection:
                 "ai_mail": {"new": 5, "last_updated": "2026-01-01"},
             },
         }
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps(existing), encoding="utf-8"
-        )
+        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps(existing), encoding="utf-8")
 
         ops.write_section(branch_dir, "flow", {"active_plans": 7})
-        data = json.loads(
-            (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
-        )
+        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         assert data["sections"]["flow"]["active_plans"] == 7
 
     def test_preserves_other_sections(self, tmp_path):
@@ -259,14 +252,10 @@ class TestWriteSection:
                 "ai_mail": {"new": 3, "opened": 1, "last_updated": "2026-01-01"},
             },
         }
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps(existing), encoding="utf-8"
-        )
+        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps(existing), encoding="utf-8")
 
         ops.write_section(branch_dir, "flow", {"active_plans": 4})
-        data = json.loads(
-            (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
-        )
+        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         # ai_mail should still be present and unchanged
         assert data["sections"]["ai_mail"]["new"] == 3
         assert data["sections"]["ai_mail"]["opened"] == 1
@@ -277,9 +266,7 @@ class TestWriteSection:
         branch_dir.mkdir()
 
         ops.write_section(branch_dir, "flow", {"active_plans": 1})
-        data = json.loads(
-            (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
-        )
+        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
         assert "last_updated" in data["sections"]["flow"]
         assert "T" in data["sections"]["flow"]["last_updated"]
 
@@ -295,6 +282,7 @@ class TestWriteSection:
 # =============================================
 # _calculate_quick_status_standalone
 # =============================================
+
 
 class TestCalculateQuickStatusStandalone:
     """Tests for _calculate_quick_status_standalone — pure calculation."""

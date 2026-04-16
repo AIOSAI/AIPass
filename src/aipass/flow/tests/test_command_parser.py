@@ -3,6 +3,7 @@
 Covers parse_create_plan_args, parse_close_command_args, and
 parse_restore_command_args from apps/handlers/plan/command_parser.py.
 """
+
 from unittest.mock import patch
 
 
@@ -65,9 +66,7 @@ class TestParseCreatePlanArgs:
     def test_dplan_type_resolves_to_dev_plans(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        location, subject, plan_type_key = parse_create_plan_args(
-            ["@flow", "Dev work", "dplan"]
-        )
+        location, subject, plan_type_key = parse_create_plan_args(["@flow", "Dev work", "dplan"])
         assert location == "@flow"
         assert subject == "Dev work"
         assert plan_type_key == "dev_plans"
@@ -79,9 +78,7 @@ class TestParseCreatePlanArgs:
     def test_master_type_resolves_to_master(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        _, _, plan_type_key = parse_create_plan_args(
-            ["@flow", "Important task", "master"]
-        )
+        _, _, plan_type_key = parse_create_plan_args(["@flow", "Important task", "master"])
         assert plan_type_key == "master"
 
     @patch(
@@ -91,9 +88,7 @@ class TestParseCreatePlanArgs:
     def test_unknown_type_passed_through(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        _, _, plan_type_key = parse_create_plan_args(
-            ["@flow", "Experiment", "custom_thing"]
-        )
+        _, _, plan_type_key = parse_create_plan_args(["@flow", "Experiment", "custom_thing"])
         # Not in the type map, so the raw value is returned as-is
         assert plan_type_key == "custom_thing"
 
@@ -104,9 +99,7 @@ class TestParseCreatePlanArgs:
     def test_type_resolution_is_case_insensitive(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        _, _, plan_type_key = parse_create_plan_args(
-            ["@flow", "Subject", "DPLAN"]
-        )
+        _, _, plan_type_key = parse_create_plan_args(["@flow", "Subject", "DPLAN"])
         assert plan_type_key == "dev_plans"
 
     @patch(
@@ -116,9 +109,7 @@ class TestParseCreatePlanArgs:
     def test_default_keyword_resolves_to_flow_plans(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        _, _, plan_type_key = parse_create_plan_args(
-            ["@flow", "Subject", "default"]
-        )
+        _, _, plan_type_key = parse_create_plan_args(["@flow", "Subject", "default"])
         assert plan_type_key == "flow_plans"
 
     @patch(
@@ -128,9 +119,7 @@ class TestParseCreatePlanArgs:
     def test_fallback_type_map_on_registry_error(self, _mock_type_map):
         from aipass.flow.apps.handlers.plan.command_parser import parse_create_plan_args
 
-        location, subject, plan_type_key = parse_create_plan_args(
-            ["@flow", "Fallback test", "dplan"]
-        )
+        location, subject, plan_type_key = parse_create_plan_args(["@flow", "Fallback test", "dplan"])
         assert location == "@flow"
         assert subject == "Fallback test"
         assert plan_type_key == "dev_plans"
@@ -215,9 +204,7 @@ class TestParseCloseCommandArgs:
     def test_all_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["--all"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all"])
         assert plan_num is None
         assert confirm is False
         assert all_plans is True
@@ -227,9 +214,7 @@ class TestParseCloseCommandArgs:
     def test_confirm_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["42", "--confirm"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--confirm"])
         assert plan_num == "42"
         assert confirm is True
         assert all_plans is False
@@ -246,9 +231,7 @@ class TestParseCloseCommandArgs:
     def test_dry_run_flag(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["42", "--dry-run"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--dry-run"])
         assert plan_num == "42"
         assert confirm is False
         assert all_plans is False
@@ -265,9 +248,7 @@ class TestParseCloseCommandArgs:
     def test_all_with_confirm(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["--all", "--confirm"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--confirm"])
         assert plan_num is None
         assert confirm is True
         assert all_plans is True
@@ -277,9 +258,7 @@ class TestParseCloseCommandArgs:
     def test_all_with_dry_run(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["--all", "--dry-run"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--dry-run"])
         assert plan_num is None
         assert confirm is False
         assert all_plans is True
@@ -289,9 +268,7 @@ class TestParseCloseCommandArgs:
     def test_all_with_preview(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        _, _, all_plans, dry_run, error = parse_close_command_args(
-            ["--all", "--preview"]
-        )
+        _, _, all_plans, dry_run, error = parse_close_command_args(["--all", "--preview"])
         assert all_plans is True
         assert dry_run is True
         assert error is None
@@ -299,9 +276,7 @@ class TestParseCloseCommandArgs:
     def test_all_confirm_dry_run_combined(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["--all", "--confirm", "--dry-run"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["--all", "--confirm", "--dry-run"])
         assert plan_num is None
         assert confirm is True
         assert all_plans is True
@@ -311,9 +286,7 @@ class TestParseCloseCommandArgs:
     def test_yes_flag_is_redundant(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["42", "--yes"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["42", "--yes"])
         assert plan_num == "42"
         # --yes does NOT set confirm (it's for backward compat, auto-confirm is default)
         assert confirm is False
@@ -330,9 +303,7 @@ class TestParseCloseCommandArgs:
     def test_plan_number_with_all_flags(self):
         from aipass.flow.apps.handlers.plan.command_parser import parse_close_command_args
 
-        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(
-            ["7", "--confirm", "--dry-run"]
-        )
+        plan_num, confirm, all_plans, dry_run, error = parse_close_command_args(["7", "--confirm", "--dry-run"])
         assert plan_num == "7"
         assert confirm is True
         assert all_plans is False

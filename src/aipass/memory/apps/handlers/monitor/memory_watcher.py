@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
+
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
@@ -86,16 +87,16 @@ def _get_rollover_threshold(branch_name: str, file_path: Path | None = None) -> 
     # 1. Check file-level metadata first (highest priority)
     if file_path is not None:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                metadata = data.get('document_metadata', {})
+                metadata = data.get("document_metadata", {})
 
                 # v2 files use entry-count limits, not line limits
-                schema_version = metadata.get('schema_version', '1.0.0')
-                if schema_version.startswith('2'):
+                schema_version = metadata.get("schema_version", "1.0.0")
+                if schema_version.startswith("2"):
                     return 999999  # Never trigger line-based rollover for v2
 
-                file_limit = metadata.get('limits', {}).get('max_lines')
+                file_limit = metadata.get("limits", {}).get("max_lines")
                 if file_limit is not None:
                     return file_limit
         except Exception as e:
@@ -108,12 +109,12 @@ def _get_rollover_threshold(branch_name: str, file_path: Path | None = None) -> 
         with open(config_path) as f:
             config = json.load(f)
 
-        branch_limits = config.get('rollover', {}).get('per_branch', {}).get(branch_name, {})
-        if 'max_lines' in branch_limits:
-            return branch_limits['max_lines']
+        branch_limits = config.get("rollover", {}).get("per_branch", {}).get(branch_name, {})
+        if "max_lines" in branch_limits:
+            return branch_limits["max_lines"]
 
         # 3. Fall back to defaults
-        default_limit = config.get('rollover', {}).get('defaults', {}).get('max_lines')
+        default_limit = config.get("rollover", {}).get("defaults", {}).get("max_lines")
         if default_limit is not None:
             return default_limit
 
@@ -141,23 +142,23 @@ def check_and_rollover() -> Dict[str, Any]:
 
     # Only run once per process
     if _startup_check_done:
-        return {'success': True, 'skipped': True, 'reason': 'Already checked this session'}
+        return {"success": True, "skipped": True, "reason": "Already checked this session"}
 
     _startup_check_done = True
 
     results = {
-        'success': True,
-        'files_checked': 0,
-        'files_over_limit': [],
-        'rollover_triggered': False,
-        'memory_pool': None
+        "success": True,
+        "files_checked": 0,
+        "files_over_limit": [],
+        "rollover_triggered": False,
+        "memory_pool": None,
     }
 
     # Get all branch paths
     branch_paths = _get_branch_paths()
 
     if not branch_paths:
-        results['error'] = 'No branch paths found'
+        results["error"] = "No branch paths found"
         return results
 
     # Check each branch for memory files over limit
@@ -169,69 +170,74 @@ def check_and_rollover() -> Dict[str, Any]:
         branch_name = branch.name.upper()
 
         # Find memory files in .trinity/ subdirectory
-        trinity_dir = branch / '.trinity'
+        trinity_dir = branch / ".trinity"
         if not trinity_dir.exists():
             continue
-        for pattern in ['local.json', 'observations.json']:
+        for pattern in ["local.json", "observations.json"]:
             for memory_file in trinity_dir.glob(pattern):
-
-                results['files_checked'] += 1
+                results["files_checked"] += 1
 
                 # Get threshold per file (file metadata > branch config > default)
                 threshold = _get_rollover_threshold(branch_name, memory_file)
 
                 try:
-                    line_count = len(memory_file.read_text(encoding='utf-8').splitlines())
+                    line_count = len(memory_file.read_text(encoding="utf-8").splitlines())
 
                     # Sync current_lines metadata if stale
                     try:
                         import json as _json
-                        _data = _json.loads(memory_file.read_text(encoding='utf-8'))
-                        meta_lines = _data.get('document_metadata', {}).get('status', {}).get('current_lines')
+
+                        _data = _json.loads(memory_file.read_text(encoding="utf-8"))
+                        meta_lines = _data.get("document_metadata", {}).get("status", {}).get("current_lines")
                         if meta_lines != line_count:
                             sync_result = update_line_count(memory_file)
-                            if sync_result.get('success'):
+                            if sync_result.get("success"):
                                 lines_synced += 1
                                 # Re-read actual line count after metadata update
-                                line_count = len(memory_file.read_text(encoding='utf-8').splitlines())
+                                line_count = len(memory_file.read_text(encoding="utf-8").splitlines())
                     except Exception as e:
                         logger.warning(f"[memory_watcher] Non-critical metadata sync failed for {memory_file}: {e}")
 
                     if line_count > threshold:
-                        results['files_over_limit'].append({
-                            'file': str(memory_file),
-                            'lines': line_count,
-                            'threshold': threshold
-                        })
+                        results["files_over_limit"].append(
+                            {"file": str(memory_file), "lines": line_count, "threshold": threshold}
+                        )
                 except Exception as e:
                     logger.warning(f"[memory_watcher] Failed to read memory file {memory_file}: {e}")
 
-    results['lines_synced'] = lines_synced
+    results["lines_synced"] = lines_synced
 
     # Trigger rollover if any files are over limit
-    if results['files_over_limit']:
-        results['rollover_triggered'] = True
+    if results["files_over_limit"]:
+        results["rollover_triggered"] = True
 
         try:
             from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
+
             execute_rollover()
         except ImportError:
             logger.warning("Rollover handler not available")
         except Exception as e:
             logger.error(f"[memory_watcher] Rollover execution failed: {e}")
-            results['rollover_error'] = str(e)
-            results['success'] = False
+            results["rollover_error"] = str(e)
+            results["success"] = False
 
     # Check memory_pool for new files to process
-    results['memory_pool'] = _check_memory_pool()
+    results["memory_pool"] = _check_memory_pool()
 
     # Check plans for new files to vectorize
-    results['plans'] = _check_plans()
+    results["plans"] = _check_plans()
 
     # Check code_archive for new files to index
-    results['code_archive'] = _check_code_archive()
+    results["code_archive"] = _check_code_archive()
 
-    json_handler.log_operation("check_and_rollover", {"files_checked": results.get('files_checked', 0), "rollover_triggered": results.get('rollover_triggered', False)})
+    json_handler.log_operation(
+        "check_and_rollover",
+        {
+            "files_checked": results.get("files_checked", 0),
+            "rollover_triggered": results.get("rollover_triggered", False),
+        },
+    )
 
     return results
 
@@ -255,48 +261,44 @@ def _check_memory_pool() -> Dict[str, Any]:
     try:
         with open(config_path) as f:
             config = json.load(f)
-        pool_config = config.get('memory_pool', {})
+        pool_config = config.get("memory_pool", {})
     except Exception as exc:
         logger.warning(f"[memory_watcher] Could not load memory pool config: {exc}")
-        return {'success': False, 'error': 'Could not load config'}
+        return {"success": False, "error": "Could not load config"}
 
     # Check if enabled
-    if not pool_config.get('enabled', False):
-        return {'success': True, 'skipped': True, 'reason': 'memory_pool disabled'}
+    if not pool_config.get("enabled", False):
+        return {"success": True, "skipped": True, "reason": "memory_pool disabled"}
 
     # Count files in pool (excluding .archive)
-    extensions = pool_config.get('supported_extensions', ['.md', '.txt'])
-    keep_recent = pool_config.get('keep_recent', 10)
+    extensions = pool_config.get("supported_extensions", [".md", ".txt"])
+    keep_recent = pool_config.get("keep_recent", 10)
 
     files = []
     for ext in extensions:
-        files.extend(pool_path.glob(f'*{ext}'))
+        files.extend(pool_path.glob(f"*{ext}"))
 
     file_count = len(files)
 
     # If under limit, nothing to do
     if file_count <= keep_recent:
-        return {
-            'success': True,
-            'files_in_pool': file_count,
-            'keep_recent': keep_recent,
-            'action': 'none'
-        }
+        return {"success": True, "files_in_pool": file_count, "keep_recent": keep_recent, "action": "none"}
 
     # Files exceed limit - run processor
     try:
         # NOTE: intake module not yet ported to aipass.memory package
         from aipass.memory.apps.handlers.intake.pool_processor import process_memory_pool  # type: ignore[import-not-found]
+
         result = process_memory_pool()
         return {
-            'success': result.get('success', False),
-            'files_processed': result.get('files_processed', 0),
-            'files_archived': result.get('archive', {}).get('archived_count', 0),
-            'action': 'processed'
+            "success": result.get("success", False),
+            "files_processed": result.get("files_processed", 0),
+            "files_archived": result.get("archive", {}).get("archived_count", 0),
+            "action": "processed",
         }
     except Exception as e:
         logger.warning(f"[memory_watcher] Memory pool processing failed: {e}")
-        return {'success': False, 'error': str(e), 'action': 'failed'}
+        return {"success": False, "error": str(e), "action": "failed"}
 
 
 def _check_plans() -> Dict[str, Any]:
@@ -316,41 +318,41 @@ def _check_plans() -> Dict[str, Any]:
 
     # Load config
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
-        plans_config = config.get('plans', {})
+        plans_config = config.get("plans", {})
     except Exception as exc:
         logger.warning(f"[memory_watcher] Could not load plans config: {exc}")
-        return {'success': False, 'error': 'Could not load config'}
+        return {"success": False, "error": "Could not load config"}
 
     # Check if enabled
-    if not plans_config.get('enabled', False):
-        return {'success': True, 'skipped': True, 'reason': 'plans disabled'}
+    if not plans_config.get("enabled", False):
+        return {"success": True, "skipped": True, "reason": "plans disabled"}
 
     # Get plans path and count files (supports absolute paths)
-    plans_dir = plans_config.get('path', 'plans')
+    plans_dir = plans_config.get("path", "plans")
     repo_root = _find_repo_root()
     plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else repo_root / plans_dir
-    extensions = plans_config.get('supported_extensions', ['.md'])
+    extensions = plans_config.get("supported_extensions", [".md"])
 
     if not plans_path.exists():
-        return {'success': True, 'skipped': True, 'reason': 'plans directory does not exist'}
+        return {"success": True, "skipped": True, "reason": "plans directory does not exist"}
 
     files = []
     for ext in extensions:
-        files.extend(plans_path.glob(f'*{ext}'))
+        files.extend(plans_path.glob(f"*{ext}"))
 
     file_count = len(files)
 
     if file_count == 0:
-        return {'success': True, 'pending_files': 0, 'action': 'count_only'}
+        return {"success": True, "pending_files": 0, "action": "count_only"}
 
     # Load manifest to count unprocessed files
     manifest_path = _MEMORY_ROOT / "config" / ".plans_processed.json"
     manifest: Dict[str, str] = {}
     if manifest_path.exists():
         try:
-            manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception as e:
             logger.warning(f"[memory_watcher] Failed to read plans manifest: {e}")
 
@@ -360,7 +362,7 @@ def _check_plans() -> Dict[str, Any]:
     if pending_count > 0:
         logger.info(f"[plans] {pending_count} plans pending vectorization. Run: drone @memory process-plans")
 
-    return {'success': True, 'pending_files': pending_count, 'action': 'count_only'}
+    return {"success": True, "pending_files": pending_count, "action": "count_only"}
 
 
 def _check_code_archive() -> Dict[str, Any]:
@@ -372,15 +374,17 @@ def _check_code_archive() -> Dict[str, Any]:
     """
     try:
         from aipass.memory.apps.handlers.archive.indexer import check_for_new_files
+
         return check_for_new_files()
     except Exception as e:
         logger.warning(f"[memory_watcher] Code archive check failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def _find_repo_root() -> Path:
     """Walk up from this file to find repo root (contains AIPASS_REGISTRY.json)."""
@@ -409,13 +413,13 @@ def _get_branch_paths() -> list[Path]:
         return []
 
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            branches = data.get('branches', [])
+            branches = data.get("branches", [])
 
             paths = []
             for branch in branches:
-                raw_path = branch.get('path', '')
+                raw_path = branch.get("path", "")
                 branch_path = Path(raw_path)
                 if not branch_path.is_absolute():
                     branch_path = repo_root / raw_path
@@ -440,12 +444,13 @@ def _is_memory_file(file_path: Path) -> bool:
     """
     name = file_path.name
     parent = file_path.parent.name
-    return parent == '.trinity' and name in ('local.json', 'observations.json')
+    return parent == ".trinity" and name in ("local.json", "observations.json")
 
 
 # =============================================================================
 # FILE SYSTEM EVENT HANDLER
 # =============================================================================
+
 
 class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
     """Watch for memory file modifications"""
@@ -478,22 +483,24 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
         # Step 1: Update line count metadata
         update_result = update_line_count(file_path)
 
-        if not update_result['success']:
-            logger.error(f"[memory_watcher] Failed to update line count for {file_path.name}: {update_result.get('error')}")
+        if not update_result["success"]:
+            logger.error(
+                f"[memory_watcher] Failed to update line count for {file_path.name}: {update_result.get('error')}"
+            )
             return
 
-        current_lines = update_result.get('lines', 0)
+        current_lines = update_result.get("lines", 0)
         logger.info(f"[memory_watcher] Updated {file_path.name}: {current_lines} lines")
 
         # Step 2: Check if rollover needed
         check_result = check_single_file(file_path)
 
-        if not check_result['success']:
+        if not check_result["success"]:
             logger.error(f"[memory_watcher] Failed to check rollover for {file_path.name}: {check_result.get('error')}")
             return
 
-        if check_result.get('should_rollover', False):
-            trigger = check_result.get('trigger')
+        if check_result.get("should_rollover", False):
+            trigger = check_result.get("trigger")
             logger.warning(f"[memory_watcher] ROLLOVER TRIGGERED: {trigger}")
 
             # Import rollover handler here to avoid circular imports
@@ -516,6 +523,7 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
 # WATCHER CONTROL FUNCTIONS
 # =============================================================================
 
+
 def start_memory_watcher() -> Dict[str, Any]:
     """
     Start watching memory files for modifications
@@ -529,19 +537,13 @@ def start_memory_watcher() -> Dict[str, Any]:
     global _observer
 
     if _observer and _observer.is_alive():
-        return {
-            'success': False,
-            'error': 'Watcher already running'
-        }
+        return {"success": False, "error": "Watcher already running"}
 
     # Get all branch paths
     branch_paths = _get_branch_paths()
 
     if not branch_paths:
-        return {
-            'success': False,
-            'error': 'No branch paths found in AIPASS_REGISTRY.json'
-        }
+        return {"success": False, "error": "No branch paths found in AIPASS_REGISTRY.json"}
 
     # Create watcher instance
     watcher = MemoryFileWatcher()
@@ -562,11 +564,7 @@ def start_memory_watcher() -> Dict[str, Any]:
     new_observer.start()
     _observer = new_observer
 
-    return {
-        'success': True,
-        'watched_paths': watched_paths,
-        'count': len(watched_paths)
-    }
+    return {"success": True, "watched_paths": watched_paths, "count": len(watched_paths)}
 
 
 def stop_memory_watcher() -> Dict[str, Any]:
@@ -579,10 +577,7 @@ def stop_memory_watcher() -> Dict[str, Any]:
     global _observer
 
     if not _observer or not _observer.is_alive():
-        return {
-            'success': False,
-            'error': 'Watcher not running'
-        }
+        return {"success": False, "error": "Watcher not running"}
 
     _observer.stop()
     _observer.join()
@@ -590,10 +585,7 @@ def stop_memory_watcher() -> Dict[str, Any]:
 
     logger.info("[memory_watcher] Stopped")
 
-    return {
-        'success': True,
-        'message': 'Memory watcher stopped'
-    }
+    return {"success": True, "message": "Memory watcher stopped"}
 
 
 def is_memory_watcher_active() -> bool:
@@ -616,19 +608,12 @@ def get_watcher_status() -> Dict[str, Any]:
     active = is_memory_watcher_active()
 
     if not active:
-        return {
-            'active': False,
-            'message': 'Watcher not running'
-        }
+        return {"active": False, "message": "Watcher not running"}
 
     # Get watched paths
     branch_paths = _get_branch_paths()
 
-    return {
-        'active': True,
-        'watched_directories': len(branch_paths),
-        'paths': [str(p) for p in branch_paths]
-    }
+    return {"active": True, "watched_directories": len(branch_paths), "paths": [str(p) for p in branch_paths]}
 
 
 # =============================================================================
@@ -639,21 +624,15 @@ if __name__ == "__main__":
     import argparse
     import time
 
-    parser = argparse.ArgumentParser(
-        description='Memory File Watcher - Monitor memory files for rollover'
-    )
-    parser.add_argument(
-        'command',
-        choices=['start', 'stop', 'status'],
-        help='Command to execute'
-    )
+    parser = argparse.ArgumentParser(description="Memory File Watcher - Monitor memory files for rollover")
+    parser.add_argument("command", choices=["start", "stop", "status"], help="Command to execute")
 
     args = parser.parse_args()
 
-    if args.command == 'start':
+    if args.command == "start":
         result = start_memory_watcher()
 
-        if result['success']:
+        if result["success"]:
             print(f"Started watching {result['count']} directories")
             print("Press Ctrl+C to stop...")
 
@@ -667,21 +646,21 @@ if __name__ == "__main__":
         else:
             print(f"Failed to start: {result.get('error')}")
 
-    elif args.command == 'stop':
+    elif args.command == "stop":
         result = stop_memory_watcher()
 
-        if result['success']:
-            print(result['message'])
+        if result["success"]:
+            print(result["message"])
         else:
             print(f"Failed to stop: {result.get('error')}")
 
-    elif args.command == 'status':
+    elif args.command == "status":
         status = get_watcher_status()
 
-        if status['active']:
+        if status["active"]:
             print("Watcher is ACTIVE")
             print(f"Watching {status['watched_directories']} directories:")
-            for path in status['paths']:
+            for path in status["paths"]:
                 print(f"  - {path}")
         else:
             print("Watcher is INACTIVE")

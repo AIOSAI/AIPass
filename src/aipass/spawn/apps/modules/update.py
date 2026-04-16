@@ -13,6 +13,7 @@ All implementation logic lives in apps/handlers/update_ops.py.
 """
 
 from aipass.prax import logger
+
 # CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, error, warning
 
@@ -31,13 +32,16 @@ def print_introspection():
     console.print()
     console.print("Connected Handlers:")
     console.print("  handlers/")
-    console.print("    - update_ops.py (update_branch, update_all — renames, additions, JSON merges, pruned file archival)")
+    console.print(
+        "    - update_ops.py (update_branch, update_all — renames, additions, JSON merges, pruned file archival)"
+    )
     console.print()
 
 
 # =============================================================================
 # DRONE ROUTING
 # =============================================================================
+
 
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point.
@@ -67,6 +71,7 @@ def handle_command(command: str, args: list) -> bool:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def handle_update(args: list[str]) -> int:
     """Parse args and dispatch to update_branch or update_all.
@@ -122,7 +127,9 @@ def handle_update(args: list[str]) -> int:
     if "--all" in args:
         if citizen_class is None:
             classes = ", ".join(get_available_classes())
-            error("--all requires a citizen class", suggestion=f"drone @spawn update <class> --all (available: {classes})")
+            error(
+                "--all requires a citizen class", suggestion=f"drone @spawn update <class> --all (available: {classes})"
+            )
             return 1
 
         results = update_all(dry_run=dry_run, trace=trace, citizen_class=citizen_class)
@@ -153,6 +160,7 @@ def handle_update(args: list[str]) -> int:
 # =============================================================================
 # OUTPUT HELPERS
 # =============================================================================
+
 
 def _print_branch_summary(result: dict, dry_run: bool) -> None:
     """Print a rich summary for a single branch update."""
@@ -241,9 +249,11 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
         console.print(f"  {status} {branch}: {changes} changes")
 
     console.print()
-    console.print(f"  Totals: +{total_add} added, ~{total_upd} updated, "
-                  f">{total_ren} renamed, -{total_prn} pruned, "
-                  f"!{total_skip} py-skipped")
+    console.print(
+        f"  Totals: +{total_add} added, ~{total_upd} updated, "
+        f">{total_ren} renamed, -{total_prn} pruned, "
+        f"!{total_skip} py-skipped"
+    )
 
     if total_err:
         error(f"{total_err} errors across all branches")

@@ -45,7 +45,9 @@ def smart_sync(caller: str) -> dict:
         # Step 1: Fetch origin
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if fetch.returncode != 0:
             result["message"] = f"Fetch failed: {fetch.stderr.strip()}"
@@ -55,7 +57,9 @@ def smart_sync(caller: str) -> dict:
         # Step 2: Check divergence
         rev_list = subprocess.run(
             ["git", "rev-list", "--left-right", "--count", "main...origin/main"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if rev_list.returncode != 0:
             result["message"] = f"Divergence check failed: {rev_list.stderr.strip()}"
@@ -74,56 +78,58 @@ def smart_sync(caller: str) -> dict:
                 # Diverged — merge instead of rebase
                 merge = subprocess.run(
                     ["git", "merge", "origin/main", "--no-edit"],
-                    capture_output=True, text=True, cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
                 )
                 if merge.returncode != 0:
                     # Merge conflict — abort and report
                     diff = subprocess.run(
                         ["git", "diff", "--name-only", "--diff-filter=U"],
-                        capture_output=True, text=True, cwd=str(repo_root),
+                        capture_output=True,
+                        text=True,
+                        cwd=str(repo_root),
                     )
                     conflict_files = diff.stdout.strip().splitlines() if diff.stdout.strip() else []
                     subprocess.run(
                         ["git", "merge", "--abort"],
-                        capture_output=True, text=True, cwd=str(repo_root),
+                        capture_output=True,
+                        text=True,
+                        cwd=str(repo_root),
                     )
                     files_msg = f" Conflicting files: {', '.join(conflict_files)}" if conflict_files else ""
-                    result["message"] = (
-                        f"Merge conflict (ahead={ahead}, behind={behind}). "
-                        f"Merge aborted.{files_msg}"
-                    )
+                    result["message"] = f"Merge conflict (ahead={ahead}, behind={behind}). Merge aborted.{files_msg}"
                     logger.error(result["message"])
                     return result
 
                 result["rebased"] = False
                 result["merged"] = True
                 result["success"] = True
-                result["message"] = (
-                    f"Merged origin/main (was {ahead} ahead, {behind} behind)"
-                )
+                result["message"] = f"Merged origin/main (was {ahead} ahead, {behind} behind)"
             else:
                 # Only behind — rebase is safe
                 rebase = subprocess.run(
                     ["git", "rebase", "origin/main"],
-                    capture_output=True, text=True, cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
                 )
                 if rebase.returncode != 0:
                     subprocess.run(
                         ["git", "rebase", "--abort"],
-                        capture_output=True, text=True, cwd=str(repo_root),
+                        capture_output=True,
+                        text=True,
+                        cwd=str(repo_root),
                     )
                     result["message"] = (
-                        f"Rebase conflict (ahead={ahead}, behind={behind}). "
-                        "Rebase aborted. Manual resolution required."
+                        f"Rebase conflict (ahead={ahead}, behind={behind}). Rebase aborted. Manual resolution required."
                     )
                     logger.error(result["message"])
                     return result
 
                 result["rebased"] = True
                 result["success"] = True
-                result["message"] = (
-                    f"Rebased onto origin/main (was {behind} behind)"
-                )
+                result["message"] = f"Rebased onto origin/main (was {behind} behind)"
         else:
             result["success"] = True
             result["message"] = "Already up to date"

@@ -45,9 +45,7 @@ def _extract_audit_scope(tree: ast.Module) -> str | None:
             continue
         for target in node.targets:
             if isinstance(target, ast.Name) and target.id == "AUDIT_SCOPE":
-                if isinstance(node.value, ast.Constant) and isinstance(
-                    node.value.value, str
-                ):
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                     return node.value.value
     return None
 
@@ -207,9 +205,7 @@ def scan(pack_dir: Path) -> dict:
                 issues.append(err)
 
         # Final compliance
-        entry["compliant"] = (
-            entry["scope_valid"] and entry["has_function"] and entry["params_ok"]
-        )
+        entry["compliant"] = entry["scope_valid"] and entry["has_function"] and entry["params_ok"]
         results.append(entry)
 
     pass_count = sum(1 for r in results if r["compliant"])

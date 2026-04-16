@@ -23,6 +23,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.ruff_check import (
 # HELPERS
 # =============================================
 
+
 def _write_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -58,6 +59,7 @@ def _make_violation(filename: str, code: str = "F401", row: int = 1) -> dict:
 # 1. Score helper
 # =============================================
 
+
 class TestScoreFromCount:
     def test_zero_violations(self) -> None:
         """Zero violations maps to score 100."""
@@ -87,6 +89,7 @@ class TestScoreFromCount:
 # =============================================
 # 2. Ruff bypass helper
 # =============================================
+
 
 class TestIsRuffBypassed:
     def test_no_bypass_rules(self) -> None:
@@ -129,15 +132,19 @@ class TestIsRuffBypassed:
 # 3. check_branch
 # =============================================
 
+
 @patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.json_handler")
 class TestCheckBranch:
-
     def test_clean_branch_scores_100(self, mock_json, tmp_path: Path) -> None:
         """Branch with zero ruff violations scores 100."""
         branch = _make_branch(tmp_path)
         clean_proc = _ruff_proc([], returncode=0)
-        with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"):
-            with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run", return_value=clean_proc):
+        with patch(
+            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"
+        ):
+            with patch(
+                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run", return_value=clean_proc
+            ):
                 result = check_branch(str(branch))
         assert result["score"] == 100
         assert result["passed"] is True
@@ -149,7 +156,9 @@ class TestCheckBranch:
         branch = _make_branch(tmp_path)
         violations = [_make_violation(str(branch / "apps" / "modules" / "x.py"), "F401", i) for i in range(10)]
         proc = _ruff_proc(violations, returncode=1)
-        with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"):
+        with patch(
+            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"
+        ):
             with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run", return_value=proc):
                 result = check_branch(str(branch))
         assert result["score"] == 85  # 10 violations → 6–20 band
@@ -187,7 +196,9 @@ class TestCheckBranch:
         bypass_file = branch / ".seedgo" / "ruff_bypass.json"
         bypass_file.parent.mkdir(parents=True, exist_ok=True)
         bypass_file.write_text(json.dumps([{"file": "thing.py", "code": "F401"}]))
-        with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"):
+        with patch(
+            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"
+        ):
             with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run", return_value=proc):
                 result = check_branch(str(branch))
         # Only 1 active violation (E501), score should be 95
@@ -197,10 +208,15 @@ class TestCheckBranch:
     def test_timeout_returns_score_zero(self, mock_json, tmp_path: Path) -> None:
         """Subprocess timeout returns score 0 and passed False."""
         import subprocess as sp
+
         branch = _make_branch(tmp_path)
-        with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"):
-            with patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
-                       side_effect=sp.TimeoutExpired(cmd="ruff", timeout=60)):
+        with patch(
+            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which", return_value="/usr/bin/ruff"
+        ):
+            with patch(
+                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
+                side_effect=sp.TimeoutExpired(cmd="ruff", timeout=60),
+            ):
                 result = check_branch(str(branch))
         assert result["score"] == 0
         assert result["passed"] is False

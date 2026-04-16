@@ -24,42 +24,46 @@ def mock_feedback_dir(tmp_path):
 @pytest.fixture
 def empty_inbox(mock_feedback_dir):
     """Start with an empty feedback inbox."""
-    storage.save_inbox({
-        "mailbox": "feedback",
-        "total_messages": 0,
-        "unread_count": 0,
-        "messages": [],
-    })
+    storage.save_inbox(
+        {
+            "mailbox": "feedback",
+            "total_messages": 0,
+            "unread_count": 0,
+            "messages": [],
+        }
+    )
 
 
 @pytest.fixture
 def populated_inbox(mock_feedback_dir):
     """Create an inbox with sample messages."""
-    storage.save_inbox({
-        "mailbox": "feedback",
-        "total_messages": 2,
-        "unread_count": 1,
-        "messages": [
-            {
-                "id": "aaa11111",
-                "from": "seedgo",
-                "subject": "Test",
-                "body": "Body text.",
-                "timestamp": "2026-04-11T10:00:00",
-                "read": False,
-                "thread": [],
-            },
-            {
-                "id": "bbb22222",
-                "from": "prax",
-                "subject": "Already read",
-                "body": "Old message.",
-                "timestamp": "2026-04-11T09:00:00",
-                "read": True,
-                "thread": [],
-            },
-        ],
-    })
+    storage.save_inbox(
+        {
+            "mailbox": "feedback",
+            "total_messages": 2,
+            "unread_count": 1,
+            "messages": [
+                {
+                    "id": "aaa11111",
+                    "from": "seedgo",
+                    "subject": "Test",
+                    "body": "Body text.",
+                    "timestamp": "2026-04-11T10:00:00",
+                    "read": False,
+                    "thread": [],
+                },
+                {
+                    "id": "bbb22222",
+                    "from": "prax",
+                    "subject": "Already read",
+                    "body": "Old message.",
+                    "timestamp": "2026-04-11T09:00:00",
+                    "read": True,
+                    "thread": [],
+                },
+            ],
+        }
+    )
 
 
 class TestCommandRouting:
@@ -130,9 +134,7 @@ class TestCommandRouting:
 
     def test_feedback_send(self, empty_inbox):
         """Should accept feedback from an agent."""
-        result = feedback_module.handle_command(
-            "feedback", ["send", "seedgo", "Bug report", "Found an issue"]
-        )
+        result = feedback_module.handle_command("feedback", ["send", "seedgo", "Bug report", "Found an issue"])
         assert result is True
 
         data = storage.load_inbox()
@@ -143,9 +145,7 @@ class TestCommandRouting:
     def test_feedback_send_without_from(self, empty_inbox):
         """Should handle send with just subject and body."""
         # When args start with a quoted-looking string, from defaults to 'unknown'
-        result = feedback_module.handle_command(
-            "feedback", ["send", "Subject here", "Body text"]
-        )
+        result = feedback_module.handle_command("feedback", ["send", "Subject here", "Body text"])
         assert result is True
 
         data = storage.load_inbox()
@@ -163,9 +163,7 @@ class TestCommandRouting:
     def test_feedback_reply(self, mock_reply, populated_inbox):
         """Should route reply command correctly."""
         mock_reply.return_value = True
-        result = feedback_module.handle_command(
-            "feedback", ["reply", "aaa11111", "Good point!"]
-        )
+        result = feedback_module.handle_command("feedback", ["reply", "aaa11111", "Good point!"])
         assert result is True
         mock_reply.assert_called_once_with("aaa11111", "Good point!")
 
@@ -196,5 +194,6 @@ class TestHandleCommandHasCorrectSignature:
     def test_handle_command_takes_two_args(self):
         """handle_command must accept (command, args) signature."""
         import inspect
+
         sig = inspect.signature(feedback_module.handle_command)
         assert len(sig.parameters) == 2

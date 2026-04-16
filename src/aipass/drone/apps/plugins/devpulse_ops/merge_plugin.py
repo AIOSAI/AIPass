@@ -46,7 +46,9 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         # Step 1: Squash-merge the PR
         merge = subprocess.run(
             ["gh", "pr", "merge", pr_number, "--squash", "--delete-branch"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if merge.returncode != 0:
             merge_stderr = merge.stderr.strip()
@@ -56,9 +58,9 @@ def merge_pr(pr_number: str, caller: str) -> dict:
             # cleanup failed. Treat this as a warning and continue.
             if "cannot delete branch" in merge_stderr and "worktree" in merge_stderr:
                 logger.warning(
-                    "merge_pr: PR #%s merged but local branch cleanup skipped "
-                    "(branch in use by worktree): %s",
-                    pr_number, merge_stderr,
+                    "merge_pr: PR #%s merged but local branch cleanup skipped (branch in use by worktree): %s",
+                    pr_number,
+                    merge_stderr,
                 )
             else:
                 result["message"] = f"Merge failed: {merge_stderr}"
@@ -69,19 +71,25 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         # git pull --rebase doesn't abort on a dirty working tree.
         stash = subprocess.run(
             ["git", "stash"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         stashed = "No local changes to save" not in stash.stdout
 
         pull = subprocess.run(
             ["git", "pull", "--rebase"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if pull.returncode != 0:
             if stashed:
                 subprocess.run(
                     ["git", "stash", "pop"],
-                    capture_output=True, text=True, cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
                 )
             result["message"] = f"Pull after merge failed: {pull.stderr.strip()}"
             logger.error(result["message"])
@@ -90,7 +98,9 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         if stashed:
             pop = subprocess.run(
                 ["git", "stash", "pop"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if pop.returncode != 0:
                 logger.warning(
@@ -101,14 +111,18 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         # Step 3: Get the merge commit hash
         rev = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         merge_commit = rev.stdout.strip() if rev.returncode == 0 else "unknown"
 
         # Step 4: Get the PR title
         title_proc = subprocess.run(
             ["gh", "pr", "view", pr_number, "--json", "title", "--jq", ".title"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         title = title_proc.stdout.strip() if title_proc.returncode == 0 else "unknown"
 
@@ -130,6 +144,7 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         # Fire pr_merged event (non-blocking — never fail the merge workflow)
         try:
             from aipass.trigger.apps.modules.core import trigger
+
             trigger.fire("pr_merged", pr_number=pr_number, title=title)
         except Exception as exc:
             logger.warning("trigger.fire('pr_merged') failed: %s", exc)

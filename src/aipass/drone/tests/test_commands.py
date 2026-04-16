@@ -30,6 +30,7 @@ from aipass.drone.apps.handlers.command_registry import ops, lookup
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the registry at a temp file so tests never touch the real one."""
@@ -57,8 +58,8 @@ def _seed_registry(registry_file: Path, commands: dict[str, Any] | None = None) 
 # 1. Registry auto-creation
 # ===================================================================
 
-class TestRegistryAutoCreation:
 
+class TestRegistryAutoCreation:
     def test_load_creates_file_when_missing(self, isolated_registry: Path) -> None:
         """load_registry() creates a new file when none exists."""
         assert not isolated_registry.exists()
@@ -103,8 +104,8 @@ class TestRegistryAutoCreation:
 # 2. CRUD operations
 # ===================================================================
 
-class TestCRUDOperations:
 
+class TestCRUDOperations:
     def test_add_command(self, isolated_registry: Path) -> None:
         """add_command creates a new entry in the registry."""
         result = ops.add_command(
@@ -216,8 +217,8 @@ class TestCRUDOperations:
 # 3. Lookup (exact match)
 # ===================================================================
 
-class TestLookup:
 
+class TestLookup:
     def test_lookup_found(self, isolated_registry: Path) -> None:
         """lookup_command returns the command dict for an exact match."""
         ops.add_command("audit", "@seedgo", "audit", ["aipass"], "Run audit", "seedgo")
@@ -239,8 +240,8 @@ class TestLookup:
 # 4. Multi-word greedy matching
 # ===================================================================
 
-class TestMultiWordMatching:
 
+class TestMultiWordMatching:
     def test_single_word_match(self, isolated_registry: Path) -> None:
         """match_command matches a single-word command."""
         ops.add_command("audit", "@seedgo", "audit")
@@ -316,8 +317,8 @@ class TestMultiWordMatching:
 # 5. List and filter by branch
 # ===================================================================
 
-class TestListAndFilter:
 
+class TestListAndFilter:
     def test_list_commands_sorted(self, isolated_registry: Path) -> None:
         """list_commands returns all commands sorted by name."""
         ops.add_command("zebra", "@t", "c1")
@@ -362,8 +363,8 @@ class TestListAndFilter:
 # 6. Save validation
 # ===================================================================
 
-class TestSaveValidation:
 
+class TestSaveValidation:
     def test_save_rejects_non_dict(self, isolated_registry: Path) -> None:
         """save_registry rejects data that is not a dict."""
         result = ops.save_registry([1, 2, 3])  # type: ignore[arg-type]
@@ -381,8 +382,8 @@ class TestSaveValidation:
 # 7. Module orchestrator
 # ===================================================================
 
-class TestModuleOrchestrator:
 
+class TestModuleOrchestrator:
     def test_handle_command_introspection(self, isolated_registry: Path) -> None:
         """handle_command with no args triggers introspection."""
         from aipass.drone.apps.modules.commands import handle_command

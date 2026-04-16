@@ -43,6 +43,7 @@ logger = get_system_logger()
 # EMBEDDING SERVICE (Singleton)
 # =============================================================================
 
+
 class EmbeddingService:
     """
     Production-ready embedding service
@@ -54,7 +55,7 @@ class EmbeddingService:
     - GPU memory cleanup (prevents VRAM leaks)
     """
 
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         """
         Initialize embedding service
 
@@ -82,13 +83,12 @@ class EmbeddingService:
         # GPU optimization if available
         self.use_gpu = torch.cuda.is_available()
         if self.use_gpu:
-            self.model = self.model.to('cuda')
+            self.model = self.model.to("cuda")
             self.batch_size = 64
         else:
             self.batch_size = 16
 
         self.dimension = 384  # all-MiniLM-L6-v2 output dimension
-
 
     def encode_batch(self, texts: List[str]) -> Dict[str, Any]:
         """
@@ -109,11 +109,7 @@ class EmbeddingService:
         import torch
 
         if not texts:
-            return {
-                "embeddings": [],
-                "count": 0,
-                "dimension": self.dimension
-            }
+            return {"embeddings": [], "count": 0, "dimension": self.dimension}
 
         # Pre-sort by length (reduces padding waste by 30%)
         sorted_pairs = sorted(enumerate(texts), key=lambda x: len(x[1]))
@@ -126,7 +122,7 @@ class EmbeddingService:
             batch_size=self.batch_size,
             convert_to_tensor=False,  # Return numpy for Chroma
             normalize_embeddings=True,  # Critical for L2 distance
-            show_progress_bar=False
+            show_progress_bar=False,
         )
 
         # Restore original order
@@ -138,11 +134,7 @@ class EmbeddingService:
         if self.use_gpu:
             torch.cuda.empty_cache()
 
-        return {
-            "embeddings": ordered_embeddings,
-            "count": len(ordered_embeddings),
-            "dimension": self.dimension
-        }
+        return {"embeddings": ordered_embeddings, "count": len(ordered_embeddings), "dimension": self.dimension}
 
 
 # Global service instance (singleton pattern)
@@ -165,6 +157,7 @@ def _get_service() -> EmbeddingService:
 # PUBLIC API
 # =============================================================================
 
+
 def encode_batch(texts: List[str]) -> Dict[str, Any]:
     """
     Encode batch of texts to embeddings
@@ -185,29 +178,21 @@ def encode_batch(texts: List[str]) -> Dict[str, Any]:
             # Each embedding is 384-dim numpy array
     """
     if not texts:
-        return {
-            'success': True,
-            'embeddings': [],
-            'count': 0,
-            'message': 'No texts provided'
-        }
+        return {"success": True, "embeddings": [], "count": 0, "message": "No texts provided"}
 
     try:
         service = _get_service()
         result = service.encode_batch(texts)
 
-        json_handler.log_operation("vector_encode_batch", {"count": result.get('count', 0), "dimension": result.get('dimension', 0), "success": True})
-        return {
-            'success': True,
-            **result
-        }
+        json_handler.log_operation(
+            "vector_encode_batch",
+            {"count": result.get("count", 0), "dimension": result.get("dimension", 0), "success": True},
+        )
+        return {"success": True, **result}
 
     except Exception as e:
         logger.error(f"[embedder] Batch encoding failed: {e}")
-        return {
-            'success': False,
-            'error': f"Encoding failed: {e}"
-        }
+        return {"success": False, "error": f"Encoding failed: {e}"}
 
 
 def encode_memories(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -230,39 +215,33 @@ def encode_memories(memories: List[Dict[str, Any]]) -> Dict[str, Any]:
         original = result['memories']
     """
     if not memories:
-        return {
-            'success': True,
-            'embeddings': [],
-            'memories': [],
-            'count': 0,
-            'message': 'No memories provided'
-        }
+        return {"success": True, "embeddings": [], "memories": [], "count": 0, "message": "No memories provided"}
 
     # Extract text content from memories
     texts = []
     for memory in memories:
         # Try common fields for text content
         text = (
-            memory.get('content') or
-            memory.get('text') or
-            memory.get('message') or
-            str(memory)  # Fallback to string representation
+            memory.get("content")
+            or memory.get("text")
+            or memory.get("message")
+            or str(memory)  # Fallback to string representation
         )
         texts.append(text)
 
     # Encode texts
     encode_result = encode_batch(texts)
 
-    if not encode_result['success']:
+    if not encode_result["success"]:
         return encode_result
 
     # Combine embeddings with original memories
     return {
-        'success': True,
-        'embeddings': encode_result['embeddings'],
-        'memories': memories,
-        'count': len(memories),
-        'dimension': encode_result['dimension']
+        "success": True,
+        "embeddings": encode_result["embeddings"],
+        "memories": memories,
+        "count": len(memories),
+        "dimension": encode_result["dimension"],
     }
 
 
@@ -277,15 +256,12 @@ def get_model_info() -> Dict[str, Any]:
         service = _get_service()
 
         return {
-            'success': True,
-            'model_name': service.model_name,
-            'dimension': service.dimension,
-            'batch_size': service.batch_size,
-            'gpu_enabled': service.use_gpu
+            "success": True,
+            "model_name": service.model_name,
+            "dimension": service.dimension,
+            "batch_size": service.batch_size,
+            "gpu_enabled": service.use_gpu,
         }
     except Exception as e:
         logger.warning(f"[embedder] Failed to get model info: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to get model info: {e}"
-        }
+        return {"success": False, "error": f"Failed to get model info: {e}"}

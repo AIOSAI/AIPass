@@ -71,12 +71,13 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Step 1: Check we're on main
         current = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if current.stdout.strip() != "main":
             result["message"] = (
-                f"Not on main branch (currently on {current.stdout.strip()}). "
-                "Checkout main before creating a PR."
+                f"Not on main branch (currently on {current.stdout.strip()}). Checkout main before creating a PR."
             )
             logger.error(result["message"])
             return result
@@ -92,12 +93,16 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         try:
             rel_dir = branch_dir.resolve().relative_to(repo_root.resolve())
         except ValueError:
-            logger.warning("create_pr: branch_dir %s not relative to repo root %s, using absolute", branch_dir, repo_root)
+            logger.warning(
+                "create_pr: branch_dir %s not relative to repo root %s, using absolute", branch_dir, repo_root
+            )
             rel_dir = branch_dir
 
         add_result = subprocess.run(
             ["git", "add", str(rel_dir) + "/"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if add_result.returncode != 0:
             result["message"] = f"Failed to stage files: {add_result.stderr.strip()}"
@@ -107,7 +112,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Step 4: Check if anything was staged
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if diff_check.returncode == 0:
             result["message"] = "Nothing to commit: no changes staged under branch directory"
@@ -115,13 +122,12 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             return result
 
         # Step 5: Commit on main (changes stay local)
-        commit_msg = (
-            f"feat({branch_name}): {description}\n\n"
-            f"Co-Authored-By: @{branch_name} <{branch_name}@aipass>"
-        )
+        commit_msg = f"feat({branch_name}): {description}\n\nCo-Authored-By: @{branch_name} <{branch_name}@aipass>"
         commit = subprocess.run(
             ["git", "commit", "-m", commit_msg],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if commit.returncode != 0:
             result["message"] = f"Commit failed: {commit.stderr.strip()}"
@@ -131,7 +137,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Step 6: Create/update feature branch pointing to same commit (no checkout)
         branch_create = subprocess.run(
             ["git", "branch", "-f", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if branch_create.returncode != 0:
             result["message"] = f"Failed to create branch: {branch_create.stderr.strip()}"
@@ -141,7 +149,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Step 7: Push feature branch (force-with-lease for persistent citizen branches)
         push = subprocess.run(
             ["git", "push", "--force-with-lease", "origin", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if push.returncode != 0:
             result["message"] = f"Push failed: {push.stderr.strip()}"
@@ -149,26 +159,30 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             return result
 
         # Step 8: Create PR via gh
-        pr_body = (
-            f"## Summary\n\n"
-            f"- {description}\n\n"
-            f"## Branch\n\n"
-            f"Created by @{branch_name} via `drone @git pr`\n"
-        )
+        pr_body = f"## Summary\n\n- {description}\n\n## Branch\n\nCreated by @{branch_name} via `drone @git pr`\n"
         pr_create = subprocess.run(
             [
-                "gh", "pr", "create",
-                "--head", feature_branch,
-                "--title", f"feat({branch_name}): {description}",
-                "--body", pr_body,
+                "gh",
+                "pr",
+                "create",
+                "--head",
+                feature_branch,
+                "--title",
+                f"feat({branch_name}): {description}",
+                "--body",
+                pr_body,
             ],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if pr_create.returncode != 0:
             # Check if PR already exists — force-push already updated it
             existing = subprocess.run(
                 ["gh", "pr", "list", "--head", feature_branch, "--json", "url", "--limit", "1"],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             try:
                 existing_prs = _json.loads(existing.stdout)
@@ -184,7 +198,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
                 # Clean up local feature branch before returning
                 subprocess.run(
                     ["git", "branch", "-D", feature_branch],
-                    capture_output=True, text=True, cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                    cwd=str(repo_root),
                 )
                 return result
         else:
@@ -193,7 +209,9 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Step 9: Clean up local feature branch (remote copy is what matters)
         subprocess.run(
             ["git", "branch", "-D", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
 
         result["success"] = True
@@ -208,6 +226,7 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # Fire pr_created event (non-blocking — never fail the PR workflow)
         try:
             from aipass.trigger.apps.modules.core import trigger
+
             trigger.fire("pr_created", branch=branch_name, pr_url=pr_url)
         except Exception as exc:
             logger.warning("trigger.fire('pr_created') failed: %s", exc)

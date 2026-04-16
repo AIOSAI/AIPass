@@ -70,6 +70,7 @@ CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
 # MAIN AGGREGATION FUNCTION (thin orchestrator)
 # =============================================
 
+
 def aggregate_central(heal: bool = True) -> bool:
     """Aggregate and validate central plans (thin orchestrator)
 
@@ -91,6 +92,7 @@ def aggregate_central(heal: bool = True) -> bool:
 # =============================================
 # DISPLAY FUNCTIONS
 # =============================================
+
 
 def print_introspection():
     """Display module introspection info."""
@@ -130,6 +132,7 @@ def print_help():
 # COMMAND INTERFACE
 # =============================================
 
+
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle module commands
 
@@ -153,10 +156,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Log the operation
-    json_handler.log_operation(
-        "central_aggregated",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("central_aggregated", {"command": command, "args": args})
 
     # Check for --heal flag (default is True)
     heal = True
@@ -175,10 +175,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 # MAIN ENTRY POINT
 # =============================================
 
+
 def main():
     """Main entry point for standalone execution"""
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

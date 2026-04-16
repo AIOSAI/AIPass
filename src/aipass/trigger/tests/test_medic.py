@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before medic module loads."""
@@ -48,14 +49,18 @@ def _mock_infrastructure(monkeypatch):
     medic_state_mod.get_muted_branches = MagicMock(return_value=[])
     medic_state_mod.mute_branch = MagicMock(return_value=True)
     medic_state_mod.unmute_branch = MagicMock(return_value=True)
-    medic_state_mod.get_suppression_stats = MagicMock(return_value={
-        "suppressed_count": 0,
-        "last_suppressed": "never",
-    })
-    medic_state_mod.get_rate_limit_stats = MagicMock(return_value={
-        "rate_limited_count": 0,
-        "last_rate_limited": "never",
-    })
+    medic_state_mod.get_suppression_stats = MagicMock(
+        return_value={
+            "suppressed_count": 0,
+            "last_suppressed": "never",
+        }
+    )
+    medic_state_mod.get_rate_limit_stats = MagicMock(
+        return_value={
+            "rate_limited_count": 0,
+            "last_rate_limited": "never",
+        }
+    )
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.medic_state", medic_state_mod)
 
     # -- CLI console (lazy import inside handle_command) --------------------
@@ -83,6 +88,7 @@ def _mock_infrastructure(monkeypatch):
 def _import_medic():
     """Import medic module fresh (after mocks are in place)."""
     import aipass.trigger.apps.modules.medic as medic
+
     return medic
 
 
@@ -118,6 +124,7 @@ def _get_print_str_args(console):
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "on"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_on_enables_medic():
     """handle_command('on', []) calls set_enabled(True), prints Panel, returns True."""
@@ -172,14 +179,13 @@ def test_handle_command_on_failure_prints_error():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected_msg = "[red]Failed to enable Medic[/red] - check trigger_config.json"
-    assert expected_msg in printed, (
-        f"Expected exact error message '{expected_msg}' in printed args: {printed}"
-    )
+    assert expected_msg in printed, f"Expected exact error message '{expected_msg}' in printed args: {printed}"
 
 
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "off"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_off_disables_medic():
     """handle_command('off', []) calls set_enabled(False), prints Panel, returns True."""
@@ -222,14 +228,13 @@ def test_handle_command_off_failure_prints_error():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected_msg = "[red]Failed to disable Medic[/red] - check trigger_config.json"
-    assert expected_msg in printed, (
-        f"Expected exact error message '{expected_msg}' in printed args: {printed}"
-    )
+    assert expected_msg in printed, f"Expected exact error message '{expected_msg}' in printed args: {printed}"
 
 
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "status"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_status_returns_current_state():
     """handle_command('status', []) displays state info and returns True."""
@@ -256,9 +261,7 @@ def test_handle_command_status_shows_enabled():
     console = _get_console()
     printed = _get_print_str_args(console)
     state_line = "  State:           [green]ENABLED[/green]"
-    assert state_line in printed, (
-        f"Expected state line '{state_line}' in printed args: {printed}"
-    )
+    assert state_line in printed, f"Expected state line '{state_line}' in printed args: {printed}"
 
 
 def test_handle_command_status_shows_disabled():
@@ -273,9 +276,7 @@ def test_handle_command_status_shows_disabled():
     console = _get_console()
     printed = _get_print_str_args(console)
     state_line = "  State:           [yellow]DISABLED[/yellow]"
-    assert state_line in printed, (
-        f"Expected state line '{state_line}' in printed args: {printed}"
-    )
+    assert state_line in printed, f"Expected state line '{state_line}' in printed args: {printed}"
 
 
 def test_handle_command_status_shows_muted_branches():
@@ -291,9 +292,7 @@ def test_handle_command_status_shows_muted_branches():
     printed = _get_print_str_args(console)
     # Source builds: "  Muted branches:  @speakeasy, @api"
     muted_line = "  Muted branches:  @speakeasy, @api"
-    assert muted_line in printed, (
-        f"Expected muted line '{muted_line}' in printed args: {printed}"
-    )
+    assert muted_line in printed, f"Expected muted line '{muted_line}' in printed args: {printed}"
 
 
 def test_handle_command_status_suppression_hint_when_disabled():
@@ -308,14 +307,13 @@ def test_handle_command_status_suppression_hint_when_disabled():
     console = _get_console()
     printed = _get_print_str_args(console)
     hint = "  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.log[/dim]"
-    assert hint in printed, (
-        f"Expected suppression hint '{hint}' in printed args: {printed}"
-    )
+    assert hint in printed, f"Expected suppression hint '{hint}' in printed args: {printed}"
 
 
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "mute"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_mute_branch():
     """handle_command('mute', ['@speakeasy']) mutes the branch."""
@@ -344,9 +342,7 @@ def test_handle_command_mute_prints_confirmation():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "  [yellow]Muted[/yellow] @api — errors logged but not dispatched"
-    assert expected in printed, (
-        f"Expected mute confirmation '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected mute confirmation '{expected}' in printed args: {printed}"
 
 
 def test_handle_command_mute_failure_prints_error():
@@ -360,9 +356,7 @@ def test_handle_command_mute_failure_prints_error():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "  [red]Failed to mute[/red] @api — check trigger_config.json"
-    assert expected in printed, (
-        f"Expected mute failure message '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected mute failure message '{expected}' in printed args: {printed}"
 
 
 def test_handle_command_mute_without_branch_name():
@@ -374,9 +368,7 @@ def test_handle_command_mute_without_branch_name():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "[red]Missing branch name[/red] - usage: medic mute @branch"
-    assert expected in printed, (
-        f"Expected usage error '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected usage error '{expected}' in printed args: {printed}"
     # Should NOT have called mute_branch
     state = _get_medic_state()
     state.mute_branch.assert_not_called()
@@ -385,6 +377,7 @@ def test_handle_command_mute_without_branch_name():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "unmute"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_unmute_branch():
     """handle_command('unmute', ['@speakeasy']) unmutes the branch."""
@@ -404,9 +397,7 @@ def test_handle_command_unmute_prints_confirmation():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "  [green]Unmuted[/green] @flow — dispatch resumed"
-    assert expected in printed, (
-        f"Expected unmute confirmation '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected unmute confirmation '{expected}' in printed args: {printed}"
 
 
 def test_handle_command_unmute_already_unmuted():
@@ -421,9 +412,7 @@ def test_handle_command_unmute_already_unmuted():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "  [red]Failed to unmute[/red] @nonexistent — check trigger_config.json"
-    assert expected in printed, (
-        f"Expected unmute failure message '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected unmute failure message '{expected}' in printed args: {printed}"
 
 
 def test_handle_command_unmute_without_branch_name():
@@ -435,9 +424,7 @@ def test_handle_command_unmute_without_branch_name():
     console = _get_console()
     printed = _get_print_str_args(console)
     expected = "[red]Missing branch name[/red] - usage: medic unmute @branch"
-    assert expected in printed, (
-        f"Expected usage error '{expected}' in printed args: {printed}"
-    )
+    assert expected in printed, f"Expected usage error '{expected}' in printed args: {printed}"
     state = _get_medic_state()
     state.unmute_branch.assert_not_called()
 
@@ -445,6 +432,7 @@ def test_handle_command_unmute_without_branch_name():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command "--help"
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_help_flag():
     """handle_command('medic', ['--help']) calls print_help and returns True."""
@@ -486,6 +474,7 @@ def test_handle_command_subcommand_help():
 # Tests -- handle_command with no args (introspection)
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_no_args_shows_introspection():
     """handle_command('medic', []) calls print_introspection and returns True."""
     medic = _import_medic()
@@ -500,6 +489,7 @@ def test_handle_command_no_args_shows_introspection():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command routing / unknown commands
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_unknown_returns_false():
     """handle_command with an unknown subcommand returns False."""
@@ -534,6 +524,7 @@ def test_handle_command_medic_routes_mute_with_args():
 # Tests -- _extract_branch_name helper
 # ---------------------------------------------------------------------------
 
+
 def test_extract_branch_name_strips_at():
     """_extract_branch_name removes leading @ and lowercases."""
     medic = _import_medic()
@@ -556,10 +547,12 @@ def test_extract_branch_name_plain():
 # Contract gap tests
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_none_command_returns_false():
     """handle_command(None, []) returns False -- None is not a recognized command."""
     medic = _import_medic()
     from typing import Any
+
     none_cmd: Any = None
     result = medic.handle_command(none_cmd, [])
     assert result is False
@@ -588,6 +581,7 @@ def test_handle_command_on_extra_args_ignored():
 # ---------------------------------------------------------------------------
 # Tests -- output_capture: verify console output content matches expectations
 # ---------------------------------------------------------------------------
+
 
 def test_output_capture_print_help(capsys):
     """output_capture: print_help output can be captured via capsys."""

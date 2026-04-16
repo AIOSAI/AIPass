@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional
 
 from aipass.prax import logger
+
 # logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -35,6 +36,7 @@ MODULE_NAME = "aggregate_central"
 # =============================================
 # HELPER FUNCTIONS
 # =============================================
+
 
 def find_branch_registry(branch_path: Path, branch_name: str) -> Optional[Path]:
     """Find the registry file for a branch
@@ -82,7 +84,7 @@ def load_branch_registry(registry_path: Path) -> Dict[str, Any]:
         Registry dict or empty structure on error
     """
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to load registry {registry_path}: {e}")
@@ -101,7 +103,7 @@ def save_branch_registry(registry_path: Path, registry: Dict[str, Any]) -> bool:
     """
     try:
         registry["last_updated"] = datetime.now(timezone.utc).isoformat()
-        with open(registry_path, 'w', encoding='utf-8') as f:
+        with open(registry_path, "w", encoding="utf-8") as f:
             json.dump(registry, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -118,9 +120,9 @@ def extract_plan_number(plan_id: str) -> Optional[str]:
     Returns:
         Plan number string or None if invalid format
     """
-    if not plan_id or '-' not in plan_id:
+    if not plan_id or "-" not in plan_id:
         return None
-    return plan_id.split('-', 1)[1]
+    return plan_id.split("-", 1)[1]
 
 
 def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool:
@@ -169,8 +171,9 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
         return False
 
 
-def validate_and_heal_branch(branch_name: str, branch_data: Dict[str, Any],
-                              heal: bool = True) -> Tuple[List[Dict], List[Dict]]:
+def validate_and_heal_branch(
+    branch_name: str, branch_data: Dict[str, Any], heal: bool = True
+) -> Tuple[List[Dict], List[Dict]]:
     """Validate plans in a branch and heal missing files
 
     Args:
@@ -235,24 +238,16 @@ def load_central(central_file: Path) -> Dict[str, Any]:
         "generated_at": "",
         "active_plans": [],
         "recently_closed": [],
-        "statistics": {
-            "active_count": 0,
-            "total_closed": 0,
-            "recently_closed_included": 0
-        },
+        "statistics": {"active_count": 0, "total_closed": 0, "recently_closed_included": 0},
         "branches": {},
-        "global_statistics": {
-            "total_active": 0,
-            "total_closed": 0,
-            "branches_reporting": 0
-        }
+        "global_statistics": {"total_active": 0, "total_closed": 0, "branches_reporting": 0},
     }
 
     if not central_file.exists():
         return empty_structure
 
     try:
-        with open(central_file, 'r', encoding='utf-8') as f:
+        with open(central_file, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to load {central_file}: {e}")
@@ -272,7 +267,7 @@ def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, 
     """
     try:
         central_dir.mkdir(parents=True, exist_ok=True)
-        with open(central_file, 'w', encoding='utf-8') as f:
+        with open(central_file, "w", encoding="utf-8") as f:
             json.dump(central_data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
@@ -284,9 +279,10 @@ def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, 
 # MAIN AGGREGATION IMPLEMENTATION
 # =============================================
 
-def aggregate_central_impl(heal: bool = True,
-                           central_file: Path | None = None,
-                           central_dir: Path | None = None) -> bool:
+
+def aggregate_central_impl(
+    heal: bool = True, central_file: Path | None = None, central_dir: Path | None = None
+) -> bool:
     """Aggregate and validate central plans
 
     Algorithm:
@@ -336,26 +332,20 @@ def aggregate_central_impl(heal: bool = True,
             logger.info(f"[{MODULE_NAME}] Processing branch: {branch_name}")
 
             # Validate and heal
-            valid_active, closed_plans = validate_and_heal_branch(
-                branch_name, branch_data, heal
-            )
+            valid_active, closed_plans = validate_and_heal_branch(branch_name, branch_data, heal)
 
             # Update branch-level active_plans with validated list
             branch_data["active_plans"] = valid_active
 
             # Update branch-level recently_closed (sorted, newest first)
-            branch_recently_closed = sorted(
-                closed_plans,
-                key=lambda x: x.get("closed", ""),
-                reverse=True
-            )[:5]
+            branch_recently_closed = sorted(closed_plans, key=lambda x: x.get("closed", ""), reverse=True)[:5]
             branch_data["recently_closed"] = branch_recently_closed
 
             # Update branch-level statistics to match validated arrays
             branch_data["statistics"] = {
                 "active_count": len(valid_active),
                 "total_closed": len(closed_plans),
-                "recently_closed_included": len(branch_recently_closed)
+                "recently_closed_included": len(branch_recently_closed),
             }
 
             # Add branch name to each plan for identification
@@ -370,16 +360,10 @@ def aggregate_central_impl(heal: bool = True,
                 all_closed.append(plan)
 
         # Sort active by created date (newest first)
-        all_active.sort(
-            key=lambda x: x.get("created", ""),
-            reverse=True
-        )
+        all_active.sort(key=lambda x: x.get("created", ""), reverse=True)
 
         # Sort closed by closed date (newest first) and limit to last 5
-        all_closed.sort(
-            key=lambda x: x.get("closed", ""),
-            reverse=True
-        )
+        all_closed.sort(key=lambda x: x.get("closed", ""), reverse=True)
         recently_closed = all_closed[:5]
 
         # Update top-level arrays
@@ -390,17 +374,16 @@ def aggregate_central_impl(heal: bool = True,
         central_data["statistics"] = {
             "active_count": len(all_active),
             "total_closed": len(all_closed),
-            "recently_closed_included": len(recently_closed)
+            "recently_closed_included": len(recently_closed),
         }
 
         # Update global_statistics (aggregated from all branches)
         central_data["global_statistics"] = {
             "total_active": len(all_active),
             "total_closed": len(all_closed),
-            "branches_reporting": len([
-                b for b in branches.values()
-                if b.get("active_plans") or b.get("recently_closed")
-            ])
+            "branches_reporting": len(
+                [b for b in branches.values() if b.get("active_plans") or b.get("recently_closed")]
+            ),
         }
 
         # Update generated_at timestamp
@@ -408,19 +391,27 @@ def aggregate_central_impl(heal: bool = True,
 
         # Save central file
         if save_central(central_file, central_dir, central_data):
-            logger.info(f"[{MODULE_NAME}] SUCCESS: Aggregation complete: {len(all_active)} active, {len(recently_closed)} recently closed")
+            logger.info(
+                f"[{MODULE_NAME}] SUCCESS: Aggregation complete: {len(all_active)} active, {len(recently_closed)} recently closed"
+            )
 
             # Fire trigger event
             try:
                 from aipass.trigger.apps.modules.core import trigger
-                trigger.fire('central_aggregated',
-                           active_count=len(all_active),
-                           closed_count=len(recently_closed),
-                           branches_count=len(branches))
+
+                trigger.fire(
+                    "central_aggregated",
+                    active_count=len(all_active),
+                    closed_count=len(recently_closed),
+                    branches_count=len(branches),
+                )
             except ImportError as e:
                 logger.warning(f"[{MODULE_NAME}] Trigger module not available, skipping central_aggregated event: {e}")
 
-            json_handler.log_operation("central_aggregated", {"active_count": len(all_active), "closed_count": len(recently_closed), "success": True})
+            json_handler.log_operation(
+                "central_aggregated",
+                {"active_count": len(all_active), "closed_count": len(recently_closed), "success": True},
+            )
             return True
         else:
             logger.error(f"[{MODULE_NAME}] Failed to save central file")

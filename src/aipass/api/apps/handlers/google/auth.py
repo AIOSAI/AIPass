@@ -54,6 +54,7 @@ try:
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
+
     GOOGLE_AUTH_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Google auth libraries not available: {e}")
@@ -125,7 +126,9 @@ def refresh_credentials(creds: "Credentials") -> bool:
 
 
 def run_oauth_flow(
-    scopes: Optional[list] = None, port: int = 0, open_browser: bool = True,
+    scopes: Optional[list] = None,
+    port: int = 0,
+    open_browser: bool = True,
 ) -> Optional["Credentials"]:
     """Run the full OAuth2 consent flow.
 
@@ -149,9 +152,7 @@ def run_oauth_flow(
     effective_scopes = scopes or DEFAULT_SCOPES["drive"]
 
     try:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(CLIENT_SECRET_PATH), effective_scopes
-        )
+        flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET_PATH), effective_scopes)
         creds = flow.run_local_server(port=port, open_browser=open_browser)
         _save_credentials(creds)
         return creds
@@ -193,7 +194,9 @@ def authenticate(scopes: Optional[list] = None) -> Optional["Credentials"]:
 
 
 def reauth(
-    scopes: Optional[list] = None, port: int = 8085, open_browser: bool = False,
+    scopes: Optional[list] = None,
+    port: int = 8085,
+    open_browser: bool = False,
 ) -> Optional["Credentials"]:
     """Force re-authentication via OAuth flow (console mode).
 

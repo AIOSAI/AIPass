@@ -39,6 +39,7 @@ _PKG_ROOT = Path(__file__).resolve().parents[4]
 # HANDLER FUNCTION
 # =============================================
 
+
 def get_registry_statistics(registry: Dict[str, Any]) -> Dict[str, Any]:
     """Calculate statistics from registry
 
@@ -65,14 +66,17 @@ def get_registry_statistics(registry: Dict[str, Any]) -> Dict[str, Any]:
         "open_plans": open_count,
         "closed_plans": closed_count,
         "other_plans": other_count,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    json_handler.log_operation("registry_statistics_calculated", {
-        "total_plans": len(plans),
-        "open_plans": open_count,
-        "closed_plans": closed_count,
-        "success": True,
-    })
+    json_handler.log_operation(
+        "registry_statistics_calculated",
+        {
+            "total_plans": len(plans),
+            "open_plans": open_count,
+            "closed_plans": closed_count,
+            "success": True,
+        },
+    )
 
     return result

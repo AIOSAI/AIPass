@@ -3,16 +3,17 @@
 from unittest.mock import patch
 
 
-
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.modules.create_plan"
 
 
 # ─── Helpers ─────────────────────────────────────────────
 
+
 def _import_handle_command():
     """Import handle_command inside each test so autouse mocks are active."""
     from aipass.flow.apps.modules.create_plan import handle_command
+
     return handle_command
 
 
@@ -20,8 +21,8 @@ def _import_handle_command():
 # 1. Command != "create" -> returns False
 # ═══════════════════════════════════════════════════════════
 
-class TestCommandRouting:
 
+class TestCommandRouting:
     def test_wrong_command_returns_false(self):
         handle_command = _import_handle_command()
         assert handle_command("delete", []) is False
@@ -39,8 +40,8 @@ class TestCommandRouting:
 # 2. command == "create" with no args -> introspection
 # ═══════════════════════════════════════════════════════════
 
-class TestIntrospection:
 
+class TestIntrospection:
     @patch(f"{_MOD}.print_introspection")
     def test_no_args_calls_introspection(self, mock_introspection):
         handle_command = _import_handle_command()
@@ -62,8 +63,8 @@ class TestIntrospection:
 # 3. command == "create" with --help -> help
 # ═══════════════════════════════════════════════════════════
 
-class TestHelp:
 
+class TestHelp:
     @patch(f"{_MOD}.print_help")
     def test_help_flag(self, mock_help):
         handle_command = _import_handle_command()
@@ -90,8 +91,8 @@ class TestHelp:
 # 4. command == "create" with valid args -> calls create_plan
 # ═══════════════════════════════════════════════════════════
 
-class TestValidArgs:
 
+class TestValidArgs:
     @patch(f"{_MOD}.display_plan_result", return_value="[green]OK[/green]")
     @patch(f"{_MOD}.create_plan", return_value=(True, 1, ".", "default", ""))
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})
@@ -111,7 +112,8 @@ class TestValidArgs:
         result = handle_command("create", [".", "My Plan"])
         assert result is True  # Command was handled
         mock_create.assert_called_once_with(
-            ".", "My Plan",
+            ".",
+            "My Plan",
             plan_type_key="flow_plans",
             plan_type_config={"prefix": "FPLAN", "digits": 4, "default_template": "default"},
         )
@@ -125,8 +127,13 @@ class TestValidArgs:
         result = handle_command("create", [".", "My Plan"])
         assert result is True  # Command was handled
         mock_display.assert_called_once_with(
-            True, 1, ".", "default", "",
-            prefix="FPLAN", digits=4,
+            True,
+            1,
+            ".",
+            "default",
+            "",
+            prefix="FPLAN",
+            digits=4,
         )
 
     @patch(f"{_MOD}.display_plan_result", return_value="[green]OK[/green]")
@@ -139,7 +146,8 @@ class TestValidArgs:
         result = handle_command("create", [".", "My Plan", "dplan"])
         assert result is True
         mock_create.assert_called_once_with(
-            ".", "My Plan",
+            ".",
+            "My Plan",
             plan_type_key="dev_plans",
             plan_type_config={"prefix": "DPLAN", "digits": 4, "default_template": "default"},
         )
@@ -149,8 +157,8 @@ class TestValidArgs:
 # 5. Invalid plan type -> error displayed, returns True
 # ═══════════════════════════════════════════════════════════
 
-class TestInvalidPlanType:
 
+class TestInvalidPlanType:
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))
     @patch(f"{_MOD}.get_plan_type", side_effect=ValueError("Unknown plan type 'bad_type'"))
     def test_invalid_type_returns_true(self, mock_get_type, mock_parse):
@@ -173,8 +181,8 @@ class TestInvalidPlanType:
 # 6. json_handler.log_operation is called on valid commands
 # ═══════════════════════════════════════════════════════════
 
-class TestOperationLogging:
 
+class TestOperationLogging:
     @patch(f"{_MOD}.display_plan_result", return_value="[green]OK[/green]")
     @patch(f"{_MOD}.create_plan", return_value=(True, 1, ".", "default", ""))
     @patch(f"{_MOD}.get_plan_type", return_value={"prefix": "FPLAN", "digits": 4, "default_template": "default"})

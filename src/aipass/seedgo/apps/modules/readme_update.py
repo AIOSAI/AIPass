@@ -29,6 +29,7 @@ from typing import List
 
 # Prax logger (system-wide, always first)
 from aipass.prax import logger
+
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -47,6 +48,7 @@ from aipass.seedgo.apps.handlers.readme.readme_ops import (
 # =============================================================================
 # COMMAND HANDLER
 # =============================================================================
+
 
 def print_introspection() -> None:
     """Display module info and connected handlers."""
@@ -123,6 +125,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # SUBCOMMAND ORCHESTRATION
 # =============================================================================
 
+
 def _handle_update(args: List[str]) -> None:
     """Orchestrate the 'update' subcommand"""
     if load_generator is None:
@@ -139,21 +142,18 @@ def _handle_update(args: List[str]) -> None:
         _print_target_error(error)
         return
 
-    json_handler.log_operation(
-        "readme_update_started",
-        {"targets": [b['name'] for b in branches]}
-    )
+    json_handler.log_operation("readme_update_started", {"targets": [b["name"] for b in branches]})
 
     total_updated = 0
 
     for branch in branches:
-        branch_name = branch['name']
-        branch_path = branch['path']
+        branch_name = branch["name"]
+        branch_path = branch["path"]
 
         console.print()
         console.print(f"[bold cyan]README Update: {branch_name}[/bold cyan]")
 
-        readme_path = Path(branch_path) / 'README.md'
+        readme_path = Path(branch_path) / "README.md"
         if not readme_path.exists():
             warning(f"No README.md found at {branch_path}")
             continue
@@ -161,7 +161,7 @@ def _handle_update(args: List[str]) -> None:
         try:
             result = generator.update_readme_auto_sections(branch_path, dry_run=False)
             _print_result(result)
-            if result.get('updated'):
+            if result.get("updated"):
                 total_updated += 1
         except Exception as e:
             display_error(f"Error: {e}")
@@ -172,8 +172,7 @@ def _handle_update(args: List[str]) -> None:
         console.print(f"[dim]Updated {total_updated}/{len(branches)} READMEs[/dim]")
 
     json_handler.log_operation(
-        "readme_update_completed",
-        {"branches_processed": len(branches), "branches_updated": total_updated}
+        "readme_update_completed", {"branches_processed": len(branches), "branches_updated": total_updated}
     )
 
 
@@ -194,13 +193,13 @@ def _handle_check(args: List[str]) -> None:
         return
 
     for branch in branches:
-        branch_name = branch['name']
-        branch_path = branch['path']
+        branch_name = branch["name"]
+        branch_path = branch["path"]
 
         console.print()
         console.print(f"[bold cyan]README Check: {branch_name}[/bold cyan]")
 
-        readme_path = Path(branch_path) / 'README.md'
+        readme_path = Path(branch_path) / "README.md"
         if not readme_path.exists():
             warning(f"No README.md found at {branch_path}")
             continue
@@ -217,6 +216,7 @@ def _handle_check(args: List[str]) -> None:
 # DISPLAY HELPERS
 # =============================================================================
 
+
 def _print_target_error(err_code: str) -> None:
     """Display target resolution errors"""
     if err_code == "no_args":
@@ -231,9 +231,9 @@ def _print_target_error(err_code: str) -> None:
 
 def _print_result(result: dict, is_check: bool = False) -> None:
     """Display formatted results of an update or check operation"""
-    updated = result.get('updated', [])
-    missing = result.get('missing_markers', [])
-    errors = result.get('errors', [])
+    updated = result.get("updated", [])
+    missing = result.get("missing_markers", [])
+    errors = result.get("errors", [])
 
     if errors:
         for err in errors:
@@ -276,7 +276,7 @@ def print_help():
 
 if __name__ == "__main__":
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
@@ -284,10 +284,7 @@ if __name__ == "__main__":
     logger.info("Prax logger connected to readme_update")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "readme_update_run",
-        {"command": "standalone", "args": sys.argv[1:]}
-    )
+    json_handler.log_operation("readme_update_run", {"command": "standalone", "args": sys.argv[1:]})
 
     # Run command
     handle_command("readme", sys.argv[1:])

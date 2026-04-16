@@ -5,16 +5,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
 
 
 # ─── Import helpers ──────────────────────────────────────
 
+
 def _import(name: str):
     """Import a function from aggregate_ops inside each test."""
     import aipass.flow.apps.handlers.plan.aggregate_ops as mod
+
     return getattr(mod, name)
 
 
@@ -22,8 +23,8 @@ def _import(name: str):
 # 1. find_branch_registry
 # ═══════════════════════════════════════════════════════════
 
-class TestFindBranchRegistry:
 
+class TestFindBranchRegistry:
     def test_returns_none_when_branch_path_missing(self, tmp_path):
         find_branch_registry = _import("find_branch_registry")
         missing = tmp_path / "no_such_dir"
@@ -72,8 +73,8 @@ class TestFindBranchRegistry:
 # 2. load_branch_registry
 # ═══════════════════════════════════════════════════════════
 
-class TestLoadBranchRegistry:
 
+class TestLoadBranchRegistry:
     def test_loads_valid_json(self, tmp_path):
         load_branch_registry = _import("load_branch_registry")
         data = {"plans": {"1": {"status": "open"}}, "next_number": 2}
@@ -99,8 +100,8 @@ class TestLoadBranchRegistry:
 # 3. save_branch_registry
 # ═══════════════════════════════════════════════════════════
 
-class TestSaveBranchRegistry:
 
+class TestSaveBranchRegistry:
     def test_saves_valid_json(self, tmp_path):
         save_branch_registry = _import("save_branch_registry")
         reg_file = tmp_path / "registry.json"
@@ -133,8 +134,8 @@ class TestSaveBranchRegistry:
 # 4. extract_plan_number
 # ═══════════════════════════════════════════════════════════
 
-class TestExtractPlanNumber:
 
+class TestExtractPlanNumber:
     def test_valid_plan_id(self):
         extract_plan_number = _import("extract_plan_number")
         assert extract_plan_number("FPLAN-0148") == "0148"
@@ -165,8 +166,8 @@ class TestExtractPlanNumber:
 # 5. auto_close_plan
 # ═══════════════════════════════════════════════════════════
 
-class TestAutoClosePlan:
 
+class TestAutoClosePlan:
     def _make_registry(self, tmp_path, plans: dict) -> Path:
         reg_file = tmp_path / "registry.json"
         data = {"plans": plans, "next_number": 10}
@@ -175,9 +176,7 @@ class TestAutoClosePlan:
 
     def test_closes_open_plan(self, tmp_path):
         auto_close_plan = _import("auto_close_plan")
-        reg = self._make_registry(tmp_path, {
-            "0148": {"status": "open", "subject": "Test"}
-        })
+        reg = self._make_registry(tmp_path, {"0148": {"status": "open", "subject": "Test"}})
         result = auto_close_plan(reg, "FPLAN-0148", "flow")
         assert result is True
         saved = json.loads(reg.read_text(encoding="utf-8"))
@@ -186,9 +185,7 @@ class TestAutoClosePlan:
 
     def test_returns_false_for_already_closed(self, tmp_path):
         auto_close_plan = _import("auto_close_plan")
-        reg = self._make_registry(tmp_path, {
-            "0001": {"status": "closed", "subject": "Done"}
-        })
+        reg = self._make_registry(tmp_path, {"0001": {"status": "closed", "subject": "Done"}})
         result = auto_close_plan(reg, "FPLAN-0001", "flow")
         assert result is False
 
@@ -206,9 +203,7 @@ class TestAutoClosePlan:
 
     def test_returns_false_on_save_failure(self, tmp_path):
         auto_close_plan = _import("auto_close_plan")
-        reg = self._make_registry(tmp_path, {
-            "0001": {"status": "open", "subject": "Test"}
-        })
+        reg = self._make_registry(tmp_path, {"0001": {"status": "open", "subject": "Test"}})
         with patch(f"{_MOD}.save_branch_registry", return_value=False):
             result = auto_close_plan(reg, "FPLAN-0001", "flow")
         assert result is False
@@ -218,8 +213,8 @@ class TestAutoClosePlan:
 # 6. validate_and_heal_branch
 # ═══════════════════════════════════════════════════════════
 
-class TestValidateAndHealBranch:
 
+class TestValidateAndHealBranch:
     def test_valid_plans_kept(self, tmp_path):
         validate_and_heal_branch = _import("validate_and_heal_branch")
         # Create an actual plan file on disk
@@ -228,9 +223,7 @@ class TestValidateAndHealBranch:
 
         branch_data = {
             "branch_path": str(tmp_path),
-            "active_plans": [
-                {"plan_id": "FPLAN-0001", "file_path": str(plan_file), "created": "2026-03-01"}
-            ],
+            "active_plans": [{"plan_id": "FPLAN-0001", "file_path": str(plan_file), "created": "2026-03-01"}],
             "recently_closed": [],
         }
         valid, closed = validate_and_heal_branch("test", branch_data, heal=False)
@@ -279,9 +272,7 @@ class TestValidateAndHealBranch:
 
     def test_recently_closed_preserved(self, tmp_path):
         validate_and_heal_branch = _import("validate_and_heal_branch")
-        existing_closed = [
-            {"plan_id": "FPLAN-0010", "status": "closed", "closed": "2026-03-20"}
-        ]
+        existing_closed = [{"plan_id": "FPLAN-0010", "status": "closed", "closed": "2026-03-20"}]
         branch_data = {
             "branch_path": str(tmp_path),
             "active_plans": [],
@@ -312,8 +303,8 @@ class TestValidateAndHealBranch:
 # 7. load_central
 # ═══════════════════════════════════════════════════════════
 
-class TestLoadCentral:
 
+class TestLoadCentral:
     def test_loads_valid_file(self, tmp_path):
         load_central = _import("load_central")
         data = {
@@ -349,8 +340,8 @@ class TestLoadCentral:
 # 8. save_central
 # ═══════════════════════════════════════════════════════════
 
-class TestSaveCentral:
 
+class TestSaveCentral:
     def test_saves_valid_json(self, tmp_path):
         save_central = _import("save_central")
         central_dir = tmp_path / ".ai_central"
@@ -383,8 +374,8 @@ class TestSaveCentral:
 # 9. aggregate_central_impl
 # ═══════════════════════════════════════════════════════════
 
-class TestAggregateCentralImpl:
 
+class TestAggregateCentralImpl:
     def test_returns_false_when_paths_none(self):
         aggregate_central_impl = _import("aggregate_central_impl")
         result = aggregate_central_impl(heal=True, central_file=None, central_dir=None)
@@ -404,9 +395,7 @@ class TestAggregateCentralImpl:
             "global_statistics": {},
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
-        result = aggregate_central_impl(
-            heal=True, central_file=central_file, central_dir=central_dir
-        )
+        result = aggregate_central_impl(heal=True, central_file=central_file, central_dir=central_dir)
         assert result is True
 
     def test_aggregates_active_plans_across_branches(self, tmp_path):
@@ -431,16 +420,12 @@ class TestAggregateCentralImpl:
             "branches": {
                 "branch_a": {
                     "branch_path": str(tmp_path / "branch_a"),
-                    "active_plans": [
-                        {"plan_id": "FPLAN-0001", "file_path": str(plan1), "created": "2026-03-01"}
-                    ],
+                    "active_plans": [{"plan_id": "FPLAN-0001", "file_path": str(plan1), "created": "2026-03-01"}],
                     "recently_closed": [],
                 },
                 "branch_b": {
                     "branch_path": str(tmp_path / "branch_b"),
-                    "active_plans": [
-                        {"plan_id": "FPLAN-0002", "file_path": str(plan2), "created": "2026-03-02"}
-                    ],
+                    "active_plans": [{"plan_id": "FPLAN-0002", "file_path": str(plan2), "created": "2026-03-02"}],
                     "recently_closed": [],
                 },
             },
@@ -449,9 +434,7 @@ class TestAggregateCentralImpl:
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
         with patch(f"{_MOD}.trigger", create=True):
-            result = aggregate_central_impl(
-                heal=False, central_file=central_file, central_dir=central_dir
-            )
+            result = aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
         assert result is True
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
@@ -470,8 +453,7 @@ class TestAggregateCentralImpl:
 
         # Build 7 closed plans in a single branch
         closed_plans = [
-            {"plan_id": f"FPLAN-{i:04d}", "status": "closed", "closed": f"2026-03-{i:02d}"}
-            for i in range(1, 8)
+            {"plan_id": f"FPLAN-{i:04d}", "status": "closed", "closed": f"2026-03-{i:02d}"} for i in range(1, 8)
         ]
         data = {
             "generated_at": "",
@@ -490,9 +472,7 @@ class TestAggregateCentralImpl:
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
         with patch(f"{_MOD}.trigger", create=True):
-            result = aggregate_central_impl(
-                heal=False, central_file=central_file, central_dir=central_dir
-            )
+            result = aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
         assert result is True
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
@@ -509,19 +489,19 @@ class TestAggregateCentralImpl:
             "active_plans": [],
             "recently_closed": [],
             "statistics": {},
-            "branches": {"b": {
-                "branch_path": str(tmp_path),
-                "active_plans": [],
-                "recently_closed": [],
-            }},
+            "branches": {
+                "b": {
+                    "branch_path": str(tmp_path),
+                    "active_plans": [],
+                    "recently_closed": [],
+                }
+            },
             "global_statistics": {},
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
         with patch(f"{_MOD}.save_central", return_value=False):
-            result = aggregate_central_impl(
-                heal=True, central_file=central_file, central_dir=central_dir
-            )
+            result = aggregate_central_impl(heal=True, central_file=central_file, central_dir=central_dir)
         assert result is False
 
     def test_returns_false_on_exception(self):
@@ -544,19 +524,19 @@ class TestAggregateCentralImpl:
             "active_plans": [],
             "recently_closed": [],
             "statistics": {},
-            "branches": {"b": {
-                "branch_path": str(tmp_path),
-                "active_plans": [],
-                "recently_closed": [],
-            }},
+            "branches": {
+                "b": {
+                    "branch_path": str(tmp_path),
+                    "active_plans": [],
+                    "recently_closed": [],
+                }
+            },
             "global_statistics": {},
         }
         central_file.write_text(json.dumps(data), encoding="utf-8")
 
         with patch(f"{_MOD}.trigger", create=True):
-            aggregate_central_impl(
-                heal=False, central_file=central_file, central_dir=central_dir
-            )
+            aggregate_central_impl(heal=False, central_file=central_file, central_dir=central_dir)
 
         saved = json.loads(central_file.read_text(encoding="utf-8"))
         assert saved["generated_at"] != ""

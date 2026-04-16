@@ -20,6 +20,7 @@ Failure modes — all non-fatal:
   - Folder without driver.py → skipped silently
   - Import error → logged as WARNING, driver skipped, no crash
 """
+
 import importlib.util
 import sys
 from pathlib import Path

@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for standards checkers."""
@@ -51,6 +52,7 @@ def _mock_infrastructure(monkeypatch):
 # Tests -- naming_check.check_module
 # ---------------------------------------------------------------------------
 
+
 def test_naming_check_module_returns_dict(tmp_path):
     """naming_check.check_module returns a dict with expected keys."""
     py_file = tmp_path / "sample.py"
@@ -59,6 +61,7 @@ def test_naming_check_module_returns_dict(tmp_path):
         encoding="utf-8",
     )
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
+
     result = check_module(str(py_file))
     assert isinstance(result, dict)
     assert "passed" in result
@@ -72,6 +75,7 @@ def test_naming_check_module_returns_dict(tmp_path):
 def test_naming_check_module_missing_file():
     """naming_check.check_module handles missing file gracefully."""
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
+
     result = check_module("/nonexistent/path/file.py")
     assert isinstance(result, dict)
     assert "passed" in result
@@ -82,6 +86,7 @@ def test_naming_check_module_with_bypass(tmp_path):
     py_file = tmp_path / "sample.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
+
     bypass = [{"file": "sample.py", "standard": "naming", "reason": "test"}]
     result = check_module(str(py_file), bypass_rules=bypass)
     assert isinstance(result, dict)
@@ -92,6 +97,7 @@ def test_naming_check_module_with_bypass(tmp_path):
 # Tests -- json_structure_check.check_module
 # ---------------------------------------------------------------------------
 
+
 def test_json_structure_check_returns_expected_keys(tmp_path):
     """json_structure_check.check_module returns dict with standard keys."""
     py_file = tmp_path / "sample.py"
@@ -100,6 +106,7 @@ def test_json_structure_check_returns_expected_keys(tmp_path):
         encoding="utf-8",
     )
     from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
     result = check_module(str(py_file))
     assert isinstance(result, dict)
     assert "passed" in result
@@ -110,6 +117,7 @@ def test_json_structure_check_returns_expected_keys(tmp_path):
 def test_json_structure_check_missing_file():
     """json_structure_check.check_module handles missing file."""
     from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
     result = check_module("/nonexistent/module.py")
     assert isinstance(result, dict)
     assert "passed" in result
@@ -120,6 +128,7 @@ def test_json_structure_check_has_standard_field(tmp_path):
     py_file = tmp_path / "test_mod.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
     from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
+
     result = check_module(str(py_file))
     assert "standard" in result
 
@@ -128,9 +137,11 @@ def test_json_structure_check_has_standard_field(tmp_path):
 # Tests -- naming_check.is_bypassed
 # ---------------------------------------------------------------------------
 
+
 def test_naming_is_bypassed_true():
     """is_bypassed returns True when rule matches."""
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
+
     rules = [{"file": "foo.py", "standard": "naming", "reason": "legacy"}]
     assert is_bypassed("some/path/foo.py", "naming", bypass_rules=rules) is True
 
@@ -138,11 +149,13 @@ def test_naming_is_bypassed_true():
 def test_naming_is_bypassed_false_no_rules():
     """is_bypassed returns False with no rules."""
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
+
     assert is_bypassed("foo.py", "naming", bypass_rules=None) is False
 
 
 def test_naming_is_bypassed_wrong_standard():
     """is_bypassed returns False when standard does not match."""
     from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
+
     rules = [{"file": "foo.py", "standard": "imports", "reason": "legacy"}]
     assert is_bypassed("foo.py", "naming", bypass_rules=rules) is False

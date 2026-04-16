@@ -167,5 +167,5 @@ def handle_passport(args: list[str]) -> int:
         console.print()
         return 0
     else:
-        error(result['error'])
+        error(result["error"])
         return 1

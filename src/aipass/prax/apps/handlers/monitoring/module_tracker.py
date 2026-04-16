@@ -12,6 +12,7 @@ from typing import Dict, List
 
 from aipass.prax.apps.handlers.json import json_handler
 
+
 class ModuleTracker:
     """Track active modules and their execution"""
 
@@ -20,6 +21,7 @@ class ModuleTracker:
         self.completed_modules: List[Dict] = []
         self.max_history = 100
         json_handler.log_operation("module_tracker_initialized", {"max_history": self.max_history})
+
 
 # Global instance
 tracker = ModuleTracker()

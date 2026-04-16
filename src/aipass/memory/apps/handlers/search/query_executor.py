@@ -58,6 +58,7 @@ MIN_SIMILARITY_THRESHOLD = 0.40  # 40% minimum relevance
 # SUBPROCESS EMBEDDING
 # =============================================================================
 
+
 def encode_query_subprocess(query: str) -> dict:
     """
     Encode query text via subprocess using memory venv's sentence-transformers.
@@ -68,7 +69,7 @@ def encode_query_subprocess(query: str) -> dict:
     Returns:
         Dict with success, embedding (list of floats), dimension
     """
-    input_data = json.dumps({'texts': [query]})
+    input_data = json.dumps({"texts": [query]})
 
     try:
         result = subprocess.run(
@@ -76,46 +77,43 @@ def encode_query_subprocess(query: str) -> dict:
             input=input_data,
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
         )
 
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Embedding subprocess failed'}
+            return {"success": False, "error": result.stderr or "Embedding subprocess failed"}
 
         data = json.loads(result.stdout)
-        if not data.get('success'):
+        if not data.get("success"):
             return data
 
-        embeddings = data.get('embeddings', [])
+        embeddings = data.get("embeddings", [])
         if not embeddings:
-            return {'success': False, 'error': 'No embedding generated'}
+            return {"success": False, "error": "No embedding generated"}
 
-        return {
-            'success': True,
-            'embedding': embeddings[0],
-            'dimension': data.get('dimension', 384)
-        }
+        return {"success": True, "embedding": embeddings[0], "dimension": data.get("dimension", 384)}
     except subprocess.TimeoutExpired:
         logger.warning("[query_executor] Embedding subprocess timed out")
-        return {'success': False, 'error': 'Embedding timed out'}
+        return {"success": False, "error": "Embedding timed out"}
     except json.JSONDecodeError as e:
         logger.warning(f"[query_executor] Invalid JSON from embedder: {e}")
-        return {'success': False, 'error': f'Invalid JSON from embedder: {e}'}
+        return {"success": False, "error": f"Invalid JSON from embedder: {e}"}
     except Exception as e:
         logger.error(f"[query_executor] Embedding subprocess failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
 # SUBPROCESS VECTOR SEARCH
 # =============================================================================
 
+
 def search_vectors_subprocess(
     query_embedding: list,
     branch: str | None = None,
     memory_type: str | None = None,
     n_results: int = 5,
-    db_path: str | Path | None = None
+    db_path: str | Path | None = None,
 ) -> dict:
     """
     Search vectors via subprocess.
@@ -131,12 +129,12 @@ def search_vectors_subprocess(
         Dict with success status and search results
     """
     input_data = {
-        'operation': 'search_vectors',
-        'query_embedding': query_embedding,
-        'branch': branch,
-        'memory_type': memory_type,
-        'n_results': n_results,
-        'db_path': str(db_path) if db_path else None
+        "operation": "search_vectors",
+        "query_embedding": query_embedding,
+        "branch": branch,
+        "memory_type": memory_type,
+        "n_results": n_results,
+        "db_path": str(db_path) if db_path else None,
     }
 
     try:
@@ -145,27 +143,28 @@ def search_vectors_subprocess(
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
         )
 
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Subprocess failed'}
+            return {"success": False, "error": result.stderr or "Subprocess failed"}
 
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired:
         logger.warning("[query_executor] Search subprocess timed out")
-        return {'success': False, 'error': 'Search operation timed out'}
+        return {"success": False, "error": "Search operation timed out"}
     except json.JSONDecodeError as e:
         logger.warning(f"[query_executor] Invalid JSON from search subprocess: {e}")
-        return {'success': False, 'error': f'Invalid JSON response: {e}'}
+        return {"success": False, "error": f"Invalid JSON response: {e}"}
     except Exception as e:
         logger.error(f"[query_executor] Search subprocess failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 # =============================================================================
 # RESULT PROCESSING
 # =============================================================================
+
 
 def _calculate_similarity(distance: float) -> float:
     """
@@ -195,8 +194,8 @@ def _filter_results(results: list, n_results: int) -> list:
     """
     filtered = []
     for result in results[:n_results]:
-        document = result.get('document', '')
-        distance = result.get('distance', 0)
+        document = result.get("document", "")
+        distance = result.get("distance", 0)
 
         similarity = _calculate_similarity(distance)
 
@@ -205,7 +204,7 @@ def _filter_results(results: list, n_results: int) -> list:
         if similarity < MIN_SIMILARITY_THRESHOLD:
             continue
 
-        result['similarity'] = similarity
+        result["similarity"] = similarity
         filtered.append(result)
 
     return filtered
@@ -215,11 +214,9 @@ def _filter_results(results: list, n_results: int) -> list:
 # PUBLIC API
 # =============================================================================
 
+
 def execute_search(
-    query: str,
-    branch: str | None = None,
-    memory_type: str | None = None,
-    n_results: int = 5
+    query: str, branch: str | None = None, memory_type: str | None = None, n_results: int = 5
 ) -> Dict[str, Any]:
     """
     Execute semantic search: encode query, search vectors, filter results.
@@ -241,38 +238,35 @@ def execute_search(
     # Step 1: Encode query via subprocess
     embed_result = encode_query_subprocess(query)
 
-    if not embed_result['success']:
-        error_msg = embed_result.get('error', 'Unknown error')
+    if not embed_result["success"]:
+        error_msg = embed_result.get("error", "Unknown error")
         logger.error(f"[search] Failed to encode query: {error_msg}")
         return {
-            'success': False,
-            'error': f'Failed to encode query: {error_msg}',
-            'query': query,
+            "success": False,
+            "error": f"Failed to encode query: {error_msg}",
+            "query": query,
         }
 
-    query_embedding = embed_result['embedding']
+    query_embedding = embed_result["embedding"]
     logger.info(f"[search] Encoded query to {len(query_embedding)}-dim vector")
 
     # Step 2: Search via subprocess
     search_result = search_vectors_subprocess(
-        query_embedding=query_embedding,
-        branch=branch,
-        memory_type=memory_type,
-        n_results=n_results
+        query_embedding=query_embedding, branch=branch, memory_type=memory_type, n_results=n_results
     )
 
-    if not search_result['success']:
-        error_msg = search_result.get('error', 'Unknown error')
+    if not search_result["success"]:
+        error_msg = search_result.get("error", "Unknown error")
         logger.error(f"[search] Search failed: {error_msg}")
         return {
-            'success': False,
-            'error': f'Search failed: {error_msg}',
-            'query': query,
+            "success": False,
+            "error": f"Search failed: {error_msg}",
+            "query": query,
         }
 
-    raw_results = search_result.get('results', [])
-    collections_searched = search_result.get('collections_searched', 0)
-    total_results = search_result.get('total_results', 0)
+    raw_results = search_result.get("results", [])
+    collections_searched = search_result.get("collections_searched", 0)
+    total_results = search_result.get("total_results", 0)
 
     logger.info(f"[search] Found {total_results} results across {collections_searched} collections")
 
@@ -281,14 +275,16 @@ def execute_search(
 
     logger.info(f"[search] Filtered to {len(filtered_results)} relevant results")
 
-    json_handler.log_operation("search_execute", {"query_len": len(query), "results": len(filtered_results), "success": True})
+    json_handler.log_operation(
+        "search_execute", {"query_len": len(query), "results": len(filtered_results), "success": True}
+    )
     return {
-        'success': True,
-        'query': query,
-        'branch': branch,
-        'memory_type': memory_type,
-        'results': filtered_results,
-        'collections_searched': collections_searched,
-        'total_results': total_results,
-        'filtered_count': len(filtered_results),
+        "success": True,
+        "query": query,
+        "branch": branch,
+        "memory_type": memory_type,
+        "results": filtered_results,
+        "collections_searched": collections_searched,
+        "total_results": total_results,
+        "filtered_count": len(filtered_results),
     }

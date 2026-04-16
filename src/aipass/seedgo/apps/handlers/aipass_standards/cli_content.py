@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_cli_standards() -> str:
     """Return formatted CLI standards content with Rich markup
 
@@ -27,9 +28,8 @@ def get_cli_standards() -> str:
         "[yellow]POLICY:[/yellow] Rich formatting is THE standard for ALL AIPass output",
         "",
         "[green]✓ Approved:[/green]",
-        "  [dim]from aipass.cli.apps.modules"
-        " import console[/dim]",
-        "  [dim]console.print(\"[cyan]This is the ONLY approved way[/cyan]\")[/dim]",
+        "  [dim]from aipass.cli.apps.modules import console[/dim]",
+        '  [dim]console.print("[cyan]This is the ONLY approved way[/cyan]")[/dim]',
         "",
         "[red]✗ Deprecated:[/red] Bare print() statements",
         "  • Only in test/temp code",
@@ -55,10 +55,8 @@ def get_cli_standards() -> str:
         "[yellow]RULE:[/yellow] Build BOTH or neither",
         "",
         "[bold cyan]CLI SERVICE PROVIDER:[/bold cyan]",
-        "  [dim]from aipass.cli.apps.modules"
-        " import console, header, success, error[/dim]",
-        "  [dim]from aipass.cli.apps.modules"
-        " import operation_start, track_operation[/dim]",
+        "  [dim]from aipass.cli.apps.modules import console, header, success, error[/dim]",
+        "  [dim]from aipass.cli.apps.modules import operation_start, track_operation[/dim]",
         "",
         "  • Consistent formatting across all branches",
         "  • Update CLI once → affects entire system",
@@ -95,9 +93,9 @@ def get_cli_standards() -> str:
         "  [bold red]bold red[/bold red], [bold cyan]bold cyan[/bold cyan], [dim yellow]dim yellow[/dim yellow]",
         "",
         "[bold]Usage:[/bold]",
-        "  [dim]console.print(\"[bold green]Success![/bold green]\")[/dim]",
-        "  [dim]console.print(\"[yellow]Warning:[/yellow] Check this\")[/dim]",
-        "  [dim]console.print(\"[dim]Additional info...[/dim]\")[/dim]",
+        '  [dim]console.print("[bold green]Success![/bold green]")[/dim]',
+        '  [dim]console.print("[yellow]Warning:[/yellow] Check this")[/dim]',
+        '  [dim]console.print("[dim]Additional info...[/dim]")[/dim]',
         "",
         "[bold]Emojis:[/bold]",
         "  ✅ Success   ❌ Error   ⚠️  Warning   ℹ️  Info",

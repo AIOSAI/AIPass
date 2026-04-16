@@ -24,6 +24,7 @@ from unittest.mock import MagicMock
 # Autouse fixture -- mock heavy infrastructure before detector is imported
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_detector_infrastructure(monkeypatch):
     """Mock prax logger and json_handler so detector.py can be imported."""
@@ -42,19 +43,16 @@ def _mock_detector_infrastructure(monkeypatch):
     json_pkg = MagicMock()
     json_pkg.json_handler = mock_json_handler
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(
-        sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler
-    )
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
 
     # Force fresh import every test
-    monkeypatch.delitem(
-        sys.modules, "aipass.memory.apps.handlers.monitor.detector", raising=False
-    )
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", raising=False)
 
 
 # ===========================================================================
 # _get_memory_file_path
 # ===========================================================================
+
 
 class TestGetMemoryFilePath:
     """Tests for _get_memory_file_path(branch, memory_type)."""
@@ -120,6 +118,7 @@ class TestGetMemoryFilePath:
 # ===========================================================================
 # _load_config
 # ===========================================================================
+
 
 class TestLoadConfig:
     """Tests for _load_config()."""
@@ -190,6 +189,7 @@ class TestLoadConfig:
 # ===========================================================================
 # check_single_file
 # ===========================================================================
+
 
 class TestCheckSingleFile:
     """Tests for check_single_file(file_path)."""
@@ -297,6 +297,7 @@ class TestCheckSingleFile:
 # ===========================================================================
 # _read_registry
 # ===========================================================================
+
 
 class TestReadRegistry:
     """Tests for _read_registry()."""

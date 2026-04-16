@@ -33,6 +33,7 @@ from aipass.drone.apps.handlers.scanning.formatters import (
 # scan_help_output tests
 # =============================================================================
 
+
 class TestScanHelpOutput:
     """Tests for scan_help_output()."""
 
@@ -43,12 +44,7 @@ class TestScanHelpOutput:
         (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
 
         mock_result = MagicMock()
-        mock_result.stdout = (
-            b"Usage: mybranch\n\n"
-            b"Commands:\n"
-            b"  audit       Run an audit\n"
-            b"  list        List items\n\n"
-        )
+        mock_result.stdout = b"Usage: mybranch\n\nCommands:\n  audit       Run an audit\n  list        List items\n\n"
         mock_result.stderr = b""
 
         with patch(
@@ -70,10 +66,7 @@ class TestScanHelpOutput:
         (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
 
         mock_result = MagicMock()
-        mock_result.stdout = (
-            b"Commands:\n"
-            b"  deploy      Deploy to production\n\n"
-        )
+        mock_result.stdout = b"Commands:\n  deploy      Deploy to production\n\n"
         mock_result.stderr = b""
 
         with patch(
@@ -140,6 +133,7 @@ class TestScanHelpOutput:
 # =============================================================================
 # scan_module_files tests
 # =============================================================================
+
 
 class TestScanModuleFiles:
     """Tests for scan_module_files()."""
@@ -212,8 +206,7 @@ class TestScanModuleFiles:
         modules_dir = temp_test_dir / "apps" / "modules"
         modules_dir.mkdir(parents=True)
         (modules_dir / "config.py").write_text(
-            '"""Configuration management for the branch."""\n'
-            "def handle_command(command=None, args=None): pass\n",
+            '"""Configuration management for the branch."""\ndef handle_command(command=None, args=None): pass\n',
             encoding="utf-8",
         )
 
@@ -241,6 +234,7 @@ class TestScanModuleFiles:
 # =============================================================================
 # scan_branch tests
 # =============================================================================
+
 
 class TestScanBranch:
     """Tests for scan_branch()."""
@@ -325,6 +319,7 @@ class TestScanBranch:
 # format_scan_results tests
 # =============================================================================
 
+
 class TestFormatScanResults:
     """Tests for format_scan_results()."""
 
@@ -362,6 +357,7 @@ class TestFormatScanResults:
 # format_no_commands tests
 # =============================================================================
 
+
 class TestFormatNoCommands:
     """Tests for format_no_commands()."""
 
@@ -384,6 +380,7 @@ class TestFormatNoCommands:
 # =============================================================================
 # scan module handle_command tests
 # =============================================================================
+
 
 class TestScanHandleCommand:
     """Tests for scan.handle_command() routing."""
@@ -433,6 +430,7 @@ class TestScanHandleCommand:
 # =============================================================================
 # scan module scan() tests
 # =============================================================================
+
 
 class TestScanFunction:
     """Tests for scan.scan() orchestration."""

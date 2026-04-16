@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_introspection_standards() -> str:
     """Return formatted introspection standards content with Rich markup
 
@@ -32,17 +33,16 @@ def get_introspection_standards() -> str:
         "[bold cyan]LEVEL 1 — Entry Point (apps/{name}.py) with no args:[/bold cyan]",
         "",
         "  • Shows branch name + description",
-        "  • Auto-discovers modules in [dim]modules/*.py[/dim]"
-        " that have [dim]handle_command()[/dim]",
+        "  • Auto-discovers modules in [dim]modules/*.py[/dim] that have [dim]handle_command()[/dim]",
         "  • Lists discovered module names",
         "  • Points to [dim]--help[/dim] for full usage",
         "  • Function name: [bold]print_introspection()[/bold]",
         "",
         "  [dim]def print_introspection():[/dim]",
         '  [dim]    """Show branch structure via auto-discovery"""[/dim]',
-        "  [dim]    modules_dir = Path(__file__).parent / \"modules\"[/dim]",
-        "  [dim]    for file_path in sorted(modules_dir.glob(\"*.py\")):[/dim]",
-        "  [dim]        if file_path.name.startswith(\"_\"):[/dim]",
+        '  [dim]    modules_dir = Path(__file__).parent / "modules"[/dim]',
+        '  [dim]    for file_path in sorted(modules_dir.glob("*.py")):[/dim]',
+        '  [dim]        if file_path.name.startswith("_"):[/dim]',
         "  [dim]            continue[/dim]",
         "  [dim]        # load and check for handle_command()[/dim]",
         "",
@@ -63,9 +63,9 @@ def get_introspection_standards() -> str:
         "",
         "  [dim]def print_introspection():[/dim]",
         '  [dim]    """Show module structure - connected handlers"""[/dim]',
-        "  [dim]    console.print(\"[bold cyan]create_plan[/bold cyan] Module\")[/dim]",
-        "  [dim]    console.print(\"[yellow]Connected Handlers:[/yellow]\")[/dim]",
-        "  [dim]    console.print(\"  handlers/plan/ - command_parser.py, ...\")[/dim]",
+        '  [dim]    console.print("[bold cyan]create_plan[/bold cyan] Module")[/dim]',
+        '  [dim]    console.print("[yellow]Connected Handlers:[/yellow]")[/dim]',
+        '  [dim]    console.print("  handlers/plan/ - command_parser.py, ...")[/dim]',
         "",
         "  [green]Output example:[/green]",
         "  [dim]create_plan Module[/dim]",
@@ -107,14 +107,12 @@ def get_introspection_standards() -> str:
         "",
         "[bold cyan]AUTO-DISCOVERY REQUIREMENTS:[/bold cyan]",
         "",
-        "  [green]✓[/green] Level 1: Scan [dim]modules/*.py[/dim] dynamically"
-        " (no hardcoded module lists)",
+        "  [green]✓[/green] Level 1: Scan [dim]modules/*.py[/dim] dynamically (no hardcoded module lists)",
         "  [green]✓[/green] Level 1: Filter by [dim]handle_command()[/dim] presence",
         "  [green]✓[/green] Level 2: List connected handlers grouped by domain",
         "  [green]✓[/green] Both levels: Function named [dim]print_introspection()[/dim]",
         "",
-        "  [red]✗[/red] Hardcoded module lists:"
-        " [dim]MODULES = ['create', 'delete', 'list'][/dim]",
+        "  [red]✗[/red] Hardcoded module lists: [dim]MODULES = ['create', 'delete', 'list'][/dim]",
         "  [red]✗[/red] Combined introspection + help in one function",
         "  [red]✗[/red] Help before introspection in execution order",
         "",

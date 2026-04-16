@@ -36,7 +36,9 @@ MAX_EMAILS = 10
 # These are resolved relative to repo root if available; vectorization is best-effort
 _REPO_ROOT = find_repo_root()
 MEMORY_PYTHON = _REPO_ROOT / "src" / "aipass" / "memory" / ".venv" / "bin" / "python3"
-CHROMA_SUBPROCESS_SCRIPT = _REPO_ROOT / "src" / "aipass" / "memory" / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
+CHROMA_SUBPROCESS_SCRIPT = (
+    _REPO_ROOT / "src" / "aipass" / "memory" / "apps" / "handlers" / "storage" / "chroma_subprocess.py"
+)
 
 
 def purge_sent_folder(mailbox_path: Path) -> Dict[str, Any]:
@@ -57,11 +59,7 @@ def purge_sent_folder(mailbox_path: Path) -> Dict[str, Any]:
         return {"success": True, "purged_count": 0, "message": "Sent folder empty"}
 
     # Get all email files sorted by modification time (newest first)
-    email_files = sorted(
-        sent_folder.glob("*.json"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
-    )
+    email_files = sorted(sent_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
 
     total_count = len(email_files)
     if total_count <= MAX_EMAILS:
@@ -91,11 +89,7 @@ def purge_deleted_folder(mailbox_path: Path) -> Dict[str, Any]:
         return {"success": True, "purged_count": 0, "message": "Deleted folder empty"}
 
     # Get all email files sorted by modification time (newest first)
-    email_files = sorted(
-        deleted_folder.glob("*.json"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
-    )
+    email_files = sorted(deleted_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
 
     total_count = len(email_files)
     if total_count <= MAX_EMAILS:
@@ -131,7 +125,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
     load_errors = []
     for file_path in files:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 email_data = json.load(f)
                 email_data["_source_file"] = str(file_path.name)
                 emails_data.append(email_data)
@@ -169,7 +163,7 @@ def _purge_email_files(mailbox_path: Path, files: List[Path], folder_type: str) 
         "purged_count": deleted_count,
         "vectorized": True,
         "load_errors": load_errors if load_errors else None,
-        "delete_errors": delete_errors if delete_errors else None
+        "delete_errors": delete_errors if delete_errors else None,
     }
 
 
@@ -199,22 +193,24 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
             text = f"{subject}\n\n{message}"
             texts.append(text)
 
-            metadatas.append({
-                "type": f"email_{folder_type}",
-                "from": email.get("from", ""),
-                "to": email.get("to", ""),
-                "subject": subject,
-                "timestamp": email.get("timestamp", ""),
-                "archived_at": datetime.now().isoformat()
-            })
+            metadatas.append(
+                {
+                    "type": f"email_{folder_type}",
+                    "from": email.get("from", ""),
+                    "to": email.get("to", ""),
+                    "subject": subject,
+                    "timestamp": email.get("timestamp", ""),
+                    "archived_at": datetime.now().isoformat(),
+                }
+            )
 
         # Call @memory vectorization via subprocess (handler independence)
         input_data = {
-            'operation': 'vectorize_and_store',
-            'branch': 'AI_MAIL',
-            'memory_type': f'email_{folder_type}',
-            'texts': texts,
-            'metadatas': metadatas
+            "operation": "vectorize_and_store",
+            "branch": "AI_MAIL",
+            "memory_type": f"email_{folder_type}",
+            "texts": texts,
+            "metadatas": metadatas,
         }
 
         result = subprocess.run(
@@ -222,7 +218,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
             input=json.dumps(input_data),
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
         )
 
         if result.returncode != 0:
@@ -257,16 +253,16 @@ def run_purge(mailbox_path: Path) -> Dict[str, Any]:
     return {
         "success": sent_result["success"] and deleted_result["success"],
         "sent": sent_result,
-        "deleted": deleted_result
+        "deleted": deleted_result,
     }
 
 
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
 
-    console.print("\n" + "="*70)
+    console.print("\n" + "=" * 70)
     console.print("SENT/DELETED AUTO-PURGE HANDLER")
-    console.print("="*70)
+    console.print("=" * 70)
     console.print("\nPURPOSE:")
     console.print("  Auto-purge sent/deleted folders when they exceed 10 emails")
     console.print()
@@ -289,4 +285,4 @@ if __name__ == "__main__":
     console.print("  - create.py (after email sent)")
     console.print("  - inbox_cleanup.py (after email deleted)")
     console.print()
-    console.print("="*70 + "\n")
+    console.print("=" * 70 + "\n")

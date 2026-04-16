@@ -45,15 +45,15 @@ STALE_ENTRY_THRESHOLD_SECONDS = 300  # 5 minutes
 # Log filenames to exclude from watching (self-referential / dispatch feedback)
 # Compared case-insensitively against Path.name (see on_modified)
 EXCLUDED_LOG_FILES: Set[str] = {
-    'dispatch.log',
-    'medic_suppressed.log',
-    'rate_limited.log',
-    'error_monitor.log',
-    'log_watcher.log',
-    'log_watcher.log.1',
+    "dispatch.log",
+    "medic_suppressed.log",
+    "rate_limited.log",
+    "error_monitor.log",
+    "log_watcher.log",
+    "log_watcher.log.1",
     # DirectLogger output files for handlers that watch logs (self-referential)
-    'trigger_log_watcher.log',
-    'trigger_error_registry.log',
+    "trigger_log_watcher.log",
+    "trigger_error_registry.log",
 }
 
 # Pre-compute lowercase set for case-insensitive matching
@@ -63,29 +63,34 @@ _EXCLUDED_LOG_FILES_LOWER: Set[str] = {f.lower() for f in EXCLUDED_LOG_FILES}
 # (e.g. a handler logging that it processed an error) rather than being
 # a new error itself.  Lines matching any of these are skipped.
 _SEMANTIC_EXCLUSION_PATTERNS: re.Pattern = re.compile(
-    r'error_hash|fingerprint|registry_id|Error ID:|'
-    r'\[ERROR\]|Processed error|Processing error|'
-    r'dispatch.*error|error.*dispatch|'
-    r'suppress.*error|error.*suppress',
+    r"error_hash|fingerprint|registry_id|Error ID:|"
+    r"\[ERROR\]|Processed error|Processing error|"
+    r"dispatch.*error|error.*dispatch|"
+    r"suppress.*error|error.*suppress",
     re.IGNORECASE,
 )
 
 # Try to import error_registry for Medic v2 registry-based dedup
 try:
     from aipass.trigger.apps.handlers.error_registry import report as registry_report
+
     _REGISTRY_AVAILABLE = True
 except ImportError:
     logger.info("error_registry not available, using MD5 fallback dedup")
     _REGISTRY_AVAILABLE = False
 
-    def registry_report(error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium") -> dict:
+    def registry_report(
+        error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium"
+    ) -> dict:
         """Fallback no-op error registry report when error_registry is unavailable."""
         return {"is_new": False, "count": 0}
+
 
 # Try to import watchdog
 try:
     from watchdog.observers import Observer as WatchdogObserver
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
+
     WATCHDOG_AVAILABLE = True
 except ImportError:
     logger.info("watchdog not available, log watcher disabled")
@@ -103,19 +108,31 @@ MAX_SEEN_HASHES = 2000  # Limit memory usage
 # Explicit mapping of system_logs filenames to their owning branch.
 # Used for files that don't follow the <branch>_<module>.log naming convention.
 SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {
-    'telegram_bridge.log': 'API',
-    'telegram_chats.log': 'API',
+    "telegram_bridge.log": "API",
+    "telegram_chats.log": "API",
 }
 
 SYSTEM_LOGS_DIR = AIPASS_PKG_ROOT.parent.parent / "system_logs"
 
 # Known branch prefixes that appear in system_logs filenames (<prefix>_<module>.log).
 # Sorted longest-first so longer prefixes match before shorter ones.
-_SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted([
-    'ai_mail', 'api', 'cli', 'drone', 'flow',
-    'prax', 'trigger', 'seedgo', 'memory',
-    'spawn', 'devpulse',
-], key=len, reverse=True)
+_SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
+    [
+        "ai_mail",
+        "api",
+        "cli",
+        "drone",
+        "flow",
+        "prax",
+        "trigger",
+        "seedgo",
+        "memory",
+        "spawn",
+        "devpulse",
+    ],
+    key=len,
+    reverse=True,
+)
 
 # Event fire callback (set by module, avoids handler importing from modules)
 _fire_event: Optional[Callable[..., None]] = None
@@ -131,8 +148,8 @@ def _load_seen_hashes() -> None:
     global _seen_error_hashes
     try:
         if TRIGGER_DATA_FILE.exists():
-            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding='utf-8'))
-            stored = data.get('seen_error_hashes', [])
+            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+            stored = data.get("seen_error_hashes", [])
             _seen_error_hashes = set(stored)
     except Exception as exc:
         logger.warning("Failed to load seen hashes: %s", exc)
@@ -150,8 +167,8 @@ def _save_seen_hashes() -> None:
         with json_file_lock(TRIGGER_DATA_FILE):
             data: Dict[str, Any] = {}
             if TRIGGER_DATA_FILE.exists():
-                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding='utf-8'))
-            data['seen_error_hashes'] = list(_seen_error_hashes)
+                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+            data["seen_error_hashes"] = list(_seen_error_hashes)
             atomic_write_json(TRIGGER_DATA_FILE, data)
     except Exception as exc:
         logger.warning("Failed to save seen hashes: %s", exc)
@@ -170,8 +187,8 @@ def _load_log_positions() -> Dict[str, int]:
     """
     try:
         if TRIGGER_DATA_FILE.exists():
-            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding='utf-8'))
-            stored = data.get('log_positions', {})
+            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+            stored = data.get("log_positions", {})
             if isinstance(stored, dict):
                 return {k: int(v) for k, v in stored.items()}
     except Exception as e:
@@ -193,8 +210,8 @@ def _save_log_positions(positions: Dict[str, int]) -> None:
         with json_file_lock(TRIGGER_DATA_FILE):
             data: Dict[str, Any] = {}
             if TRIGGER_DATA_FILE.exists():
-                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding='utf-8'))
-            data['log_positions'] = positions
+                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+            data["log_positions"] = positions
             atomic_write_json(TRIGGER_DATA_FILE, data)
     except Exception as exc:
         logger.warning("Failed to save log positions: %s", exc)
@@ -218,11 +235,11 @@ def _is_stale_entry(timestamp_str: str) -> bool:
     cutoff = now - timedelta(seconds=STALE_ENTRY_THRESHOLD_SECONDS)
 
     formats = [
-        '%Y-%m-%d %H:%M:%S,%f',   # Python logging: 2026-02-13 22:51:25,565
-        '%Y-%m-%d %H:%M:%S.%f',   # Prax: 2026-02-13 22:51:25.565
-        '%Y-%m-%d %H:%M:%S',      # Simple: 2026-02-13 22:51:25
-        '%Y-%m-%dT%H:%M:%S.%f',   # ISO: 2026-02-13T22:51:25.565
-        '%Y-%m-%dT%H:%M:%S',      # ISO simple: 2026-02-13T22:51:25
+        "%Y-%m-%d %H:%M:%S,%f",  # Python logging: 2026-02-13 22:51:25,565
+        "%Y-%m-%d %H:%M:%S.%f",  # Prax: 2026-02-13 22:51:25.565
+        "%Y-%m-%d %H:%M:%S",  # Simple: 2026-02-13 22:51:25
+        "%Y-%m-%dT%H:%M:%S.%f",  # ISO: 2026-02-13T22:51:25.565
+        "%Y-%m-%dT%H:%M:%S",  # ISO simple: 2026-02-13T22:51:25
     ]
 
     stripped = timestamp_str.strip()
@@ -283,21 +300,21 @@ def _detect_branch_from_path(log_path: str) -> str:
             # Match filename prefix against known branch names (longest-first)
             name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
             for prefix in _SYSTEM_LOGS_BRANCH_PREFIXES:
-                if name_stem.startswith(prefix + '_') or name_stem == prefix:
+                if name_stem.startswith(prefix + "_") or name_stem == prefix:
                     return prefix.upper()
-            return 'UNKNOWN'
+            return "UNKNOWN"
 
         # Standard src/aipass/<branch>/logs/ pattern
         parts = path.parts
         for i, part in enumerate(parts):
-            if part == 'aipass' and i + 1 < len(parts) and parts[i + 1] != '__pycache__':
+            if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
                 # Check if this looks like a branch dir (has logs/ subdir)
-                if i + 2 < len(parts) and parts[i + 2] == 'logs':
+                if i + 2 < len(parts) and parts[i + 2] == "logs":
                     return parts[i + 1].upper()
-        return 'UNKNOWN'
+        return "UNKNOWN"
     except Exception as exc:
         logger.warning("Failed to detect branch from path '%s': %s", log_path, exc)
-        return 'UNKNOWN'
+        return "UNKNOWN"
 
 
 def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
@@ -317,16 +334,16 @@ def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
     """
     try:
         # Try Prax format first (pipe-separated)
-        if ' | ' in log_line:
-            parts = log_line.split(' | ', 3)
+        if " | " in log_line:
+            parts = log_line.split(" | ", 3)
             if len(parts) >= 4:
                 level = parts[2].strip().upper()
-                if level in ('ERROR', 'CRITICAL'):
+                if level in ("ERROR", "CRITICAL"):
                     return {
-                        'timestamp': parts[0].strip(),
-                        'module': parts[1].strip(),
-                        'level': level,
-                        'message': parts[3].strip()
+                        "timestamp": parts[0].strip(),
+                        "module": parts[1].strip(),
+                        "level": level,
+                        "message": parts[3].strip(),
                     }
                 return None
 
@@ -336,18 +353,18 @@ def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
         # matches ERROR appearing anywhere in the text (false positive).
         # Instead, we split positionally and validate parts[2] is a
         # standalone level word.
-        if ' - ' in log_line:
-            parts = log_line.split(' - ', 3)
+        if " - " in log_line:
+            parts = log_line.split(" - ", 3)
             if len(parts) >= 4:
                 level = parts[2].strip().upper()
                 # Strict check: level field must be EXACTLY a known level,
                 # not a longer string that happens to contain one.
-                if level in ('ERROR', 'CRITICAL'):
+                if level in ("ERROR", "CRITICAL"):
                     return {
-                        'timestamp': parts[0].strip(),
-                        'module': parts[1].strip(),
-                        'level': level,
-                        'message': parts[3].strip()
+                        "timestamp": parts[0].strip(),
+                        "module": parts[1].strip(),
+                        "level": level,
+                        "message": parts[3].strip(),
                     }
 
         return None
@@ -378,7 +395,7 @@ def _is_duplicate_error(error_hash: str) -> bool:
     _seen_error_hashes.add(error_hash)
     if len(_seen_error_hashes) > MAX_SEEN_HASHES:
         # Remove oldest entries (convert to list, slice, back to set)
-        _seen_error_hashes = set(list(_seen_error_hashes)[MAX_SEEN_HASHES // 2:])
+        _seen_error_hashes = set(list(_seen_error_hashes)[MAX_SEEN_HASHES // 2 :])
 
     # Persist to disk after each new hash
     _save_seen_hashes()
@@ -417,13 +434,13 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
 
     def _should_process(self, file_path: str) -> bool:
         """Check if a log file should be processed."""
-        if not file_path.endswith('.log'):
+        if not file_path.endswith(".log"):
             return False
         filename = Path(file_path).name
         if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
-        is_branch_log = '/aipass/' in file_path and '/logs/' in file_path
-        is_system_log = '/system_logs/' in file_path
+        is_branch_log = "/aipass/" in file_path and "/logs/" in file_path
+        is_system_log = "/system_logs/" in file_path
         return is_branch_log or is_system_log
 
     def _read_new_lines(self, file_path: str) -> None:
@@ -436,11 +453,11 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         if current_size <= last_pos:
             return
 
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             f.seek(last_pos)
             new_lines = f.read()
             if new_lines.strip():
-                for line in new_lines.strip().split('\n'):
+                for line in new_lines.strip().split("\n"):
                     if line.strip():
                         self._process_log_line(line, file_path)
             self.log_positions[file_path] = f.tell()
@@ -493,62 +510,60 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
 
             # Skip lines that reference error artifacts (IDs, fingerprints,
             # registry entries).  These are logs ABOUT errors, not new errors.
-            if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed['message']):
+            if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed["message"]):
                 return
 
             # Skip stale entries — prevents re-flagging old log lines
-            if _is_stale_entry(parsed['timestamp']):
+            if _is_stale_entry(parsed["timestamp"]):
                 return
 
             branch = _detect_branch_from_path(log_path)
-            module = parsed['module']
-            message = parsed['message']
+            module = parsed["module"]
+            message = parsed["message"]
 
             # Primary path: Medic v2 registry-based dedup
             if _REGISTRY_AVAILABLE:
                 try:
                     result = registry_report(
-                        error_type=parsed['level'],
+                        error_type=parsed["level"],
                         message=message,
                         component=branch,
                         log_path=log_path,
-                        severity='medium'
+                        severity="medium",
                     )
 
                     # Fire event on every occurrence — let the error_detected
                     # handler decide via circuit breaker, backoff, and rate limiting.
-                    error_count = result.get('count', 1)
+                    error_count = result.get("count", 1)
 
                     # Fire error_detected event with registry data
                     if _fire_event is not None:
                         _fire_event(
-                            'error_detected',
+                            "error_detected",
                             branch=branch,
                             module=module,
                             message=message,
                             log_path=log_path,
-                            error_hash=result.get('id', ''),
-                            timestamp=parsed['timestamp'],
-                            fingerprint=result.get('fingerprint', ''),
-                            registry_id=result.get('id', ''),
-                            first_seen=result.get('first_seen', ''),
-                            last_seen=result.get('last_seen', ''),
+                            error_hash=result.get("id", ""),
+                            timestamp=parsed["timestamp"],
+                            fingerprint=result.get("fingerprint", ""),
+                            registry_id=result.get("id", ""),
+                            first_seen=result.get("first_seen", ""),
+                            last_seen=result.get("last_seen", ""),
                             count=error_count,
                         )
                         json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
                     else:
                         logger.warning(
-                            "Cannot fire error_detected event: _fire_event callback not set "
-                            "(branch=%s, module=%s)", branch, module
+                            "Cannot fire error_detected event: _fire_event callback not set (branch=%s, module=%s)",
+                            branch,
+                            module,
                         )
                     return
 
                 except Exception as e:
                     # Registry unavailable — fall through to legacy MD5 dedup
-                    logger.warning(
-                        "Registry report failed for %s:%s — using MD5 fallback: %s",
-                        branch, module, e
-                    )
+                    logger.warning("Registry report failed for %s:%s — using MD5 fallback: %s", branch, module, e)
 
             # Fallback path: retry lazy import of registry, else track count locally
             error_hash = _generate_error_hash(module, message)
@@ -556,27 +571,26 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             # Retry registry import — may have failed at module load but be available now
             try:
                 from aipass.trigger.apps.handlers.error_registry import report as _lazy_report
+
                 result = _lazy_report(
-                    error_type=parsed['level'],
-                    message=message,
-                    component=branch,
-                    log_path=log_path,
-                    severity='medium'
+                    error_type=parsed["level"], message=message, component=branch, log_path=log_path, severity="medium"
                 )
-                error_count = result.get('count', 1)
-                if not result.get('is_new', False) and error_count != 2:
+                error_count = result.get("count", 1)
+                if not result.get("is_new", False) and error_count != 2:
                     return
                 if _fire_event is not None:
                     _fire_event(
-                        'error_detected',
-                        branch=branch, module=module, message=message,
+                        "error_detected",
+                        branch=branch,
+                        module=module,
+                        message=message,
                         log_path=log_path,
-                        error_hash=result.get('id', error_hash),
-                        timestamp=parsed['timestamp'],
-                        fingerprint=result.get('fingerprint', ''),
-                        registry_id=result.get('id', ''),
-                        first_seen=result.get('first_seen', ''),
-                        last_seen=result.get('last_seen', ''),
+                        error_hash=result.get("id", error_hash),
+                        timestamp=parsed["timestamp"],
+                        fingerprint=result.get("fingerprint", ""),
+                        registry_id=result.get("id", ""),
+                        first_seen=result.get("first_seen", ""),
+                        last_seen=result.get("last_seen", ""),
                         count=error_count,
                     )
                     json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
@@ -590,20 +604,21 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
 
             if _fire_event is not None:
                 _fire_event(
-                    'error_detected',
+                    "error_detected",
                     branch=branch,
                     module=module,
                     message=message,
                     log_path=log_path,
                     error_hash=error_hash,
-                    timestamp=parsed['timestamp'],
+                    timestamp=parsed["timestamp"],
                     count=local_count,
                 )
                 json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
             else:
                 logger.warning(
-                    "Cannot fire error_detected event: _fire_event callback not set "
-                    "(branch=%s, module=%s)", branch, module
+                    "Cannot fire error_detected event: _fire_event callback not set (branch=%s, module=%s)",
+                    branch,
+                    module,
                 )
 
         except Exception as exc:
@@ -626,10 +641,10 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         for branch_dir in AIPASS_PKG_ROOT.iterdir():
             if not branch_dir.is_dir():
                 continue
-            logs_dir = branch_dir / 'logs'
+            logs_dir = branch_dir / "logs"
             if not logs_dir.exists():
                 continue
-            for log_file in logs_dir.glob('*.log'):
+            for log_file in logs_dir.glob("*.log"):
                 try:
                     file_path = str(log_file)
                     current_size = log_file.stat().st_size
@@ -645,7 +660,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
 
         # System-level logs under ~/system_logs/
         if SYSTEM_LOGS_DIR.exists():
-            for log_file in SYSTEM_LOGS_DIR.glob('*.log'):
+            for log_file in SYSTEM_LOGS_DIR.glob("*.log"):
                 try:
                     file_path = str(log_file)
                     current_size = log_file.stat().st_size
@@ -698,7 +713,7 @@ def start_branch_log_watcher() -> Any:
     for branch_dir in AIPASS_PKG_ROOT.iterdir():
         if not branch_dir.is_dir():
             continue
-        logs_dir = branch_dir / 'logs'
+        logs_dir = branch_dir / "logs"
         if logs_dir.exists():
             observer.schedule(watcher, str(logs_dir), recursive=False)
 
@@ -759,17 +774,17 @@ def get_watcher_status() -> Dict[str, Any]:
     if _active_watcher is not None:
         tracked_files = len(_active_watcher.log_positions)
     return {
-        'active': is_branch_log_watcher_active(),
-        'watchdog_available': WATCHDOG_AVAILABLE,
-        'seen_hashes_count': len(_seen_error_hashes),
-        'tracked_log_files': tracked_files,
-        'excluded_files': list(EXCLUDED_LOG_FILES),
-        'stale_threshold_seconds': STALE_ENTRY_THRESHOLD_SECONDS,
-        'aipass_root': str(AIPASS_PKG_ROOT)
+        "active": is_branch_log_watcher_active(),
+        "watchdog_available": WATCHDOG_AVAILABLE,
+        "seen_hashes_count": len(_seen_error_hashes),
+        "tracked_log_files": tracked_files,
+        "excluded_files": list(EXCLUDED_LOG_FILES),
+        "stale_threshold_seconds": STALE_ENTRY_THRESHOLD_SECONDS,
+        "aipass_root": str(AIPASS_PKG_ROOT),
     }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """Standalone test for branch log watcher."""
     import time
 

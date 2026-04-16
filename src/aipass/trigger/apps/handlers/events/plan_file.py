@@ -29,6 +29,7 @@ from typing import Optional
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json
 from aipass.trigger.apps.handlers.json import json_handler
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -36,6 +37,7 @@ def _find_repo_root() -> Path:
         if (parent / "AIPASS_REGISTRY.json").exists():
             return parent
     return Path.cwd()
+
 
 REPO_ROOT = _find_repo_root()
 
@@ -54,7 +56,7 @@ def _log_error(message: str) -> None:
     try:
         HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).isoformat()
-        with open(HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] [{MODULE_NAME}] {message}\n")
     except Exception:
         pass  # Last resort - cannot fail on logging failure
@@ -63,8 +65,9 @@ def _log_error(message: str) -> None:
 def _load_registry() -> dict:
     """Load registry from JSON file"""
     import json
+
     if REGISTRY_FILE.exists():
-        with open(REGISTRY_FILE, 'r', encoding='utf-8') as f:
+        with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"plans": {}, "next_number": 1}
 
@@ -76,7 +79,7 @@ def _save_registry(registry: dict) -> None:
 
 def _get_plan_number(file_path: Path) -> Optional[str]:
     """Extract plan number from filename (e.g., FPLAN-0001.md -> 0001)"""
-    match = re.search(r'FPLAN-(\d{4})\.md$', file_path.name)
+    match = re.search(r"FPLAN-(\d{4})\.md$", file_path.name)
     return match.group(1) if match else None
 
 
@@ -120,7 +123,7 @@ def handle_plan_file_created(path: str, **kwargs):
             "subject": "Auto-detected PLAN",
             "status": "open",
             "file_path": str(file_path),
-            "last_updated": datetime.now(timezone.utc).isoformat()
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
 
         # Update next_number if needed

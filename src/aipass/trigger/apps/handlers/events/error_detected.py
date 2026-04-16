@@ -49,7 +49,7 @@ def _log_warning(message: str) -> None:
     try:
         _HANDLER_LOG.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with open(_HANDLER_LOG, 'a', encoding='utf-8') as f:
+        with open(_HANDLER_LOG, "a", encoding="utf-8") as f:
             f.write(f"{ts} | WARNING | {message}\n")
     except Exception:
         pass
@@ -62,6 +62,7 @@ def _find_repo_root() -> Path:
         if (parent / "AIPASS_REGISTRY.json").exists():
             return parent
     return Path.cwd()
+
 
 _REPO_ROOT = _find_repo_root()
 
@@ -79,6 +80,7 @@ try:
         should_dispatch as registry_should_dispatch,
         record_dispatch as registry_record_dispatch,
     )
+
     _REGISTRY_DISPATCH_AVAILABLE = True
 except ImportError:
     _REGISTRY_DISPATCH_AVAILABLE = False
@@ -99,6 +101,7 @@ except ImportError:
         """Fallback no-op dispatch recording when error_registry is unavailable."""
         pass
 
+
 # Legacy rate limiting (kept for backward compat when registry unavailable)
 _dispatch_timestamps: Dict[str, List[float]] = {}
 MAX_DISPATCHES_PER_WINDOW = 3
@@ -117,8 +120,8 @@ def _is_medic_enabled() -> bool:
     """
     try:
         if TRIGGER_CONFIG_FILE.exists():
-            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
-            return bool(data.get('config', {}).get('medic_enabled', True))
+            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+            return bool(data.get("config", {}).get("medic_enabled", True))
     except Exception as exc:
         _log_warning(f"_is_medic_enabled config read failed: {exc}")
         return True  # Default to enabled on read failure
@@ -140,8 +143,8 @@ def _is_branch_muted(branch_name: str) -> bool:
     """
     try:
         if TRIGGER_CONFIG_FILE.exists():
-            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding='utf-8'))
-            muted = data.get('config', {}).get('muted_branches', [])
+            data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+            muted = data.get("config", {}).get("muted_branches", [])
             return branch_name.lower() in [b.lower() for b in muted]
     except Exception as exc:
         _log_warning(f"_is_branch_muted config read failed: {exc}")
@@ -172,7 +175,7 @@ def _get_registered_emails() -> set:
     """
     try:
         if BRANCH_REGISTRY_FILE.exists():
-            data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding='utf-8'))
+            data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
             return {b["email"] for b in data.get("branches", [])}
     except Exception as exc:
         _log_warning(f"_get_registered_emails registry read failed: {exc}")
@@ -201,9 +204,7 @@ def _is_rate_limited(branch_email: str) -> bool:
         _dispatch_timestamps[branch_email] = []
 
     # Prune old timestamps
-    _dispatch_timestamps[branch_email] = [
-        ts for ts in _dispatch_timestamps[branch_email] if ts > cutoff
-    ]
+    _dispatch_timestamps[branch_email] = [ts for ts in _dispatch_timestamps[branch_email] if ts > cutoff]
 
     return len(_dispatch_timestamps[branch_email]) >= MAX_DISPATCHES_PER_WINDOW
 
@@ -239,7 +240,7 @@ def _read_log_context(log_path: str, error_message: str, context_lines: int = 2)
         path = Path(log_path)
         if not path.exists():
             return ""
-        lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         # Find last occurrence of the error message
         target_idx = -1
         for i in range(len(lines) - 1, -1, -1):
@@ -268,7 +269,7 @@ def _build_notification_message(
     last_seen: str = "",
     log_context: str = "",
     fingerprint: str = "",
-    registry_id: str = ""
+    registry_id: str = "",
 ) -> str:
     """
     Build error notification message with investigation instructions.
@@ -350,11 +351,8 @@ def _write_suppression_log(reason: str, branch: str, module: str, message: str) 
     try:
         suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.log"
         suppressed_log.parent.mkdir(parents=True, exist_ok=True)
-        with open(suppressed_log, 'a', encoding='utf-8') as f:
-            f.write(
-                f"{datetime.now().isoformat()} | "
-                f"{reason} - {branch}: {module} - {message[:100]}\n"
-            )
+        with open(suppressed_log, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} | {reason} - {branch}: {module} - {message[:100]}\n")
     except Exception as exc:
         _log_warning(f"suppression log write failed ({reason}): {exc}")
 
@@ -364,7 +362,7 @@ def _write_rate_log(reason: str, detail: str) -> None:
     try:
         rate_log = TRIGGER_ROOT / "logs" / "rate_limited.log"
         rate_log.parent.mkdir(parents=True, exist_ok=True)
-        with open(rate_log, 'a', encoding='utf-8') as f:
+        with open(rate_log, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()} | {reason}: {detail}\n")
     except Exception as exc:
         _log_warning(f"rate log write failed ({reason}): {exc}")
@@ -382,7 +380,7 @@ def handle_error_detected(
     first_seen: str = "",
     last_seen: str = "",
     count: int = 1,
-    **kwargs: Any
+    **kwargs: Any,
 ) -> None:
     """
     Handle error_detected event - deliver notification to affected branch.
@@ -457,7 +455,7 @@ def handle_error_detected(
         recipient = f"@{branch.lower()}"
 
         # devpulse is protected from auto-triggering
-        if recipient == '@devpulse':
+        if recipient == "@devpulse":
             return
 
         # Validate target branch exists in registry before attempting delivery
@@ -478,10 +476,9 @@ def handle_error_detected(
                 return
         else:
             # Legacy fallback: per-branch rate limiting (Medic v1)
-            recent_count = len([
-                ts for ts in _dispatch_timestamps.get(recipient, [])
-                if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS
-            ])
+            recent_count = len(
+                [ts for ts in _dispatch_timestamps.get(recipient, []) if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS]
+            )
             if _is_rate_limited(recipient):
                 _write_rate_log("Rate limited", f"{recipient} has {recent_count} recent dispatches, skipping")
                 return
@@ -511,7 +508,7 @@ def handle_error_detected(
             last_seen=last_seen or timestamp,
             log_context=error_log_context,
             fingerprint=fingerprint,
-            registry_id=registry_id
+            registry_id=registry_id,
         )
 
         # Send via callback (set by module layer, trigger isn't a branch so PWD detection fails)
@@ -520,14 +517,15 @@ def handle_error_detected(
             subject=email_subject,
             message=notification_message,
             auto_execute=True,
-            reply_to='@devpulse',
-            from_branch='@trigger'
+            reply_to="@devpulse",
+            from_branch="@trigger",
         )
 
         # Wake the target branch so the email is processed immediately
         try:
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-            wake_branch(recipient, fresh=False, sender='@trigger')
+
+            wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception:
             pass  # Silent — email in inbox as fallback
 

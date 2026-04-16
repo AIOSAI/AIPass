@@ -31,6 +31,7 @@ from aipass.cli.apps.modules import console, error, warning
 # MODULE DISCOVERY
 # =============================================================================
 
+
 def discover_command_modules() -> List[Callable]:
     """
     Auto-discover command modules from modules/ directory
@@ -50,7 +51,7 @@ def discover_command_modules() -> List[Callable]:
     # Scan for Python files in modules directory
     for module_file in modules_dir.glob("*.py"):
         # Skip __init__.py and non-command modules
-        if module_file.name.startswith('_') or module_file.name == 'logger.py':
+        if module_file.name.startswith("_") or module_file.name == "logger.py":
             continue
 
         try:
@@ -59,7 +60,7 @@ def discover_command_modules() -> List[Callable]:
             module = importlib.import_module(module_name)
 
             # Check for handle_command interface
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 command_handlers.append(module.handle_command)
 
         except Exception as e:
@@ -68,9 +69,11 @@ def discover_command_modules() -> List[Callable]:
 
     return command_handlers
 
+
 # =============================================================================
 # INTROSPECTION DISPLAY
 # =============================================================================
+
 
 def print_introspection():
     """Display discovered modules (main entry point - modules only, no handlers)"""
@@ -86,7 +89,7 @@ def print_introspection():
 
     if modules_dir.exists():
         for module_file in modules_dir.glob("*.py"):
-            if module_file.name.startswith('_') or module_file.name == 'logger.py':
+            if module_file.name.startswith("_") or module_file.name == "logger.py":
                 continue
             discovered_modules.append(module_file.stem)
 
@@ -131,6 +134,7 @@ def print_help():
 # COMMAND ROUTING
 # =============================================================================
 
+
 def route_command(command: str, args: List[str], handlers: List[Callable]) -> bool:
     """
     Route command to appropriate module handler
@@ -154,14 +158,16 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
 
     return False
 
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description='PRAX - System-Wide Logging Infrastructure',
+        description="PRAX - System-Wide Logging Infrastructure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,  # We route --help to modules when a command is given
         epilog="""
@@ -175,22 +181,17 @@ Examples:
   drone @prax monitor run
   drone @prax status
   drone @prax dashboard
-        """
+        """,
     )
 
     # Add command argument (optional)
-    parser.add_argument('command',
-                       nargs='?',
-                       help='Command to execute')
+    parser.add_argument("command", nargs="?", help="Command to execute")
 
     # Add remaining arguments for command handlers
-    parser.add_argument('args',
-                       nargs='*',
-                       help='Arguments for the command')
+    parser.add_argument("args", nargs="*", help="Arguments for the command")
 
-    parser.add_argument('--help', '-h', action='store_true', dest='show_help',
-                       help='Show help information')
-    parser.add_argument('--version', '-V', action='version', version='PRAX v2.0.0')
+    parser.add_argument("--help", "-h", action="store_true", dest="show_help", help="Show help information")
+    parser.add_argument("--version", "-V", action="version", version="PRAX v2.0.0")
 
     parsed_args, remaining = parser.parse_known_args()
 
@@ -215,7 +216,7 @@ Examples:
 
     # Pass --help through to module handler (e.g. drone @prax monitor --help)
     if parsed_args.show_help:
-        all_args = ['--help'] + all_args
+        all_args = ["--help"] + all_args
 
     # Route command to appropriate handler
     if route_command(parsed_args.command, all_args, handlers):
@@ -223,6 +224,7 @@ Examples:
     else:
         error(f"Unknown command: {parsed_args.command}")
         return 1
+
 
 if __name__ == "__main__":
     try:

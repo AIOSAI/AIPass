@@ -53,13 +53,9 @@ else:
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
     if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
     else:
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -88,6 +84,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def temp_test_dir(tmp_path: Path):

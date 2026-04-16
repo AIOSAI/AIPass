@@ -85,7 +85,9 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 1: Check we are on main
         current = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if current.stdout.strip() != "main":
             result["message"] = (
@@ -105,7 +107,9 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 3: Sync STATUS.md before staging so the fresh state is committed
         sync_result = subprocess.run(
             ["drone", "@prax", "status", "sync"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if sync_result.returncode != 0:
             logger.warning("create_system_pr: status sync failed (non-fatal): %s", sync_result.stderr.strip())
@@ -113,30 +117,35 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Stage all changes including untracked new files
         subprocess.run(
             ["git", "add", "-A"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
 
         # Unstage .git_pr.lock — it is acquired (created) for this workflow
         # and must never be committed. Belt-and-suspenders alongside .gitignore.
         subprocess.run(
             ["git", "reset", "HEAD", ".git_pr.lock"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
 
         # Step 4: If anything is staged, commit it (normal commit on main)
         diff_check = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if diff_check.returncode != 0:
             # There are staged changes — commit them
-            commit_msg = (
-                f"feat(system): {description}\n\n"
-                f"Co-Authored-By: @{caller} <{caller}@aipass>"
-            )
+            commit_msg = f"feat(system): {description}\n\nCo-Authored-By: @{caller} <{caller}@aipass>"
             commit = subprocess.run(
                 ["git", "commit", "-m", commit_msg],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             if commit.returncode != 0:
                 result["message"] = f"Commit failed: {commit.stderr.strip()}"
@@ -146,11 +155,15 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 5: Check if main is ahead of origin/main
         subprocess.run(
             ["git", "fetch", "origin", "main"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         ahead_check = subprocess.run(
             ["git", "rev-list", "--count", "origin/main..HEAD"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         ahead_count = int(ahead_check.stdout.strip() or "0")
         if ahead_count == 0:
@@ -161,7 +174,9 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 6: Create feature branch at current main tip
         branch_create = subprocess.run(
             ["git", "branch", "-f", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if branch_create.returncode != 0:
             result["message"] = f"Failed to create branch: {branch_create.stderr.strip()}"
@@ -171,7 +186,9 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 7: Push feature branch
         push = subprocess.run(
             ["git", "push", "--force-with-lease", "origin", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if push.returncode != 0:
             result["message"] = f"Push failed: {push.stderr.strip()}"
@@ -187,19 +204,28 @@ def create_system_pr(description: str, caller: str) -> dict:
         )
         pr_create = subprocess.run(
             [
-                "gh", "pr", "create",
-                "--head", feature_branch,
-                "--title", f"feat(system): {description}",
-                "--body", pr_body,
+                "gh",
+                "pr",
+                "create",
+                "--head",
+                feature_branch,
+                "--title",
+                f"feat(system): {description}",
+                "--body",
+                pr_body,
             ],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
         if pr_create.returncode != 0:
             result["message"] = f"PR creation failed: {pr_create.stderr.strip()}"
             logger.error(result["message"])
             subprocess.run(
                 ["git", "branch", "-D", feature_branch],
-                capture_output=True, text=True, cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
             )
             return result
 
@@ -208,7 +234,9 @@ def create_system_pr(description: str, caller: str) -> dict:
         # Step 9: Clean up local feature branch (main stays untouched)
         subprocess.run(
             ["git", "branch", "-D", feature_branch],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
 
         result["success"] = True

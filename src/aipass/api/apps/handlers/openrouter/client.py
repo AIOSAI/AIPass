@@ -45,6 +45,7 @@ from aipass.prax import logger
 # OpenAI SDK for OpenRouter compatibility
 try:
     from openai import OpenAI
+
     OPENAI_AVAILABLE = True
 except ImportError as e:
     logger.error(f"OpenAI SDK not available. Install with: pip install openai: {e}")
@@ -69,10 +70,7 @@ DEFAULT_TIMEOUT = 30
 # NOTE: No default model - callers must specify their own model from their branch config
 
 # HTTP headers for OpenRouter
-OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://aipass.local",
-    "X-Title": "AIPass API Client"
-}
+OPENROUTER_HEADERS = {"HTTP-Referer": "https://aipass.local", "X-Title": "AIPass API Client"}
 
 # Client cache for connection pooling
 _client_cache: Dict[str, OpenAI] = {}
@@ -82,7 +80,10 @@ MAX_CACHED_CLIENTS = 5
 # CLIENT CREATION
 # =============================================
 
-def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: int = DEFAULT_TIMEOUT) -> Optional[OpenAI]:
+
+def create_client(
+    api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: int = DEFAULT_TIMEOUT
+) -> Optional[OpenAI]:
     """
     Create OpenAI SDK client configured for OpenRouter.
 
@@ -110,12 +111,7 @@ def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: in
 
     try:
         # Create OpenAI client with OpenRouter configuration
-        client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
-            timeout=timeout,
-            default_headers=OPENROUTER_HEADERS
-        )
+        client = OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, default_headers=OPENROUTER_HEADERS)
 
         logger.info(f"Created OpenRouter client - base_url: {base_url}, timeout: {timeout}s")
         json_handler.log_operation("client_initialized", {"base_url": base_url, "timeout": timeout})
@@ -126,7 +122,9 @@ def create_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: in
         return None
 
 
-def get_cached_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: int = DEFAULT_TIMEOUT) -> Optional[OpenAI]:
+def get_cached_client(
+    api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout: int = DEFAULT_TIMEOUT
+) -> Optional[OpenAI]:
     """
     Get cached OpenAI client or create new one if not cached.
     Implements connection pooling for better performance.
@@ -176,6 +174,7 @@ def get_cached_client(api_key: str, base_url: str = OPENROUTER_BASE_URL, timeout
 # API REQUEST EXECUTION
 # =============================================
 
+
 def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: int = 1, **kwargs) -> Optional[Any]:
     """
     Execute API request via OpenRouter with retry logic.
@@ -191,14 +190,12 @@ def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: 
         OpenAI response object or None on failure
     """
     if not client or not messages or not model:
-        logger.warning(f"make_api_request() called with missing params — client={bool(client)}, messages={bool(messages)}, model={bool(model)}")
+        logger.warning(
+            f"make_api_request() called with missing params — client={bool(client)}, messages={bool(messages)}, model={bool(model)}"
+        )
         return None
 
-    api_params = {
-        "model": model,
-        "messages": messages,
-        **kwargs
-    }
+    api_params = {"model": model, "messages": messages, **kwargs}
 
     last_error = None
     for attempt in range(1 + retries):
@@ -211,7 +208,9 @@ def make_api_request(client: OpenAI, messages: List[Dict], model: str, retries: 
             last_error = e
             if attempt < retries:
                 delay = 1.0 * (attempt + 1)  # 1s, 2s, ...
-                logger.info(f"API request failed for {model} (attempt {attempt + 1}/{1 + retries}): {e} — retrying in {delay:.0f}s")
+                logger.info(
+                    f"API request failed for {model} (attempt {attempt + 1}/{1 + retries}): {e} — retrying in {delay:.0f}s"
+                )
                 time.sleep(delay)
 
     logger.error(f"API request failed for {model} after {1 + retries} attempts: {last_error}")
@@ -240,11 +239,11 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
 
     try:
         # Validate response structure
-        if not hasattr(response, 'choices') or not response.choices:
+        if not hasattr(response, "choices") or not response.choices:
             logger.warning("Response missing 'choices' or choices is empty")
             return None
 
-        if not hasattr(response.choices[0], 'message'):
+        if not hasattr(response.choices[0], "message"):
             logger.warning("Response choice missing 'message' attribute")
             return None
 
@@ -256,12 +255,12 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
             return None
 
         # Extract metadata
-        finish_reason = response.choices[0].finish_reason if hasattr(response.choices[0], 'finish_reason') else None
+        finish_reason = response.choices[0].finish_reason if hasattr(response.choices[0], "finish_reason") else None
         result = {
             "content": content,
-            "id": response.id if hasattr(response, 'id') else None,
-            "model": response.model if hasattr(response, 'model') else None,
-            "finish_reason": finish_reason
+            "id": response.id if hasattr(response, "id") else None,
+            "model": response.model if hasattr(response, "model") else None,
+            "finish_reason": finish_reason,
         }
 
         if finish_reason == "content_filter":
@@ -279,7 +278,10 @@ def extract_response(response: Any) -> Optional[Dict[str, Any]]:
 # MAIN API CALL
 # =============================================
 
-def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str] = None, **kwargs) -> Optional[Dict[str, Any]]:
+
+def get_response(
+    prompt: str, caller: Optional[str] = None, model: Optional[str] = None, **kwargs
+) -> Optional[Dict[str, Any]]:
     """
     Main API call - get response from OpenRouter with full tracking integration.
 
@@ -324,7 +326,9 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
     # Step 2: Require model from caller - no defaults
     if not model:
         logger.error("No model specified.")
-        logger.warning("Callers must provide their own model via branch config (e.g., flow_json/openrouter_config.json)")
+        logger.warning(
+            "Callers must provide their own model via branch config (e.g., flow_json/openrouter_config.json)"
+        )
         return None
 
     # Step 3: Get API key
@@ -365,6 +369,7 @@ def get_response(prompt: str, caller: Optional[str] = None, model: Optional[str]
 # =============================================
 # CLEANUP
 # =============================================
+
 
 def get_cache_stats() -> Dict[str, Any]:
     """

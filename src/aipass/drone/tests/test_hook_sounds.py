@@ -27,9 +27,7 @@ def _isolate(tmp_path, monkeypatch):
         "aipass.drone.apps.plugins.hook_sounds.hook_sounds_plugin.MUTE_FLAG",
         flag,
     )
-    with patch(
-        "aipass.drone.apps.plugins.hook_sounds.hook_sounds_plugin.json_handler"
-    ):
+    with patch("aipass.drone.apps.plugins.hook_sounds.hook_sounds_plugin.json_handler"):
         yield flag
 
 

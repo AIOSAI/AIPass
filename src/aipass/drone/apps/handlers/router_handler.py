@@ -35,9 +35,7 @@ def find_entry_point(branch_path: str, branch_name: str) -> Path:
     """
     entry_point = Path(branch_path) / "apps" / f"{branch_name}.py"
     if not entry_point.exists():
-        raise CommandExecutionError(
-            f"Entry point not found for branch '{branch_name}': {entry_point}"
-        )
+        raise CommandExecutionError(f"Entry point not found for branch '{branch_name}': {entry_point}")
     return entry_point
 
 
@@ -136,7 +134,9 @@ def execute_branch_command(
 
     caller_tag = f" [CALLER:{caller_branch.upper()}]" if caller_branch else ""
     logger.info("Executed @%s%s %s → exit %d", branch_name, caller_tag, command or "(introspection)", result.exit_code)
-    json_handler.log_operation("execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code})
+    json_handler.log_operation(
+        "execute_branch_command", {"branch": branch_name, "command": command or "", "exit_code": result.exit_code}
+    )
 
     return CommandResult(
         stdout=result.stdout,

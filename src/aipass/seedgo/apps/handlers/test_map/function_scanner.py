@@ -24,29 +24,35 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # -- Standard functions to exclude (already covered by test_quality checker) --
 
 # CLI routing — every branch has these, not custom logic
-CLI_ROUTING_FUNCTIONS = frozenset({
-    "handle_command",
-    "print_introspection",
-    "print_help",
-    "main",
-})
+CLI_ROUTING_FUNCTIONS = frozenset(
+    {
+        "handle_command",
+        "print_introspection",
+        "print_help",
+        "main",
+    }
+)
 
 # json_handler standard functions — covered by test_quality checker
-JSON_HANDLER_FUNCTIONS = frozenset({
-    "validate_json_structure",
-    "get_json_path",
-    "ensure_json_exists",
-    "load_json",
-    "save_json",
-    "log_operation",
-    "ensure_module_jsons",
-    "load_template",
-})
+JSON_HANDLER_FUNCTIONS = frozenset(
+    {
+        "validate_json_structure",
+        "get_json_path",
+        "ensure_json_exists",
+        "load_json",
+        "save_json",
+        "log_operation",
+        "ensure_module_jsons",
+        "load_template",
+    }
+)
 
 # Bypass helper present in many checkers
-CHECKER_BOILERPLATE = frozenset({
-    "is_bypassed",
-})
+CHECKER_BOILERPLATE = frozenset(
+    {
+        "is_bypassed",
+    }
+)
 
 EXCLUDED_FUNCTIONS = CLI_ROUTING_FUNCTIONS | JSON_HANDLER_FUNCTIONS | CHECKER_BOILERPLATE
 
@@ -54,6 +60,7 @@ EXCLUDED_FUNCTIONS = CLI_ROUTING_FUNCTIONS | JSON_HANDLER_FUNCTIONS | CHECKER_BO
 # =============================================================================
 # AST SCANNING
 # =============================================================================
+
 
 def _read_file_safe(path: Path) -> str:
     """Read file contents, returning empty string on error."""
@@ -90,11 +97,13 @@ def _extract_public_functions(file_path: Path) -> list[dict]:
             continue
         if name in EXCLUDED_FUNCTIONS:
             continue
-        functions.append({
-            "name": name,
-            "line": node.lineno,
-            "file": str(file_path),
-        })
+        functions.append(
+            {
+                "name": name,
+                "line": node.lineno,
+                "file": str(file_path),
+            }
+        )
 
     return functions
 
@@ -143,7 +152,6 @@ def _scan_source_files(branch_path: Path) -> list[dict]:
     return all_functions
 
 
-
 def _test_files_source(branch_path: Path) -> str:
     """Concatenate all test file sources for matching."""
     tests_dir = branch_path / "tests"
@@ -162,6 +170,7 @@ def _test_files_source(branch_path: Path) -> str:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def scan_branch(branch_path: str) -> dict:
     """Scan a branch and build its custom function coverage map.
@@ -211,27 +220,35 @@ def scan_branch(branch_path: str) -> dict:
         if rel_path not in files_map:
             files_map[rel_path] = []
 
-        files_map[rel_path].append({
-            "name": func["name"],
-            "line": func["line"],
-            "tested": is_tested,
-            "test_file": test_files_map.get(func["name"]),
-        })
+        files_map[rel_path].append(
+            {
+                "name": func["name"],
+                "line": func["line"],
+                "tested": is_tested,
+                "test_file": test_files_map.get(func["name"]),
+            }
+        )
 
     total = len(all_functions)
     pct = int((tested_count / total) * 100) if total > 0 else 0
 
     logger.info(
         "test_map scan: %s — %d/%d custom functions tested (%d%%)",
-        branch_name, tested_count, total, pct,
+        branch_name,
+        tested_count,
+        total,
+        pct,
     )
 
-    json_handler.log_operation("test_map_scan", {
-        "branch": branch_name,
-        "total_functions": total,
-        "tested_functions": tested_count,
-        "coverage_pct": pct,
-    })
+    json_handler.log_operation(
+        "test_map_scan",
+        {
+            "branch": branch_name,
+            "total_functions": total,
+            "tested_functions": tested_count,
+            "coverage_pct": pct,
+        },
+    )
 
     return {
         "branch": branch_name,

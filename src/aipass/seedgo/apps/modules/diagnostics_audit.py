@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+
 # CLI service
 from aipass.cli import console
 from aipass.cli.apps.modules import error, warning
@@ -39,11 +40,11 @@ def print_branch_diagnostics(result: Dict):
 
     Note: Used by tests/test_diagnostics_audit.py — not called in production audit pipeline.
     """
-    branch = result['branch']
-    errors = result.get('total_errors', 0)
-    warnings = result.get('total_warnings', 0)
-    files_analyzed = result.get('total_files', 0)
-    files_with_errors = result.get('files_with_errors', 0)
+    branch = result["branch"]
+    errors = result.get("total_errors", 0)
+    warnings = result.get("total_warnings", 0)
+    files_analyzed = result.get("total_files", 0)
+    files_with_errors = result.get("files_with_errors", 0)
 
     # Status icon
     if errors == 0:
@@ -64,28 +65,28 @@ def print_branch_diagnostics(result: Dict):
     # Show top files with errors (clickable paths)
     if files_with_errors > 0:
         console.print("  [dim]Top files with errors:[/dim]")
-        for file_result in result.get('results', [])[:5]:
-            if file_result['errors'] > 0:
-                file_path = file_result['file']
-                file_errors = file_result['errors']
+        for file_result in result.get("results", [])[:5]:
+            if file_result["errors"] > 0:
+                file_path = file_result["file"]
+                file_errors = file_result["errors"]
                 console.print(f"    [red]✗[/red] {file_path} [dim]({file_errors} errors)[/dim]")
 
                 # Show first 3 errors per file
-                for diag in file_result['diagnostics'][:3]:
-                    line = diag['line']
-                    msg = diag['message'][:60] + "..." if len(diag['message']) > 60 else diag['message']
+                for diag in file_result["diagnostics"][:3]:
+                    line = diag["line"]
+                    msg = diag["message"][:60] + "..." if len(diag["message"]) > 60 else diag["message"]
                     console.print(f"      [dim]L{line}:[/dim] {msg}")
 
 
 def print_system_summary(all_results: List[Dict]):
     """Print system-wide diagnostics summary"""
     total_branches = len(all_results)
-    total_errors = sum(r.get('total_errors', 0) for r in all_results)
-    total_warnings = sum(r.get('total_warnings', 0) for r in all_results)
-    total_files = sum(r.get('total_files', 0) for r in all_results)
-    files_with_errors = sum(r.get('files_with_errors', 0) for r in all_results)
+    total_errors = sum(r.get("total_errors", 0) for r in all_results)
+    total_warnings = sum(r.get("total_warnings", 0) for r in all_results)
+    total_files = sum(r.get("total_files", 0) for r in all_results)
+    files_with_errors = sum(r.get("files_with_errors", 0) for r in all_results)
 
-    clean_branches = sum(1 for r in all_results if r.get('total_errors', 0) == 0)
+    clean_branches = sum(1 for r in all_results if r.get("total_errors", 0) == 0)
     branches_with_errors = total_branches - clean_branches
 
     console.print()
@@ -104,11 +105,11 @@ def print_system_summary(all_results: List[Dict]):
     # Top branches by error count
     if branches_with_errors > 0:
         console.print("[bold]BRANCHES BY ERROR COUNT:[/bold]")
-        sorted_results = sorted(all_results, key=lambda x: x.get('total_errors', 0), reverse=True)
+        sorted_results = sorted(all_results, key=lambda x: x.get("total_errors", 0), reverse=True)
         for result in sorted_results[:10]:
-            if result.get('total_errors', 0) > 0:
-                branch = result['branch']
-                errors = result['total_errors']
+            if result.get("total_errors", 0) > 0:
+                branch = result["branch"]
+                errors = result["total_errors"]
                 console.print(f"  {branch:15} [red]{errors:4} errors[/red]")
 
     console.print("─" * 70)
@@ -130,7 +131,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return False
 
     # --help → full help
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -183,7 +184,9 @@ def print_help():
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  [green]drone @seedgo diagnostics_audit[/green]            [dim]Scan all branches for type errors[/dim]")
+    console.print(
+        "  [green]drone @seedgo diagnostics_audit[/green]            [dim]Scan all branches for type errors[/dim]"
+    )
     console.print("  [green]drone @seedgo diagnostics_audit @<branch>[/green]  [dim]Scan specific branch[/dim]")
     console.print()
 
@@ -203,7 +206,7 @@ def print_help():
 
 if __name__ == "__main__":
     # Handle help flag or no arguments
-    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']):
+    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]):
         print_help()
         sys.exit(0)
 
@@ -211,10 +214,7 @@ if __name__ == "__main__":
     logger.info("Prax logger connected to diagnostics_audit")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "diagnostics_run",
-        {"command": "standalone", "args": sys.argv[1:]}
-    )
+    json_handler.log_operation("diagnostics_run", {"command": "standalone", "args": sys.argv[1:]})
 
     # Run diagnostics
     handle_command("diagnostics", sys.argv[1:])

@@ -20,6 +20,7 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before watchers/log_watcher loads."""
@@ -34,9 +35,7 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
     monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
     monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(
-        sys.modules, "aipass.prax.apps.modules.logger", MagicMock()
-    )
+    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", MagicMock())
 
     # -- trigger json handler -----------------------------------------------
     mock_json_handler = MagicMock()
@@ -46,12 +45,11 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
     json_mod = MagicMock()
     json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod
-    )
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
     from aipass.trigger.apps.config import atomic_write_json
+
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
     mock_config.atomic_write_json = atomic_write_json
@@ -71,9 +69,7 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "watchdog.observers", mock_observer_mod)
 
     mock_events_mod = MagicMock()
-    mock_events_mod.FileSystemEventHandler = type(
-        "FakeFileSystemEventHandler", (object,), {}
-    )
+    mock_events_mod.FileSystemEventHandler = type("FakeFileSystemEventHandler", (object,), {})
     monkeypatch.setitem(sys.modules, "watchdog.events", mock_events_mod)
 
     # -- Force re-import so mocks take effect -------------------------------
@@ -87,14 +83,14 @@ def _mock_infrastructure(monkeypatch):
 def _import_watchers_lw():
     """Import watchers/log_watcher module fresh (after mocks are in place)."""
     import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
+
     return wlw
-
-
 
 
 # ---------------------------------------------------------------------------
 # Tests -- _generate_error_hash
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateErrorHash:
     """Tests for _generate_error_hash pure function."""
@@ -130,6 +126,7 @@ class TestGenerateErrorHash:
 # Tests -- _detect_branch_from_log
 # ---------------------------------------------------------------------------
 
+
 class TestDetectBranchFromLog:
     """Tests for _detect_branch_from_log."""
 
@@ -157,6 +154,7 @@ class TestDetectBranchFromLog:
 # ---------------------------------------------------------------------------
 # Tests -- _detect_log_level
 # ---------------------------------------------------------------------------
+
 
 class TestDetectLogLevel:
     """Tests for _detect_log_level."""
@@ -201,6 +199,7 @@ class TestDetectLogLevel:
 # Tests -- _parse_log_message
 # ---------------------------------------------------------------------------
 
+
 class TestParseLogMessage:
     """Tests for _parse_log_message."""
 
@@ -226,6 +225,7 @@ class TestParseLogMessage:
 # Tests -- _extract_module_name
 # ---------------------------------------------------------------------------
 
+
 class TestExtractModuleName:
     """Tests for _extract_module_name."""
 
@@ -244,6 +244,7 @@ class TestExtractModuleName:
 # ---------------------------------------------------------------------------
 # Tests -- _should_skip_log
 # ---------------------------------------------------------------------------
+
 
 class TestShouldSkipLog:
     """Tests for _should_skip_log."""
@@ -277,6 +278,7 @@ class TestShouldSkipLog:
 # ---------------------------------------------------------------------------
 # Tests -- LogFileWatcher._read_new_lines
 # ---------------------------------------------------------------------------
+
 
 class TestLogFileWatcherReadNewLines:
     """Tests for LogFileWatcher._read_new_lines with tmp_path."""
@@ -321,6 +323,7 @@ class TestLogFileWatcherReadNewLines:
 # ---------------------------------------------------------------------------
 # Tests -- start / stop / is_active
 # ---------------------------------------------------------------------------
+
 
 class TestStartStopActive:
     """Tests for start_log_watcher, stop_log_watcher, is_log_watcher_active."""

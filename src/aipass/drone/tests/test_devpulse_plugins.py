@@ -33,10 +33,12 @@ def devpulse_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     trinity.mkdir()
     passport = trinity / "passport.json"
     passport.write_text(
-        json.dumps({
-            "branch_info": {"branch_name": "devpulse"},
-            "identity": {"name": "devpulse"},
-        }),
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "devpulse"},
+                "identity": {"name": "devpulse"},
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -50,10 +52,12 @@ def seedgo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     trinity.mkdir()
     passport = trinity / "passport.json"
     passport.write_text(
-        json.dumps({
-            "branch_info": {"branch_name": "seedgo"},
-            "identity": {"name": "seedgo"},
-        }),
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "seedgo"},
+                "identity": {"name": "seedgo"},
+            }
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -119,9 +123,7 @@ class TestMergePrHappyPath:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
-    def test_merge_pr_success(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_merge_pr_success(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -156,9 +158,7 @@ class TestMergePrFailure:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
-    def test_merge_pr_merge_fails(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_merge_pr_merge_fails(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         proc = MagicMock()
@@ -184,9 +184,7 @@ class TestSmartSyncUpToDate:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.subprocess.run")
-    def test_smart_sync_up_to_date(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_smart_sync_up_to_date(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -215,9 +213,7 @@ class TestSmartSyncBehind:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.subprocess.run")
-    def test_smart_sync_behind_rebase_success(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_smart_sync_behind_rebase_success(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -248,9 +244,7 @@ class TestSmartSyncDivergedMergeSuccess:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.subprocess.run")
-    def test_smart_sync_diverged_merge_ok(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_smart_sync_diverged_merge_ok(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -283,9 +277,7 @@ class TestSmartSyncMergeConflict:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.subprocess.run")
-    def test_smart_sync_merge_conflict(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_smart_sync_merge_conflict(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -331,9 +323,7 @@ class TestFixStuckRebase:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
-    def test_fix_stuck_rebase(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_fix_stuck_rebase(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
         # Create .git/rebase-merge to simulate stuck rebase
         git_dir = tmp_path / ".git"
@@ -366,9 +356,7 @@ class TestFixDetachedHead:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
-    def test_fix_detached_head(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_fix_detached_head(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
@@ -404,9 +392,7 @@ class TestFixDiverged:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
-    def test_fix_diverged_merges(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_fix_diverged_merges(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
@@ -441,9 +427,7 @@ class TestFixCleanState:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
-    def test_fix_clean_state(
-        self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_fix_clean_state(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
         mock_root.return_value = tmp_path
         git_dir = tmp_path / ".git"
         git_dir.mkdir()

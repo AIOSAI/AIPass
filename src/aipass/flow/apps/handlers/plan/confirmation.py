@@ -51,7 +51,7 @@ def confirm_plan_deletion(plan_key: str) -> bool:
 
     try:
         response = input(f"Close FPLAN-{plan_key}? (yes/no): ").strip().lower()
-        return response in ['yes', 'y']
+        return response in ["yes", "y"]
     except EOFError:
         # Fallback for edge cases where isatty() returns True but input fails
         logger.warning(f"[confirmation] EOFError reading input for plan {plan_key} deletion, auto-confirming")

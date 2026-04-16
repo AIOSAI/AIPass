@@ -56,6 +56,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # PACK DISCOVERY
 # =============================================================================
 
+
 def _discover_proof_packs() -> dict:
     """Discover available proof packs from handlers/ directory.
 
@@ -141,6 +142,7 @@ def _resolve_target_pack(proof_pack_name: str) -> Path | None:
 # =============================================================================
 # PROOF EXECUTION
 # =============================================================================
+
 
 def _load_and_run_proof(handler_path: Path, pack_dir: Path) -> dict:
     """Import a proof handler module dynamically and call its scan() function.
@@ -247,7 +249,7 @@ def _run_proof_pack(pack_name: str, pack_dir: Path) -> dict:
             failed_count += 1
 
     total = len(handlers)
-    certified = (failed_count == 0 and error_count == 0 and total > 0)
+    certified = failed_count == 0 and error_count == 0 and total > 0
 
     return {
         "pack_name": pack_name,
@@ -264,6 +266,7 @@ def _run_proof_pack(pack_name: str, pack_dir: Path) -> dict:
 # =============================================================================
 # DISPLAY
 # =============================================================================
+
 
 def _display_proof_results(pack_name: str, results: dict) -> None:
     """Rich console output for proof pack results.
@@ -341,6 +344,7 @@ def _display_proof_results(pack_name: str, results: dict) -> None:
 # INTROSPECTION
 # =============================================================================
 
+
 def _show_proof_introspection() -> None:
     """Show available proof packs and example commands when proof is run with no args."""
     packs = _discover_proof_packs()
@@ -383,6 +387,7 @@ def print_introspection() -> None:
 # HELP
 # =============================================================================
 
+
 def print_help() -> None:
     """Print help information."""
     console.print()
@@ -417,6 +422,7 @@ def print_help() -> None:
 # COMMAND HANDLER
 # =============================================================================
 
+
 def _validate_pack(args: List[str]) -> tuple:
     pack_name: str | None = None
     json_output = False
@@ -433,7 +439,7 @@ def _validate_pack(args: List[str]) -> tuple:
         available = ", ".join(packs.keys()) if packs else "(none)"
         error(
             f"Unknown proof pack: '{pack_name}'",
-            suggestion=f"Available packs: {available}. Usage: drone @seedgo proof {next(iter(packs), '<pack>')}"
+            suggestion=f"Available packs: {available}. Usage: drone @seedgo proof {next(iter(packs), '<pack>')}",
         )
         return None, None, json_output
 
@@ -469,10 +475,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if pack_name is None:
         return True
 
-    json_handler.log_operation(
-        "proof_started",
-        {"pack": pack_name}
-    )
+    json_handler.log_operation("proof_started", {"pack": pack_name})
 
     results = _run_proof_pack(pack_name, pack_dir)
 
@@ -489,7 +492,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             "failed": results["failed"],
             "errors": results["errors"],
             "certified": results["certified"],
-        }
+        },
     )
 
     return True

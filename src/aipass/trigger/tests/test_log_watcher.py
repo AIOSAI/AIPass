@@ -21,6 +21,7 @@ import pytest
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before log_watcher module loads."""
@@ -45,12 +46,11 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
     json_mod = MagicMock()
     json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod
-    )
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT, AIPASS_PKG_ROOT) ---------------------
     from aipass.trigger.apps.config import atomic_write_json
+
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
     mock_config.AIPASS_PKG_ROOT = Path("/tmp/fake_aipass_pkg")
@@ -60,9 +60,7 @@ def _mock_infrastructure(monkeypatch):
     # -- error_registry (report) -------------------------------------------
     mock_registry = MagicMock()
     mock_registry.report = MagicMock(return_value={"is_new": True, "count": 1, "id": "abc123"})
-    monkeypatch.setitem(
-        sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry
-    )
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
 
     # -- watchdog (make it available) ---------------------------------------
     mock_observer_cls = MagicMock()
@@ -72,28 +70,24 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "watchdog.observers", mock_observer_mod)
 
     mock_events_mod = MagicMock()
-    mock_events_mod.FileSystemEventHandler = type(
-        "FakeFileSystemEventHandler", (object,), {}
-    )
+    mock_events_mod.FileSystemEventHandler = type("FakeFileSystemEventHandler", (object,), {})
     monkeypatch.setitem(sys.modules, "watchdog.events", mock_events_mod)
 
     # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(
-        sys.modules, "aipass.trigger.apps.handlers.log_watcher", raising=False
-    )
+    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.log_watcher", raising=False)
 
 
 def _import_log_watcher():
     """Import log_watcher module fresh (after mocks are in place)."""
     import aipass.trigger.apps.handlers.log_watcher as lw
+
     return lw
-
-
 
 
 # ---------------------------------------------------------------------------
 # Tests -- _generate_error_hash
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateErrorHash:
     """Tests for _generate_error_hash pure function."""
@@ -128,6 +122,7 @@ class TestGenerateErrorHash:
 # ---------------------------------------------------------------------------
 # Tests -- _detect_branch_from_path
 # ---------------------------------------------------------------------------
+
 
 class TestDetectBranchFromPath:
     """Tests for _detect_branch_from_path."""
@@ -165,6 +160,7 @@ class TestDetectBranchFromPath:
 # ---------------------------------------------------------------------------
 # Tests -- _parse_prax_log_line
 # ---------------------------------------------------------------------------
+
 
 class TestParsePraxLogLine:
     """Tests for _parse_prax_log_line."""
@@ -225,6 +221,7 @@ class TestParsePraxLogLine:
 # Tests -- _is_stale_entry
 # ---------------------------------------------------------------------------
 
+
 class TestIsStaleEntry:
     """Tests for _is_stale_entry."""
 
@@ -260,6 +257,7 @@ class TestIsStaleEntry:
 # Tests -- _is_duplicate_error
 # ---------------------------------------------------------------------------
 
+
 class TestIsDuplicateError:
     """Tests for _is_duplicate_error."""
 
@@ -294,6 +292,7 @@ class TestIsDuplicateError:
 # Tests -- set_event_callback / clear_seen_hashes
 # ---------------------------------------------------------------------------
 
+
 class TestCallbackAndState:
     """Tests for set_event_callback and clear_seen_hashes."""
 
@@ -316,6 +315,7 @@ class TestCallbackAndState:
 # ---------------------------------------------------------------------------
 # Tests -- BranchLogWatcher._should_process
 # ---------------------------------------------------------------------------
+
 
 class TestShouldProcess:
     """Tests for BranchLogWatcher._should_process."""
@@ -354,6 +354,7 @@ class TestShouldProcess:
 # ---------------------------------------------------------------------------
 # Tests -- BranchLogWatcher._process_log_line
 # ---------------------------------------------------------------------------
+
 
 class TestProcessLogLine:
     """Tests for BranchLogWatcher._process_log_line."""
@@ -420,6 +421,7 @@ class TestProcessLogLine:
 # Tests -- BranchLogWatcher._read_new_lines
 # ---------------------------------------------------------------------------
 
+
 class TestReadNewLines:
     """Tests for BranchLogWatcher._read_new_lines with tmp_path."""
 
@@ -472,6 +474,7 @@ class TestReadNewLines:
 # ---------------------------------------------------------------------------
 # Tests -- start / stop / is_active / get_status
 # ---------------------------------------------------------------------------
+
 
 class TestStartStopStatus:
     """Tests for start_branch_log_watcher, stop, is_active, get_watcher_status."""

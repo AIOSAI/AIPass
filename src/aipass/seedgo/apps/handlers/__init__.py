@@ -62,8 +62,10 @@ def _guard_branch_access():
 
     # DEBUG: Log guard resolution details when debugging
     import os
+
     if os.environ.get("AIPASS_DEBUG_GUARD"):
         import logging
+
         _guard_logger = logging.getLogger("aipass.seedgo.handlers.guard")
         _guard_logger.info("caller_file = %s", caller_file)
         _guard_logger.info("import_line = %s", import_line)
@@ -94,9 +96,9 @@ def _guard_branch_access():
     blocked_import = import_line if import_line else "unknown"
 
     raise ImportError(
-        f"\n{'='*60}\n"
+        f"\n{'=' * 60}\n"
         f"ACCESS DENIED: Cross-branch handler import blocked\n"
-        f"{'='*60}\n"
+        f"{'=' * 60}\n"
         f"  Caller branch: {caller_branch}\n"
         f"  Caller file:   {caller_filename}\n"
         f"  Blocked:       {blocked_import}\n"
@@ -110,7 +112,7 @@ def _guard_branch_access():
         f"\n"
         f"  For full standards guide:\n"
         f"    drone @seedgo handlers\n"
-        f"{'='*60}"
+        f"{'=' * 60}"
     )
 
 

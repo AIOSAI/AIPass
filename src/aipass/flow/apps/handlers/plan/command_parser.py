@@ -61,13 +61,16 @@ def parse_create_plan_args(args: List[str]) -> Tuple[str | None, str, str]:
     # Map raw type argument to plan_type_key via registry
     try:
         from aipass.flow.apps.handlers.template.registry_ops import get_type_map
+
         type_map = get_type_map()
     except Exception as e:
         logger.warning(f"[{MODULE_NAME}] Failed to load type map from registry_ops, using defaults: {e}")
         type_map = {"default": "flow_plans", "dplan": "dev_plans"}
     plan_type_key = type_map.get(raw_type.lower(), raw_type)
 
-    json_handler.log_operation("create_args_parsed", {"location": location, "subject": subject, "plan_type_key": plan_type_key})
+    json_handler.log_operation(
+        "create_args_parsed", {"location": location, "subject": subject, "plan_type_key": plan_type_key}
+    )
     return location, subject, plan_type_key
 
 
@@ -120,15 +123,15 @@ def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, b
         (None, False, False, False, "Plan number or --all required")
     """
     # Check for --all flag
-    all_plans = '--all' in args
+    all_plans = "--all" in args
 
     # Default: auto-confirm (confirm=False means no prompt)
     # --confirm or --interactive explicitly requests a prompt
     # --yes/-y kept for backwards compat (redundant, already auto-confirms)
-    confirm = '--confirm' in args or '--interactive' in args
+    confirm = "--confirm" in args or "--interactive" in args
 
     # Check for --dry-run or --preview flag
-    dry_run = '--dry-run' in args or '--preview' in args
+    dry_run = "--dry-run" in args or "--preview" in args
 
     # If --all, plan_num is None
     if all_plans:
@@ -136,7 +139,7 @@ def parse_close_command_args(args: List[str]) -> Tuple[str | None, bool, bool, b
 
     # Otherwise, need plan number
     # Filter out flag args to find the plan number
-    non_flag_args = [a for a in args if not a.startswith('--') and a not in ('-y',)]
+    non_flag_args = [a for a in args if not a.startswith("--") and a not in ("-y",)]
     if not non_flag_args:
         return None, False, False, dry_run, "Plan number or --all required"
 

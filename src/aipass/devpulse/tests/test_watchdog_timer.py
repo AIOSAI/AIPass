@@ -24,29 +24,35 @@ from aipass.devpulse.apps.modules import watchdog as wd_mod
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("30s", 30),
-    ("5m", 300),
-    ("2h", 7200),
-    ("1h30m", 5400),
-    ("45", 45),
-    ("0s", 0),
-    ("120", 120),
-    ("1h1m1s", 3661),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("30s", 30),
+        ("5m", 300),
+        ("2h", 7200),
+        ("1h30m", 5400),
+        ("45", 45),
+        ("0s", 0),
+        ("120", 120),
+        ("1h1m1s", 3661),
+    ],
+)
 def test_parse_duration_valid(text, expected):
     assert timer_handler.parse_duration(text) == expected
 
 
-@pytest.mark.parametrize("text", [
-    "abc",
-    "",
-    "   ",
-    "-5m",
-    "5x",
-    "5m5",
-    "hm",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "abc",
+        "",
+        "   ",
+        "-5m",
+        "5x",
+        "5m5",
+        "hm",
+    ],
+)
 def test_parse_duration_invalid(text):
     with pytest.raises(ValueError):
         timer_handler.parse_duration(text)
@@ -62,16 +68,19 @@ def test_parse_duration_none_raises():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("seconds,expected", [
-    (1, "1s"),
-    (59, "59s"),
-    (60, "1m 00s"),
-    (125, "2m 05s"),
-    (3600, "1h 0m 00s"),
-    (5400, "1h 30m 00s"),
-    (3725, "1h 2m 05s"),
-    (0, "0s"),
-])
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [
+        (1, "1s"),
+        (59, "59s"),
+        (60, "1m 00s"),
+        (125, "2m 05s"),
+        (3600, "1h 0m 00s"),
+        (5400, "1h 30m 00s"),
+        (3725, "1h 2m 05s"),
+        (0, "0s"),
+    ],
+)
 def test_format_human(seconds, expected):
     assert timer_handler.format_human(seconds) == expected
 
@@ -125,7 +134,7 @@ def test_timer_start_then_stop(store_path):
     assert stop["human"].endswith("s")
     assert "stopped_at" in stop
 
-    raw = json.loads(store_path.read_text(encoding='utf-8'))
+    raw = json.loads(store_path.read_text(encoding="utf-8"))
     assert "phase-a" not in raw["active"]
     assert len(raw["history"]) == 1
     assert raw["history"][0]["name"] == "phase-a"
@@ -206,14 +215,14 @@ def test_timer_report_contains_sections(store_path):
 def test_persistence_across_reloads(store_path):
     timer_handler.timer_start("persistent", storage_path=store_path)
 
-    raw_after_start = json.loads(store_path.read_text(encoding='utf-8'))
+    raw_after_start = json.loads(store_path.read_text(encoding="utf-8"))
     assert "persistent" in raw_after_start["active"]
 
     time.sleep(1.1)
     stop_result = timer_handler.timer_stop("persistent", storage_path=store_path)
     assert stop_result["state"] == "stopped"
 
-    raw_after_stop = json.loads(store_path.read_text(encoding='utf-8'))
+    raw_after_stop = json.loads(store_path.read_text(encoding="utf-8"))
     assert "persistent" not in raw_after_stop["active"]
     assert any(h["name"] == "persistent" for h in raw_after_stop["history"])
 
@@ -256,30 +265,39 @@ def _fake_timer_module(**overrides):
 
     def wake_in(duration):
         fake.calls.append(("wake_in", duration))
-        return overrides.get("wake_in", {
-            "woke": True,
-            "reason": "timer fired",
-            "elapsed": 1,
-            "duration": duration,
-            "state": "woke",
-        })
+        return overrides.get(
+            "wake_in",
+            {
+                "woke": True,
+                "reason": "timer fired",
+                "elapsed": 1,
+                "duration": duration,
+                "state": "woke",
+            },
+        )
 
     def timer_start(name, storage_path=None):
         fake.calls.append(("timer_start", name))
-        return overrides.get("timer_start", {
-            "name": name,
-            "started_at": "now",
-            "state": "started",
-        })
+        return overrides.get(
+            "timer_start",
+            {
+                "name": name,
+                "started_at": "now",
+                "state": "started",
+            },
+        )
 
     def timer_stop(name, storage_path=None):
         fake.calls.append(("timer_stop", name))
-        return overrides.get("timer_stop", {
-            "name": name,
-            "elapsed_seconds": 12,
-            "human": "12s",
-            "state": "stopped",
-        })
+        return overrides.get(
+            "timer_stop",
+            {
+                "name": name,
+                "elapsed_seconds": 12,
+                "human": "12s",
+                "state": "stopped",
+            },
+        )
 
     def timer_list(storage_path=None):
         fake.calls.append(("timer_list",))

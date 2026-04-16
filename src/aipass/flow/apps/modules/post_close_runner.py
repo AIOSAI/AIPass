@@ -70,10 +70,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     # Log the operation
-    json_handler.log_operation(
-        "post_close_processed",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("post_close_processed", {"command": command, "args": args})
 
     # Run the post-close processing directly (foreground)
     if not _acquire_lock():
@@ -181,7 +178,7 @@ def print_help():
 
 
 if __name__ == "__main__":
-    if '--help' in sys.argv or '-h' in sys.argv:
+    if "--help" in sys.argv or "-h" in sys.argv:
         print_help()
         sys.exit(0)
 

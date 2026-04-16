@@ -14,6 +14,7 @@ from aipass.cli.apps.modules.init_project import handle_command, _handle_init
 # Helpers
 # =============================================================================
 
+
 def _make_capture_console():
     """Return (console, get_output) for capturing Rich output."""
     buf = StringIO()
@@ -24,6 +25,7 @@ def _make_capture_console():
 # =============================================================================
 # handle_command routing tests
 # =============================================================================
+
 
 class TestHandleCommandRouting:
     """Verify handle_command dispatches correctly and returns the right boolean."""
@@ -80,8 +82,7 @@ class TestHandleCommandRouting:
         """Unknown aipass subcommand shows error and returns True."""
         cons, get_output = _make_capture_console()
         err_cons, get_err = _make_capture_console()
-        with patch.object(init_project, "console", cons), \
-             patch.object(init_project, "error") as mock_error:
+        with patch.object(init_project, "console", cons), patch.object(init_project, "error") as mock_error:
             result = handle_command("aipass", ["bogus"])
         assert result is True
         mock_error.assert_called_once()
@@ -92,6 +93,7 @@ class TestHandleCommandRouting:
 # =============================================================================
 # _handle_init tests
 # =============================================================================
+
 
 class TestHandleInit:
     """Tests for the init subcommand orchestration."""
@@ -110,13 +112,16 @@ class TestHandleInit:
         err_cons, get_err = _make_capture_console()
 
         from aipass.cli.apps.modules import display
-        with patch.object(init_project, "console", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True), \
-             patch.object(init_project, "json_handler") as mock_json, \
-             patch.object(init_project, "logger"):
+
+        with (
+            patch.object(init_project, "console", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+            patch.object(init_project, "json_handler") as mock_json,
+            patch.object(init_project, "logger"),
+        ):
             result = _handle_init([str(target)])
 
         assert result is True
@@ -128,10 +133,12 @@ class TestHandleInit:
 
     def test_init_value_error_exits(self, tmp_path):
         """ValueError from init_project causes error display and sys.exit(1)."""
-        with patch.object(init_project, "init_project", side_effect=ValueError("bad name")), \
-             patch.object(init_project, "error") as mock_error, \
-             patch.object(init_project, "logger"), \
-             pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(init_project, "init_project", side_effect=ValueError("bad name")),
+            patch.object(init_project, "error") as mock_error,
+            patch.object(init_project, "logger"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             _handle_init([str(tmp_path)])
         assert exc_info.value.code == 1
         mock_error.assert_called_once()
@@ -139,20 +146,24 @@ class TestHandleInit:
 
     def test_init_file_exists_error_exits(self, tmp_path):
         """FileExistsError from init_project causes error display and sys.exit(1)."""
-        with patch.object(init_project, "init_project", side_effect=FileExistsError("already exists")), \
-             patch.object(init_project, "error") as mock_error, \
-             patch.object(init_project, "logger"), \
-             pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(init_project, "init_project", side_effect=FileExistsError("already exists")),
+            patch.object(init_project, "error") as mock_error,
+            patch.object(init_project, "logger"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             _handle_init([str(tmp_path)])
         assert exc_info.value.code == 1
         mock_error.assert_called_once()
 
     def test_init_os_error_exits(self, tmp_path):
         """OSError from init_project causes error display and sys.exit(1)."""
-        with patch.object(init_project, "init_project", side_effect=OSError("disk full")), \
-             patch.object(init_project, "error") as mock_error, \
-             patch.object(init_project, "logger"), \
-             pytest.raises(SystemExit) as exc_info:
+        with (
+            patch.object(init_project, "init_project", side_effect=OSError("disk full")),
+            patch.object(init_project, "error") as mock_error,
+            patch.object(init_project, "logger"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
             _handle_init([str(tmp_path)])
         assert exc_info.value.code == 1
         mock_error.assert_called_once()
@@ -160,6 +171,7 @@ class TestHandleInit:
     def test_init_uses_caller_cwd_env(self, tmp_path):
         """When no target arg, uses AIPASS_CALLER_CWD env var."""
         import os
+
         target = tmp_path / "env_project"
         target.mkdir()
 
@@ -167,14 +179,17 @@ class TestHandleInit:
         err_cons, get_err = _make_capture_console()
 
         from aipass.cli.apps.modules import display
-        with patch.dict(os.environ, {"AIPASS_CALLER_CWD": str(target)}), \
-             patch.object(init_project, "console", cons), \
-             patch.object(display, "CONSOLE", cons), \
-             patch.object(display, "err_console", err_cons), \
-             patch.object(display, "_TRIGGER", None), \
-             patch.object(display, "_TRIGGER_LOADED", True), \
-             patch.object(init_project, "json_handler"), \
-             patch.object(init_project, "logger"):
+
+        with (
+            patch.dict(os.environ, {"AIPASS_CALLER_CWD": str(target)}),
+            patch.object(init_project, "console", cons),
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "err_console", err_cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+            patch.object(init_project, "json_handler"),
+            patch.object(init_project, "logger"),
+        ):
             result = _handle_init([])
 
         assert result is True

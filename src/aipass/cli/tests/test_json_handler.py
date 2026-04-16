@@ -322,9 +322,7 @@ class TestLogOperation:
         with patch.object(json_handler, "JSON_DIR", tmp_path):
             json_handler.log_operation("deploy", module_name="cli")
 
-        log = json.loads(
-            (tmp_path / "cli_log.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((tmp_path / "cli_log.json").read_text(encoding="utf-8"))
         assert len(log) == 1
         assert log[0]["operation"] == "deploy"
         assert "timestamp" in log[0]
@@ -332,13 +330,9 @@ class TestLogOperation:
     def test_logs_entry_with_data(self, tmp_path):
         """Data dict should be nested inside the log entry."""
         with patch.object(json_handler, "JSON_DIR", tmp_path):
-            json_handler.log_operation(
-                "sync", data={"count": 5}, module_name="cli"
-            )
+            json_handler.log_operation("sync", data={"count": 5}, module_name="cli")
 
-        log = json.loads(
-            (tmp_path / "cli_log.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((tmp_path / "cli_log.json").read_text(encoding="utf-8"))
         assert log[0]["data"]["count"] == 5
 
     def test_rotation_trims_to_max_entries(self, tmp_path):
@@ -350,19 +344,13 @@ class TestLogOperation:
             "config": {"max_log_entries": 3},
             "created": "2026-01-01",
         }
-        (tmp_path / "cli_config.json").write_text(
-            json.dumps(config), encoding="utf-8"
-        )
+        (tmp_path / "cli_config.json").write_text(json.dumps(config), encoding="utf-8")
 
         with patch.object(json_handler, "JSON_DIR", tmp_path):
             for i in range(5):
-                json_handler.log_operation(
-                    f"op_{i}", module_name="cli"
-                )
+                json_handler.log_operation(f"op_{i}", module_name="cli")
 
-        log = json.loads(
-            (tmp_path / "cli_log.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((tmp_path / "cli_log.json").read_text(encoding="utf-8"))
         assert len(log) == 3
         # Oldest two (op_0, op_1) should be gone; newest three remain
         operations = [entry["operation"] for entry in log]
@@ -374,9 +362,7 @@ class TestLogOperation:
             json_handler.log_operation("first", module_name="cli")
             json_handler.log_operation("second", module_name="cli")
 
-        log = json.loads(
-            (tmp_path / "cli_log.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((tmp_path / "cli_log.json").read_text(encoding="utf-8"))
         assert len(log) == 2
         assert log[0]["operation"] == "first"
         assert log[1]["operation"] == "second"
@@ -456,8 +442,6 @@ class TestEdgeCases:
         with patch.object(json_handler, "JSON_DIR", tmp_path):
             json_handler.log_operation("op", data={}, module_name="mod")
 
-        log = json.loads(
-            (tmp_path / "mod_log.json").read_text(encoding="utf-8")
-        )
+        log = json.loads((tmp_path / "mod_log.json").read_text(encoding="utf-8"))
         assert len(log) == 1
         assert "data" not in log[0]

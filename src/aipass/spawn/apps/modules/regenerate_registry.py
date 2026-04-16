@@ -28,13 +28,16 @@ def print_introspection():
     console.print()
     console.print("Connected Handlers:")
     console.print("  handlers/")
-    console.print("    - regenerate_registry_ops.py (regenerate_template_registry — walk template, hash files, build registry)")
+    console.print(
+        "    - regenerate_registry_ops.py (regenerate_template_registry — walk template, hash files, build registry)"
+    )
     console.print()
 
 
 # =============================================================================
 # DRONE ROUTING
 # =============================================================================
+
 
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point.
@@ -64,6 +67,7 @@ def handle_command(command: str, args: list) -> bool:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def handle_regenerate_registry(args: list[str]) -> int:
     """Parse args and execute template registry regeneration.
@@ -142,6 +146,7 @@ def handle_regenerate_registry(args: list[str]) -> int:
 # =============================================================================
 # OUTPUT HELPERS
 # =============================================================================
+
 
 def _print_help() -> None:
     """Print usage help for regenerate-registry command."""

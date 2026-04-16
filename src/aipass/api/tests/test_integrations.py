@@ -14,6 +14,7 @@ Groups:
   TestFetchContracts        — fetch_contracts() happy path and empty
   TestCallContract          — call_contract() happy path, unregistered, args forwarding, exception
 """
+
 import pytest
 
 from aipass.api.apps.modules import bridge, registry
@@ -23,6 +24,7 @@ from aipass.api.apps.modules.integrations_manager import fetch_contracts, call_c
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def clean_bridge():
@@ -38,12 +40,15 @@ def clean_bridge():
 # TestBridge
 # ---------------------------------------------------------------------------
 
+
 class TestBridge:
     def test_register_and_resolve(self):
         """register() then resolve() returns the same callable."""
+
         def fn():
             """Test fixture."""
             return "result"
+
         bridge.register("my_contract", fn)
         assert bridge.resolve("my_contract") is fn
 
@@ -64,12 +69,15 @@ class TestBridge:
 
     def test_register_overwrites(self):
         """Registering same name twice replaces the driver."""
+
         def fn1():
             """First test fixture."""
             return "first"
+
         def fn2():
             """Second test fixture."""
             return "second"
+
         bridge.register("dup", fn1)
         bridge.register("dup", fn2)
         assert bridge.resolve("dup") is fn2
@@ -78,6 +86,7 @@ class TestBridge:
 # ---------------------------------------------------------------------------
 # TestRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestRegistry:
     def test_load_drivers_empty_dir(self, tmp_path):
@@ -144,6 +153,7 @@ class TestRegistry:
 # TestFetchContracts
 # ---------------------------------------------------------------------------
 
+
 class TestFetchContracts:
     def test_empty_returns_success(self):
         """fetch_contracts() returns success with empty list when bridge is clear."""
@@ -165,6 +175,7 @@ class TestFetchContracts:
 # ---------------------------------------------------------------------------
 # TestCallContract
 # ---------------------------------------------------------------------------
+
 
 class TestCallContract:
     def test_call_registered_contract(self):

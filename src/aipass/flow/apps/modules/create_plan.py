@@ -83,6 +83,7 @@ ECOSYSTEM_ROOT = _PKG_ROOT
 # INTROSPECTION
 # =============================================
 
+
 def print_introspection():
     """Display module info and connected handlers"""
     console.print()
@@ -120,6 +121,7 @@ def print_introspection():
     console.print("[dim]Run 'drone @flow create --help' for usage[/dim]")
     console.print()
 
+
 def print_help():
     """Print help information for create_plan module"""
     console.print()
@@ -146,6 +148,7 @@ def print_help():
 # =============================================
 # ORCHESTRATION WORKFLOWS (thin wrappers)
 # =============================================
+
 
 def create_plan(
     location: str | None = None,
@@ -213,7 +216,7 @@ def create_plan(
             if msg_type == "dim":
                 console.print(f"[dim]{msg['text']}[/dim]")
             elif msg_type == "warning":
-                warning(msg['text'])
+                warning(msg["text"])
             elif msg_type == "display":
                 console.print(msg["text"])
         return ok, num, loc, tmpl, error
@@ -254,10 +257,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Log the operation
-    json_handler.log_operation(
-        "plan_created",
-        {"command": command, "args": args}
-    )
+    json_handler.log_operation("plan_created", {"command": command, "args": args})
 
     # STEP 1: Parse arguments (delegate to handler)
     location, subject, plan_type_key = parse_create_plan_args(args)
@@ -276,7 +276,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # STEP 2: Execute workflow
     success, num, loc, tmpl, error = create_plan(
-        location, subject,
+        location,
+        subject,
         plan_type_key=plan_type_key,
         plan_type_config=plan_type_config,
     )
@@ -285,8 +286,13 @@ def handle_command(command: str, args: List[str]) -> bool:
     prefix = plan_type_config["prefix"] if plan_type_config else "FPLAN"
     digits = plan_type_config["digits"] if plan_type_config else 4
     result_msg = display_plan_result(
-        success, num, loc, tmpl, error,
-        prefix=prefix, digits=digits,
+        success,
+        num,
+        loc,
+        tmpl,
+        error,
+        prefix=prefix,
+        digits=digits,
     )
     console.print(result_msg)
 
@@ -307,7 +313,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
@@ -315,18 +321,15 @@ if __name__ == "__main__":
     logger.info("Prax logger connected to create_plan")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "plan_created",
-        {"command": "standalone"}
-    )
+    json_handler.log_operation("plan_created", {"command": "standalone"})
 
     # Call handle_command with default
     args = sys.argv[1:] if len(sys.argv) > 1 else []
-    if args and args[0] not in ['create', 'create_plan']:
+    if args and args[0] not in ["create", "create_plan"]:
         # If first arg is not command, assume it's location (backward compatibility)
-        args.insert(0, 'create')
+        args.insert(0, "create")
 
-    result = handle_command(args[0] if args else 'create', args[1:] if args else [])
+    result = handle_command(args[0] if args else "create", args[1:] if args else [])
     if result:
         sys.exit(0)
     else:

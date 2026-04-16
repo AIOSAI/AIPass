@@ -35,6 +35,7 @@ _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 # PATH HELPERS
 # =============================================================================
 
+
 def get_template_dir(citizen_class: str = "builder") -> Path:
     """Return path to template directory for a citizen class.
 
@@ -45,12 +46,14 @@ def get_template_dir(citizen_class: str = "builder") -> Path:
         Path to the template directory.
     """
     from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_get_template_dir
+
     return _class_get_template_dir(citizen_class)
 
 
 # =============================================================================
 # FILE HASHING
 # =============================================================================
+
 
 def compute_file_hash(file_path: Path) -> str:
     """Compute SHA-256 hash of a file, returning the first 12 hex characters.
@@ -80,6 +83,7 @@ def compute_file_hash(file_path: Path) -> str:
 # TEMPLATE REGISTRY OPERATIONS
 # =============================================================================
 
+
 def load_template_registry(template_dir: Path) -> Optional[dict]:
     """Load .spawn/.template_registry.json from a template directory.
 
@@ -107,6 +111,7 @@ def load_template_registry(template_dir: Path) -> Optional[dict]:
 # =============================================================================
 # BRANCH METADATA OPERATIONS
 # =============================================================================
+
 
 def load_branch_meta(branch_dir: Path) -> Optional[dict]:
     """Load .spawn/.branch_meta.json from a branch directory.

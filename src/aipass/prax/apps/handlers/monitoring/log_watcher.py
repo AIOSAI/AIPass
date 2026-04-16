@@ -45,6 +45,7 @@ logger = get_direct_logger()
 # Trigger integration - graceful fallback if trigger not available
 try:
     from aipass.trigger.apps.modules.core import trigger
+
     HAS_TRIGGER = True
 except ImportError as e:
     logger.info("[log_watcher] trigger module not available: %s", e)
@@ -67,8 +68,10 @@ def _generate_error_hash(module_name: str, message: str) -> str:
         8-character hash string for deduplication
     """
     import hashlib
+
     content = f"{module_name}:{message}"
     return hashlib.md5(content.encode()).hexdigest()[:8]
+
 
 # Global observer instance
 _log_observer: Any = None
@@ -124,7 +127,7 @@ class LogFileWatcher(FileSystemEventHandler):
         if current_size <= last_pos:
             return None
 
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             f.seek(last_pos)
             new_lines = f.read()
             self.log_positions[file_path] = f.tell()
@@ -138,7 +141,7 @@ class LogFileWatcher(FileSystemEventHandler):
 
         file_path = str(event.src_path)
 
-        if not file_path.endswith('.log'):
+        if not file_path.endswith(".log"):
             return
 
         if str(get_system_logs_dir()) not in file_path:
@@ -150,7 +153,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 return
 
             branch = detect_branch_from_log(file_path)
-            for line in new_content.strip().split('\n'):
+            for line in new_content.strip().split("\n"):
                 self._process_log_line(branch, line, file_path)
 
         except Exception as e:
@@ -163,29 +166,29 @@ class LogFileWatcher(FileSystemEventHandler):
     def _detect_log_level(self, log_line: str) -> str:
         """Detect log level from log line. Returns 'error', 'warning', 'info', or 'debug'."""
         _LEVEL_MARKERS = {
-            'error': (' - ERROR - ', ' ERROR ', '[ERROR]', ' - CRITICAL - ', ' CRITICAL ', '[CRITICAL]'),
-            'warning': (' - WARNING - ', ' WARNING ', '[WARNING]'),
-            'debug': (' - DEBUG - ', ' DEBUG ', '[DEBUG]'),
+            "error": (" - ERROR - ", " ERROR ", "[ERROR]", " - CRITICAL - ", " CRITICAL ", "[CRITICAL]"),
+            "warning": (" - WARNING - ", " WARNING ", "[WARNING]"),
+            "debug": (" - DEBUG - ", " DEBUG ", "[DEBUG]"),
         }
         for level, markers in _LEVEL_MARKERS.items():
             if any(m in log_line for m in markers):
                 return level
-        return 'info'
+        return "info"
 
     def _match_flow_command(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
         """Match flow plan commands from log line."""
         if "Creating" in log_line:
-            return {'command': "flow create plan", 'caller': None, 'target': None}
+            return {"command": "flow create plan", "caller": None, "target": None}
         if "Closing" in log_line:
             match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
             plan_id = match.group(1) if match else ""
-            return {'command': f"flow close plan {plan_id}".strip(), 'caller': None, 'target': None}
+            return {"command": f"flow close plan {plan_id}".strip(), "caller": None, "target": None}
         if "Opening" in log_line:
             match = re.search(r"(?:FPLAN|PLAN)[- ]?(\d+)", log_line)
             plan_id = match.group(1) if match else ""
-            return {'command': f"flow open plan {plan_id}".strip(), 'caller': None, 'target': None}
-        if "Loaded module:" in log_line and not self.last_command_per_branch.get('FLOW', '').startswith('FLOW:flow'):
-            return {'command': "flow command", 'caller': None, 'target': None}
+            return {"command": f"flow open plan {plan_id}".strip(), "caller": None, "target": None}
+        if "Loaded module:" in log_line and not self.last_command_per_branch.get("FLOW", "").startswith("FLOW:flow"):
+            return {"command": "flow command", "caller": None, "target": None}
         return None
 
     def _extract_command_info(self, log_line: str) -> Optional[Dict[str, Optional[str]]]:
@@ -199,8 +202,8 @@ class LogFileWatcher(FileSystemEventHandler):
         if "Drone started with args:" in log_line or "[drone] Drone started with args:" in log_line:
             match = re.search(r"args:\s*\[([^\]]+)\]", log_line)
             if match:
-                args = match.group(1).replace("'", "").replace('"', '')
-                return {'command': f"drone {args}", 'caller': None, 'target': None}
+                args = match.group(1).replace("'", "").replace('"', "")
+                return {"command": f"drone {args}", "caller": None, "target": None}
 
         # Pattern 2: Flow plan commands
         if "[FLOW]" in log_line or "FLOW_PLAN]" in log_line:
@@ -213,13 +216,13 @@ class LogFileWatcher(FileSystemEventHandler):
             match = re.search(r"Auditing\s+(\w+)", log_line)
             if match:
                 target = match.group(1).upper()
-                return {'command': f"seedgo audit @{target.lower()}", 'caller': None, 'target': target}
+                return {"command": f"seedgo audit @{target.lower()}", "caller": None, "target": target}
 
         # Pattern 4: Seedgo checklist commands
         if "standards_checklist" in log_line.lower() and "Running" in log_line:
             match = re.search(r"Running\s+(\w+)\s+standard\s+check\s+on\s+(.+)", log_line)
             if match:
-                return {'command': f"seedgo checklist {match.group(2)}", 'caller': None, 'target': None}
+                return {"command": f"seedgo checklist {match.group(2)}", "caller": None, "target": None}
 
         # Pattern 5: AI Mail commands - extract target
         if "[ai_mail]" in log_line.lower():
@@ -227,44 +230,46 @@ class LogFileWatcher(FileSystemEventHandler):
                 # Try to extract recipient
                 target_match = re.search(r"to\s+@?(\w+)", log_line, re.IGNORECASE)
                 target = target_match.group(1).upper() if target_match else None
-                return {'command': "ai_mail send", 'caller': None, 'target': target}
+                return {"command": "ai_mail send", "caller": None, "target": target}
             elif "inbox" in log_line.lower():
-                return {'command': "ai_mail inbox", 'caller': None, 'target': None}
+                return {"command": "ai_mail inbox", "caller": None, "target": None}
 
         # Pattern 6: Prax commands
         if "[prax]" in log_line.lower():
             if "monitor" in log_line.lower():
-                return {'command': "prax monitor", 'caller': None, 'target': None}
+                return {"command": "prax monitor", "caller": None, "target": None}
             elif "status" in log_line.lower():
-                return {'command': "prax status", 'caller': None, 'target': None}
+                return {"command": "prax status", "caller": None, "target": None}
 
         # Pattern 8: Backup operations (direct python3 calls)
         if "[backup" in log_line.lower():
-            if "snapshot" in log_line.lower() and ("Starting" in log_line or "Running" in log_line or "Complete" in log_line):
-                return {'command': "backup snapshot", 'caller': None, 'target': None}
+            if "snapshot" in log_line.lower() and (
+                "Starting" in log_line or "Running" in log_line or "Complete" in log_line
+            ):
+                return {"command": "backup snapshot", "caller": None, "target": None}
             elif "versioned" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {'command': "backup versioned", 'caller': None, 'target': None}
+                return {"command": "backup versioned", "caller": None, "target": None}
             elif "sync" in log_line.lower() and ("Starting" in log_line or "Running" in log_line):
-                return {'command': "backup sync", 'caller': None, 'target': None}
+                return {"command": "backup sync", "caller": None, "target": None}
 
         # Pattern 9: Memory operations (direct python3 calls)
         if "[memory]" in log_line.lower() or "memory" in log_line.lower():
             if "rollover" in log_line.lower() and ("Starting" in log_line or "Processing" in log_line):
-                return {'command': "memory rollover", 'caller': None, 'target': None}
+                return {"command": "memory rollover", "caller": None, "target": None}
             elif "search" in log_line.lower() and "query" in log_line.lower():
-                return {'command': "memory search", 'caller': None, 'target': None}
+                return {"command": "memory search", "caller": None, "target": None}
 
         # Pattern 10: Spawn operations (direct python3 calls)
         if "[spawn]" in log_line.lower():
             if "Creating" in log_line and "branch" in log_line.lower():
                 match = re.search(r"Creating\s+(?:branch\s+)?(\w+)", log_line)
                 target = match.group(1).upper() if match else None
-                return {'command': "spawn create branch", 'caller': None, 'target': target}
+                return {"command": "spawn create branch", "caller": None, "target": target}
 
         # Pattern 11: Trigger operations (direct python3 calls)
         if "[trigger]" in log_line.lower():
             if "fired" in log_line.lower() or "triggered" in log_line.lower():
-                return {'command': "trigger fire", 'caller': None, 'target': None}
+                return {"command": "trigger fire", "caller": None, "target": None}
 
         # Pattern 12: Drone routing with caller attribution - HIGHEST PRIORITY
         # Format: "Routing @flow [CALLER:PRAX] → create ['.', 'Subject']"
@@ -279,7 +284,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 cmd_name = route_match.group(2)
                 cmd_args = route_match.group(3).strip()
                 display_cmd = f"drone @{route_match.group(1)} {cmd_name} {cmd_args}".strip()
-                return {'command': display_cmd, 'caller': caller, 'target': target}
+                return {"command": display_cmd, "caller": caller, "target": target}
 
         # Pattern 7: ALL drone command executions - HIGH PRIORITY
         # Format: "Executing command [CALLER:PRAX]: seedgo.py audit @prax"
@@ -301,18 +306,18 @@ class LogFileWatcher(FileSystemEventHandler):
         target = self._extract_target_from_cmd(cmd)
 
         # Clean up command display - simplify paths
-        display_cmd = re.sub(r'[^\s]*/aipass/(\w+)/apps/\w+\.py', lambda m: f"@{m.group(1)}", cmd)
-        display_cmd = re.sub(r'[^\s]*/aipass/(\w+)', lambda m: f"@{m.group(1)}", display_cmd)
+        display_cmd = re.sub(r"[^\s]*/aipass/(\w+)/apps/\w+\.py", lambda m: f"@{m.group(1)}", cmd)
+        display_cmd = re.sub(r"[^\s]*/aipass/(\w+)", lambda m: f"@{m.group(1)}", display_cmd)
 
-        return {'command': display_cmd, 'caller': caller, 'target': target}
+        return {"command": display_cmd, "caller": caller, "target": target}
 
     @staticmethod
     def _extract_target_from_cmd(cmd: str) -> Optional[str]:
         """Extract target branch from a command string."""
-        target_match = re.search(r'@(\w+)', cmd)
+        target_match = re.search(r"@(\w+)", cmd)
         if target_match:
             return target_match.group(1).upper()
-        path_match = re.search(r'/aipass/(\w+)', cmd)
+        path_match = re.search(r"/aipass/(\w+)", cmd)
         if path_match:
             return path_match.group(1).upper()
         return None
@@ -324,9 +329,9 @@ class LogFileWatcher(FileSystemEventHandler):
         """
         # Handle dict format (new) and legacy string/tuple formats
         if isinstance(command_info, dict):
-            command = command_info.get('command', '')
-            caller = command_info.get('caller')
-            target = command_info.get('target')
+            command = command_info.get("command", "")
+            caller = command_info.get("caller")
+            target = command_info.get("target")
         elif isinstance(command_info, tuple):
             command, caller = command_info
             target = None
@@ -343,13 +348,13 @@ class LogFileWatcher(FileSystemEventHandler):
 
         separator_event = MonitoringEvent(
             priority=2,
-            event_type='command',
+            event_type="command",
             branch=branch,
-            action='executed',
+            action="executed",
             message=command,
-            level='info',
+            level="info",
             timestamp=datetime.now(),
-            caller=caller
+            caller=caller,
         )
 
         # Store target in action field since MonitoringEvent doesn't have a target field
@@ -372,12 +377,12 @@ class LogFileWatcher(FileSystemEventHandler):
             Cleaned message content
         """
         # Try to extract message after last pipe separator
-        if ' | ' in log_line:
-            parts = log_line.split(' | ')
+        if " | " in log_line:
+            parts = log_line.split(" | ")
             if len(parts) >= 4:
                 # Format: [BRANCH] TIMESTAMP | SOURCE | LEVEL | MESSAGE
                 # Return everything after the LEVEL part
-                return ' | '.join(parts[3:]).strip()
+                return " | ".join(parts[3:]).strip()
             elif len(parts) >= 2:
                 # Simpler format, return last part
                 return parts[-1].strip()
@@ -385,8 +390,7 @@ class LogFileWatcher(FileSystemEventHandler):
         # Fallback: return as-is if can't parse
         return log_line.strip()
 
-    def _emit_log_event(self, branch: str, log_line: str, level: str,
-                        log_file_path: Optional[str] = None) -> None:
+    def _emit_log_event(self, branch: str, log_line: str, level: str, log_file_path: Optional[str] = None) -> None:
         """
         Create and emit log event to monitoring queue.
 
@@ -404,32 +408,33 @@ class LogFileWatcher(FileSystemEventHandler):
         current_time = datetime.now()
 
         # Fire trigger event for ERROR level logs
-        if HAS_TRIGGER and level == 'error':
+        if HAS_TRIGGER and level == "error":
             # Extract module name from log line if possible
-            module_name = 'unknown'
-            if ' | ' in log_line:
-                parts = log_line.split(' | ')
+            module_name = "unknown"
+            if " | " in log_line:
+                parts = log_line.split(" | ")
                 if len(parts) >= 2:
                     module_name = parts[1].strip()
 
-            trigger.fire('error_detected',  # type: ignore[union-attr]
+            trigger.fire(
+                "error_detected",  # type: ignore[union-attr]
                 branch=branch,
                 message=clean_message,
                 error_hash=_generate_error_hash(module_name, clean_message),
                 timestamp=current_time.isoformat(),
-                log_file=log_file_path or 'unknown',
-                module_name=module_name
+                log_file=log_file_path or "unknown",
+                module_name=module_name,
             )
 
         # Create monitoring event
         log_event = MonitoringEvent(
             priority=0,  # Auto-calculated from level
-            event_type='log',
+            event_type="log",
             branch=branch,
-            action='logged',
+            action="logged",
             message=clean_message,
             level=level,
-            timestamp=current_time
+            timestamp=current_time,
         )
 
         # Push to queue
@@ -450,6 +455,7 @@ class LogFileWatcher(FileSystemEventHandler):
                 self.log_positions[str(log_file)] = log_file.stat().st_size
             except Exception as e:
                 logger.info(f"Could not get size for {log_file}: {e}")
+
 
 def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -> Any:
     """
@@ -478,6 +484,7 @@ def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -
     # Create observer — polling fallback when inotify unavailable
     if use_polling:
         from watchdog.observers.polling import PollingObserver
+
         observer = PollingObserver(timeout=1)
         logger.info("Log watcher using polling observer (1s interval)")
     else:
@@ -520,7 +527,7 @@ def is_log_watcher_active() -> bool:
 # STANDALONE TEST
 # =============================================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """
     Standalone test - starts log watcher and prints events from queue.
 
@@ -555,25 +562,23 @@ if __name__ == '__main__':
 
             if event:
                 # Format and display event
-                timestamp = event.timestamp.strftime('%H:%M:%S')
+                timestamp = event.timestamp.strftime("%H:%M:%S")
 
                 # Color by level
                 level_colors = {
-                    'error': 'red',
-                    'warning': 'yellow',
-                    'info': 'white',
-                    'debug': 'dim',
+                    "error": "red",
+                    "warning": "yellow",
+                    "info": "white",
+                    "debug": "dim",
                 }
-                color = level_colors.get(event.level, 'white')
+                color = level_colors.get(event.level, "white")
 
                 # Print event
-                if event.event_type == 'command':
+                if event.event_type == "command":
                     console.print(f"\n[bold green]{event.message}[/bold green]\n")
                 else:
                     console.print(
-                        f"[dim]{timestamp}[/dim] "
-                        f"[cyan][{event.branch:>8}][/cyan] "
-                        f"[{color}]{event.message}[/{color}]"
+                        f"[dim]{timestamp}[/dim] [cyan][{event.branch:>8}][/cyan] [{color}]{event.message}[/{color}]"
                     )
 
             # Small delay to prevent CPU spinning

@@ -55,7 +55,6 @@ SCHEDULER_CONFIG = _REPO_ROOT / ".aipass" / "scheduler_config.json"
 SHUTDOWN = False
 
 
-
 def _notify_telegram(message: str) -> bool:
     """Send a notification to Patrick's Telegram via the scheduler bot."""
     try:
@@ -96,7 +95,7 @@ def _read_json(filepath: Path) -> Optional[Dict[str, Any]]:
     if not filepath.exists():
         return None
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("[daemon] Failed to read JSON %s: %s", filepath, e)
@@ -107,7 +106,7 @@ def _write_json(filepath: Path, data: Dict[str, Any]) -> bool:
     """Write data to a JSON file, returning success."""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except OSError as e:
@@ -125,20 +124,12 @@ def _set_session_name(branch_path: Path, name: str) -> bool:
     projects_dir = Path("~/.claude/projects").expanduser() / encoded_cwd
     if not projects_dir.exists():
         return False
-    jsonl_files = sorted(
-        projects_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
-    )
+    jsonl_files = sorted(projects_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not jsonl_files:
         return False
     latest = jsonl_files[0]
     session_id = latest.stem
-    entry = json.dumps({
-        "type": "custom-title",
-        "customTitle": name,
-        "sessionId": session_id
-    })
+    entry = json.dumps({"type": "custom-title", "customTitle": name, "sessionId": session_id})
     try:
         with open(latest, "a", encoding="utf-8") as f:
             f.write(entry + "\n")
@@ -154,7 +145,7 @@ def _check_lock(branch_path: Path) -> Optional[Dict[str, Any]]:
     if not lock_file.exists():
         return None
     try:
-        with open(lock_file, 'r', encoding='utf-8') as f:
+        with open(lock_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         pid = data.get("pid")
         if pid is not None:
@@ -173,18 +164,13 @@ def _check_lock(branch_path: Path) -> Optional[Dict[str, Any]]:
                 lock_time = datetime.fromisoformat(ts)
                 age = (datetime.now() - lock_time).total_seconds()
                 if age > 600:
-                    logger.warning(
-                        "Stale lock removed at %s (PID %s dead, age %.0fs)",
-                        lock_file, pid, age
-                    )
+                    logger.warning("Stale lock removed at %s (PID %s dead, age %.0fs)", lock_file, pid, age)
                     lock_file.unlink(missing_ok=True)
                     return None
             except (ValueError, TypeError):
                 logger.info("Unparseable lock timestamp at %s", lock_file)
         # Dead process, remove stale lock
-        logger.warning(
-            "Stale lock removed at %s (PID %s no longer running)", lock_file, pid
-        )
+        logger.warning("Stale lock removed at %s (PID %s no longer running)", lock_file, pid)
         lock_file.unlink(missing_ok=True)
         return None
     except (json.JSONDecodeError, OSError):
@@ -196,16 +182,12 @@ def _check_lock(branch_path: Path) -> Optional[Dict[str, Any]]:
 def _acquire_lock(branch_path: Path, pid: int) -> tuple[bool, str]:
     """Acquire dispatch lock for branch. Atomic creation via O_CREAT|O_EXCL."""
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    lock_data = {
-        "pid": pid,
-        "timestamp": datetime.now().isoformat(),
-        "branch": str(branch_path)
-    }
+    lock_data = {"pid": pid, "timestamp": datetime.now().isoformat(), "branch": str(branch_path)}
     try:
         lock_file.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         try:
-            os.write(fd, json.dumps(lock_data, indent=2).encode('utf-8'))
+            os.write(fd, json.dumps(lock_data, indent=2).encode("utf-8"))
         finally:
             os.close(fd)
         return True, "Lock acquired"
@@ -228,7 +210,7 @@ def load_config() -> Dict[str, Any]:
         "session_rotation_cycles": 12,
         "cold_start_prompt": "Hi. Check inbox, process new emails, update memories when done.",
         "wake_prompt": "Wake. Check inbox, process new emails, continue work. Update memories when done.",
-        "autonomous_branches": []
+        "autonomous_branches": [],
     }
 
     config = _read_json(CONFIG_FILE)
@@ -346,8 +328,7 @@ def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
                 age = (now - msg_time).total_seconds()
                 if age > orphan_threshold_seconds:
                     logger.warning(
-                        "Retrying orphaned dispatch email %s (opened %.0f min ago)",
-                        msg.get("id", "?"), age / 60
+                        "Retrying orphaned dispatch email %s (opened %.0f min ago)", msg.get("id", "?"), age / 60
                     )
                     return msg
             except (ValueError, TypeError):
@@ -357,11 +338,7 @@ def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
 
 
 def spawn_agent(
-    branch_path: Path,
-    branch_email: str,
-    message: Dict[str, Any],
-    config: Dict[str, Any],
-    state: Dict[str, Any]
+    branch_path: Path, branch_email: str, message: Dict[str, Any], config: Dict[str, Any], state: Dict[str, Any]
 ) -> bool:
     """
     Spawn a Claude agent at the target branch via dispatch_monitor wrapper.
@@ -389,16 +366,19 @@ def spawn_agent(
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
     # Prompt — no lock cleanup instruction (dispatch_monitor handles it)
-    prompt = (
-        f"Hi. Check inbox for task from {sender} (message ID: {msg_id}). "
-        f"Execute it. Send confirmation when done."
-    )
+    prompt = f"Hi. Check inbox for task from {sender} (message ID: {msg_id}). Execute it. Send confirmation when done."
 
     claude_cmd = [
-        "claude", "-c", "-p", prompt,
-        "--max-turns", str(max_turns),
-        "--permission-mode", "bypassPermissions",
-        "--output-format", "json"
+        "claude",
+        "-c",
+        "-p",
+        prompt,
+        "--max-turns",
+        str(max_turns),
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "json",
     ]
 
     # Build monitor command (dispatch_monitor wraps claude, handles bounce + lock cleanup)
@@ -408,9 +388,14 @@ def spawn_agent(
     STDERR_LOG = str(LOG_DIR / "dispatch_stderr.log")
 
     monitor_cmd = [
-        sys.executable, str(MONITOR_SCRIPT),
-        branch_email, lock_file_path, sender, STDERR_LOG,
-        "--", *claude_cmd
+        sys.executable,
+        str(MONITOR_SCRIPT),
+        branch_email,
+        lock_file_path,
+        sender,
+        STDERR_LOG,
+        "--",
+        *claude_cmd,
     ]
 
     spawn_env = os.environ.copy()
@@ -432,7 +417,7 @@ def spawn_agent(
             stderr=subprocess.DEVNULL,
             start_new_session=True,
             cwd=str(branch_path),
-            env=spawn_env
+            env=spawn_env,
         )
 
         monitor_pid = process.pid
@@ -455,14 +440,15 @@ def spawn_agent(
 
         # Desktop notification — show who woke and why
         notif_title = f"Daemon → {branch_email}"
-        notif_body = f"Task from {sender}: \"{subject[:80]}\"" if subject else f"Dispatch from {sender}"
+        notif_body = f'Task from {sender}: "{subject[:80]}"' if subject else f"Dispatch from {sender}"
         try:
             from aipass.ai_mail.apps.handlers.notify import send_notification
+
             send_notification(notif_title, notif_body, source=branch_email.lstrip("@"))
         except Exception:
             logger.info(f"Desktop notification unavailable for {branch_email}")
 
-        logger.info(f"SPAWN {branch_email} PID={monitor_pid} (monitor) sender={sender} subject=\"{subject[:60]}\"")
+        logger.info(f'SPAWN {branch_email} PID={monitor_pid} (monitor) sender={sender} subject="{subject[:60]}"')
         log_dispatch(branch_email, monitor_pid, "spawned")
         _notify_telegram(f"[Dispatch] {branch_email} woke\nTask from {sender}: {subject[:80]}")
         return True
@@ -482,20 +468,20 @@ def is_protected_branch(branch_email: str) -> bool:
 def _read_session_type(pid_str: str) -> str:
     """Read AIPASS_SESSION_TYPE from /proc/{pid}/environ. Returns 'interactive' if unset."""
     if sys.platform != "linux":
-        return 'interactive'
+        return "interactive"
     try:
-        with open(f'/proc/{pid_str}/environ', 'rb') as f:
+        with open(f"/proc/{pid_str}/environ", "rb") as f:
             data = f.read()
-        for entry in data.split(b'\0'):
-            if entry.startswith(b'AIPASS_SESSION_TYPE='):
-                return entry.split(b'=', 1)[1].decode('utf-8')
+        for entry in data.split(b"\0"):
+            if entry.startswith(b"AIPASS_SESSION_TYPE="):
+                return entry.split(b"=", 1)[1].decode("utf-8")
     except (OSError, PermissionError):
         logger.info("Cannot read session type for PID %s", pid_str)
-    return 'interactive'
+    return "interactive"
 
 
 # Session types that should NOT block dispatch (idle/background sessions)
-_NON_BLOCKING_SESSION_TYPES = {'telegram', 'dispatched', 'daemon'}
+_NON_BLOCKING_SESSION_TYPES = {"telegram", "dispatched", "daemon"}
 
 
 def _is_branch_occupied(branch_path: Path) -> bool:
@@ -507,21 +493,18 @@ def _is_branch_occupied(branch_path: Path) -> bool:
     """
     resolved = branch_path.resolve()
     try:
-        result = subprocess.run(
-            ['pgrep', '-x', 'claude'],
-            capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
             return False
 
-        for pid_str in result.stdout.strip().split('\n'):
+        for pid_str in result.stdout.strip().split("\n"):
             pid_str = pid_str.strip()
             if not pid_str:
                 continue
             try:
                 if sys.platform != "linux":
                     continue
-                cwd = os.readlink(f'/proc/{pid_str}/cwd')
+                cwd = os.readlink(f"/proc/{pid_str}/cwd")
                 if Path(cwd).resolve() == resolved:
                     session_type = _read_session_type(pid_str)
                     if session_type not in _NON_BLOCKING_SESSION_TYPES:

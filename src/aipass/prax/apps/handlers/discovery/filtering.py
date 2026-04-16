@@ -18,6 +18,7 @@ from pathlib import Path
 from aipass.prax.apps.handlers.config.ignore_patterns import load_ignore_patterns_from_config
 from aipass.prax.apps.handlers.json import json_handler
 
+
 def should_ignore_path(path: Path) -> bool:
     """Check if path should be ignored based on patterns from config
 

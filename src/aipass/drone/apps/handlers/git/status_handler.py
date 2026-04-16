@@ -37,7 +37,9 @@ def get_branch_status(branch_dir: Path) -> dict:
     try:
         result = subprocess.run(
             ["git", "status", "--porcelain"],
-            capture_output=True, text=True, cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.error("git status failed: %s", exc)
@@ -54,7 +56,9 @@ def get_branch_status(branch_dir: Path) -> dict:
     try:
         rel_dir = branch_dir.resolve().relative_to(repo_root.resolve())
     except ValueError:
-        logger.warning("get_branch_status: branch_dir %s not relative to repo root %s, using absolute", branch_dir, repo_root)
+        logger.warning(
+            "get_branch_status: branch_dir %s not relative to repo root %s, using absolute", branch_dir, repo_root
+        )
         rel_dir = branch_dir
 
     rel_prefix = str(rel_dir) + "/"

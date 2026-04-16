@@ -20,11 +20,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.dispatch.status import (
-    load_dispatch_log,
-    check_pid_status,
-    calculate_age
-)
+from aipass.ai_mail.apps.handlers.dispatch.status import load_dispatch_log, check_pid_status, calculate_age
 
 
 def print_help() -> None:
@@ -77,7 +73,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "dispatch":
         return False
 
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -157,10 +153,10 @@ def _orchestrate_status() -> bool:
 
 def _orchestrate_wake(args: List[str]) -> bool:
     """Orchestrate manual branch wake."""
-    if not args or args[0] in ['--help', '-h', 'help']:
+    if not args or args[0] in ["--help", "-h", "help"]:
         console.print("\n[bold]Wake - Manual branch spawn[/bold]")
-        console.print("  Usage: dispatch wake @branch [\"custom message\"]")
-        console.print("  Or:    drone wake @branch [\"custom message\"]\n")
+        console.print('  Usage: dispatch wake @branch ["custom message"]')
+        console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
 
     # Parse --fresh, --sender, --model flags
@@ -195,9 +191,9 @@ def _orchestrate_wake(args: List[str]) -> bool:
     console.print(f"\n⏳ Waking {branch_email}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+
     dispatch_status, success = wake_branch(
-        branch_email, custom_message, fresh=use_fresh, sender=use_sender,
-        model=use_model
+        branch_email, custom_message, fresh=use_fresh, sender=use_sender, model=use_model
     )
 
     # Print step-by-step status
@@ -236,7 +232,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         i += 1
 
     if len(filtered) < 3:
-        error("Usage: dispatch @target \"Subject\" \"Body\" [--fresh] [--no-memory-save]")
+        error('Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save]')
         return True
 
     target = filtered[0]
@@ -244,9 +240,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     body = filtered[2]
 
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
-    json_handler.log_operation("dispatch_send_and_wake", {
-        "target": target, "subject": subject, "fresh": use_fresh
-    })
+    json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
 
     # --- Step 1: Send dispatch email ---
     console.print(f"\nSending dispatch email to {target}...")
@@ -270,21 +264,34 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     _repo_root = _ai_mail_dir.parents[2]
 
     def _delivery_callback(branch_path, new_count, opened_count, total):
-        on_email_delivered(branch_path, new_count, opened_count, total,
-                           push_dashboard_fn=push_dashboard_update,
-                           update_central_fn=update_central)
+        on_email_delivered(
+            branch_path,
+            new_count,
+            opened_count,
+            total,
+            push_dashboard_fn=push_dashboard_update,
+            update_central_fn=update_central,
+        )
 
     try:
-        user_info = resolve_sender_info(
-            from_branch, _repo_root, _ai_mail_dir, get_branch_by_email, get_current_user
-        )
+        user_info = resolve_sender_info(from_branch, _repo_root, _ai_mail_dir, get_branch_by_email, get_current_user)
         message = prepend_dispatch_header(body, no_memory_save=no_memory_save)
 
         send_ok, send_error = send_to_single(
-            target, subject, message, user_info, True, no_memory_save,
-            None, target, create_email_file, load_email_file,
-            deliver_email_to_branch, _delivery_callback,
-            json_handler.log_operation, update_central
+            target,
+            subject,
+            message,
+            user_info,
+            True,
+            no_memory_save,
+            None,
+            target,
+            create_email_file,
+            load_email_file,
+            deliver_email_to_branch,
+            _delivery_callback,
+            json_handler.log_operation,
+            update_central,
         )
 
         if not send_ok:
@@ -296,7 +303,8 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('email_dispatched', to=target, subject=subject)
+
+            trigger.fire("email_dispatched", to=target, subject=subject)
         except Exception as e:
             logger.warning("[dispatch] trigger fire failed: %s", e)
 
@@ -309,18 +317,14 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     console.print(f"\nWaking {target}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+
     dispatch_status, wake_ok = wake_branch(
-        target, fresh=use_fresh,
-        sender=user_info.get("email_address", "@ai_mail"),
-        model=use_model
+        target, fresh=use_fresh, sender=user_info.get("email_address", "@ai_mail"), model=use_model
     )
     console.print(dispatch_status.format())
 
     if not wake_ok:
-        console.print(
-            f"[yellow]Email sent but wake failed — retry: "
-            f"drone @ai_mail dispatch wake {target}[/yellow]"
-        )
+        console.print(f"[yellow]Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}[/yellow]")
 
     return True
 
@@ -331,6 +335,7 @@ def _orchestrate_daemon() -> bool:
     console.print("\n[bold]Starting dispatch daemon...[/bold]")
 
     from aipass.ai_mail.apps.handlers.dispatch.daemon import run_daemon
+
     run_daemon()
     return True
 
@@ -339,7 +344,9 @@ def print_introspection():
     """Display module introspection info."""
     console.print()
     console.print("dispatch Module")
-    console.print("Orchestrates dispatch commands: combined send+wake, status tracking, daemon management, and manual wake.")
+    console.print(
+        "Orchestrates dispatch commands: combined send+wake, status tracking, daemon management, and manual wake."
+    )
     console.print()
     console.print("Connected Handlers:")
     console.print("  handlers/dispatch/")
@@ -361,7 +368,7 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    if sys.argv[1] in ['--help', '-h', 'help']:
+    if sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

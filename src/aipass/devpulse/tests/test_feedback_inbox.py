@@ -72,12 +72,14 @@ class TestListMessages:
 
     def test_empty_inbox(self, mock_feedback_dir, capsys):
         """Should print 'no messages' for empty inbox."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 0,
-            "unread_count": 0,
-            "messages": [],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 0,
+                "unread_count": 0,
+                "messages": [],
+            }
+        )
         inbox.list_messages()
         # list_messages prints to stderr via Rich Console
         # We just verify it doesn't raise
@@ -174,15 +176,24 @@ class TestClearAllRead:
 
     def test_no_read_messages(self, mock_feedback_dir):
         """Should handle inbox with no read messages."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 1,
-            "unread_count": 1,
-            "messages": [
-                {"id": "x", "from": "a", "subject": "b", "body": "c",
-                 "timestamp": "2026-04-11T10:00:00", "read": False, "thread": []},
-            ],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 1,
+                "messages": [
+                    {
+                        "id": "x",
+                        "from": "a",
+                        "subject": "b",
+                        "body": "c",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": False,
+                        "thread": [],
+                    },
+                ],
+            }
+        )
         inbox.clear_all_read()
 
         data = storage.load_inbox()
@@ -190,12 +201,14 @@ class TestClearAllRead:
 
     def test_empty_inbox_clear_all(self, mock_feedback_dir):
         """Should handle empty inbox gracefully."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 0,
-            "unread_count": 0,
-            "messages": [],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 0,
+                "unread_count": 0,
+                "messages": [],
+            }
+        )
         inbox.clear_all_read()
 
 
@@ -204,12 +217,14 @@ class TestGetSummary:
 
     def test_empty_inbox_summary(self, mock_feedback_dir):
         """Should return 'No feedback messages.' for empty inbox."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 0,
-            "unread_count": 0,
-            "messages": [],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 0,
+                "unread_count": 0,
+                "messages": [],
+            }
+        )
         result = inbox.get_summary()
         assert result == "No feedback messages."
 
@@ -220,14 +235,23 @@ class TestGetSummary:
 
     def test_single_message_summary(self, mock_feedback_dir):
         """Should use singular 'message' for count of 1."""
-        storage.save_inbox({
-            "mailbox": "feedback",
-            "total_messages": 1,
-            "unread_count": 0,
-            "messages": [
-                {"id": "x", "from": "a", "subject": "b", "body": "c",
-                 "timestamp": "2026-04-11T10:00:00", "read": True, "thread": []},
-            ],
-        })
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 0,
+                "messages": [
+                    {
+                        "id": "x",
+                        "from": "a",
+                        "subject": "b",
+                        "body": "c",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": True,
+                        "thread": [],
+                    },
+                ],
+            }
+        )
         result = inbox.get_summary()
         assert result == "1 message, 0 unread"

@@ -36,6 +36,7 @@ from aipass.drone.apps.handlers.discovery_handler import (
 # Help-output scanning
 # ---------------------------------------------------------------------------
 
+
 def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
     """Run the branch entry point with ``--help`` and parse discovered commands.
 
@@ -104,6 +105,7 @@ def _extract_descriptions(help_text: str, command_names: list[str]) -> dict[str,
 # Module-file scanning
 # ---------------------------------------------------------------------------
 
+
 def scan_module_files(branch_path: str) -> list[dict]:
     """Scan ``apps/modules/*.py`` for files that define ``handle_command()``.
 
@@ -167,6 +169,7 @@ def _extract_module_description(source: str) -> str:
 # ---------------------------------------------------------------------------
 # Full branch scan (merge + deduplicate)
 # ---------------------------------------------------------------------------
+
 
 def scan_branch(branch_path: str, branch_name: str) -> list[dict]:
     """Perform a full scan of a branch to discover available commands.

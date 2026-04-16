@@ -29,6 +29,7 @@ import numpy as np
 # Import helper -- torch and sentence_transformers must be mocked
 # ---------------------------------------------------------------------------
 
+
 def _import_embedder(monkeypatch):
     """Import embedder module with mocked ML dependencies.
 
@@ -67,6 +68,7 @@ def _reset_globals(embedder) -> None:
 # ===========================================================================
 # Tests: Public API -- encode_batch
 # ===========================================================================
+
 
 class TestPublicEncodeBatch:
     """Test public encode_batch function."""
@@ -120,6 +122,7 @@ class TestPublicEncodeBatch:
 # ===========================================================================
 # Tests: Public API -- encode_memories
 # ===========================================================================
+
 
 class TestPublicEncodeMemories:
     """Test public encode_memories function."""
@@ -227,6 +230,7 @@ class TestPublicEncodeMemories:
 # Tests: Public API -- get_model_info
 # ===========================================================================
 
+
 class TestPublicGetModelInfo:
     """Test public get_model_info function."""
 
@@ -257,6 +261,7 @@ class TestPublicGetModelInfo:
 # ===========================================================================
 # Tests: EmbeddingService class -- encode_batch internals
 # ===========================================================================
+
 
 class TestEmbeddingServiceEncodeBatch:
     """Test EmbeddingService.encode_batch pre-sort and order restoration."""
@@ -319,6 +324,7 @@ class TestEmbeddingServiceEncodeBatch:
 # ===========================================================================
 # Tests: EmbeddingService -- GPU path
 # ===========================================================================
+
 
 class TestEmbeddingServiceGPU:
     """Test EmbeddingService GPU detection and cleanup."""

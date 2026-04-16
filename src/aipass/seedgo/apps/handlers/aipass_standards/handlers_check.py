@@ -23,20 +23,21 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
         # Must match standard
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
         # Must match file (check if rule file path is in the full path)
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
         # Check line-specific bypass
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -69,45 +70,45 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'handlers', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "handlers", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'HANDLERS'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "HANDLERS",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'HANDLERS'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "HANDLERS",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'HANDLERS'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "HANDLERS",
         }
 
     # Only check files in handlers/ directory
-    is_handler = 'apps/handlers/' in module_path
+    is_handler = "apps/handlers/" in module_path
     if not is_handler:
         return {
-            'passed': True,
-            'checks': [{'name': 'Handler check', 'passed': True, 'message': 'Not a handler file (skipped)'}],
-            'score': 100,
-            'standard': 'HANDLERS'
+            "passed": True,
+            "checks": [{"name": "Handler check", "passed": True, "message": "Not a handler file (skipped)"}],
+            "score": 100,
+            "standard": "HANDLERS",
         }
 
     # Check 1: Handler independence (no cross-handler imports except defaults)
@@ -125,7 +126,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         checks.append(orchestration_check)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
@@ -133,12 +134,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "handlers"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'HANDLERS'
-    }
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "HANDLERS"}
 
 
 def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
@@ -157,7 +153,7 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
     path_parts = Path(module_path).parts
     own_package = None
     for i, part in enumerate(path_parts):
-        if part == 'handlers' and i + 1 < len(path_parts):
+        if part == "handlers" and i + 1 < len(path_parts):
             own_package = path_parts[i + 1]
             break
 
@@ -178,31 +174,31 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
                 in_docstring = not in_docstring
 
         # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith('#'):
+        if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
         # Check for handler imports
-        if 'apps.handlers' in stripped and ('from ' in stripped or 'import ' in stripped):
+        if "apps.handlers" in stripped and ("from " in stripped or "import " in stripped):
             # Skip if in a string (rough check)
             if '"from ' in stripped or "'from " in stripped:
                 continue
 
             # Extract code part (before comment)
-            code_part = stripped.split('#')[0] if '#' in stripped else stripped
+            code_part = stripped.split("#")[0] if "#" in stripped else stripped
 
-            if 'apps.handlers' not in code_part:
+            if "apps.handlers" not in code_part:
                 continue
 
             # Allowed: Default handlers (json_handler)
-            if 'handlers.json import json_handler' in code_part:
+            if "handlers.json import json_handler" in code_part:
                 continue
 
             # Allowed: Same package imports (relative imports like "from .decorators")
-            if code_part.strip().startswith('from .'):
+            if code_part.strip().startswith("from ."):
                 continue
 
             # Allowed: Same package absolute imports
-            if own_package and f'handlers.{own_package}' in code_part:
+            if own_package and f"handlers.{own_package}" in code_part:
                 continue
 
             # Forbidden: Cross-handler imports
@@ -210,16 +206,12 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
 
     if forbidden_imports:
         return {
-            'name': 'Handler independence',
-            'passed': False,
-            'message': f'Cross-handler imports detected (except defaults): {forbidden_imports[0]}'
+            "name": "Handler independence",
+            "passed": False,
+            "message": f"Cross-handler imports detected (except defaults): {forbidden_imports[0]}",
         }
 
-    return {
-        'name': 'Handler independence',
-        'passed': True,
-        'message': 'No forbidden cross-handler imports detected'
-    }
+    return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-handler imports detected"}
 
 
 def check_auto_detection(content: str) -> Optional[Dict]:
@@ -229,28 +221,28 @@ def check_auto_detection(content: str) -> Optional[Dict]:
     If handler has module_name parameter, should use inspect.stack() auto-detection
     """
     # Check if any function accepts module_name parameter
-    has_module_name_param = bool(re.search(r'def\s+\w+\([^)]*module_name', content))
+    has_module_name_param = bool(re.search(r"def\s+\w+\([^)]*module_name", content))
 
     if not has_module_name_param:
         return None  # No module_name parameter, auto-detection not needed
 
     # Check for auto-detection implementation
-    has_inspect_import = 'import inspect' in content
-    has_stack_usage = 'inspect.stack()' in content
-    has_auto_detect_function = '_get_caller_module_name' in content or 'get_caller' in content
+    has_inspect_import = "import inspect" in content
+    has_stack_usage = "inspect.stack()" in content
+    has_auto_detect_function = "_get_caller_module_name" in content or "get_caller" in content
 
     if has_auto_detect_function or (has_inspect_import and has_stack_usage):
         return {
-            'name': 'Auto-detection pattern',
-            'passed': True,
-            'message': 'Auto-detection pattern implemented (inspect.stack())'
+            "name": "Auto-detection pattern",
+            "passed": True,
+            "message": "Auto-detection pattern implemented (inspect.stack())",
         }
 
     # Has module_name param but no auto-detection
     return {
-        'name': 'Auto-detection pattern',
-        'passed': False,
-        'message': 'Has module_name parameter but missing auto-detection (use inspect.stack())'
+        "name": "Auto-detection pattern",
+        "passed": False,
+        "message": "Has module_name parameter but missing auto-detection (use inspect.stack())",
     }
 
 
@@ -280,23 +272,23 @@ def check_no_orchestration(content: str, lines: List[str]) -> Optional[Dict]:
                 in_docstring = not in_docstring
 
         # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith('#'):
+        if in_docstring or not stripped or stripped.startswith("#"):
             continue
 
         # Check for module imports
-        if 'apps.modules' in stripped and ('from ' in stripped or 'import ' in stripped):
+        if "apps.modules" in stripped and ("from " in stripped or "import " in stripped):
             # Skip if in a string
             if '"from ' in stripped or "'from " in stripped:
                 continue
 
             # Extract code part
-            code_part = stripped.split('#')[0] if '#' in stripped else stripped
+            code_part = stripped.split("#")[0] if "#" in stripped else stripped
 
-            if 'apps.modules' not in code_part:
+            if "apps.modules" not in code_part:
                 continue
 
             # Allowed: Service imports (prax.apps.modules.logger, cli.apps.modules)
-            if 'prax.apps.modules.logger' in code_part or 'cli.apps.modules' in code_part:
+            if "prax.apps.modules.logger" in code_part or "cli.apps.modules" in code_part:
                 continue
 
             # Forbidden: Module imports (orchestration)
@@ -304,13 +296,9 @@ def check_no_orchestration(content: str, lines: List[str]) -> Optional[Dict]:
 
     if module_imports:
         return {
-            'name': 'No orchestration',
-            'passed': False,
-            'message': f'Handler imports modules (orchestration): {module_imports[0]}'
+            "name": "No orchestration",
+            "passed": False,
+            "message": f"Handler imports modules (orchestration): {module_imports[0]}",
         }
 
-    return {
-        'name': 'No orchestration',
-        'passed': True,
-        'message': 'No module imports detected (pure implementation)'
-    }
+    return {"name": "No orchestration", "passed": True, "message": "No module imports detected (pure implementation)"}

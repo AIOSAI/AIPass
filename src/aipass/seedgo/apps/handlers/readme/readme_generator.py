@@ -34,22 +34,30 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 TREE_EXCLUDE = {
-    '__pycache__', '.gitkeep', '.git', 'node_modules',
-    '.pytest_cache', '.mypy_cache',
+    "__pycache__",
+    ".gitkeep",
+    ".git",
+    "node_modules",
+    ".pytest_cache",
+    ".mypy_cache",
 }
 
 # Directories to show as name-only (no children) - data/log dirs
 TREE_COLLAPSE = {
-    'ai_mail.local', 'logs', 'htmlcov', 'commands',
-    'ai_mail_archive', 'artifacts',
+    "ai_mail.local",
+    "logs",
+    "htmlcov",
+    "commands",
+    "ai_mail_archive",
+    "artifacts",
 }
 
 # Directories whose children are files only (no recursion into subdirs)
 # e.g., *_json dirs with config/data/log triplets
-TREE_SHALLOW_PATTERN = re.compile(r'.*_json$')
+TREE_SHALLOW_PATTERN = re.compile(r".*_json$")
 
 # Hidden directory prefixes to skip
-HIDDEN_PREFIX = '.'
+HIDDEN_PREFIX = "."
 
 # Auto-section markers for README updates
 MARKER_PREFIX = "<!-- AUTO:"
@@ -60,6 +68,7 @@ MARKER_CLOSE_PREFIX = "<!-- /AUTO:"
 # =============================================================================
 # SECTION GENERATORS
 # =============================================================================
+
 
 def generate_tree_section(branch_path: str) -> str:
     """
@@ -97,7 +106,7 @@ def generate_tree_section(branch_path: str) -> str:
         if len(lines) <= 1:
             return ""
 
-        tree_text = '\n'.join(lines)
+        tree_text = "\n".join(lines)
         return f"```\n{tree_text}\n```"
 
     except Exception:
@@ -117,9 +126,9 @@ def _should_skip_entry(name: str) -> bool:
     """
     if name in TREE_EXCLUDE:
         return True
-    if name.startswith(HIDDEN_PREFIX) and name not in ('.aipass',):
+    if name.startswith(HIDDEN_PREFIX) and name not in (".aipass",):
         return True
-    if name.endswith('.pyc'):
+    if name.endswith(".pyc"):
         return True
     return False
 
@@ -149,9 +158,9 @@ def _get_dir_depth(dir_name: str, is_apps_subtree: bool) -> Optional[int]:
         return 4
 
     # Top-level structural directories get moderate depth
-    structural_dirs = {'apps', 'docs', 'tests', 'tools', 'templates', 'standards'}
+    structural_dirs = {"apps", "docs", "tests", "tools", "templates", "standards"}
     if dir_name in structural_dirs:
-        if dir_name == 'apps':
+        if dir_name == "apps":
             return 4  # Full depth for apps
         return 2  # Moderate depth for others
 
@@ -159,8 +168,9 @@ def _get_dir_depth(dir_name: str, is_apps_subtree: bool) -> Optional[int]:
     return 1
 
 
-def _build_tree(directory: Path, lines: List[str], prefix: str = "",
-                depth_remaining: int = 4, is_apps_subtree: bool = False) -> None:
+def _build_tree(
+    directory: Path, lines: List[str], prefix: str = "", depth_remaining: int = 4, is_apps_subtree: bool = False
+) -> None:
     """
     Recursively build tree lines for a directory.
 
@@ -187,7 +197,7 @@ def _build_tree(directory: Path, lines: List[str], prefix: str = "",
     filtered = [e for e in entries if not _should_skip_entry(e.name)]
 
     for i, entry in enumerate(filtered):
-        is_last = (i == len(filtered) - 1)
+        is_last = i == len(filtered) - 1
         connector = "└── " if is_last else "├── "
         child_prefix = "    " if is_last else "│   "
 
@@ -197,14 +207,13 @@ def _build_tree(directory: Path, lines: List[str], prefix: str = "",
             lines.append(f"{prefix}{connector}{entry.name}/{suffix}")
 
             # Determine child depth
-            child_is_apps = is_apps_subtree or entry.name == 'apps'
+            child_is_apps = is_apps_subtree or entry.name == "apps"
             child_depth = _get_dir_depth(entry.name, is_apps_subtree)
 
             if child_depth is not None:
                 effective_depth = min(child_depth, depth_remaining - 1)
                 if effective_depth > 0:
-                    _build_tree(entry, lines, prefix + child_prefix,
-                                effective_depth, child_is_apps)
+                    _build_tree(entry, lines, prefix + child_prefix, effective_depth, child_is_apps)
         else:
             comment = _get_file_comment(entry)
             suffix = f"  # {comment}" if comment else ""
@@ -221,22 +230,22 @@ def _get_file_comment(file_path: Path) -> str:
     Returns:
         Short description string, or empty string
     """
-    if not file_path.suffix == '.py':
+    if not file_path.suffix == ".py":
         return ""
-    if file_path.name == '__init__.py':
+    if file_path.name == "__init__.py":
         return ""
 
     try:
-        content = file_path.read_text(encoding='utf-8', errors='ignore')
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
         # Try to extract from META header Name line
-        name_match = re.search(r'^# Name:\s*\S+\s*-\s*(.+)$', content, re.MULTILINE)
+        name_match = re.search(r"^# Name:\s*\S+\s*-\s*(.+)$", content, re.MULTILINE)
         if name_match:
             return name_match.group(1).strip()
 
         # Fallback: first line of module docstring
         doc_match = re.search(r'^"""(.+?)"""', content, re.DOTALL)
         if doc_match:
-            first_line = doc_match.group(1).strip().split('\n')[0].strip()
+            first_line = doc_match.group(1).strip().split("\n")[0].strip()
             if first_line:
                 return first_line
     except (OSError, UnicodeDecodeError):
@@ -258,16 +267,16 @@ def _get_dir_comment(dir_path: Path) -> str:
     """
     # Known directory purposes
     known_dirs = {
-        'modules': 'Business logic orchestration',
-        'handlers': 'Implementation details',
-        'json': 'JSON handler package',
-        'json_templates': 'JSON templates',
-        'tests': 'Test suite',
-        'docs': 'Documentation',
-        'tools': 'Utilities',
-        'templates': 'Templates',
-        'extensions': 'Extensions',
-        'plugins': 'Plugins',
+        "modules": "Business logic orchestration",
+        "handlers": "Implementation details",
+        "json": "JSON handler package",
+        "json_templates": "JSON templates",
+        "tests": "Test suite",
+        "docs": "Documentation",
+        "tools": "Utilities",
+        "templates": "Templates",
+        "extensions": "Extensions",
+        "plugins": "Plugins",
     }
     return known_dirs.get(dir_path.name, "")
 
@@ -285,15 +294,12 @@ def generate_modules_section(branch_path: str) -> str:
     Returns:
         Markdown formatted module list, or empty string if no modules
     """
-    modules_dir = Path(branch_path) / 'apps' / 'modules'
+    modules_dir = Path(branch_path) / "apps" / "modules"
 
     if not modules_dir.exists():
         return ""
 
-    module_files = sorted(
-        f for f in modules_dir.glob('*.py')
-        if f.name != '__init__.py'
-    )
+    module_files = sorted(f for f in modules_dir.glob("*.py") if f.name != "__init__.py")
 
     if not module_files:
         return ""
@@ -308,11 +314,11 @@ def generate_modules_section(branch_path: str) -> str:
         else:
             lines.append(f"- **{name}**")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def _extract_description_from_content(content: str) -> str:
-    name_match = re.search(r'^# Name:\s*\S+\s*-\s*(.+)$', content, re.MULTILINE)
+    name_match = re.search(r"^# Name:\s*\S+\s*-\s*(.+)$", content, re.MULTILINE)
     if name_match:
         return name_match.group(1).strip()
 
@@ -320,7 +326,7 @@ def _extract_description_from_content(content: str) -> str:
     if doc_match:
         docstring = doc_match.group(1).strip()
         if docstring:
-            first_line = docstring.split('\n')[0].strip()
+            first_line = docstring.split("\n")[0].strip()
             if first_line:
                 return first_line
 
@@ -343,7 +349,7 @@ def _extract_module_description(module_path: Path) -> str:
         Description string, or empty string
     """
     try:
-        content = module_path.read_text(encoding='utf-8', errors='ignore')
+        content = module_path.read_text(encoding="utf-8", errors="ignore")
         return _extract_description_from_content(content)
     except (OSError, UnicodeDecodeError):
         logger.info("Cannot read module for description extraction: %s", module_path)
@@ -367,24 +373,24 @@ def generate_commands_section(branch_path: str) -> str:
     branch_name = branch_dir.name
 
     # Find entry point: apps/<branch_name>.py
-    entry_point = branch_dir / 'apps' / f'{branch_name}.py'
+    entry_point = branch_dir / "apps" / f"{branch_name}.py"
     if not entry_point.exists():
         # Try lowercase
-        entry_point = branch_dir / 'apps' / f'{branch_name.lower()}.py'
+        entry_point = branch_dir / "apps" / f"{branch_name.lower()}.py"
     if not entry_point.exists():
         return ""
 
     try:
         env = os.environ.copy()
-        env['COLUMNS'] = '500'
+        env["COLUMNS"] = "500"
 
         result = subprocess.run(
-            [sys.executable, str(entry_point), '--help'],
+            [sys.executable, str(entry_point), "--help"],
             capture_output=True,
             text=True,
             timeout=15,
             env=env,
-            cwd=str(branch_dir)
+            cwd=str(branch_dir),
         )
 
         output = result.stdout or ""
@@ -405,14 +411,14 @@ def generate_commands_section(branch_path: str) -> str:
 
 
 def _parse_commands_line(help_text: str) -> List[str]:
-    commands_line_match = re.search(r'^Commands:\s*(.+)$', help_text, re.MULTILINE)
+    commands_line_match = re.search(r"^Commands:\s*(.+)$", help_text, re.MULTILINE)
     if not commands_line_match:
         return []
     commands_str = commands_line_match.group(1).strip()
-    commands = [cmd.strip() for cmd in commands_str.split(',') if cmd.strip()]
+    commands = [cmd.strip() for cmd in commands_str.split(",") if cmd.strip()]
     lines = []
     for cmd in commands:
-        if cmd.startswith('--'):
+        if cmd.startswith("--"):
             lines.append(f"- `{cmd}` - Flag")
         else:
             lines.append(f"- `{cmd}`")
@@ -420,19 +426,15 @@ def _parse_commands_line(help_text: str) -> List[str]:
 
 
 def _parse_commands_section(help_text: str) -> List[str]:
-    available_match = re.search(
-        r'AVAILABLE COMMANDS:\s*\n((?:\s+\S.*\n)*)',
-        help_text,
-        re.MULTILINE
-    )
+    available_match = re.search(r"AVAILABLE COMMANDS:\s*\n((?:\s+\S.*\n)*)", help_text, re.MULTILINE)
     if not available_match:
         return []
     lines = []
     cmd_block = available_match.group(1)
-    for line in cmd_block.strip().split('\n'):
+    for line in cmd_block.strip().split("\n"):
         stripped = line.strip()
         if stripped:
-            parts = re.split(r'\s{2,}', stripped, maxsplit=1)
+            parts = re.split(r"\s{2,}", stripped, maxsplit=1)
             if len(parts) == 2:
                 lines.append(f"- `{parts[0]}` - {parts[1]}")
             else:
@@ -443,16 +445,13 @@ def _parse_commands_section(help_text: str) -> List[str]:
 def _parse_command_pairs(help_text: str) -> List[str]:
     lines = []
     seen_commands = set()
-    cmd_pattern = re.compile(
-        r'^\s{2,}([\w@-]+(?:\s[\w@<>-]+)*)\s{2,}([A-Z].*?)$',
-        re.MULTILINE
-    )
+    cmd_pattern = re.compile(r"^\s{2,}([\w@-]+(?:\s[\w@<>-]+)*)\s{2,}([A-Z].*?)$", re.MULTILINE)
     for match in cmd_pattern.finditer(help_text):
         cmd_part = match.group(1).strip()
         description = match.group(2).strip()
-        if '->' in description or '"' in cmd_part:
+        if "->" in description or '"' in cmd_part:
             continue
-        if re.match(r'^\d+\.', cmd_part):
+        if re.match(r"^\d+\.", cmd_part):
             continue
         if cmd_part in seen_commands:
             continue
@@ -487,7 +486,7 @@ def _parse_help_output(help_text: str) -> str:
     if not lines:
         return ""
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def generate_header_section(branch_path: str) -> str:
@@ -504,26 +503,26 @@ def generate_header_section(branch_path: str) -> str:
         Formatted header markdown, or empty string on failure
     """
     branch_dir = Path(branch_path)
-    branch_name = branch_dir.name.upper().replace('-', '_')
+    branch_name = branch_dir.name.upper().replace("-", "_")
 
     # Find passport.json
-    id_file = branch_dir / '.trinity' / 'passport.json'
+    id_file = branch_dir / ".trinity" / "passport.json"
     if not id_file.exists():
         return ""
 
     try:
-        data = json.loads(id_file.read_text(encoding='utf-8'))
+        data = json.loads(id_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         logger.info("Cannot read passport for header generation: %s", id_file)
         return ""
 
-    branch_info = data.get('branch_info', {})
+    branch_info = data.get("branch_info", {})
 
-    name = branch_info.get('branch_name', branch_name)
-    path = branch_info.get('path', str(branch_dir))
-    profile = branch_info.get('profile', 'Unknown')
-    created = branch_info.get('created', 'Unknown')
-    role = branch_info.get('role', '')
+    name = branch_info.get("branch_name", branch_name)
+    path = branch_info.get("path", str(branch_dir))
+    profile = branch_info.get("profile", "Unknown")
+    created = branch_info.get("created", "Unknown")
+    role = branch_info.get("role", "")
 
     lines = [
         f"# {name}",
@@ -536,7 +535,7 @@ def generate_header_section(branch_path: str) -> str:
     lines.append(f"**Profile:** {profile}")
     lines.append(f"**Created:** {created}")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def generate_last_updated() -> str:
@@ -546,13 +545,14 @@ def generate_last_updated() -> str:
     Returns:
         Formatted timestamp string: *Last Updated: YYYY-MM-DD*
     """
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now().strftime("%Y-%m-%d")
     return f"*Last Updated: {today}*"
 
 
 # =============================================================================
 # AGGREGATE GENERATORS
 # =============================================================================
+
 
 def generate_all_sections(branch_path: str) -> dict:
     """
@@ -571,11 +571,11 @@ def generate_all_sections(branch_path: str) -> dict:
     sections = {}
 
     generators = {
-        'header': lambda: generate_header_section(branch_path),
-        'tree': lambda: generate_tree_section(branch_path),
-        'modules': lambda: generate_modules_section(branch_path),
-        'commands': lambda: generate_commands_section(branch_path),
-        'last_updated': lambda: generate_last_updated(),
+        "header": lambda: generate_header_section(branch_path),
+        "tree": lambda: generate_tree_section(branch_path),
+        "modules": lambda: generate_modules_section(branch_path),
+        "commands": lambda: generate_commands_section(branch_path),
+        "last_updated": lambda: generate_last_updated(),
     }
 
     for name, generator in generators.items():
@@ -592,6 +592,7 @@ def generate_all_sections(branch_path: str) -> dict:
 # =============================================================================
 # README UPDATER
 # =============================================================================
+
 
 def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict:
     """
@@ -618,22 +619,22 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
             'dry_run': whether this was a dry run
     """
     result = {
-        'updated': [],
-        'missing_markers': [],
-        'errors': [],
-        'dry_run': dry_run,
+        "updated": [],
+        "missing_markers": [],
+        "errors": [],
+        "dry_run": dry_run,
     }
 
-    readme_path = Path(branch_path) / 'README.md'
+    readme_path = Path(branch_path) / "README.md"
     if not readme_path.exists():
-        result['errors'].append('README.md not found')
+        result["errors"].append("README.md not found")
         return result
 
     try:
-        content = readme_path.read_text(encoding='utf-8')
+        content = readme_path.read_text(encoding="utf-8")
     except OSError as e:
         logger.info("Cannot read README at %s: %s", readme_path, e)
-        result['errors'].append(f'Failed to read README.md: {e}')
+        result["errors"].append(f"Failed to read README.md: {e}")
         return result
 
     # Generate all sections
@@ -641,11 +642,11 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
 
     # Map section names to marker names
     marker_map = {
-        'tree': 'TREE',
-        'modules': 'MODULES',
-        'commands': 'COMMANDS',
-        'header': 'HEADER',
-        'last_updated': 'LAST_UPDATED',
+        "tree": "TREE",
+        "modules": "MODULES",
+        "commands": "COMMANDS",
+        "header": "HEADER",
+        "last_updated": "LAST_UPDATED",
     }
 
     updated_content = content
@@ -660,38 +661,36 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
 
         if open_marker in updated_content and close_marker in updated_content:
             # Replace content between markers
-            pattern = re.compile(
-                re.escape(open_marker) + r'.*?' + re.escape(close_marker),
-                re.DOTALL
-            )
+            pattern = re.compile(re.escape(open_marker) + r".*?" + re.escape(close_marker), re.DOTALL)
             replacement = f"{open_marker}\n{section_content}\n{close_marker}"
             updated_content = pattern.sub(replacement, updated_content)
-            result['updated'].append(section_name)
+            result["updated"].append(section_name)
         else:
-            result['missing_markers'].append(section_name)
+            result["missing_markers"].append(section_name)
 
     # Write if not dry run and something changed
-    if not dry_run and result['updated'] and updated_content != content:
+    if not dry_run and result["updated"] and updated_content != content:
         try:
-            readme_path.write_text(updated_content, encoding='utf-8')
+            readme_path.write_text(updated_content, encoding="utf-8")
         except OSError as e:
             logger.info("Cannot write README at %s: %s", readme_path, e)
-            result['errors'].append(f'Failed to write README.md: {e}')
+            result["errors"].append(f"Failed to write README.md: {e}")
 
     return result
 
 
 if __name__ == "__main__":
     from rich.console import Console as _Console
+
     _cli = _Console()
     target = sys.argv[1] if len(sys.argv) > 1 else str(Path.cwd())
-    _cli.print(f"Generating README sections for: {target}\n{'='*70}")
+    _cli.print(f"Generating README sections for: {target}\n{'=' * 70}")
     sections = generate_all_sections(target)
     for name, content in sections.items():
-        _cli.print(f"\n{'='*70}\nSECTION: {name}\n{'='*70}")
+        _cli.print(f"\n{'=' * 70}\nSECTION: {name}\n{'=' * 70}")
         _cli.print(content if content else "(empty - no content generated)")
     # Test updater in dry_run mode
-    _cli.print(f"\n{'='*70}\nUPDATE DRY RUN\n{'='*70}")
+    _cli.print(f"\n{'=' * 70}\nUPDATE DRY RUN\n{'=' * 70}")
     update_result = update_readme_auto_sections(target, dry_run=True)
     _cli.print(f"Would update: {update_result['updated']}")
     _cli.print(f"Missing markers: {update_result['missing_markers']}")

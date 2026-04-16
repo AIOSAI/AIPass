@@ -27,6 +27,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports so checkers load in isolation."""
@@ -94,11 +95,13 @@ def _write_temp_py_with_meta(tmp_path: Path, name: str, body: str) -> str:
 # 1. log_structure_check
 # ===========================================================================
 
+
 class TestLogStructureCheck:
     """Tests for log_structure_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
         return log_structure_check
 
     def test_log_structure_clean_passes(self, tmp_path):
@@ -158,11 +161,13 @@ class TestLogStructureCheck:
 # 2. log_visibility_check
 # ===========================================================================
 
+
 class TestLogVisibilityCheck:
     """Tests for log_visibility_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import log_visibility_check
+
         return log_visibility_check
 
     def test_log_visibility_clean_passes(self, tmp_path):
@@ -216,16 +221,18 @@ class TestLogVisibilityCheck:
 # 3. meta_check
 # ===========================================================================
 
+
 class TestMetaCheck:
     """Tests for meta_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import meta_check
+
         return meta_check
 
     def test_meta_clean_passes(self, tmp_path):
         """File WITH a valid META header passes."""
-        content = META_HEADER.format(filename="good_meta.py") + '\nx = 1\n'
+        content = META_HEADER.format(filename="good_meta.py") + "\nx = 1\n"
         filepath = _write_temp_py(tmp_path, "good_meta.py", content)
 
         checker = self._import()
@@ -269,11 +276,13 @@ class TestMetaCheck:
 # 4. modules_check
 # ===========================================================================
 
+
 class TestModulesCheck:
     """Tests for modules_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import modules_check
+
         return modules_check
 
     def test_modules_clean_passes(self, tmp_path):
@@ -339,11 +348,13 @@ class TestModulesCheck:
 # 5. permission_flags_check
 # ===========================================================================
 
+
 class TestPermissionFlagsCheck:
     """Tests for permission_flags_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import permission_flags_check
+
         return permission_flags_check
 
     def test_permission_flags_clean_passes(self, tmp_path):
@@ -396,11 +407,13 @@ class TestPermissionFlagsCheck:
 # 6. readme_check
 # ===========================================================================
 
+
 class TestReadmeCheck:
     """Tests for readme_check.check_module (entry_point scope)."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import readme_check
+
         return readme_check
 
     def _make_branch(self, tmp_path: Path) -> tuple[Path, str]:
@@ -479,11 +492,13 @@ class TestReadmeCheck:
 # 7. shebang_check
 # ===========================================================================
 
+
 class TestShebangCheck:
     """Tests for shebang_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import shebang_check
+
         return shebang_check
 
     def test_shebang_clean_passes(self, tmp_path):
@@ -532,11 +547,13 @@ class TestShebangCheck:
 # 8. silent_catch_check
 # ===========================================================================
 
+
 class TestSilentCatchCheck:
     """Tests for silent_catch_check.check_module."""
 
     def _import(self):
         from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
+
         return silent_catch_check
 
     def test_silent_catch_clean_passes(self, tmp_path):

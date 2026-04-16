@@ -40,27 +40,48 @@ from aipass.flow.apps.handlers.json import json_handler
 MODULE_NAME = "registry_monitor"
 
 # PLAN file pattern — matches any plan prefix (FPLAN, DPLAN, APLAN, RPLAN, TDPLAN, etc.)
-PLAN_PATTERN = re.compile(r'^[A-Z]+PLAN-\d{4}\.md$')
+PLAN_PATTERN = re.compile(r"^[A-Z]+PLAN-\d{4}\.md$")
 
 # Directories to ignore during monitoring
 IGNORE_FOLDERS = {
     # Development and version control
-    ".git", ".venv", "venv", "__pycache__", "node_modules",
-    ".pytest_cache", "dist", "build", ".idea", ".vscode",
-
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".idea",
+    ".vscode",
     # Backup and archive
-    "backup", "backups", ".backup", "archive", ".archive",
-    "backup", "archive_temp", "processed_plans",
-
+    "backup",
+    "backups",
+    ".backup",
+    "archive",
+    ".archive",
+    "backup",
+    "archive_temp",
+    "processed_plans",
     # Memory and admin
-    "memory", "admin", "aipass-help",
-
+    "memory",
+    "admin",
+    "aipass-help",
     # User directories
-    ".local", "Downloads", "downloads",
-
+    ".local",
+    "Downloads",
+    "downloads",
     # System directories (permission issues)
-    "proc", "sys", "dev", "run", "boot", "lost+found",
-    "timeshift", "snapshots", ".snapshots"
+    "proc",
+    "sys",
+    "dev",
+    "run",
+    "boot",
+    "lost+found",
+    "timeshift",
+    "snapshots",
+    ".snapshots",
 }
 
 # Global observer instance
@@ -75,6 +96,7 @@ DEDUPE_WINDOW = 2.0  # seconds
 # =============================================
 # FILE WATCHER CLASS
 # =============================================
+
 
 class PlanFileWatcher(FileSystemEventHandler):
     """Monitors PLAN file changes and fires trigger events"""
@@ -116,7 +138,7 @@ class PlanFileWatcher(FileSystemEventHandler):
 
     def _get_plan_number(self, file_path: Path) -> Optional[str]:
         """Extract plan number from filename (e.g., FPLAN-0001.md -> 0001, DPLAN-0005.md -> 0005)"""
-        match = re.search(r'[A-Z]+PLAN-(\d{4})\.md$', file_path.name)
+        match = re.search(r"[A-Z]+PLAN-(\d{4})\.md$", file_path.name)
         return match.group(1) if match else None
 
     def _is_duplicate_event(self, event_type: str, plan_num: str) -> bool:
@@ -125,8 +147,7 @@ class PlanFileWatcher(FileSystemEventHandler):
         now = time.time()
 
         # Clean old events
-        _recent_events = [(et, pn, ts) for et, pn, ts in _recent_events
-                         if now - ts < DEDUPE_WINDOW]
+        _recent_events = [(et, pn, ts) for et, pn, ts in _recent_events if now - ts < DEDUPE_WINDOW]
 
         # Check for duplicates
         for et, pn, ts in _recent_events:
@@ -156,30 +177,40 @@ class PlanFileWatcher(FileSystemEventHandler):
         """Fire plan_file_created event - Trigger handles registry update"""
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_file_created', path=str(file_path))
+
+            trigger.fire("plan_file_created", path=str(file_path))
         except ImportError:
-            logger.warning(f"[{MODULE_NAME}] Trigger not available - plan_file_created event not fired for {file_path.name}")
+            logger.warning(
+                f"[{MODULE_NAME}] Trigger not available - plan_file_created event not fired for {file_path.name}"
+            )
 
     def _fire_plan_file_deleted(self, file_path: Path):
         """Fire plan_file_deleted event - Trigger handles registry update"""
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_file_deleted', path=str(file_path))
+
+            trigger.fire("plan_file_deleted", path=str(file_path))
         except ImportError:
-            logger.warning(f"[{MODULE_NAME}] Trigger not available - plan_file_deleted event not fired for {file_path.name}")
+            logger.warning(
+                f"[{MODULE_NAME}] Trigger not available - plan_file_deleted event not fired for {file_path.name}"
+            )
 
     def _fire_plan_file_moved(self, src_path: Path, dest_path: Path):
         """Fire plan_file_moved event - Trigger handles registry update"""
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_file_moved', src_path=str(src_path), dest_path=str(dest_path))
+
+            trigger.fire("plan_file_moved", src_path=str(src_path), dest_path=str(dest_path))
         except ImportError:
-            logger.warning(f"[{MODULE_NAME}] Trigger not available - plan_file_moved event not fired for {dest_path.name}")
+            logger.warning(
+                f"[{MODULE_NAME}] Trigger not available - plan_file_moved event not fired for {dest_path.name}"
+            )
 
 
 # =============================================
 # HELPER
 # =============================================
+
 
 def _fire_event(event_name: str, **kwargs) -> bool:
     """
@@ -194,6 +225,7 @@ def _fire_event(event_name: str, **kwargs) -> bool:
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
+
         trigger.fire(event_name, **kwargs)
         return True
     except ImportError:
@@ -205,7 +237,10 @@ def _fire_event(event_name: str, **kwargs) -> bool:
 # SCAN AND HEAL IMPLEMENTATION
 # =============================================
 
-def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}) -> Dict[str, Any]:
+
+def scan_plan_files_impl(
+    ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}
+) -> Dict[str, Any]:
     """
     Scan ecosystem for PLAN files and fire events to heal registry
 
@@ -247,7 +282,7 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
         for filename in files:
             if PLAN_PATTERN.match(filename):
                 file_path = Path(root) / filename
-                match = re.search(r'[A-Z]+PLAN-(\d{4})\.md$', filename)
+                match = re.search(r"[A-Z]+PLAN-(\d{4})\.md$", filename)
                 if match:
                     plan_number = match.group(1)
 
@@ -274,7 +309,7 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
             for dup_path in paths[1:]:  # Skip first path (already in plan_files)
                 old_name = dup_path.name
                 # Preserve original plan prefix (FPLAN, DPLAN, TDPLAN, etc.)
-                prefix_match = re.match(r'^([A-Z]+PLAN)', old_name)
+                prefix_match = re.match(r"^([A-Z]+PLAN)", old_name)
                 dup_prefix = prefix_match.group(1) if prefix_match else "FPLAN"
                 new_num = f"{next_available:04d}"
                 new_name = f"{dup_prefix}-{new_num}.md"
@@ -287,11 +322,7 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
 
                     # Add to plan_files with new number
                     plan_files[new_num] = new_path
-                    renumbered.append({
-                        "old_number": plan_num,
-                        "new_number": new_num,
-                        "path": str(new_path)
-                    })
+                    renumbered.append({"old_number": plan_num, "new_number": new_num, "path": str(new_path)})
 
                     next_available += 1
                 except Exception as e:
@@ -310,7 +341,7 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
     for plan_number, file_path in plan_files.items():
         if plan_number not in plans:
             # File exists but not in registry - fire created event
-            if _fire_event('plan_file_created', path=str(file_path)):
+            if _fire_event("plan_file_created", path=str(file_path)):
                 added.append(plan_number)
                 logger.info(f"[{MODULE_NAME}] Fired plan_file_created for {file_path.name}")
         else:
@@ -318,7 +349,7 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
             current_path = plans[plan_number].get("file_path", "")
             if current_path != str(file_path):
                 # Fire moved event
-                if _fire_event('plan_file_moved', src_path=current_path, dest_path=str(file_path)):
+                if _fire_event("plan_file_moved", src_path=current_path, dest_path=str(file_path)):
                     updated.append(plan_number)
                     logger.info(f"[{MODULE_NAME}] Fired plan_file_moved for {file_path.name}")
 
@@ -328,13 +359,15 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
             # Registry entry but no file - fire deleted event
             orphan_path = plans[plan_number].get("file_path", "")
             orphan_name = Path(orphan_path).name if orphan_path else f"PLAN-{plan_number}.md"
-            if _fire_event('plan_file_deleted', path=orphan_path or f"PLAN-{plan_number}.md"):
+            if _fire_event("plan_file_deleted", path=orphan_path or f"PLAN-{plan_number}.md"):
                 removed.append(plan_number)
                 logger.info(f"[{MODULE_NAME}] Fired plan_file_deleted for {orphan_name}")
 
     # Log event results
     if added or updated or removed or renumbered:
-        logger.info(f"[{MODULE_NAME}] Events fired - Created: {len(added)}, Moved: {len(updated)}, Deleted: {len(removed)}, Renumbered: {len(renumbered)}")
+        logger.info(
+            f"[{MODULE_NAME}] Events fired - Created: {len(added)}, Moved: {len(updated)}, Deleted: {len(removed)}, Renumbered: {len(renumbered)}"
+        )
 
     # Reload registry to get updated count (after handlers processed events)
     registry = load_registry()
@@ -342,14 +375,17 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
 
     logger.info(f"[{MODULE_NAME}] Scan complete - {total_plans} PLAN files in registry")
 
-    json_handler.log_operation("plan_files_scanned", {
-        "total_plans": total_plans,
-        "added": len(added),
-        "updated": len(updated),
-        "removed": len(removed),
-        "renumbered": len(renumbered),
-        "success": True,
-    })
+    json_handler.log_operation(
+        "plan_files_scanned",
+        {
+            "total_plans": total_plans,
+            "added": len(added),
+            "updated": len(updated),
+            "removed": len(removed),
+            "renumbered": len(renumbered),
+            "success": True,
+        },
+    )
 
     return {
         "total_plans": total_plans,
@@ -357,13 +393,14 @@ def scan_plan_files_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[
         "updated": updated,
         "removed": removed,
         "renumbered": renumbered,
-        "healing_performed": len(added) + len(updated) + len(removed) + len(renumbered) > 0
+        "healing_performed": len(added) + len(updated) + len(removed) + len(renumbered) > 0,
     }
 
 
 # =============================================
 # MONITOR CONTROL IMPLEMENTATIONS
 # =============================================
+
 
 def start_monitoring_impl(ecosystem_root: Path) -> Dict[str, Any]:
     """Start PLAN file monitoring with watchdog
@@ -414,7 +451,9 @@ def stop_monitoring_impl() -> Dict[str, Any]:
             return {"success": False, "message": "Monitor is not running", "status": "not_running"}
 
 
-def get_status_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}) -> Dict[str, Any]:
+def get_status_impl(
+    ecosystem_root: Path, load_registry: Callable[[], Dict[str, Any]] = lambda: {"plans": {}}
+) -> Dict[str, Any]:
     """Get monitoring status
 
     Args:
@@ -440,5 +479,5 @@ def get_status_impl(ecosystem_root: Path, load_registry: Callable[[], Dict[str, 
         "watch_location": str(ecosystem_root),
         "total_plans": total_plans,
         "open_plans": open_plans,
-        "ignore_folders": len(IGNORE_FOLDERS)
+        "ignore_folders": len(IGNORE_FOLDERS),
     }

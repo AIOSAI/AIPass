@@ -21,6 +21,7 @@ try:
 except ImportError:
     logger.warning("CLI console not available, falling back to default Rich Console")
     from rich.console import Console
+
     console = Console()
 
 from rich.table import Table

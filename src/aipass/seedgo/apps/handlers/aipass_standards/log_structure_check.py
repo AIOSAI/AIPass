@@ -55,12 +55,12 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -86,89 +86,95 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
     checks = []
 
-    if is_bypassed(module_path, 'log_structure', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "log_structure", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'LOG_STRUCTURE'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "LOG_STRUCTURE",
         }
 
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'LOG_STRUCTURE'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "LOG_STRUCTURE",
         }
 
     # Check 1: Branch-root log placement — logs/ directory at the branch root
     branch_root = _find_branch_root(path)
     logs_dir = branch_root / "logs"
     has_logs_dir = logs_dir.is_dir()
-    checks.append({
-        'name': 'Branch-root logs/ directory',
-        'passed': has_logs_dir,
-        'message': f'logs/ directory exists at branch root {branch_root}/'
-                   if has_logs_dir
-                   else f'Missing logs/ directory at branch root {branch_root}/ — two-tier model requires logs/ at branch root'
-    })
+    checks.append(
+        {
+            "name": "Branch-root logs/ directory",
+            "passed": has_logs_dir,
+            "message": f"logs/ directory exists at branch root {branch_root}/"
+            if has_logs_dir
+            else f"Missing logs/ directory at branch root {branch_root}/ — two-tier model requires logs/ at branch root",
+        }
+    )
 
     # Check 2-3: Scan file for hardcoded log paths
     try:
-        content = path.read_text(encoding='utf-8')
+        content = path.read_text(encoding="utf-8")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
-        checks.append({
-            'name': 'File readable',
-            'passed': False,
-            'message': f'Error reading file: {e}'
-        })
-        passed = all(c['passed'] for c in checks)
-        score = int(sum(1 for c in checks if c['passed']) / len(checks) * 100)
-        return {'passed': passed, 'checks': checks, 'score': score, 'standard': 'LOG_STRUCTURE'}
+        checks.append({"name": "File readable", "passed": False, "message": f"Error reading file: {e}"})
+        passed = all(c["passed"] for c in checks)
+        score = int(sum(1 for c in checks if c["passed"]) / len(checks) * 100)
+        return {"passed": passed, "checks": checks, "score": score, "standard": "LOG_STRUCTURE"}
 
-    lines = content.split('\n')
+    lines = content.split("\n")
 
     # Check 2: No hardcoded absolute log paths
     abs_log_issues = []
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
         # Skip comments and docstrings
-        if stripped.startswith('#') or stripped.startswith('"""') or stripped.startswith("'''"):
+        if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
             continue
         # Look for absolute paths in log-related contexts
         if re.search(r'["\'][/\\](?:home|tmp|var|etc)[/\\].*\.log', stripped):
             abs_log_issues.append(i)
 
-    checks.append({
-        'name': 'No hardcoded log paths',
-        'passed': len(abs_log_issues) == 0,
-        'message': 'No hardcoded absolute log paths found' if not abs_log_issues
-                   else f'Hardcoded log paths on lines: {abs_log_issues}'
-    })
+    checks.append(
+        {
+            "name": "No hardcoded log paths",
+            "passed": len(abs_log_issues) == 0,
+            "message": "No hardcoded absolute log paths found"
+            if not abs_log_issues
+            else f"Hardcoded log paths on lines: {abs_log_issues}",
+        }
+    )
 
     # Check 3: No /home/ references in logging setup
     home_log_issues = []
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
-        if stripped.startswith('#') or stripped.startswith('"""') or stripped.startswith("'''"):
+        if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
             continue
         # Look for /home/ in log file handler or path config
-        if re.search(r'/home/\w+', stripped) and ('log' in stripped.lower() or 'LOG' in stripped):
+        if re.search(r"/home/\w+", stripped) and ("log" in stripped.lower() or "LOG" in stripped):
             home_log_issues.append(i)
 
-    checks.append({
-        'name': 'No /home/ in log config',
-        'passed': len(home_log_issues) == 0,
-        'message': 'No /home/ references in logging configuration' if not home_log_issues
-                   else f'/home/ references in log config on lines: {home_log_issues}'
-    })
+    checks.append(
+        {
+            "name": "No /home/ in log config",
+            "passed": len(home_log_issues) == 0,
+            "message": "No /home/ references in logging configuration"
+            if not home_log_issues
+            else f"/home/ references in log config on lines: {home_log_issues}",
+        }
+    )
 
-    passed = all(c['passed'] for c in checks)
-    score = int(sum(1 for c in checks if c['passed']) / len(checks) * 100) if checks else 0
-    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "log_structure"})
-    return {'passed': passed, 'checks': checks, 'score': score, 'standard': 'LOG_STRUCTURE'}
+    passed = all(c["passed"] for c in checks)
+    score = int(sum(1 for c in checks if c["passed"]) / len(checks) * 100) if checks else 0
+    json_handler.log_operation(
+        "check_completed", {"file": str(module_path), "score": score, "standard": "log_structure"}
+    )
+    return {"passed": passed, "checks": checks, "score": score, "standard": "LOG_STRUCTURE"}
 
 
 def check_branch_post(branch_path: str) -> tuple:
@@ -190,8 +196,7 @@ def check_branch_post(branch_path: str) -> tuple:
     in_dirs = [f for f in bp.rglob("*.log") if f.parent.name == "logs"]
 
     repo = next(
-        (p for p in [bp] + list(bp.parents)
-         if (p / "AIPASS_REGISTRY.json").is_file()),
+        (p for p in [bp] + list(bp.parents) if (p / "AIPASS_REGISTRY.json").is_file()),
         None,
     )
     if repo and (repo / "system_logs").is_dir():
@@ -199,10 +204,16 @@ def check_branch_post(branch_path: str) -> tuple:
         system_count = len(list(sd.glob(f"{bp.name}_*.log")))
         if in_dirs and system_count == 0:
             scores.append(50)
-            violations.append({
-                "file": "(branch-level)", "path": str(sd), "score": 50,
-                "issues": [f"Branch has {len(in_dirs)} local log(s) but 0 system logs — prax dispatch may be misconfigured"],
-            })
+            violations.append(
+                {
+                    "file": "(branch-level)",
+                    "path": str(sd),
+                    "score": 50,
+                    "issues": [
+                        f"Branch has {len(in_dirs)} local log(s) but 0 system logs — prax dispatch may be misconfigured"
+                    ],
+                }
+            )
         else:
             scores.append(100)
 

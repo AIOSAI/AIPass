@@ -1,4 +1,5 @@
 """Shared pytest fixtures for flow tests"""
+
 import os
 import tempfile
 
@@ -32,20 +33,20 @@ def mock_logger():
 @pytest.fixture(autouse=True)
 def mock_json_handler():
     """Mock json_handler to prevent real JSON operations."""
-    with patch(
-        "aipass.flow.apps.handlers.json.json_handler.log_operation"
-    ) as mock_log_op:
+    with patch("aipass.flow.apps.handlers.json.json_handler.log_operation") as mock_log_op:
         yield mock_log_op
 
 
 @pytest.fixture(autouse=True)
 def mock_console():
     """Mock CLI console to prevent real console output."""
-    with patch("aipass.cli.apps.modules.console") as console_mock, \
-         patch("aipass.cli.apps.modules.error") as error_mock, \
-         patch("aipass.cli.apps.modules.warning") as warning_mock, \
-         patch("aipass.cli.apps.modules.success") as success_mock, \
-         patch("aipass.cli.apps.modules.header") as header_mock:
+    with (
+        patch("aipass.cli.apps.modules.console") as console_mock,
+        patch("aipass.cli.apps.modules.error") as error_mock,
+        patch("aipass.cli.apps.modules.warning") as warning_mock,
+        patch("aipass.cli.apps.modules.success") as success_mock,
+        patch("aipass.cli.apps.modules.header") as header_mock,
+    ):
         yield {
             "console": console_mock,
             "error": error_mock,
@@ -77,7 +78,7 @@ def mock_registry(tmp_path):
                 "created": "2026-03-20",
                 "file_path": str(tmp_path / "FPLAN-0001_test_plan_one_2026-03-20.md"),
                 "location": str(tmp_path),
-                "relative_path": "FPLAN-0001_test_plan_one_2026-03-20.md"
+                "relative_path": "FPLAN-0001_test_plan_one_2026-03-20.md",
             },
             "2": {
                 "subject": "Closed plan",
@@ -87,7 +88,7 @@ def mock_registry(tmp_path):
                 "closed_reason": "completed",
                 "file_path": str(tmp_path / "FPLAN-0002_closed_plan_2026-03-18.md"),
                 "location": str(tmp_path),
-                "relative_path": "FPLAN-0002_closed_plan_2026-03-18.md"
+                "relative_path": "FPLAN-0002_closed_plan_2026-03-18.md",
             },
             "3": {
                 "subject": "Another open",
@@ -95,9 +96,9 @@ def mock_registry(tmp_path):
                 "created": "2026-03-22",
                 "file_path": str(tmp_path / "FPLAN-0003_another_open_2026-03-22.md"),
                 "location": str(tmp_path),
-                "relative_path": "FPLAN-0003_another_open_2026-03-22.md"
-            }
-        }
+                "relative_path": "FPLAN-0003_another_open_2026-03-22.md",
+            },
+        },
     }
     registry_file = tmp_path / "fplan_registry.json"
     registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
@@ -109,16 +110,8 @@ def mock_template_registry(tmp_path):
     """Create a mock template registry."""
     registry = {
         "types": {
-            "flow_plans": {
-                "prefix": "FPLAN",
-                "shorthand": "fplan",
-                "created": "2026-03-07"
-            },
-            "dev_plans": {
-                "prefix": "DPLAN",
-                "shorthand": "dplan",
-                "created": "2026-03-07"
-            }
+            "flow_plans": {"prefix": "FPLAN", "shorthand": "fplan", "created": "2026-03-07"},
+            "dev_plans": {"prefix": "DPLAN", "shorthand": "dplan", "created": "2026-03-07"},
         }
     }
     registry_file = tmp_path / "template_registry.json"

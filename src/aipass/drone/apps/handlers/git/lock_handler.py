@@ -42,7 +42,9 @@ def find_repo_root() -> Path:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
         )
         if result.returncode == 0 and result.stdout.strip():
             return Path(result.stdout.strip())

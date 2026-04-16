@@ -15,6 +15,7 @@ Module orchestrates, handler implements.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_modules_standards() -> str:
     """Return formatted module standards content with Rich markup
 
@@ -65,8 +66,7 @@ def get_modules_standards() -> str:
         "",
         "[bold cyan]ESSENTIAL IMPORTS:[/bold cyan]",
         "  [dim]from aipass.prax.apps.modules.logger import system_logger as logger[/dim]",
-        "  [dim]from aipass.cli.apps.modules"
-        " import console, header, success, error[/dim]",
+        "  [dim]from aipass.cli.apps.modules import console, header, success, error[/dim]",
         "  [dim]from aipass.seedgo.apps.handlers.json import json_handler[/dim]",
         "",
         "[bold cyan]WARNINGS:[/bold cyan]",

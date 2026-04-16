@@ -19,7 +19,7 @@ from typing import Dict, Any, Tuple
 from aipass.flow.apps.handlers.json import json_handler
 
 # Matches any PREFIX- at the start (e.g. FPLAN-, DPLAN-, XPLAN-)
-_PREFIX_RE = re.compile(r'^([A-Z]+PLAN)-', re.IGNORECASE)
+_PREFIX_RE = re.compile(r"^([A-Z]+PLAN)-", re.IGNORECASE)
 
 
 def normalize_plan_number(plan_num: str) -> str:
@@ -49,7 +49,7 @@ def normalize_plan_number(plan_num: str) -> str:
         upper = plan_num.upper().strip()
         m = _PREFIX_RE.match(upper)
         if m:
-            plan_num = plan_num[m.end():]
+            plan_num = plan_num[m.end() :]
         elif upper.startswith("PLAN-"):
             plan_num = plan_num[5:]
         elif upper.startswith("PLAN"):

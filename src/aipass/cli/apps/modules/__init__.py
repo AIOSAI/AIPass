@@ -24,35 +24,23 @@ PATTERN (from Prax):
 from aipass.cli.apps.modules.display import console, err_console
 
 # Display functions
-from aipass.cli.apps.modules.display import (
-    header,
-    success,
-    error,
-    warning,
-    fatal,
-    section
-)
+from aipass.cli.apps.modules.display import header, success, error, warning, fatal, section
 
 # Operation templates
-from aipass.cli.apps.modules.templates import (
-    operation_start,
-    operation_complete
-)
+from aipass.cli.apps.modules.templates import operation_start, operation_complete
 
 __all__ = [
     # Rich console (primary service)
-    'console',
-    'err_console',
-
+    "console",
+    "err_console",
     # Display
-    'header',
-    'success',
-    'error',
-    'warning',
-    'fatal',
-    'section',
-
+    "header",
+    "success",
+    "error",
+    "warning",
+    "fatal",
+    "section",
     # Templates
-    'operation_start',
-    'operation_complete',
+    "operation_start",
+    "operation_complete",
 ]

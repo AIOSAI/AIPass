@@ -35,8 +35,8 @@ def parse_command(cmd: str) -> Tuple[Optional[str], List[str]]:
     json_handler.log_operation("filter_applied", {"command": command, "args": args})
 
     # Normalize aliases
-    if command in ['exit', 'q']:
-        command = 'quit'
+    if command in ["exit", "q"]:
+        command = "quit"
 
     return command, args
 

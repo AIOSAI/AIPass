@@ -30,7 +30,7 @@ from aipass.prax import logger
 # ---------------------------------------------------------------------------
 
 _BRANCH_ROOT: Path = Path(__file__).resolve().parents[3]
-_BRANCH_NAME: str = _BRANCH_ROOT.name          # "drone"
+_BRANCH_NAME: str = _BRANCH_ROOT.name  # "drone"
 JSON_DIR: Path = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
 
 _JSON_TYPES: tuple[str, ...] = ("config", "data", "log")
@@ -39,6 +39,7 @@ _JSON_TYPES: tuple[str, ...] = ("config", "data", "log")
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _today() -> str:
     """Return today's date as ISO string."""
@@ -70,9 +71,7 @@ def _atomic_write_json(path: Path, data: Any) -> None:
     Prevents truncation/corruption during concurrent access.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(path.parent), suffix=".tmp", prefix=".json_"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".json_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
@@ -126,6 +125,7 @@ _DEFAULTS: dict[str, Any] = {
 # Validation
 # ---------------------------------------------------------------------------
 
+
 def validate_json_structure(data: Any, json_type: str) -> bool:
     """Validate that *data* matches the expected shape for *json_type*.
 
@@ -158,6 +158,7 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
 # Path helpers
 # ---------------------------------------------------------------------------
 
+
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Return the filesystem path for *module_name*'s JSON of *json_type*.
 
@@ -174,6 +175,7 @@ def get_json_path(module_name: str, json_type: str) -> Path:
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
+
 
 def ensure_json_exists(module_name: str, json_type: str) -> bool:
     """Ensure a single JSON file exists; create with inline defaults if missing.
@@ -287,6 +289,7 @@ def save_json(module_name: str, json_type: str, data: Any) -> bool:
 # ---------------------------------------------------------------------------
 # High-level operations
 # ---------------------------------------------------------------------------
+
 
 def log_operation(
     operation: str,
@@ -424,10 +427,12 @@ if __name__ == "__main__":
 
     console = Console()
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]JSON HANDLER (drone) — Smoke Test[/bold cyan]",
-        border_style="bright_blue",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]JSON HANDLER (drone) — Smoke Test[/bold cyan]",
+            border_style="bright_blue",
+        )
+    )
     console.print()
     console.print(f"[dim]Branch root:[/dim]  {_BRANCH_ROOT}")
     console.print(f"[dim]JSON dir:[/dim]     {JSON_DIR}")

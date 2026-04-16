@@ -68,8 +68,7 @@ def get_deep_nesting_standards() -> str:
         "  [dim]        handle(item)[/dim]",
         "",
         "  Violation message example:",
-        "  [dim]2 functions exceed nesting limit: process() depth 5"
-        " line 15, build() depth 6 line 88[/dim]",
+        "  [dim]2 functions exceed nesting limit: process() depth 5 line 15, build() depth 6 line 88[/dim]",
         "",
         "[bold cyan]HOW TO FIX:[/bold cyan]",
         "  1. Identify the deeply nested function from the violation message",
@@ -94,10 +93,9 @@ def get_deep_nesting_standards() -> str:
         "",
         "[bold cyan]BYPASS:[/bold cyan]",
         "  Add an entry to [dim].seedgo/bypass.json[/dim]:",
-        "  [dim]{\"standard\": \"deep_nesting\", \"file\": \"path/to/file.py\"}[/dim]",
+        '  [dim]{"standard": "deep_nesting", "file": "path/to/file.py"}[/dim]',
         "  Or bypass specific lines:",
-        "  [dim]{\"standard\": \"deep_nesting\","
-        " \"file\": \"file.py\", \"lines\": [15]}[/dim]",
+        '  [dim]{"standard": "deep_nesting", "file": "file.py", "lines": [15]}[/dim]',
         "",
         "[bold cyan]REFERENCE:[/bold cyan]",
         "  [dim]See: seedgo standards pack (deep_nesting)[/dim]",

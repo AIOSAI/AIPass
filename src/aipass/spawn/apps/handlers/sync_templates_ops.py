@@ -24,14 +24,13 @@ from aipass.spawn.apps.handlers.json import json_handler
 _REPO_ROOT = Path(__file__).parents[5]  # handlers/apps/spawn/aipass/src/AIPass
 
 # Path to template_owners.json
-_TEMPLATE_OWNERS_PATH = (
-    Path(__file__).parent / "templates" / "template_owners.json"
-)
+_TEMPLATE_OWNERS_PATH = Path(__file__).parent / "templates" / "template_owners.json"
 
 
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def sync_templates(sync: bool = False, dry_run: bool = False) -> dict:
     """Pull managed files from authoritative source branches.
@@ -83,9 +82,7 @@ def sync_templates(sync: bool = False, dry_run: bool = False) -> dict:
 
         # Resolve paths
         source_file = _REPO_ROOT / "src" / "aipass" / source_branch / source_path
-        template_file = (
-            Path(__file__).parent / "templates" / template_path
-        )
+        template_file = Path(__file__).parent / "templates" / template_path
 
         if not source_file.exists():
             errors.append(f"Source file not found: {source_file}")
@@ -128,6 +125,7 @@ def sync_templates(sync: bool = False, dry_run: bool = False) -> dict:
 # =============================================================================
 # INTERNAL HELPERS
 # =============================================================================
+
 
 def _load_template_owners() -> dict:
     """Load template_owners.json. Returns empty structure if missing."""

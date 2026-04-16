@@ -28,8 +28,13 @@ from typing import Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.error_registry import (
-    query, get_entry, update_status, clear_resolved, get_stats,
-    get_circuit_breaker_status, circuit_breaker_reset,
+    query,
+    get_entry,
+    update_status,
+    clear_resolved,
+    get_stats,
+    get_circuit_breaker_status,
+    circuit_breaker_reset,
     update_source_fix_status,
 )
 from aipass.trigger.apps.handlers.error_reporter import (  # noqa: F401
@@ -45,6 +50,7 @@ def print_introspection():
     except ImportError:
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -159,7 +165,7 @@ def handle_command(command: str, args: list) -> bool:
     if not args:
         print_introspection()
         return True
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -167,9 +173,13 @@ def handle_command(command: str, args: list) -> bool:
     rest = args[1:]
 
     routes = {
-        "list": _cmd_list, "detail": _cmd_detail, "suppress": _cmd_suppress,
-        "resolve": _cmd_resolve, "clear-resolved": _cmd_clear_resolved,
-        "stats": _cmd_stats, "circuit-breaker": _cmd_circuit_breaker,
+        "list": _cmd_list,
+        "detail": _cmd_detail,
+        "suppress": _cmd_suppress,
+        "resolve": _cmd_resolve,
+        "clear-resolved": _cmd_clear_resolved,
+        "stats": _cmd_stats,
+        "circuit-breaker": _cmd_circuit_breaker,
     }
 
     if sub in routes:
@@ -184,6 +194,7 @@ def handle_command(command: str, args: list) -> bool:
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
+
 
 def _cmd_list(console, args: list) -> bool:
     """List errors with Rich table. Filters: --status, --component, --severity, --limit."""
@@ -220,10 +231,13 @@ def _cmd_list(console, args: list) -> bool:
         sc = _STATUS_COLORS.get(st, "white")
         svc = _SEVERITY_COLORS.get(sev, "white")
         table.add_row(
-            e.get("id", "?"), e.get("fingerprint", "?")[:8],
-            e.get("error_type", "?"), e.get("component", "?"),
+            e.get("id", "?"),
+            e.get("fingerprint", "?")[:8],
+            e.get("error_type", "?"),
+            e.get("component", "?"),
             str(e.get("count", 0)),
-            f"[{svc}]{sev}[/{svc}]", f"[{sc}]{st}[/{sc}]",
+            f"[{svc}]{sev}[/{svc}]",
+            f"[{sc}]{st}[/{sc}]",
             _fmt_time(e.get("last_seen", "?")),
         )
 
@@ -245,7 +259,10 @@ def _cmd_detail(console, args: list) -> bool:
         entry = _find_by_id_or_fp(args[0])
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
         logger.warning("Failed to read error registry for '%s': %s", args[0], exc)
-        error(f"Failed to read error registry: {exc}", suggestion="Registry may be corrupted — try 'drone @trigger errors list' first")
+        error(
+            f"Failed to read error registry: {exc}",
+            suggestion="Registry may be corrupted — try 'drone @trigger errors list' first",
+        )
         return True
 
     if not entry:
@@ -272,8 +289,14 @@ def _cmd_detail(console, args: list) -> bool:
     ]
     if entry.get("suppress_reason"):
         lines.append(f"  [bold]Suppress Reason:[/bold] {entry['suppress_reason']}")
-    lines += ["", "  [bold]Message:[/bold]", f"    {entry.get('message', '?')}",
-              "", "  [bold]Normalized:[/bold]", f"    {entry.get('normalized_message', '?')}"]
+    lines += [
+        "",
+        "  [bold]Message:[/bold]",
+        f"    {entry.get('message', '?')}",
+        "",
+        "  [bold]Normalized:[/bold]",
+        f"    {entry.get('normalized_message', '?')}",
+    ]
 
     console.print(Panel("\n".join(lines), title=f"Error Detail - {entry.get('id', '?')}", style="bold"))
     return True
@@ -421,8 +444,7 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
 
 
 if __name__ == "__main__":
-
-    if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

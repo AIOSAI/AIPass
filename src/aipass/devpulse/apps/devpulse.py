@@ -95,12 +95,11 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
 # HANDLER SECURITY GUARD
 # =============================================================================
 
+
 def handle_command(command: str, args: list) -> bool:
     """Entry point for drone routing. Guards against cross-branch misuse."""
     caller = Path.cwd().name
-    if caller != "devpulse" and not any(
-        p.name == "devpulse" for p in Path.cwd().parents
-    ):
+    if caller != "devpulse" and not any(p.name == "devpulse" for p in Path.cwd().parents):
         logger.warning(f"[DEVPULSE] Cross-branch call from {caller} — use ai_mail instead")
 
     return _handle_command(command, args)
@@ -124,6 +123,7 @@ def _handle_command(command: str, args: list) -> bool:
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
+
 
 def main():
     """Main entry point - routes commands or shows help."""

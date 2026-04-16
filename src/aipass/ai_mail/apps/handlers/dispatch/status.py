@@ -33,7 +33,7 @@ def load_dispatch_log() -> List[Dict[str, Any]]:
         return []
 
     try:
-        with open(DISPATCH_LOG_FILE, 'r', encoding='utf-8') as f:
+        with open(DISPATCH_LOG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data.get("dispatches", [])
     except (json.JSONDecodeError, IOError) as e:
@@ -50,12 +50,9 @@ def save_dispatch_log(dispatches: List[Dict[str, Any]]) -> bool:
         # Keep last 50 dispatches
         dispatches = dispatches[-50:]
 
-        data = {
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "dispatches": dispatches
-        }
+        data = {"last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "dispatches": dispatches}
 
-        with open(DISPATCH_LOG_FILE, 'w', encoding='utf-8') as f:
+        with open(DISPATCH_LOG_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except IOError as e:
@@ -84,7 +81,7 @@ def log_dispatch(branch: str, pid: Optional[int], status: str, error_msg: Option
         "branch": branch,
         "pid": pid,
         "status": status,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
     if error_msg:
@@ -102,11 +99,7 @@ def check_pid_status(pid: int) -> str:
         'RUNNING', 'COMPLETED', or 'UNKNOWN'
     """
     try:
-        result = subprocess.run(
-            ['ps', '-p', str(pid)],
-            capture_output=True,
-            timeout=5
-        )
+        result = subprocess.run(["ps", "-p", str(pid)], capture_output=True, timeout=5)
         if result.returncode == 0:
             return "RUNNING"
         else:

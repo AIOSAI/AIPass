@@ -94,7 +94,7 @@ EXAMPLES:
 
   # Cleanup data older than 60 days
   drone @api cleanup 60
-        """
+        """,
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -115,7 +115,12 @@ EXAMPLES:
 
     # cleanup command
     cleanup_parser = subparsers.add_parser("cleanup", help="Clean up old usage data")
-    cleanup_parser.add_argument("days", nargs="?", default=str(DEFAULT_RETENTION_DAYS), help=f"Days to retain (default: {DEFAULT_RETENTION_DAYS})")
+    cleanup_parser.add_argument(
+        "days",
+        nargs="?",
+        default=str(DEFAULT_RETENTION_DAYS),
+        help=f"Days to retain (default: {DEFAULT_RETENTION_DAYS})",
+    )
 
     console.print(parser.format_help())
 
@@ -189,7 +194,9 @@ def track_usage(args: List[str]):
 
     if result.get("success"):
         metrics = result.get("metrics", {})
-        success(f"Tracked: {metrics.get('tokens_prompt', 0)} prompt + {metrics.get('tokens_completion', 0)} completion tokens, ${metrics.get('total_cost', 0):.6f}")
+        success(
+            f"Tracked: {metrics.get('tokens_prompt', 0)} prompt + {metrics.get('tokens_completion', 0)} completion tokens, ${metrics.get('total_cost', 0):.6f}"
+        )
     else:
         error(f"Tracking failed: {result.get('error', 'unknown')}")
 
@@ -206,7 +213,7 @@ def show_stats():
         console.print(f"  Total Cost: ${stats.get('total_cost', 0.0):.6f}")
         console.print(f"  Total Tokens: {stats.get('total_tokens', 0)}")
         console.print(f"  Callers: {stats.get('callers', 0)}")
-        models = stats.get('models_used', [])
+        models = stats.get("models_used", [])
         if models:
             console.print(f"  Models Used: {', '.join(models)}")
     else:
@@ -275,7 +282,8 @@ def cleanup_data(args: List[str]):
         # Fire trigger event
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('usage_data_cleaned', days=days, data_path=str(data_path))
+
+            trigger.fire("usage_data_cleaned", days=days, data_path=str(data_path))
         except ImportError:
             logger.warning("Trigger module not available — skipping event fire")
     else:
@@ -292,7 +300,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Show help for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

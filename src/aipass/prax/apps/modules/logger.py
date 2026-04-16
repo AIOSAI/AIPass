@@ -57,20 +57,11 @@ from aipass.prax.apps.handlers.logging.setup import (
     disable_terminal_output as _disable_terminal,
 )
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
-from aipass.prax.apps.handlers.logging.override import (
-    is_override_active
-)
-from aipass.prax.apps.handlers.discovery.watcher import (
-    start_file_watcher,
-    is_file_watcher_active
-)
+from aipass.prax.apps.handlers.logging.override import is_override_active
+from aipass.prax.apps.handlers.discovery.watcher import start_file_watcher, is_file_watcher_active
 from aipass.prax.apps.handlers.registry.load import load_module_registry
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir, get_module_logs_dir, PRAX_JSON_DIR
-from aipass.prax.apps.handlers.logging.direct import (
-    get_direct_logger,
-    direct_log,
-    DirectLogger
-)
+from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
 from aipass.prax.apps.handlers.json import json_handler
 
 # Module constants
@@ -81,6 +72,7 @@ DATA_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_data.json"
 # SYSTEM LOGGER - THE MAIN EXPORT
 # =============================================
 
+
 def get_system_logger():
     """Get logger that automatically routes to correct module log file.
 
@@ -90,6 +82,7 @@ def get_system_logger():
     """
     module_name, caller_path, branch = get_caller_info()
     return setup_individual_logger(module_name, caller_path=caller_path, caller_branch=branch)
+
 
 class SystemLogger:
     """Auto-routing logger that writes to calling module's log file"""
@@ -117,7 +110,8 @@ class SystemLogger:
             # Fire startup event (trigger auto-initializes handlers)
             try:
                 from aipass.trigger.apps.modules.core import trigger
-                trigger.fire('startup')
+
+                trigger.fire("startup")
             except (ImportError, OSError) as e:
                 logger.warning("Trigger startup fire skipped (not available or inotify full): %s", e)
 
@@ -139,12 +133,14 @@ class SystemLogger:
         logger = get_system_logger()
         logger.error(message, *args, **kwargs)
 
+
 # Export the logger object - this is what other branches import
 system_logger = SystemLogger()
 
 # =============================================
 # LIFECYCLE FUNCTIONS
 # =============================================
+
 
 def initialize_logging_system():
     """Initialize the complete logging system
@@ -166,10 +162,8 @@ def initialize_logging_system():
 
     result = run_initialize(MODULE_NAME)
 
-    console.print(
-        f"[{MODULE_NAME}] System initialized - "
-        f"{result['modules_count']} modules, individual logging"
-    )
+    console.print(f"[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
+
 
 def shutdown_logging_system():
     """Shutdown logging system cleanly
@@ -190,9 +184,11 @@ def shutdown_logging_system():
 
     console.print(f"[{MODULE_NAME}] Shutdown complete")
 
+
 # =============================================
 # STATUS AND CONTROL
 # =============================================
+
 
 def get_system_status() -> Dict[str, Any]:
     """Get current logging system status
@@ -215,12 +211,14 @@ def get_system_status() -> Dict[str, Any]:
         "module_logs_dir": str(get_module_logs_dir("prax")),
         "registry_file": str(DATA_FILE),
         "file_watcher_active": is_file_watcher_active(),
-        "logger_override_active": is_override_active()
+        "logger_override_active": is_override_active(),
     }
+
 
 def enable_terminal_output():
     """Enable terminal output for all future loggers"""
     _enable_terminal()
+
 
 def disable_terminal_output():
     """Disable terminal output"""
@@ -234,6 +232,7 @@ def print_introspection():
     except ImportError as e:
         logger.info("CLI console not available, using rich fallback: %s", e)
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -274,7 +273,7 @@ def handle_command(_command: str, args: list) -> bool:
     if not args:
         print_introspection()
         return True
-    if args[0] in ('--help', '-h', 'help'):
+    if args[0] in ("--help", "-h", "help"):
         print_introspection()  # Logger has no user commands — introspection IS the help
         return True
     return False

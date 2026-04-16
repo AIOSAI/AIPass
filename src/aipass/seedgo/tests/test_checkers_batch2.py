@@ -61,7 +61,7 @@ def _write(tmp_path: Path, name: str, content: str) -> str:
 
 class TestErrorHandling:
     def test_error_handling_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import os
 
 def do_work():
@@ -70,7 +70,7 @@ def do_work():
     except ZeroDivisionError as e:
         print(f"Caught: {e}")
         return None
-'''
+"""
         fp = _write(tmp_path, "clean_errors.py", code)
         result = check_error_handling(fp)
         assert result["passed"] is True
@@ -78,13 +78,13 @@ def do_work():
         assert result["standard"] == "ERROR_HANDLING"
 
     def test_error_handling_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 def do_work():
     try:
         risky()
     except:
         pass
-'''
+"""
         fp = _write(tmp_path, "bad_errors.py", code)
         result = check_error_handling(fp)
         assert result["score"] < 100
@@ -93,13 +93,13 @@ def do_work():
         assert "silent failure" in violations[0]["message"].lower() or "except" in violations[0]["message"].lower()
 
     def test_error_handling_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 def do_work():
     try:
         risky()
     except:
         pass
-'''
+"""
         fp = _write(tmp_path, "bypass_errors.py", code)
         bypass = [{"file": "bypass_errors.py", "standard": "error_handling"}]
         result = check_error_handling(fp, bypass_rules=bypass)
@@ -116,12 +116,12 @@ class TestHandlers:
         # The checker only runs checks for files whose path contains 'apps/handlers/'
         handler_dir = tmp_path / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 from aipass.seedgo.apps.handlers.json import json_handler
 
 def do_stuff():
     return True
-'''
+"""
         fp = str(handler_dir / "clean_handler.py")
         Path(fp).write_text(code, encoding="utf-8")
         result = check_handlers(fp)
@@ -132,13 +132,13 @@ def do_stuff():
     def test_handlers_violation_caught(self, tmp_path: Path) -> None:
         handler_dir = tmp_path / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.modules.scanner import scan_all
 
 def do_stuff():
     return scan_all()
-'''
+"""
         fp = str(handler_dir / "bad_handler.py")
         Path(fp).write_text(code, encoding="utf-8")
         result = check_handlers(fp)
@@ -149,9 +149,9 @@ def do_stuff():
     def test_handlers_bypass_respected(self, tmp_path: Path) -> None:
         handler_dir = tmp_path / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 from aipass.seedgo.apps.modules.scanner import scan_all
-'''
+"""
         fp = str(handler_dir / "bypass_handler.py")
         Path(fp).write_text(code, encoding="utf-8")
         bypass = [{"file": "bypass_handler.py", "standard": "handlers"}]
@@ -166,14 +166,14 @@ from aipass.seedgo.apps.modules.scanner import scan_all
 
 class TestHardcodedKey:
     def test_hardcoded_key_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import os
 
 API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 def call_api():
     return API_KEY
-'''
+"""
         fp = _write(tmp_path, "clean_keys.py", code)
         result = check_hardcoded_key(fp)
         assert result["passed"] is True
@@ -181,12 +181,12 @@ def call_api():
         assert result["standard"] == "HARDCODED_KEY"
 
     def test_hardcoded_key_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
 
 def call_api():
     return API_KEY
-'''
+"""
         fp = _write(tmp_path, "bad_keys.py", code)
         result = check_hardcoded_key(fp)
         assert result["score"] < 100
@@ -195,9 +195,9 @@ def call_api():
         assert "hardcoded" in violations[0]["message"].lower() or "key" in violations[0]["message"].lower()
 
     def test_hardcoded_key_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
-'''
+"""
         fp = _write(tmp_path, "bypass_keys.py", code)
         bypass = [{"file": "bypass_keys.py", "standard": "hardcoded_key"}]
         result = check_hardcoded_key(fp, bypass_rules=bypass)
@@ -211,11 +211,11 @@ API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
 
 class TestHelpText:
     def test_help_text_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 def print_help():
     print("Usage: drone @seedgo audit")
     print("Run an audit on the current branch.")
-'''
+"""
         fp = _write(tmp_path, "clean_help.py", code)
         result = check_help_text(fp)
         assert result["passed"] is True
@@ -223,11 +223,11 @@ def print_help():
         assert result["standard"] == "HELP_TEXT"
 
     def test_help_text_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 def print_help():
     print("Usage: python3 tools/scanner.py --all")
     print("Run the scanner tool.")
-'''
+"""
         fp = _write(tmp_path, "bad_help.py", code)
         result = check_help_text(fp)
         assert result["score"] < 100
@@ -235,10 +235,10 @@ def print_help():
         assert len(violations) > 0
 
     def test_help_text_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 def print_help():
     print("Usage: python3 tools/scanner.py --all")
-'''
+"""
         fp = _write(tmp_path, "bypass_help.py", code)
         bypass = [{"file": "bypass_help.py", "standard": "help_text"}]
         result = check_help_text(fp, bypass_rules=bypass)
@@ -252,7 +252,7 @@ def print_help():
 
 class TestImports:
     def test_imports_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import os
 import sys
 from pathlib import Path
@@ -264,7 +264,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 def process():
     logger.info("Processing")
     return True
-'''
+"""
         fp = _write(tmp_path, "clean_imports.py", code)
         result = check_imports(fp)
         assert result["passed"] is True
@@ -272,7 +272,7 @@ def process():
         assert result["standard"] == "IMPORTS"
 
     def test_imports_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import sys
 sys.path.insert(0, "/some/path")
 
@@ -282,7 +282,7 @@ from aipass.prax import logger
 def process():
     logger.info("Processing")
     return True
-'''
+"""
         fp = _write(tmp_path, "bad_imports.py", code)
         result = check_imports(fp)
         assert result["score"] < 100
@@ -290,10 +290,10 @@ def process():
         assert len(violations) > 0
 
     def test_imports_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import sys
 sys.path.insert(0, "/some/path")
-'''
+"""
         fp = _write(tmp_path, "bypass_imports.py", code)
         bypass = [{"file": "bypass_imports.py", "standard": "imports"}]
         result = check_imports(fp, bypass_rules=bypass)
@@ -310,7 +310,7 @@ class TestIntrospection:
         # File must be in apps/ to be detected as entry point, or modules/ for module
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 def print_introspection():
     print("Module: scanner")
     print("Version: 1.0.0")
@@ -323,7 +323,7 @@ def handle_command(command, args):
         print("Help text here")
         return True
     return False
-'''
+"""
         fp = str(modules_dir / "scanner.py")
         Path(fp).write_text(code, encoding="utf-8")
         result = check_introspection(fp)
@@ -334,12 +334,12 @@ def handle_command(command, args):
     def test_introspection_violation_caught(self, tmp_path: Path) -> None:
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 def handle_command(command, args):
     if args[0] == "scan":
         return do_scan()
     return False
-'''
+"""
         fp = str(modules_dir / "bad_module.py")
         Path(fp).write_text(code, encoding="utf-8")
         result = check_introspection(fp)
@@ -350,10 +350,10 @@ def handle_command(command, args):
     def test_introspection_bypass_respected(self, tmp_path: Path) -> None:
         modules_dir = tmp_path / "apps" / "modules"
         modules_dir.mkdir(parents=True)
-        code = '''\
+        code = """\
 def handle_command(command, args):
     return False
-'''
+"""
         fp = str(modules_dir / "bypass_mod.py")
         Path(fp).write_text(code, encoding="utf-8")
         bypass = [{"file": "bypass_mod.py", "standard": "introspection"}]
@@ -368,13 +368,13 @@ def handle_command(command, args):
 
 class TestLogHandler:
     def test_log_handler_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 from aipass.prax import logger
 
 def do_work():
     logger.info("Working")
     return True
-'''
+"""
         fp = _write(tmp_path, "clean_logging.py", code)
         result = check_log_handler(fp)
         assert result["passed"] is True
@@ -382,7 +382,7 @@ def do_work():
         assert result["standard"] == "LOG_HANDLER"
 
     def test_log_handler_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import logging
 
 handler = logging.FileHandler("/var/log/app.log")
@@ -390,7 +390,7 @@ handler2 = logging.StreamHandler()
 my_logger = logging.getLogger("app")
 my_logger.addHandler(handler)
 my_logger.addHandler(handler2)
-'''
+"""
         fp = _write(tmp_path, "bad_logging.py", code)
         result = check_log_handler(fp)
         assert result["score"] < 100
@@ -398,13 +398,13 @@ my_logger.addHandler(handler2)
         assert len(violations) > 0
 
     def test_log_handler_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 import logging
 
 handler = logging.FileHandler("/var/log/app.log")
 my_logger = logging.getLogger("app")
 my_logger.addHandler(handler)
-'''
+"""
         fp = _write(tmp_path, "bypass_logging.py", code)
         bypass = [{"file": "bypass_logging.py", "standard": "log_handler"}]
         result = check_log_handler(fp, bypass_rules=bypass)
@@ -418,7 +418,7 @@ my_logger.addHandler(handler)
 
 class TestLogLevel:
     def test_log_level_clean_passes(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 from aipass.prax import logger
 
 def process():
@@ -429,7 +429,7 @@ def process():
         logger.error("System failure during compute: %s", e)
     logger.warning("User provided unknown command")
     return True
-'''
+"""
         fp = _write(tmp_path, "clean_levels.py", code)
         result = check_log_level(fp)
         assert result["passed"] is True
@@ -437,14 +437,14 @@ def process():
         assert result["standard"] == "LOG_LEVEL"
 
     def test_log_level_violation_caught(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 from aipass.prax import logger
 
 def handle_command(command, args):
     if command == "unknown":
         logger.error("Unknown command: %s", command)
     return False
-'''
+"""
         fp = _write(tmp_path, "bad_levels.py", code)
         result = check_log_level(fp)
         assert result["score"] < 100
@@ -452,14 +452,14 @@ def handle_command(command, args):
         assert len(violations) > 0
 
     def test_log_level_bypass_respected(self, tmp_path: Path) -> None:
-        code = '''\
+        code = """\
 from aipass.prax import logger
 
 def handle_command(command, args):
     if command == "unknown":
         logger.error("Unknown command: %s", command)
     return False
-'''
+"""
         fp = _write(tmp_path, "bypass_levels.py", code)
         bypass = [{"file": "bypass_levels.py", "standard": "log_level"}]
         result = check_log_level(fp, bypass_rules=bypass)

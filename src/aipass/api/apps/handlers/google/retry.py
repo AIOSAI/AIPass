@@ -58,7 +58,9 @@ def is_ssl_error(exc: Exception) -> bool:
 
 
 def api_call_with_retry(
-    request: Any, max_retries: int = 3, rebuild_service_fn: Optional[Callable] = None,
+    request: Any,
+    max_retries: int = 3,
+    rebuild_service_fn: Optional[Callable] = None,
 ) -> Any:
     """Execute a Google API request with exponential backoff on SSL errors.
 
@@ -81,7 +83,7 @@ def api_call_with_retry(
             return request.execute()
         except Exception as e:
             if attempt < max_retries and is_ssl_error(e):
-                wait = 2 ** attempt
+                wait = 2**attempt
                 json_handler.log_operation("api_retry_attempted", {"attempt": attempt + 1, "wait_seconds": wait})
                 time.sleep(wait)
                 if rebuild_service_fn:

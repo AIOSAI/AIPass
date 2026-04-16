@@ -37,6 +37,7 @@ from aipass.prax.apps.handlers.json import json_handler
 # CONSTANTS
 # =============================================================================
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -45,9 +46,11 @@ def _find_repo_root() -> Path:
             return parent
     return Path.cwd()
 
+
 def _get_aipass_registry() -> Path:
     """Lazily resolve AIPASS_REGISTRY.json path."""
     return _find_repo_root() / "AIPASS_REGISTRY.json"
+
 
 STALE_THRESHOLD_MINUTES = 120
 
@@ -55,6 +58,7 @@ STALE_THRESHOLD_MINUTES = 120
 # =============================================================================
 # DATA COLLECTION
 # =============================================================================
+
 
 def _get_all_branches() -> List[Dict[str, Any]]:
     """
@@ -73,10 +77,7 @@ def _get_all_branches() -> List[Dict[str, Any]]:
         for branch in data.get("branches", []):
             branch_path = Path(branch.get("path", ""))
             if branch_path.exists():
-                branches.append({
-                    "name": branch.get("name", ""),
-                    "path": branch_path
-                })
+                branches.append({"name": branch.get("name", ""), "path": branch_path})
         return branches
     except Exception as e:
         logger.warning("Failed to load AIPASS_REGISTRY.json: %s", e)
@@ -173,20 +174,22 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         # Validate PID is still alive
         if not _is_pid_alive(pid):
             # Stale lock — process died without cleanup
-            stale_agents.append({
-                "branch": branch["name"],
-                "pid": pid,
-                "started": timestamp,
-                "runtime_minutes": round(runtime_minutes, 1),
-                "status": "dead_process"
-            })
+            stale_agents.append(
+                {
+                    "branch": branch["name"],
+                    "pid": pid,
+                    "started": timestamp,
+                    "runtime_minutes": round(runtime_minutes, 1),
+                    "status": "dead_process",
+                }
+            )
             continue
 
         agent_info = {
             "branch": branch["name"],
             "pid": pid,
             "started": timestamp,
-            "runtime_minutes": round(runtime_minutes, 1)
+            "runtime_minutes": round(runtime_minutes, 1),
         }
 
         if runtime_minutes > STALE_THRESHOLD_MINUTES:
@@ -201,6 +204,7 @@ def _scan_active_agents() -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def build_agent_status_section() -> Dict[str, Any]:
     """
@@ -220,7 +224,7 @@ def build_agent_status_section() -> Dict[str, Any]:
         "active_agents": active_agents,
         "agent_count": len(active_agents),
         "stale_agents": stale_agents,
-        "last_updated": datetime.now().isoformat()
+        "last_updated": datetime.now().isoformat(),
     }
 
 
@@ -234,8 +238,7 @@ def _get_all_branch_paths() -> List[Path]:
     return [b["path"] for b in _get_all_branches()]
 
 
-def _write_section_to_all_branches(section_name: str, section_data: Dict,
-                                    branch_paths: List[Path]) -> int:
+def _write_section_to_all_branches(section_name: str, section_data: Dict, branch_paths: List[Path]) -> int:
     """
     Write a dashboard section to multiple branches via a single subprocess.
 
@@ -268,18 +271,12 @@ def _write_section_to_all_branches(section_name: str, section_data: Dict,
             "print(ok)\n"
         )
 
-        input_data = json.dumps({
-            "section_name": section_name,
-            "section_data": section_data,
-            "branch_paths": [str(p) for p in branch_paths]
-        })
+        input_data = json.dumps(
+            {"section_name": section_name, "section_data": section_data, "branch_paths": [str(p) for p in branch_paths]}
+        )
 
         result = subprocess.run(
-            [sys.executable, "-c", script],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=60
+            [sys.executable, "-c", script], input=input_data, capture_output=True, text=True, timeout=60
         )
 
         if result.returncode == 0 and result.stdout.strip().isdigit():
@@ -311,16 +308,17 @@ def push_agent_status_dashboard() -> bool:
         if not branch_paths:
             return False
 
-        success_count = _write_section_to_all_branches(
-            "agent_status", section_data, branch_paths
-        )
+        success_count = _write_section_to_all_branches("agent_status", section_data, branch_paths)
 
-        json_handler.log_operation("agent_status_written", {
-            "branches_targeted": len(branch_paths),
-            "branches_updated": success_count,
-            "active_agents": section_data.get("agent_count", 0),
-            "stale_agents": len(section_data.get("stale_agents", [])),
-        })
+        json_handler.log_operation(
+            "agent_status_written",
+            {
+                "branches_targeted": len(branch_paths),
+                "branches_updated": success_count,
+                "active_agents": section_data.get("agent_count", 0),
+                "stale_agents": len(section_data.get("stale_agents", [])),
+            },
+        )
 
         return success_count > 0
 

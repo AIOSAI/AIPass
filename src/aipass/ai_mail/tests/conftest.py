@@ -1,4 +1,3 @@
-
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: tests/conftest.py
@@ -15,6 +14,7 @@
 # =============================================
 
 """Shared pytest fixtures for ai_mail tests"""
+
 import os
 import tempfile
 
@@ -45,10 +45,7 @@ def sample_test_data() -> dict:
 
     Customize this fixture for your module's needs
     """
-    return {
-        "test_key": "test_value",
-        "sample_data": "example"
-    }
+    return {"test_key": "test_value", "sample_data": "example"}
 
 
 @pytest.fixture

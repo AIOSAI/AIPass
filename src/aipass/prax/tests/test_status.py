@@ -21,15 +21,18 @@ from unittest.mock import MagicMock
 # HELPERS
 # =============================================
 
+
 def _ensure_sync_mock(monkeypatch):
     """Inject a mock for the sync handler before importing status module."""
     mock_sync_mod = MagicMock()
-    mock_sync_mod.sync_status = MagicMock(return_value={
-        "status": "ok",
-        "branches_synced": ["prax", "drone", "flow"],
-        "branches_missing": [],
-        "timestamp": "2026-03-24T12:00:00",
-    })
+    mock_sync_mod.sync_status = MagicMock(
+        return_value={
+            "status": "ok",
+            "branches_synced": ["prax", "drone", "flow"],
+            "branches_missing": [],
+            "timestamp": "2026-03-24T12:00:00",
+        }
+    )
     monkeypatch.setitem(
         sys.modules,
         "aipass.prax.apps.handlers.status.sync",
@@ -47,12 +50,14 @@ def _fresh_import():
         print_help,
         print_introspection,
     )
+
     return handle_command, print_help, print_introspection
 
 
 # =============================================
 # TESTS
 # =============================================
+
 
 def test_handle_command_help(mock_prax_infrastructure, monkeypatch):
     """--help flag returns True and prints help text."""

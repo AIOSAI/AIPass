@@ -41,6 +41,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # PACK DISCOVERY
 # =============================================================================
 
+
 def _discover_proof_packs() -> dict:
     """Discover available proof packs from handlers/ directory.
 
@@ -70,6 +71,7 @@ def _discover_proof_packs() -> dict:
 # PROOF CONTENT DISCOVERY
 # =============================================================================
 
+
 def _discover_proof_content(pack_dir: Path) -> dict:
     """Discover available proof content files within a pack.
 
@@ -93,6 +95,7 @@ def _discover_proof_content(pack_dir: Path) -> dict:
 # =============================================================================
 # CONTENT LOADING
 # =============================================================================
+
 
 def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
     """Load and return formatted proof content from a content handler.
@@ -131,6 +134,7 @@ def _load_proof_content(content_file: Path, proof_name: str) -> str | None:
 # =============================================================================
 # DISPLAY HELPERS
 # =============================================================================
+
 
 def _show_query_introspection() -> None:
     """No-args display: list available proof packs with content counts."""
@@ -231,6 +235,7 @@ def _show_proof_content(pack_name: str, pack_dir: Path, proof_name: str) -> None
 # COMMAND HANDLER
 # =============================================================================
 
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'proof_query' command with pack-aware drill-down.
@@ -283,6 +288,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # INTROSPECTION & HELP
 # =============================================================================
 
+
 def print_introspection() -> None:
     """Display module info for seedgo introspection system."""
     _show_query_introspection()
@@ -296,7 +302,9 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
-    console.print("  [green]drone @seedgo proof_query[/green]                        [dim]List available proof packs[/dim]")
+    console.print(
+        "  [green]drone @seedgo proof_query[/green]                        [dim]List available proof packs[/dim]"
+    )
     console.print("  [green]drone @seedgo proof_query <pack>[/green]                 [dim]List proofs in pack[/dim]")
     console.print("  [green]drone @seedgo proof_query <pack> <proof>[/green]         [dim]Show proof content[/dim]")
     console.print("  [green]drone @seedgo proof_query --help[/green]                 [dim]This help message[/dim]")

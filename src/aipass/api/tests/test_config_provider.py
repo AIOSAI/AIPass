@@ -137,9 +137,7 @@ class TestMergeConfigs:
 
         config_provider.merge_configs(base, updates)
 
-        mock_jh.log_operation.assert_called_once_with(
-            "config_merged", {"keys_updated": 2}
-        )
+        mock_jh.log_operation.assert_called_once_with("config_merged", {"keys_updated": 2})
 
 
 # =============================================

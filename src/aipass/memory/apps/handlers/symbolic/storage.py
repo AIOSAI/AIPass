@@ -46,10 +46,9 @@ COLLECTION_NAME = "symbolic_fragments"
 # FRAGMENT CREATION
 # =============================================================================
 
+
 def create_fragment(
-    analysis: Dict[str, Any],
-    content: str | None = None,
-    source_branch: str | None = None
+    analysis: Dict[str, Any], content: str | None = None, source_branch: str | None = None
 ) -> Dict[str, Any]:
     """
     Create a fragment from conversation analysis
@@ -66,13 +65,10 @@ def create_fragment(
         Dict with 'success', 'fragment' containing storable fragment
     """
     if not analysis:
-        return {
-            'success': False,
-            'error': 'No analysis provided'
-        }
+        return {"success": False, "error": "No analysis provided"}
 
-    dimensions = analysis.get('dimensions', {})
-    metadata = analysis.get('metadata', {})
+    dimensions = analysis.get("dimensions", {})
+    metadata = analysis.get("metadata", {})
 
     # Generate unique ID with UUID suffix for uniqueness
     timestamp = datetime.now()
@@ -86,30 +82,27 @@ def create_fragment(
 
     # Build fragment structure
     frag_data = {
-        'id': frag_id,
-        'content': content,
-        'dimensions': {
-            'technical': dimensions.get('technical', []),
-            'emotional': dimensions.get('emotional', []),
-            'collaboration': dimensions.get('collaboration', []),
-            'learnings': dimensions.get('learnings', []),
-            'triggers': dimensions.get('triggers', [])
+        "id": frag_id,
+        "content": content,
+        "dimensions": {
+            "technical": dimensions.get("technical", []),
+            "emotional": dimensions.get("emotional", []),
+            "collaboration": dimensions.get("collaboration", []),
+            "learnings": dimensions.get("learnings", []),
+            "triggers": dimensions.get("triggers", []),
         },
-        'metadata': {
-            'timestamp': metadata.get('timestamp', timestamp.isoformat()),
-            'message_count': analysis.get('message_count', 0),
-            'depth': metadata.get('depth', 'unknown'),
-            'total_words': metadata.get('total_words', 0)
-        }
+        "metadata": {
+            "timestamp": metadata.get("timestamp", timestamp.isoformat()),
+            "message_count": analysis.get("message_count", 0),
+            "depth": metadata.get("depth", "unknown"),
+            "total_words": metadata.get("total_words", 0),
+        },
     }
 
     if source_branch:
-        frag_data['metadata']['source_branch'] = source_branch
+        frag_data["metadata"]["source_branch"] = source_branch
 
-    return {
-        'success': True,
-        'fragment': frag_data
-    }
+    return {"success": True, "fragment": frag_data}
 
 
 def _generate_essence(dimensions: Dict[str, Any], metadata: Dict[str, Any]) -> str:
@@ -129,33 +122,33 @@ def _generate_essence(dimensions: Dict[str, Any], metadata: Dict[str, Any]) -> s
     parts = []
 
     # Technical flow
-    technical = dimensions.get('technical', [])
-    if technical and 'no_conversation' not in technical:
+    technical = dimensions.get("technical", [])
+    if technical and "no_conversation" not in technical:
         parts.append(f"Technical: {', '.join(technical)}")
 
     # Emotional arc
-    emotional = dimensions.get('emotional', [])
-    if emotional and 'neutral' not in emotional:
+    emotional = dimensions.get("emotional", [])
+    if emotional and "neutral" not in emotional:
         parts.append(f"Emotional: {', '.join(emotional)}")
 
     # Collaboration patterns
-    collaboration = dimensions.get('collaboration', [])
-    if collaboration and 'no_interaction' not in collaboration:
+    collaboration = dimensions.get("collaboration", [])
+    if collaboration and "no_interaction" not in collaboration:
         parts.append(f"Collaboration: {', '.join(collaboration)}")
 
     # Key learnings
-    learnings = dimensions.get('learnings', [])
-    if learnings and 'no_insights' not in learnings:
+    learnings = dimensions.get("learnings", [])
+    if learnings and "no_insights" not in learnings:
         parts.append(f"Learnings: {', '.join(learnings)}")
 
     # Context triggers
-    triggers = dimensions.get('triggers', [])
+    triggers = dimensions.get("triggers", [])
     if triggers:
         parts.append(f"Context: {', '.join(triggers[:5])}")
 
     # Add depth indicator
-    depth = metadata.get('depth', 'unknown')
-    if depth != 'unknown':
+    depth = metadata.get("depth", "unknown")
+    if depth != "unknown":
         parts.append(f"Depth: {depth}")
 
     if not parts:
@@ -167,6 +160,7 @@ def _generate_essence(dimensions: Dict[str, Any], metadata: Dict[str, Any]) -> s
 # =============================================================================
 # METADATA FLATTENING
 # =============================================================================
+
 
 def flatten_dimensions(fragment: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -182,49 +176,41 @@ def flatten_dimensions(fragment: Dict[str, Any]) -> Dict[str, Any]:
         Dict with 'success', 'metadata' containing flattened metadata
     """
     if not fragment:
-        return {
-            'success': False,
-            'error': 'No fragment provided'
-        }
+        return {"success": False, "error": "No fragment provided"}
 
-    dimensions = fragment.get('dimensions', {})
-    metadata = fragment.get('metadata', {})
+    dimensions = fragment.get("dimensions", {})
+    metadata = fragment.get("metadata", {})
 
     flat = {}
 
     # Flatten each dimension list to indexed keys
     for dim_name, dim_values in dimensions.items():
-        if dim_name == 'triggers':
+        if dim_name == "triggers":
             # Store triggers as comma-separated string for contains search
-            flat['triggers'] = ','.join(dim_values) if dim_values else ''
+            flat["triggers"] = ",".join(dim_values) if dim_values else ""
         else:
             # Store other dimensions as indexed keys
             for i, value in enumerate(dim_values[:5]):  # Limit to 5 per dimension
-                flat[f'{dim_name}_{i}'] = value
+                flat[f"{dim_name}_{i}"] = value
 
     # Add metadata fields
-    flat['timestamp'] = metadata.get('timestamp', '')
-    flat['message_count'] = metadata.get('message_count', 0)
-    flat['depth'] = metadata.get('depth', 'unknown')
-    flat['total_words'] = metadata.get('total_words', 0)
+    flat["timestamp"] = metadata.get("timestamp", "")
+    flat["message_count"] = metadata.get("message_count", 0)
+    flat["depth"] = metadata.get("depth", "unknown")
+    flat["total_words"] = metadata.get("total_words", 0)
 
-    if 'source_branch' in metadata:
-        flat['source_branch'] = metadata['source_branch']
+    if "source_branch" in metadata:
+        flat["source_branch"] = metadata["source_branch"]
 
-    return {
-        'success': True,
-        'metadata': flat
-    }
+    return {"success": True, "metadata": flat}
 
 
 # =============================================================================
 # STORAGE FUNCTIONS
 # =============================================================================
 
-def store_fragment(
-    fragment: Dict[str, Any],
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+
+def store_fragment(fragment: Dict[str, Any], db_path: Path | None = None) -> Dict[str, Any]:
     """
     Store a single fragment in ChromaDB
 
@@ -239,87 +225,57 @@ def store_fragment(
         Dict with 'success', storage details
     """
     if not fragment:
-        return {
-            'success': False,
-            'error': 'No fragment provided'
-        }
+        return {"success": False, "error": "No fragment provided"}
 
     # Import shared client
     from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
 
-    frag_content = fragment.get('content', '')
-    frag_id = fragment.get('id', '')
+    frag_content = fragment.get("content", "")
+    frag_id = fragment.get("id", "")
 
     if not frag_content or not frag_id:
-        return {
-            'success': False,
-            'error': 'Fragment missing content or id'
-        }
+        return {"success": False, "error": "Fragment missing content or id"}
 
     # Generate embedding
     embed_result = embedder.encode_batch([frag_content])
-    if not embed_result.get('success'):
-        return {
-            'success': False,
-            'error': f"Embedding failed: {embed_result.get('error', 'Unknown error')}"
-        }
+    if not embed_result.get("success"):
+        return {"success": False, "error": f"Embedding failed: {embed_result.get('error', 'Unknown error')}"}
 
-    embed_vectors = embed_result.get('embeddings', [])
+    embed_vectors = embed_result.get("embeddings", [])
     if not embed_vectors:
-        return {
-            'success': False,
-            'error': 'No embedding generated'
-        }
+        return {"success": False, "error": "No embedding generated"}
 
     embed_vec = embed_vectors[0]
-    if hasattr(embed_vec, 'tolist'):
+    if hasattr(embed_vec, "tolist"):
         embed_vec = embed_vec.tolist()
 
     # Flatten dimensions for metadata
     flat_result = flatten_dimensions(fragment)
-    if not flat_result.get('success'):
+    if not flat_result.get("success"):
         return flat_result
 
-    flat_meta = flat_result['metadata']
+    flat_meta = flat_result["metadata"]
 
     try:
         client = get_chroma_client(db_path)
 
         collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=None
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
         # Upsert fragment (idempotent - safe for re-runs)
-        collection.upsert(
-            ids=[frag_id],
-            embeddings=[embed_vec],
-            documents=[frag_content],
-            metadatas=[flat_meta]
-        )
+        collection.upsert(ids=[frag_id], embeddings=[embed_vec], documents=[frag_content], metadatas=[flat_meta])
 
         total = collection.count()
         json_handler.log_operation("symbolic_store_fragment", {"fragment_id": frag_id, "total": total, "success": True})
-        return {
-            'success': True,
-            'fragment_id': frag_id,
-            'collection': COLLECTION_NAME,
-            'total_fragments': total
-        }
+        return {"success": True, "fragment_id": frag_id, "collection": COLLECTION_NAME, "total_fragments": total}
 
     except Exception as e:
         logger.error(f"[storage] Fragment storage failed: {e}")
-        return {
-            'success': False,
-            'error': f"Storage failed: {e}"
-        }
+        return {"success": False, "error": f"Storage failed: {e}"}
 
 
-def store_fragments_batch(
-    fragments: List[Dict[str, Any]],
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def store_fragments_batch(fragments: List[Dict[str, Any]], db_path: Path | None = None) -> Dict[str, Any]:
     """
     Store multiple fragments in ChromaDB in batch
 
@@ -334,43 +290,30 @@ def store_fragments_batch(
         Dict with 'success', batch storage details
     """
     if not fragments:
-        return {
-            'success': True,
-            'message': 'No fragments to store',
-            'stored': 0
-        }
+        return {"success": True, "message": "No fragments to store", "stored": 0}
 
     # Extract content for batch embedding
     content_list = []
     valid_frags = []
 
     for frag in fragments:
-        frag_content = frag.get('content', '')
-        frag_id = frag.get('id', '')
+        frag_content = frag.get("content", "")
+        frag_id = frag.get("id", "")
         if frag_content and frag_id:
             content_list.append(frag_content)
             valid_frags.append(frag)
 
     if not valid_frags:
-        return {
-            'success': False,
-            'error': 'No valid fragments to store'
-        }
+        return {"success": False, "error": "No valid fragments to store"}
 
     # Batch embedding
     embed_result = embedder.encode_batch(content_list)
-    if not embed_result.get('success'):
-        return {
-            'success': False,
-            'error': f"Batch embedding failed: {embed_result.get('error', 'Unknown error')}"
-        }
+    if not embed_result.get("success"):
+        return {"success": False, "error": f"Batch embedding failed: {embed_result.get('error', 'Unknown error')}"}
 
-    embed_vectors = embed_result.get('embeddings', [])
+    embed_vectors = embed_result.get("embeddings", [])
     if len(embed_vectors) != len(valid_frags):
-        return {
-            'success': False,
-            'error': 'Embedding count mismatch'
-        }
+        return {"success": False, "error": "Embedding count mismatch"}
 
     # Prepare batch data
     batch_ids = []
@@ -380,17 +323,17 @@ def store_fragments_batch(
 
     for i, frag in enumerate(valid_frags):
         vec = embed_vectors[i]
-        if hasattr(vec, 'tolist'):
+        if hasattr(vec, "tolist"):
             vec = vec.tolist()
 
         flat_result = flatten_dimensions(frag)
-        if not flat_result.get('success'):
+        if not flat_result.get("success"):
             continue
 
-        batch_ids.append(frag['id'])
+        batch_ids.append(frag["id"])
         batch_embeddings.append(vec)
-        batch_documents.append(frag['content'])
-        batch_metadatas.append(flat_result['metadata'])
+        batch_documents.append(frag["content"])
+        batch_metadatas.append(flat_result["metadata"])
 
     # Import shared client
     from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
@@ -399,44 +342,30 @@ def store_fragments_batch(
         client = get_chroma_client(db_path)
 
         collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=None
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
         # Batch upsert (idempotent - safe for re-runs)
         collection.upsert(
-            ids=batch_ids,
-            embeddings=batch_embeddings,
-            documents=batch_documents,
-            metadatas=batch_metadatas
+            ids=batch_ids, embeddings=batch_embeddings, documents=batch_documents, metadatas=batch_metadatas
         )
 
         total = collection.count()
         json_handler.log_operation("symbolic_store_batch", {"stored": len(batch_ids), "total": total, "success": True})
-        return {
-            'success': True,
-            'stored': len(batch_ids),
-            'collection': COLLECTION_NAME,
-            'total_fragments': total
-        }
+        return {"success": True, "stored": len(batch_ids), "collection": COLLECTION_NAME, "total_fragments": total}
 
     except Exception as e:
         logger.error(f"[storage] Batch fragment storage failed: {e}")
-        return {
-            'success': False,
-            'error': f"Batch storage failed: {e}"
-        }
+        return {"success": False, "error": f"Batch storage failed: {e}"}
 
 
 # =============================================================================
 # v2 LLM FRAGMENT STORAGE
 # =============================================================================
 
+
 def store_llm_fragment(
-    fragment: Dict[str, Any],
-    source_branch: str | None = None,
-    db_path: Path | None = None
+    fragment: Dict[str, Any], source_branch: str | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Store a single LLM-extracted fragment in ChromaDB
@@ -455,19 +384,13 @@ def store_llm_fragment(
         Dict with 'success', 'fragment_id', 'collection', 'total_fragments'
     """
     if not fragment:
-        return {
-            'success': False,
-            'error': 'No fragment provided'
-        }
+        return {"success": False, "error": "No fragment provided"}
 
-    summary = fragment.get('summary', '')
-    insight = fragment.get('insight', '')
+    summary = fragment.get("summary", "")
+    insight = fragment.get("insight", "")
 
     if not summary:
-        return {
-            'success': False,
-            'error': 'Fragment missing summary'
-        }
+        return {"success": False, "error": "Fragment missing summary"}
 
     # Import shared client
     from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
@@ -482,78 +405,57 @@ def store_llm_fragment(
     doc_text = f"{summary}. {insight}" if insight else summary
 
     # Build flat metadata for ChromaDB
-    triggers_list = fragment.get('triggers', [])
+    triggers_list = fragment.get("triggers", [])
     flat_meta: Dict[str, Any] = {
-        'summary': summary,
-        'insight': insight,
-        'type': fragment.get('type', ''),
-        'emotional_tone': fragment.get('emotional_tone', ''),
-        'technical_domain': fragment.get('technical_domain', ''),
-        'triggers': ','.join(triggers_list) if triggers_list else '',
-        'timestamp': timestamp.isoformat(),
-        'schema_version': 'v2'
+        "summary": summary,
+        "insight": insight,
+        "type": fragment.get("type", ""),
+        "emotional_tone": fragment.get("emotional_tone", ""),
+        "technical_domain": fragment.get("technical_domain", ""),
+        "triggers": ",".join(triggers_list) if triggers_list else "",
+        "timestamp": timestamp.isoformat(),
+        "schema_version": "v2",
     }
 
     if source_branch:
-        flat_meta['source_branch'] = source_branch
+        flat_meta["source_branch"] = source_branch
 
     # Generate embedding
     embed_result = embedder.encode_batch([doc_text])
-    if not embed_result.get('success'):
-        return {
-            'success': False,
-            'error': f"Embedding failed: {embed_result.get('error', 'Unknown error')}"
-        }
+    if not embed_result.get("success"):
+        return {"success": False, "error": f"Embedding failed: {embed_result.get('error', 'Unknown error')}"}
 
-    embed_vectors = embed_result.get('embeddings', [])
+    embed_vectors = embed_result.get("embeddings", [])
     if not embed_vectors:
-        return {
-            'success': False,
-            'error': 'No embedding generated'
-        }
+        return {"success": False, "error": "No embedding generated"}
 
     embed_vec = embed_vectors[0]
-    if hasattr(embed_vec, 'tolist'):
+    if hasattr(embed_vec, "tolist"):
         embed_vec = embed_vec.tolist()
 
     try:
         client = get_chroma_client(db_path)
 
         collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=None
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
         # Upsert fragment (idempotent - safe for re-runs)
-        collection.upsert(
-            ids=[frag_id],
-            embeddings=[embed_vec],
-            documents=[doc_text],
-            metadatas=[flat_meta]
-        )
+        collection.upsert(ids=[frag_id], embeddings=[embed_vec], documents=[doc_text], metadatas=[flat_meta])
 
         total = collection.count()
-        json_handler.log_operation("symbolic_store_llm_fragment", {"fragment_id": frag_id, "total": total, "success": True})
-        return {
-            'success': True,
-            'fragment_id': frag_id,
-            'collection': COLLECTION_NAME,
-            'total_fragments': total
-        }
+        json_handler.log_operation(
+            "symbolic_store_llm_fragment", {"fragment_id": frag_id, "total": total, "success": True}
+        )
+        return {"success": True, "fragment_id": frag_id, "collection": COLLECTION_NAME, "total_fragments": total}
 
     except Exception as e:
         logger.error(f"[storage] LLM fragment storage failed: {e}")
-        return {
-            'success': False,
-            'error': f"LLM fragment storage failed: {e}"
-        }
+        return {"success": False, "error": f"LLM fragment storage failed: {e}"}
 
 
 def store_llm_fragments_batch(
-    fragments: List[Dict[str, Any]],
-    source_branch: str | None = None,
-    db_path: Path | None = None
+    fragments: List[Dict[str, Any]], source_branch: str | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Store multiple LLM-extracted fragments in ChromaDB in batch
@@ -570,11 +472,7 @@ def store_llm_fragments_batch(
         Dict with 'success', 'stored' count, 'collection', 'total_fragments'
     """
     if not fragments:
-        return {
-            'success': True,
-            'message': 'No fragments to store',
-            'stored': 0
-        }
+        return {"success": True, "message": "No fragments to store", "stored": 0}
 
     # Build document texts and metadata for valid fragments
     timestamp = datetime.now()
@@ -583,11 +481,11 @@ def store_llm_fragments_batch(
     frag_metas = []
 
     for frag in fragments:
-        summary = frag.get('summary', '')
+        summary = frag.get("summary", "")
         if not summary:
             continue
 
-        insight = frag.get('insight', '')
+        insight = frag.get("insight", "")
         doc_text = f"{summary}. {insight}" if insight else summary
 
         # Generate unique ID (offset microseconds to avoid collisions)
@@ -595,50 +493,41 @@ def store_llm_fragments_batch(
         unique_suffix = uuid.uuid4().hex[:8]
         frag_id = f"frag_{ts_str}_{unique_suffix}"
 
-        triggers_list = frag.get('triggers', [])
+        triggers_list = frag.get("triggers", [])
         flat_meta: Dict[str, Any] = {
-            'summary': summary,
-            'insight': insight,
-            'type': frag.get('type', ''),
-            'emotional_tone': frag.get('emotional_tone', ''),
-            'technical_domain': frag.get('technical_domain', ''),
-            'triggers': ','.join(triggers_list) if triggers_list else '',
-            'timestamp': timestamp.isoformat(),
-            'schema_version': 'v2'
+            "summary": summary,
+            "insight": insight,
+            "type": frag.get("type", ""),
+            "emotional_tone": frag.get("emotional_tone", ""),
+            "technical_domain": frag.get("technical_domain", ""),
+            "triggers": ",".join(triggers_list) if triggers_list else "",
+            "timestamp": timestamp.isoformat(),
+            "schema_version": "v2",
         }
 
         if source_branch:
-            flat_meta['source_branch'] = source_branch
+            flat_meta["source_branch"] = source_branch
 
         doc_texts.append(doc_text)
         frag_ids.append(frag_id)
         frag_metas.append(flat_meta)
 
     if not doc_texts:
-        return {
-            'success': False,
-            'error': 'No valid LLM fragments to store'
-        }
+        return {"success": False, "error": "No valid LLM fragments to store"}
 
     # Batch embedding
     embed_result = embedder.encode_batch(doc_texts)
-    if not embed_result.get('success'):
-        return {
-            'success': False,
-            'error': f"Batch embedding failed: {embed_result.get('error', 'Unknown error')}"
-        }
+    if not embed_result.get("success"):
+        return {"success": False, "error": f"Batch embedding failed: {embed_result.get('error', 'Unknown error')}"}
 
-    embed_vectors = embed_result.get('embeddings', [])
+    embed_vectors = embed_result.get("embeddings", [])
     if len(embed_vectors) != len(doc_texts):
-        return {
-            'success': False,
-            'error': 'Embedding count mismatch'
-        }
+        return {"success": False, "error": "Embedding count mismatch"}
 
     # Convert embeddings to lists
     batch_embeddings = []
     for vec in embed_vectors:
-        if hasattr(vec, 'tolist'):
+        if hasattr(vec, "tolist"):
             vec = vec.tolist()
         batch_embeddings.append(vec)
 
@@ -649,40 +538,24 @@ def store_llm_fragments_batch(
         client = get_chroma_client(db_path)
 
         collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=None
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
         # Batch upsert (idempotent - safe for re-runs)
-        collection.upsert(
-            ids=frag_ids,
-            embeddings=batch_embeddings,
-            documents=doc_texts,
-            metadatas=frag_metas
-        )
+        collection.upsert(ids=frag_ids, embeddings=batch_embeddings, documents=doc_texts, metadatas=frag_metas)
 
         total = collection.count()
-        json_handler.log_operation("symbolic_store_llm_batch", {"stored": len(frag_ids), "total": total, "success": True})
-        return {
-            'success': True,
-            'stored': len(frag_ids),
-            'collection': COLLECTION_NAME,
-            'total_fragments': total
-        }
+        json_handler.log_operation(
+            "symbolic_store_llm_batch", {"stored": len(frag_ids), "total": total, "success": True}
+        )
+        return {"success": True, "stored": len(frag_ids), "collection": COLLECTION_NAME, "total_fragments": total}
 
     except Exception as e:
         logger.error(f"[storage] Batch LLM fragment storage failed: {e}")
-        return {
-            'success': False,
-            'error': f"Batch LLM fragment storage failed: {e}"
-        }
+        return {"success": False, "error": f"Batch LLM fragment storage failed: {e}"}
 
 
-def delete_fragment(
-    fragment_id: str,
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def delete_fragment(fragment_id: str, db_path: Path | None = None) -> Dict[str, Any]:
     """
     Delete a fragment from ChromaDB by ID.
 
@@ -701,24 +574,17 @@ def delete_fragment(
     try:
         client = get_chroma_client(db_path)
         collection = client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-            embedding_function=None
+            name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}, embedding_function=None
         )
 
         collection.delete(ids=[fragment_id])
 
         total = collection.count()
-        json_handler.log_operation("symbolic_delete_fragment", {"deleted_id": fragment_id, "total": total, "success": True})
-        return {
-            'success': True,
-            'deleted_id': fragment_id,
-            'total_fragments': total
-        }
+        json_handler.log_operation(
+            "symbolic_delete_fragment", {"deleted_id": fragment_id, "total": total, "success": True}
+        )
+        return {"success": True, "deleted_id": fragment_id, "total_fragments": total}
 
     except Exception as e:
         logger.error(f"[storage] Fragment deletion failed: {e}")
-        return {
-            'success': False,
-            'error': f"Fragment deletion failed: {e}"
-        }
+        return {"success": False, "error": f"Fragment deletion failed: {e}"}

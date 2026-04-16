@@ -25,6 +25,7 @@ from aipass.prax.apps.handlers.logging.terminal.filtering import should_display_
 
 from aipass.prax.apps.handlers.json import json_handler
 
+
 def format_terminal_message(record: logging.LogRecord, branch: Optional[str] = None) -> str:
     """Format log record for terminal output
 
@@ -55,6 +56,7 @@ def format_terminal_message(record: logging.LogRecord, branch: Optional[str] = N
     # Format message
     return f"[{branch_label}] {module_name} - {level}: {record.getMessage()}"
 
+
 class TerminalFormatter(logging.Formatter):
     """Custom formatter for terminal output with branch information"""
 
@@ -83,6 +85,7 @@ class TerminalFormatter(logging.Formatter):
 
         # Format and return
         return format_terminal_message(record)
+
 
 def create_terminal_handler() -> logging.StreamHandler:
     """Create StreamHandler for terminal output

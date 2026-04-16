@@ -90,6 +90,7 @@ def _get_all_registry_files() -> List[str]:
 # HELPER FUNCTIONS
 # =============================================
 
+
 def _load_registry() -> Dict[str, Any]:
     """Load all per-type plan registries and merge into a single dict.
 
@@ -102,7 +103,7 @@ def _load_registry() -> Dict[str, Any]:
         try:
             if not target.exists():
                 continue
-            with open(target, 'r', encoding='utf-8') as f:
+            with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for plan_num, plan_data in data.get("plans", {}).items():
                 merged["plans"][plan_num] = plan_data
@@ -136,7 +137,7 @@ def _extract_flow_plans(registry: Dict[str, Any]) -> tuple[List[Dict], List[Dict
         # Extract plan prefix from file_path (e.g., DPLAN, FPLAN, TDPLAN)
         file_path_str = plan_data.get("file_path", "")
         filename = Path(file_path_str).name if file_path_str else ""
-        prefix_match = re.match(r'^([A-Z]+PLAN)', filename)
+        prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
         prefix = prefix_match.group(1) if prefix_match else "FPLAN"
 
         # Build plan entry
@@ -146,7 +147,7 @@ def _extract_flow_plans(registry: Dict[str, Any]) -> tuple[List[Dict], List[Dict
             "status": plan_data.get("status", "open"),
             "created": plan_data.get("created", ""),
             "file_path": plan_data.get("file_path", ""),
-            "relative_path": plan_data.get("relative_path", "")
+            "relative_path": plan_data.get("relative_path", ""),
         }
 
         if plan_data.get("status") == "open":
@@ -177,26 +178,18 @@ def _load_central() -> Dict[str, Any]:
         return {
             "generated_at": "",
             "branches": {},
-            "global_statistics": {
-                "total_active": 0,
-                "total_closed": 0,
-                "branches_reporting": 0
-            }
+            "global_statistics": {"total_active": 0, "total_closed": 0, "branches_reporting": 0},
         }
 
     try:
-        with open(CENTRAL_FILE, 'r', encoding='utf-8') as f:
+        with open(CENTRAL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as exc:
         logger.warning("Failed to load PLANS.central.json '%s': %s", CENTRAL_FILE, exc)
         return {
             "generated_at": "",
             "branches": {},
-            "global_statistics": {
-                "total_active": 0,
-                "total_closed": 0,
-                "branches_reporting": 0
-            }
+            "global_statistics": {"total_active": 0, "total_closed": 0, "branches_reporting": 0},
         }
 
 
@@ -218,16 +211,13 @@ def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]
         total_active += stats.get("active_count", 0)
         total_closed += stats.get("total_closed", 0)
 
-    return {
-        "total_active": total_active,
-        "total_closed": total_closed,
-        "branches_reporting": len(branches)
-    }
+    return {"total_active": total_active, "total_closed": total_closed, "branches_reporting": len(branches)}
 
 
 # =============================================
 # MAIN HANDLER FUNCTION
 # =============================================
+
 
 def push_to_plans_central() -> bool:
     """Push Flow's plan data to .ai_central/PLANS.central.json
@@ -266,10 +256,14 @@ def push_to_plans_central() -> bool:
             "recently_closed": recently_closed,
             "statistics": {
                 "active_count": len(active_plans),
-                "total_closed": len([p for p in registry.get("plans", {}).values()
-                                    if p.get("location") == str(FLOW_ROOT)
-                                    and p.get("status") == "closed"])
-            }
+                "total_closed": len(
+                    [
+                        p
+                        for p in registry.get("plans", {}).values()
+                        if p.get("location") == str(FLOW_ROOT) and p.get("status") == "closed"
+                    ]
+                ),
+            },
         }
 
         # Load existing central file
@@ -287,19 +281,22 @@ def push_to_plans_central() -> bool:
         central_data["generated_at"] = now
 
         # Write back to central file
-        with open(CENTRAL_FILE, 'w', encoding='utf-8') as f:
+        with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
             json.dump(central_data, f, indent=2, ensure_ascii=False)
 
         # Call aggregate_central_impl to rebuild top-level arrays with validation
         # This ensures active_plans is built from all branches and validates files exist
         aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR)
 
-        json_handler.log_operation("plans_central_pushed", {
-            "active_plans": len(active_plans),
-            "recently_closed": len(recently_closed),
-            "branches_reporting": central_data["global_statistics"].get("branches_reporting", 0),
-            "success": True,
-        })
+        json_handler.log_operation(
+            "plans_central_pushed",
+            {
+                "active_plans": len(active_plans),
+                "recently_closed": len(recently_closed),
+                "branches_reporting": central_data["global_statistics"].get("branches_reporting", 0),
+                "success": True,
+            },
+        )
 
         return True
 

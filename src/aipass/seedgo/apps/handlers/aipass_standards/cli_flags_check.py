@@ -31,17 +31,18 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit scope: entry points only (apps/{name}.py)
 AUDIT_SCOPE = "entry_point"
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -68,44 +69,44 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'cli_flags', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "cli_flags", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'CLI_FLAGS'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "CLI_FLAGS",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'CLI_FLAGS'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "CLI_FLAGS",
         }
 
     # Only check entry point files — files whose parent directory is "apps"
-    if path.parent.name != 'apps':
+    if path.parent.name != "apps":
         return {
-            'passed': True,
-            'checks': [{'name': 'Entry point check', 'passed': True, 'message': 'Not an entry point (skipped)'}],
-            'score': 100,
-            'standard': 'CLI_FLAGS'
+            "passed": True,
+            "checks": [{"name": "Entry point check", "passed": True, "message": "Not an entry point (skipped)"}],
+            "score": 100,
+            "standard": "CLI_FLAGS",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'CLI_FLAGS'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "CLI_FLAGS",
         }
 
     # Check 1: --version / -V flag support
@@ -113,18 +114,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks.append(version_flag_check)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli_flags"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'CLI_FLAGS'
-    }
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "CLI_FLAGS"}
 
 
 def _get_non_code_lines(lines: List[str]) -> set:
@@ -153,7 +149,7 @@ def _get_non_code_lines(lines: List[str]) -> set:
             skip.add(i)
             continue
 
-        if in_docstring or stripped.startswith('#'):
+        if in_docstring or stripped.startswith("#"):
             skip.add(i)
 
     return skip
@@ -169,12 +165,8 @@ def check_version_flag(lines: List[str], file_path: str, bypass_rules: list | No
 
     If either pattern is found, the check passes.
     """
-    if is_bypassed(file_path, 'cli_flags', None, bypass_rules):
-        return {
-            'name': '--version flag support',
-            'passed': True,
-            'message': 'Bypassed by bypass rules'
-        }
+    if is_bypassed(file_path, "cli_flags", None, bypass_rules):
+        return {"name": "--version flag support", "passed": True, "message": "Bypassed by bypass rules"}
 
     skip_lines = _get_non_code_lines(lines)
 
@@ -191,13 +183,13 @@ def check_version_flag(lines: List[str], file_path: str, bypass_rules: list | No
         for pattern in version_patterns:
             if re.search(pattern, line):
                 return {
-                    'name': '--version flag support',
-                    'passed': True,
-                    'message': f'Found version flag handling on line {i}'
+                    "name": "--version flag support",
+                    "passed": True,
+                    "message": f"Found version flag handling on line {i}",
                 }
 
     return {
-        'name': '--version flag support',
-        'passed': False,
-        'message': 'Entry point missing --version / -V flag support'
+        "name": "--version flag support",
+        "passed": False,
+        "message": "Entry point missing --version / -V flag support",
     }

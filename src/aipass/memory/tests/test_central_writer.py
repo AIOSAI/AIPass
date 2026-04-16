@@ -27,6 +27,7 @@ from unittest.mock import MagicMock
 # Import helper
 # ---------------------------------------------------------------------------
 
+
 def _import_central_writer(monkeypatch, tmp_path):
     """Import central_writer with mocked dependencies and paths at tmp_path."""
     sys.modules.pop("aipass.memory.apps.handlers.central_writer", None)
@@ -49,6 +50,7 @@ def _import_central_writer(monkeypatch, tmp_path):
 # Helper: create a tiny SQLite DB with embeddings table
 # ---------------------------------------------------------------------------
 
+
 def _create_chroma_db(db_path: Path, num_rows: int = 5) -> None:
     """Create a minimal SQLite DB mimicking ChromaDB structure."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +66,7 @@ def _create_chroma_db(db_path: Path, num_rows: int = 5) -> None:
 # ===========================================================================
 # Tests: count_chroma_vectors
 # ===========================================================================
+
 
 class TestCountChromaVectors:
     """Test count_chroma_vectors SQLite reading."""
@@ -113,6 +116,7 @@ class TestCountChromaVectors:
 # ===========================================================================
 # Tests: count_archive_files
 # ===========================================================================
+
 
 class TestCountArchiveFiles:
     """Test count_archive_files .md counting."""
@@ -171,6 +175,7 @@ class TestCountArchiveFiles:
 # Tests: get_last_rollover_timestamp
 # ===========================================================================
 
+
 class TestGetLastRolloverTimestamp:
     """Test get_last_rollover_timestamp file stat reading."""
 
@@ -208,6 +213,7 @@ class TestGetLastRolloverTimestamp:
 # Tests: collect_stats
 # ===========================================================================
 
+
 class TestCollectStats:
     """Test collect_stats aggregation."""
 
@@ -243,6 +249,7 @@ class TestCollectStats:
 # Tests: read_central_file
 # ===========================================================================
 
+
 class TestReadCentralFile:
     """Test read_central_file JSON reading."""
 
@@ -269,9 +276,7 @@ class TestReadCentralFile:
             "stats": {"total_vectors": 42, "total_archives": 5, "last_rollover": "2026-02-28"},
             "extra_field": "preserved",
         }
-        (central_dir / "MEMORY.central.json").write_text(
-            json.dumps(data), encoding="utf-8"
-        )
+        (central_dir / "MEMORY.central.json").write_text(json.dumps(data), encoding="utf-8")
 
         result = cw.read_central_file()
 
@@ -296,6 +301,7 @@ class TestReadCentralFile:
 # ===========================================================================
 # Tests: write_central_file
 # ===========================================================================
+
 
 class TestWriteCentralFile:
     """Test write_central_file JSON writing."""
@@ -346,6 +352,7 @@ class TestWriteCentralFile:
 # Tests: update_central
 # ===========================================================================
 
+
 class TestUpdateCentral:
     """Test update_central end-to-end flow."""
 
@@ -386,17 +393,13 @@ class TestUpdateCentral:
             "_note": "placeholder - not yet populated",
             "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
         }
-        (central_dir / "MEMORY.central.json").write_text(
-            json.dumps(old_data), encoding="utf-8"
-        )
+        (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
         result = cw.update_central()
 
         assert result["success"] is True
 
-        written = json.loads(
-            (central_dir / "MEMORY.central.json").read_text(encoding="utf-8")
-        )
+        written = json.loads((central_dir / "MEMORY.central.json").read_text(encoding="utf-8"))
         assert "_note" not in written
 
     def test_preserves_extra_fields(self, monkeypatch, tmp_path):
@@ -411,17 +414,13 @@ class TestUpdateCentral:
             "custom_field": "keep_me",
             "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
         }
-        (central_dir / "MEMORY.central.json").write_text(
-            json.dumps(old_data), encoding="utf-8"
-        )
+        (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
         result = cw.update_central()
 
         assert result["success"] is True
 
-        written = json.loads(
-            (central_dir / "MEMORY.central.json").read_text(encoding="utf-8")
-        )
+        written = json.loads((central_dir / "MEMORY.central.json").read_text(encoding="utf-8"))
         assert written["custom_field"] == "keep_me"
 
     def test_failure_returns_error(self, monkeypatch, tmp_path):
@@ -450,6 +449,7 @@ class TestUpdateCentral:
 # ===========================================================================
 # Tests: get_current_stats
 # ===========================================================================
+
 
 class TestGetCurrentStats:
     """Test get_current_stats read-only stats collection."""

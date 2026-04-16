@@ -25,6 +25,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 # DEEP MERGE
 # =============================================================================
 
+
 def deep_merge(template_data: Any, existing_data: Any) -> Any:
     """Recursively merge template structure with existing data.
 
@@ -93,6 +94,7 @@ def deep_merge(template_data: Any, existing_data: Any) -> Any:
 # =============================================================================
 # BACKUP
 # =============================================================================
+
 
 def backup_json(file_path: Path) -> Path:
     """Create a timestamped backup of a JSON file before modifying.

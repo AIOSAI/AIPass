@@ -167,7 +167,9 @@ def wake_at(
     target = parse_schedule(time_str, now=start)
     logger.info(
         "[watchdog.schedule] wake_at time=%s target=%s command=%s",
-        time_str, target.isoformat(), command,
+        time_str,
+        target.isoformat(),
+        command,
     )
 
     handle = _registry.register(

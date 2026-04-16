@@ -36,11 +36,28 @@ AUDIT_SCOPE = "branch_level"
 
 # -- Directories to skip when collecting source files -------------------------
 SKIP_DIRS = {
-    "__pycache__", ".archive", "logs", "tests",
-    "json_templates", "tools", ".trinity", ".aipass", ".ai_mail.local",
-    ".venv", "venv", "node_modules", ".git", "site-packages",
-    ".mypy_cache", ".ruff_cache", ".pytest_cache", ".spawn",
-    "backups", "reports", "docs", ".sorting_unprocessed",
+    "__pycache__",
+    ".archive",
+    "logs",
+    "tests",
+    "json_templates",
+    "tools",
+    ".trinity",
+    ".aipass",
+    ".ai_mail.local",
+    ".venv",
+    "venv",
+    "node_modules",
+    ".git",
+    "site-packages",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".spawn",
+    "backups",
+    "reports",
+    "docs",
+    ".sorting_unprocessed",
 }
 
 # -- Function names excluded from analysis ------------------------------------
@@ -59,6 +76,7 @@ _MAIN_BLOCK_RE = re.compile(
 
 
 # -- Bypass helper ------------------------------------------------------------
+
 
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed."""
@@ -79,6 +97,7 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
 
 # -- File collection ----------------------------------------------------------
 
+
 def _should_skip(path: Path) -> bool:
     """Return True if any path component is in the skip set."""
     return any(part in SKIP_DIRS for part in path.parts)
@@ -98,6 +117,7 @@ def _collect_python_files(branch_path: Path) -> list[Path]:
 
 # -- Corpus preparation ------------------------------------------------------
 
+
 def _strip_non_code(source: str) -> str:
     """
     Remove string literals, comments, and __main__ blocks from source.
@@ -113,7 +133,7 @@ def _strip_non_code(source: str) -> str:
         logger.info("Tokenizer failed, falling back to raw corpus: %s", exc)
         return _MAIN_BLOCK_RE.sub("", source)
 
-    lines = source.split('\n')
+    lines = source.split("\n")
     chars = [list(line) for line in lines]
 
     for tok in tokens:
@@ -127,13 +147,14 @@ def _strip_non_code(source: str) -> str:
             col_start = sc if row == sr else 0
             col_end = ec if row == er else len(chars[row])
             for col in range(col_start, min(col_end, len(chars[row]))):
-                chars[row][col] = ' '
+                chars[row][col] = " "
 
-    result = '\n'.join(''.join(line) for line in chars)
+    result = "\n".join("".join(line) for line in chars)
     return _MAIN_BLOCK_RE.sub("", result)
 
 
 # -- AST function extraction --------------------------------------------------
+
 
 def _is_excluded(name: str) -> bool:
     """Return True if this function name should never be flagged."""
@@ -174,6 +195,7 @@ def _extract_functions(py_file: Path) -> list[tuple[str, int]]:
 
 # -- Reference counting -------------------------------------------------------
 
+
 def _count_references_in_corpus(func_name: str, corpus: str) -> int:
     """
     Count how many times func_name appears as a word-bounded identifier
@@ -197,6 +219,7 @@ def _count_def_lines(func_name: str, corpus: str) -> int:
 
 
 # -- Branch-level check (audit pipeline entry) --------------------------------
+
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """
@@ -306,11 +329,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             except ValueError:
                 logger.info("File %s not relative to branch, using full path", py_file)
                 rel_path = py_file
-            unused_functions.append({
-                "name": func_name,
-                "file": str(rel_path),
-                "line": lineno,
-            })
+            unused_functions.append(
+                {
+                    "name": func_name,
+                    "file": str(rel_path),
+                    "line": lineno,
+                }
+            )
 
     # Score: clean_functions / total_functions * 100
     clean_count = total_functions - len(unused_functions)
@@ -320,10 +345,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     # Build check entry
     if unused_functions:
         # Build a summary of unused functions (cap at 15 for readability)
-        details = [
-            f"  {uf['name']} ({uf['file']}:{uf['line']})"
-            for uf in unused_functions[:15]
-        ]
+        details = [f"  {uf['name']} ({uf['file']}:{uf['line']})" for uf in unused_functions[:15]]
         if len(unused_functions) > 15:
             details.append(f"  ... and {len(unused_functions) - 15} more")
         detail_text = "\n".join(details)
@@ -333,8 +355,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 "name": "Unused functions",
                 "passed": passed,
                 "message": (
-                    f"{len(unused_functions)} unused out of {total_functions} "
-                    f"functions ({score}% clean)\n{detail_text}"
+                    f"{len(unused_functions)} unused out of {total_functions} functions ({score}% clean)\n{detail_text}"
                 ),
                 "unused": unused_functions,
             }

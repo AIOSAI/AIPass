@@ -64,13 +64,9 @@ if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
     # Resolve the real filesystem path for the handlers package
     if BRANCH_MODULE in ("commons", "skills"):
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / BRANCH_MODULE / "apps" / "handlers"
     else:
-        _handlers_dir = (
-            Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-        )
+        _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -87,11 +83,11 @@ json_handler = _mod
 
 _JSON_DIR_ATTR: str | None = None
 _JSON_DIR_CANDIDATES = [
-    f"{BRANCH_MODULE.upper()}_JSON_DIR",        # SEEDGO_JSON_DIR, BACKUP_JSON_DIR, etc.
-    "JSON_DIR",                                   # seedgo, daemon, memory, cli, drone
-    "BRANCH_JSON_DIR",                            # commons
-    f"{BRANCH_MODULE}_json",                      # unlikely but covered
-    "_JSON_DIR",                                   # spawn
+    f"{BRANCH_MODULE.upper()}_JSON_DIR",  # SEEDGO_JSON_DIR, BACKUP_JSON_DIR, etc.
+    "JSON_DIR",  # seedgo, daemon, memory, cli, drone
+    "BRANCH_JSON_DIR",  # commons
+    f"{BRANCH_MODULE}_json",  # unlikely but covered
+    "_JSON_DIR",  # spawn
 ]
 
 for _candidate in _JSON_DIR_CANDIDATES:
@@ -101,8 +97,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 
 if _JSON_DIR_ATTR is None:
     pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler — "
-        f"tried: {_JSON_DIR_CANDIDATES}",
+        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler — tried: {_JSON_DIR_CANDIDATES}",
         allow_module_level=True,
     )
 
@@ -112,6 +107,7 @@ if _JSON_DIR_ATTR is None:
 # ---------------------------------------------------------------------------
 # Branches use: _create_default, _get_default_template, _get_default,
 # _default_template, load_template, or per-type _default_config/_default_data/_default_log.
+
 
 def _get_default_for_type(json_type: str, module_name: str = "test_mod") -> Any:
     """Call whichever default factory the branch exposes."""
@@ -179,6 +175,7 @@ def _default_factory_raises_on_unknown() -> bool:
 # Isolation fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect JSON operations to tmp_path for test isolation."""
@@ -196,6 +193,7 @@ def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # Helper: resolve JSON dir as Path regardless of branch type
 # ---------------------------------------------------------------------------
 
+
 def _json_dir_as_path(tmp_path: Path) -> Path:
     """Return the patched JSON dir as a Path (handles str-typed branches)."""
     assert _JSON_DIR_ATTR is not None
@@ -208,6 +206,7 @@ def _json_dir_as_path(tmp_path: Path) -> Path:
 # ============================================================================
 # Group 1 — _create_default / default templates (4 tests)
 # ============================================================================
+
 
 def test_default_config_returns_dict_with_required_keys() -> None:  # JH-001
     if not _has_default_factory():
@@ -246,6 +245,7 @@ def test_default_unknown_type_raises_value_error() -> None:  # JH-004
 # ============================================================================
 # Group 2 — validate_json_structure (10 tests)
 # ============================================================================
+
 
 def test_validate_valid_config() -> None:  # JH-005
     data = {"module_name": "x", "version": "1.0.0", "config": {}}
@@ -298,6 +298,7 @@ def test_validate_none_input_returns_false() -> None:  # JH-014
 # Group 3 — get_json_path (3 tests)
 # ============================================================================
 
+
 def test_get_json_path_returns_path_type(tmp_path: Path) -> None:  # JH-015
     result = json_handler.get_json_path("mymod", "config")
     # Some branches return str (commons), most return Path
@@ -319,6 +320,7 @@ def test_get_json_path_different_combos_differ(tmp_path: Path) -> None:  # JH-01
 # ============================================================================
 # Group 4 — ensure_json_exists (5 tests)
 # ============================================================================
+
 
 def test_ensure_creates_file_when_missing(tmp_path: Path) -> None:  # JH-018
     result = json_handler.ensure_json_exists("ens_mod", "config")
@@ -381,6 +383,7 @@ def test_ensure_returns_bool(tmp_path: Path) -> None:  # JH-022
 # Group 5 — load_json (4 tests)
 # ============================================================================
 
+
 def test_load_creates_default_when_missing(tmp_path: Path) -> None:  # JH-023
     result = json_handler.load_json("fresh_mod", "log")
     assert result is not None, "load_json must auto-create and return content"
@@ -412,6 +415,7 @@ def test_load_returns_list_for_log(tmp_path: Path) -> None:  # JH-026
 # ============================================================================
 # Group 6 — save_json (5 tests)
 # ============================================================================
+
 
 def test_save_roundtrip(tmp_path: Path) -> None:  # JH-027
     json_dir = _json_dir_as_path(tmp_path)
@@ -446,9 +450,7 @@ def test_save_data_updates_last_updated(tmp_path: Path) -> None:  # JH-030
     data = {"created": "2025-01-01", "last_updated": "2025-01-01"}
     json_handler.save_json("ts", "data", data)
 
-    on_disk = json.loads(
-        (json_dir / "ts_data.json").read_text(encoding="utf-8")
-    )
+    on_disk = json.loads((json_dir / "ts_data.json").read_text(encoding="utf-8"))
     assert on_disk["last_updated"] == today, "Saving data type must auto-stamp last_updated"
 
 
@@ -468,12 +470,11 @@ def test_save_writes_valid_json_to_disk(tmp_path: Path) -> None:  # JH-031
 # Group 7 — log_operation (7 tests)
 # ============================================================================
 
+
 def test_log_operation_appends_entry(tmp_path: Path) -> None:  # JH-032
     json_handler.log_operation("deploy", module_name="logmod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "logmod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "logmod_log.json").read_text(encoding="utf-8"))
     assert len(log) >= 1, "log_operation must append at least one entry"
     assert log[-1]["operation"] == "deploy"
 
@@ -487,20 +488,14 @@ def test_log_operation_returns_bool(tmp_path: Path) -> None:  # JH-033
 def test_log_operation_entry_has_timestamp(tmp_path: Path) -> None:  # JH-034
     json_handler.log_operation("check_ts", module_name="tsmod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "tsmod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "tsmod_log.json").read_text(encoding="utf-8"))
     assert "timestamp" in log[-1], "Log entry must have a timestamp field"
 
 
 def test_log_operation_includes_data_when_provided(tmp_path: Path) -> None:  # JH-035
-    json_handler.log_operation(
-        "with_data", data={"count": 5}, module_name="datamod"
-    )
+    json_handler.log_operation("with_data", data={"count": 5}, module_name="datamod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "datamod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "datamod_log.json").read_text(encoding="utf-8"))
     assert "data" in log[-1], "Log entry must include data dict when provided"
     assert log[-1]["data"]["count"] == 5
 
@@ -510,9 +505,7 @@ def test_log_operation_multiple_calls_accumulate(tmp_path: Path) -> None:  # JH-
     json_handler.log_operation("second", module_name="accmod")
     json_handler.log_operation("third", module_name="accmod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "accmod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "accmod_log.json").read_text(encoding="utf-8"))
     assert len(log) >= 3, "Multiple log_operation calls must accumulate entries"
     ops = [e["operation"] for e in log[-3:]]
     assert ops == ["first", "second", "third"]
@@ -535,9 +528,7 @@ def test_log_operation_fifo_rotation(tmp_path: Path) -> None:  # JH-040
         json_handler.log_operation(f"op_{i}", module_name="fifomod")
 
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "fifomod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "fifomod_log.json").read_text(encoding="utf-8"))
     assert len(log) <= max_entries, f"Log must not exceed {max_entries} entries after rotation"
     # First entries should have been rotated out
     assert log[-1]["operation"] == f"op_{max_entries + 4}", "Most recent entry must be last"
@@ -546,9 +537,7 @@ def test_log_operation_fifo_rotation(tmp_path: Path) -> None:  # JH-040
 def test_log_operation_empty_dict_not_attached(tmp_path: Path) -> None:  # JH-041
     json_handler.log_operation("no_data", data={}, module_name="emptymod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "emptymod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "emptymod_log.json").read_text(encoding="utf-8"))
     entry = log[-1]
     # Empty dict should either not be attached or be an empty dict
     # The key test: the entry should not have a non-empty "data" field from an empty input
@@ -559,6 +548,7 @@ def test_log_operation_empty_dict_not_attached(tmp_path: Path) -> None:  # JH-04
 # ============================================================================
 # Group 8 — ensure_module_jsons (5 tests)
 # ============================================================================
+
 
 def test_ensure_module_jsons_creates_all_three(tmp_path: Path) -> None:  # JH-036
     if not hasattr(json_handler, "ensure_module_jsons"):
@@ -583,19 +573,13 @@ def test_ensure_module_jsons_files_pass_validation(tmp_path: Path) -> None:  # J
     json_handler.ensure_module_jsons("valid_mod")
     json_dir = _json_dir_as_path(tmp_path)
 
-    config = json.loads(
-        (json_dir / "valid_mod_config.json").read_text(encoding="utf-8")
-    )
+    config = json.loads((json_dir / "valid_mod_config.json").read_text(encoding="utf-8"))
     assert json_handler.validate_json_structure(config, "config") is True
 
-    data = json.loads(
-        (json_dir / "valid_mod_data.json").read_text(encoding="utf-8")
-    )
+    data = json.loads((json_dir / "valid_mod_data.json").read_text(encoding="utf-8"))
     assert json_handler.validate_json_structure(data, "data") is True
 
-    log = json.loads(
-        (json_dir / "valid_mod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "valid_mod_log.json").read_text(encoding="utf-8"))
     assert json_handler.validate_json_structure(log, "log") is True
 
 
@@ -604,9 +588,7 @@ def test_ensure_module_jsons_data_has_correct_keys(tmp_path: Path) -> None:  # J
         pytest.skip("Branch does not have ensure_module_jsons")
     json_handler.ensure_module_jsons("keymod")
     json_dir = _json_dir_as_path(tmp_path)
-    data = json.loads(
-        (json_dir / "keymod_data.json").read_text(encoding="utf-8")
-    )
+    data = json.loads((json_dir / "keymod_data.json").read_text(encoding="utf-8"))
     assert "created" in data, "Data file must have 'created' key"
     assert "last_updated" in data, "Data file must have 'last_updated' key"
 
@@ -616,9 +598,7 @@ def test_ensure_module_jsons_log_is_empty_list(tmp_path: Path) -> None:  # JH-04
         pytest.skip("Branch does not have ensure_module_jsons")
     json_handler.ensure_module_jsons("listmod")
     json_dir = _json_dir_as_path(tmp_path)
-    log = json.loads(
-        (json_dir / "listmod_log.json").read_text(encoding="utf-8")
-    )
+    log = json.loads((json_dir / "listmod_log.json").read_text(encoding="utf-8"))
     assert isinstance(log, list), "Log file must be a list"
     assert len(log) == 0, "Initial log file must be an empty list"
 
@@ -627,11 +607,10 @@ def test_ensure_module_jsons_log_is_empty_list(tmp_path: Path) -> None:  # JH-04
 # Infrastructure mocking — reimport_after_mock
 # ============================================================================
 
+
 def test_reimport_after_mock(tmp_path: Path) -> None:
     """reimport_after_mock: module can be reloaded cleanly."""
-    handler_module = sys.modules.get(
-        f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
-    )
+    handler_module = sys.modules.get(f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler")
     if handler_module:
         importlib.reload(handler_module)
 
@@ -639,6 +618,7 @@ def test_reimport_after_mock(tmp_path: Path) -> None:
 # ============================================================================
 # Group 9 — Empty file resilience (4 tests)
 # ============================================================================
+
 
 def test_ensure_regenerates_empty_log_file(tmp_path: Path) -> None:  # JH-044
     """Empty log.json should be regenerated, not crash with JSONDecodeError."""
@@ -683,11 +663,18 @@ def test_log_operation_survives_empty_log_file(tmp_path: Path) -> None:  # JH-04
     json_dir.mkdir(parents=True, exist_ok=True)
     # Create valid config but empty log
     config_path = json_dir / "recover_config.json"
-    config_path.write_text(json.dumps({
-        "module_name": "recover", "version": "1.0.0",
-        "config": {"max_log_entries": 100},
-        "created": "2026-01-01", "last_updated": "2026-01-01",
-    }), encoding="utf-8")
+    config_path.write_text(
+        json.dumps(
+            {
+                "module_name": "recover",
+                "version": "1.0.0",
+                "config": {"max_log_entries": 100},
+                "created": "2026-01-01",
+                "last_updated": "2026-01-01",
+            }
+        ),
+        encoding="utf-8",
+    )
     log_path = json_dir / "recover_log.json"
     log_path.write_text("", encoding="utf-8")
 

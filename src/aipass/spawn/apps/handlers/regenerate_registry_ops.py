@@ -41,6 +41,7 @@ _BRANCH_PLACEHOLDERS = ("{{BRANCH}}", "{{BRANCHNAME}}")
 # PUBLIC API
 # =============================================================================
 
+
 def regenerate_template_registry(template_dir: Path) -> dict:
     """Walk a template directory, hash files, and build a fresh registry.
 
@@ -109,8 +110,7 @@ def regenerate_template_registry(template_dir: Path) -> dict:
     }
 
     logger.info(
-        f"Regenerated template registry for {template_dir.name}: "
-        f"{len(files)} files, {len(directories)} directories"
+        f"Regenerated template registry for {template_dir.name}: {len(files)} files, {len(directories)} directories"
     )
 
     return {**registry, "stats": stats}
@@ -119,6 +119,7 @@ def regenerate_template_registry(template_dir: Path) -> dict:
 # =============================================================================
 # INTERNAL — SCANNING
 # =============================================================================
+
 
 def _scan_template_directory(
     template_dir: Path,
@@ -191,21 +192,25 @@ def _scan_template_directory(
 
         if item.is_dir():
             has_placeholder = any(p in item.name for p in _BRANCH_PLACEHOLDERS)
-            raw_dirs.append({
-                "path": rel_str,
-                "name": item.name,
-                "has_branch_placeholder": has_placeholder,
-            })
+            raw_dirs.append(
+                {
+                    "path": rel_str,
+                    "name": item.name,
+                    "has_branch_placeholder": has_placeholder,
+                }
+            )
 
         elif item.is_file():
             content_hash = compute_file_hash(item)
             has_placeholder = any(p in item.name for p in _BRANCH_PLACEHOLDERS)
-            raw_files.append({
-                "path": rel_str,
-                "name": item.name,
-                "content_hash": content_hash,
-                "has_branch_placeholder": has_placeholder,
-            })
+            raw_files.append(
+                {
+                    "path": rel_str,
+                    "name": item.name,
+                    "content_hash": content_hash,
+                    "has_branch_placeholder": has_placeholder,
+                }
+            )
 
     # Assign IDs to files with three-pass global matching.
     # This prevents new files from stealing IDs that existing files should claim.

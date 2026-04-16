@@ -34,14 +34,14 @@ def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_r
         return False
     for rule in bypass_rules:
         # Must match standard
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
         # Must match file (check if rule file path is in the full path)
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
         # Check line-specific bypass
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -74,52 +74,52 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'introspection', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "introspection", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'INTROSPECTION'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "INTROSPECTION",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'INTROSPECTION'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "INTROSPECTION",
         }
 
     # Skip __init__.py files
-    if path.name == '__init__.py':
+    if path.name == "__init__.py":
         return {
-            'passed': True,
-            'checks': [{'name': 'Introspection check', 'passed': True, 'message': '__init__.py skipped'}],
-            'score': 100,
-            'standard': 'INTROSPECTION'
+            "passed": True,
+            "checks": [{"name": "Introspection check", "passed": True, "message": "__init__.py skipped"}],
+            "score": 100,
+            "standard": "INTROSPECTION",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'INTROSPECTION'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "INTROSPECTION",
         }
 
     # Empty file
     if not content.strip():
         return {
-            'passed': True,
-            'checks': [{'name': 'Introspection check', 'passed': True, 'message': 'Empty file skipped'}],
-            'score': 100,
-            'standard': 'INTROSPECTION'
+            "passed": True,
+            "checks": [{"name": "Introspection check", "passed": True, "message": "Empty file skipped"}],
+            "score": 100,
+            "standard": "INTROSPECTION",
         }
 
     # Parse AST
@@ -128,23 +128,29 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     except SyntaxError as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
-            'passed': False,
-            'checks': [{'name': 'File parseable', 'passed': False, 'message': f'Syntax error: {e}'}],
-            'score': 0,
-            'standard': 'INTROSPECTION'
+            "passed": False,
+            "checks": [{"name": "File parseable", "passed": False, "message": f"Syntax error: {e}"}],
+            "score": 0,
+            "standard": "INTROSPECTION",
         }
 
     # Determine file type from path
     is_entry_point = _is_entry_point(module_path, path)
-    is_module = '/modules/' in module_path and path.parent.name == 'modules'
+    is_module = "/modules/" in module_path and path.parent.name == "modules"
 
     # If neither entry point nor module, skip
     if not is_entry_point and not is_module:
         return {
-            'passed': True,
-            'checks': [{'name': 'Introspection check', 'passed': True, 'message': 'Not an entry point or module file (not applicable)'}],
-            'score': 100,
-            'standard': 'INTROSPECTION'
+            "passed": True,
+            "checks": [
+                {
+                    "name": "Introspection check",
+                    "passed": True,
+                    "message": "Not an entry point or module file (not applicable)",
+                }
+            ],
+            "score": 100,
+            "standard": "INTROSPECTION",
         }
 
     # Check 1: print_introspection exists (applies to both entry points and modules)
@@ -181,20 +187,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             checks.append(help_check)
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
     # Overall pass if score >= 75%
     overall_passed = score >= 75
 
-    json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "introspection"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'INTROSPECTION'
-    }
+    json_handler.log_operation(
+        "check_completed", {"file": str(module_path), "score": score, "standard": "introspection"}
+    )
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "INTROSPECTION"}
 
 
 def _is_entry_point(module_path: str, path: Path) -> bool:
@@ -204,11 +207,11 @@ def _is_entry_point(module_path: str, path: Path) -> bool:
     Entry points live at apps/{name}.py — their parent directory is 'apps'.
     Files in apps/modules/, apps/handlers/, apps/plugins/ etc. are NOT entry points.
     """
-    if not path.name.endswith('.py'):
+    if not path.name.endswith(".py"):
         return False
-    if 'apps/' not in module_path:
+    if "apps/" not in module_path:
         return False
-    return path.parent.name == 'apps'
+    return path.parent.name == "apps"
 
 
 def check_print_introspection_exists(tree: ast.Module, filename: str) -> Dict:
@@ -216,17 +219,17 @@ def check_print_introspection_exists(tree: ast.Module, filename: str) -> Dict:
     Use AST to check if def print_introspection exists as a top-level function.
     """
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == 'print_introspection':
+        if isinstance(node, ast.FunctionDef) and node.name == "print_introspection":
             return {
-                'name': 'print_introspection exists',
-                'passed': True,
-                'message': f'Found print_introspection() at line {node.lineno} in {filename}'
+                "name": "print_introspection exists",
+                "passed": True,
+                "message": f"Found print_introspection() at line {node.lineno} in {filename}",
             }
 
     return {
-        'name': 'print_introspection exists',
-        'passed': False,
-        'message': f'Missing def print_introspection() in {filename}'
+        "name": "print_introspection exists",
+        "passed": False,
+        "message": f"Missing def print_introspection() in {filename}",
     }
 
 
@@ -252,9 +255,9 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
     if main_func is None:
         # No main function or __name__ block — can't check order
         return {
-            'name': 'Execution order',
-            'passed': True,
-            'message': f'No main() or __name__ block found in {filename} (skipped)'
+            "name": "Execution order",
+            "passed": True,
+            "message": f"No main() or __name__ block found in {filename} (skipped)",
         }
 
     # Walk the body of main to find conditionals
@@ -277,45 +280,45 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
     if no_args_line is not None and help_check_line is not None:
         if no_args_line < help_check_line:
             return {
-                'name': 'Execution order',
-                'passed': True,
-                'message': f'No-args check (line {no_args_line}) before --help check (line {help_check_line})'
+                "name": "Execution order",
+                "passed": True,
+                "message": f"No-args check (line {no_args_line}) before --help check (line {help_check_line})",
             }
         else:
             return {
-                'name': 'Execution order',
-                'passed': False,
-                'message': f'--help check (line {help_check_line}) before no-args check (line {no_args_line}) — no-args should come first'
+                "name": "Execution order",
+                "passed": False,
+                "message": f"--help check (line {help_check_line}) before no-args check (line {no_args_line}) — no-args should come first",
             }
 
     # If only help check found (no no-args check)
     if help_check_line is not None and no_args_line is None:
         return {
-            'name': 'Execution order',
-            'passed': False,
-            'message': f'Found --help check but no no-args check in {filename} — add empty args handling before --help'
+            "name": "Execution order",
+            "passed": False,
+            "message": f"Found --help check but no no-args check in {filename} — add empty args handling before --help",
         }
 
     # If only no-args check found (no help check) — that's fine, help may be elsewhere
     if no_args_line is not None and help_check_line is None:
         return {
-            'name': 'Execution order',
-            'passed': True,
-            'message': f'No-args check found at line {no_args_line} (no --help conditional to compare against)'
+            "name": "Execution order",
+            "passed": True,
+            "message": f"No-args check found at line {no_args_line} (no --help conditional to compare against)",
         }
 
     # Neither found — can't determine order
     return {
-        'name': 'Execution order',
-        'passed': True,
-        'message': f'No args/help conditionals detected in main() of {filename} (skipped)'
+        "name": "Execution order",
+        "passed": True,
+        "message": f"No args/help conditionals detected in main() of {filename} (skipped)",
     }
 
 
 def _find_main_function(tree: ast.Module) -> Optional[ast.FunctionDef]:
     """Find the top-level main() function definition."""
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == 'main':
+        if isinstance(node, ast.FunctionDef) and node.name == "main":
             return node
     return None
 
@@ -323,7 +326,7 @@ def _find_main_function(tree: ast.Module) -> Optional[ast.FunctionDef]:
 def _find_handle_command_function(tree: ast.Module) -> Optional[ast.FunctionDef]:
     """Find the top-level handle_command() function definition."""
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == 'handle_command':
+        if isinstance(node, ast.FunctionDef) and node.name == "handle_command":
             return node
     return None
 
@@ -353,17 +356,17 @@ def check_module_handle_command_gate(tree: ast.Module, filename: str) -> Optiona
     if handle_cmd is None:
         # No handle_command — module may use a different pattern, skip
         return {
-            'name': 'handle_command no-args gate',
-            'passed': True,
-            'message': f'No handle_command() found in {filename} (skipped)'
+            "name": "handle_command no-args gate",
+            "passed": True,
+            "message": f"No handle_command() found in {filename} (skipped)",
         }
 
     # Walk handle_command body to find a no-args conditional that calls introspection
     # Known introspection-related function names (direct or wrapper)
     introspection_names = {
-        'print_introspection',
-        '_show_audit_introspection',
-        '_show_pack_module_introspection',
+        "print_introspection",
+        "_show_audit_introspection",
+        "_show_pack_module_introspection",
     }
 
     for node in ast.walk(handle_cmd):
@@ -377,16 +380,16 @@ def check_module_handle_command_gate(tree: ast.Module, filename: str) -> Optiona
         calls = _get_function_calls_in_block(node.body)
         if calls & introspection_names:
             return {
-                'name': 'handle_command no-args gate',
-                'passed': True,
-                'message': f'handle_command() gates on no-args at line {node.lineno} → introspection'
+                "name": "handle_command no-args gate",
+                "passed": True,
+                "message": f"handle_command() gates on no-args at line {node.lineno} → introspection",
             }
 
     # No no-args gate found that dispatches to introspection
     return {
-        'name': 'handle_command no-args gate',
-        'passed': False,
-        'message': f'handle_command() in {filename} has no no-args gate calling print_introspection() — module will not show introspection when called with no arguments'
+        "name": "handle_command no-args gate",
+        "passed": False,
+        "message": f"handle_command() in {filename} has no no-args gate calling print_introspection() — module will not show introspection when called with no arguments",
     }
 
 
@@ -401,11 +404,13 @@ def _find_name_main_block(tree: ast.Module) -> Optional[ast.If]:
             test = node.test
             if isinstance(test, ast.Compare):
                 # Left side: __name__
-                if isinstance(test.left, ast.Name) and test.left.id == '__name__':
+                if isinstance(test.left, ast.Name) and test.left.id == "__name__":
                     # Right side: '__main__'
-                    if (test.comparators and
-                            isinstance(test.comparators[0], ast.Constant) and
-                            test.comparators[0].value == '__main__'):
+                    if (
+                        test.comparators
+                        and isinstance(test.comparators[0], ast.Constant)
+                        and test.comparators[0].value == "__main__"
+                    ):
                         return node
     return None
 
@@ -428,7 +433,7 @@ def _is_no_args_check(node: ast.If) -> bool:
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
         operand = test.operand
         # not args
-        if isinstance(operand, ast.Name) and operand.id == 'args':
+        if isinstance(operand, ast.Name) and operand.id == "args":
             return True
         # not sys.argv[1:]
         if isinstance(operand, ast.Subscript):
@@ -439,11 +444,11 @@ def _is_no_args_check(node: ast.If) -> bool:
         left = test.left
 
         # Check if left side is len(args) or len(sys.argv)
-        if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == 'len':
+        if isinstance(left, ast.Call) and isinstance(left.func, ast.Name) and left.func.id == "len":
             if left.args:
                 arg = left.args[0]
                 # len(args) == 0
-                if isinstance(arg, ast.Name) and arg.id == 'args':
+                if isinstance(arg, ast.Name) and arg.id == "args":
                     # Check comparator is 0 or 1
                     if test.comparators and isinstance(test.comparators[0], ast.Constant):
                         val = test.comparators[0].value
@@ -451,8 +456,7 @@ def _is_no_args_check(node: ast.If) -> bool:
                             return True
                 # len(sys.argv) == 1 or len(sys.argv) < 2
                 if isinstance(arg, ast.Attribute):
-                    if (isinstance(arg.value, ast.Name) and arg.value.id == 'sys' and
-                            arg.attr == 'argv'):
+                    if isinstance(arg.value, ast.Name) and arg.value.id == "sys" and arg.attr == "argv":
                         if test.comparators and isinstance(test.comparators[0], ast.Constant):
                             val = test.comparators[0].value
                             if val in (1, 2):
@@ -481,7 +485,7 @@ def _ast_contains_help_string(node: ast.AST) -> bool:
     """
     # Direct string constant
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        if node.value in ('--help', '-h'):
+        if node.value in ("--help", "-h"):
             return True
 
     # Walk all child nodes
@@ -516,41 +520,41 @@ def check_correct_dispatch(tree: ast.Module, filename: str) -> Optional[Dict]:
         # Check no-args block
         if _is_no_args_check(node):
             calls = _get_function_calls_in_block(node.body)
-            if 'print_help' in calls and 'print_introspection' not in calls:
+            if "print_help" in calls and "print_introspection" not in calls:
                 return {
-                    'name': 'Correct dispatch',
-                    'passed': False,
-                    'message': f'No-args block calls print_help() in {filename} (line {node.lineno}) — should call print_introspection() (introspection != help)'
+                    "name": "Correct dispatch",
+                    "passed": False,
+                    "message": f"No-args block calls print_help() in {filename} (line {node.lineno}) — should call print_introspection() (introspection != help)",
                 }
 
         # Check --help block — look for help strings in the condition
         if _is_help_check(node):
             calls = _get_function_calls_in_block(node.body)
             # Calls introspection-related functions instead of print_help
-            introspection_funcs = calls & {'print_introspection', '_show_pack_module_introspection'}
-            if introspection_funcs and 'print_help' not in calls:
+            introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
+            if introspection_funcs and "print_help" not in calls:
                 return {
-                    'name': 'Correct dispatch',
-                    'passed': False,
-                    'message': f'--help block calls {introspection_funcs.pop()}() in {filename} (line {node.lineno}) — should call print_help() (help != introspection)'
+                    "name": "Correct dispatch",
+                    "passed": False,
+                    "message": f"--help block calls {introspection_funcs.pop()}() in {filename} (line {node.lineno}) — should call print_help() (help != introspection)",
                 }
 
         # Also check: condition contains --help string AND body calls introspection
         # This catches compound conditionals like: if not remaining or remaining[0] in ["--help"]
         if _ast_contains_help_string(node.test):
             calls = _get_function_calls_in_block(node.body)
-            introspection_funcs = calls & {'print_introspection', '_show_pack_module_introspection'}
-            if introspection_funcs and 'print_help' not in calls:
+            introspection_funcs = calls & {"print_introspection", "_show_pack_module_introspection"}
+            if introspection_funcs and "print_help" not in calls:
                 return {
-                    'name': 'Correct dispatch',
-                    'passed': False,
-                    'message': f'Block with --help condition calls {introspection_funcs.pop()}() in {filename} (line {node.lineno}) — --help should show help, not introspection'
+                    "name": "Correct dispatch",
+                    "passed": False,
+                    "message": f"Block with --help condition calls {introspection_funcs.pop()}() in {filename} (line {node.lineno}) — --help should show help, not introspection",
                 }
 
     return {
-        'name': 'Correct dispatch',
-        'passed': True,
-        'message': 'No-args → introspection, --help → help (correct separation)'
+        "name": "Correct dispatch",
+        "passed": True,
+        "message": "No-args → introspection, --help → help (correct separation)",
     }
 
 
@@ -577,7 +581,7 @@ def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
     Help/introspection text that references python3 is misleading and causes
     agents to follow instructions that don't work.
     """
-    target_funcs = {'print_introspection', 'print_help'}
+    target_funcs = {"print_introspection", "print_help"}
     python3_refs = []
 
     found_funcs = set()
@@ -588,24 +592,24 @@ def check_content_references(tree: ast.Module, filename: str) -> Optional[Dict]:
             for child in ast.walk(node):
                 if isinstance(child, ast.Constant) and isinstance(child.value, str):
                     val = child.value.lower()
-                    if 'python3 ' in val or 'python3\n' in val:
+                    if "python3 " in val or "python3\n" in val:
                         python3_refs.append((node.name, child.lineno))
 
     if not found_funcs:
         return None  # No relevant functions to check
 
     if python3_refs:
-        refs_str = ', '.join(f'{fn}() line {ln}' for fn, ln in python3_refs[:3])
+        refs_str = ", ".join(f"{fn}() line {ln}" for fn, ln in python3_refs[:3])
         return {
-            'name': 'Content references',
-            'passed': False,
-            'message': f'Help/introspection text references python3 instead of drone commands: {refs_str} in {filename} — use "drone @branch command" instead'
+            "name": "Content references",
+            "passed": False,
+            "message": f'Help/introspection text references python3 instead of drone commands: {refs_str} in {filename} — use "drone @branch command" instead',
         }
 
     return {
-        'name': 'Content references',
-        'passed': True,
-        'message': 'Help/introspection text uses correct command references'
+        "name": "Content references",
+        "passed": True,
+        "message": "Help/introspection text uses correct command references",
     }
 
 
@@ -625,13 +629,13 @@ def check_module_help_interception(tree: ast.Module, filename: str) -> Optional[
     for node in ast.walk(handle_cmd):
         if isinstance(node, ast.If) and _is_help_check(node):
             return {
-                'name': 'Module help interception',
-                'passed': True,
-                'message': f'handle_command() intercepts --help at line {node.lineno}'
+                "name": "Module help interception",
+                "passed": True,
+                "message": f"handle_command() intercepts --help at line {node.lineno}",
             }
 
     return {
-        'name': 'Module help interception',
-        'passed': False,
-        'message': f'handle_command() in {filename} does not intercept --help — flag may fall through to business logic'
+        "name": "Module help interception",
+        "passed": False,
+        "message": f"handle_command() in {filename} does not intercept --help — flag may fall through to business logic",
     }

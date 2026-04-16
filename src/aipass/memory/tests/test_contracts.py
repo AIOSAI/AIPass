@@ -101,9 +101,7 @@ class TestReturnTypeContracts:
         local_json.write_text("{}", encoding="utf-8")
 
         result = local_json
-        assert isinstance(result, Path), (
-            f"Memory paths must be pathlib.Path, got {type(result)}"
-        )
+        assert isinstance(result, Path), f"Memory paths must be pathlib.Path, got {type(result)}"
         assert result.exists()
 
 

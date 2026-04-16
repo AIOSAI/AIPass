@@ -31,6 +31,7 @@ import inspect
 import json
 import logging
 import os
+
 logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -48,6 +49,7 @@ PRAX_ROOT = Path(__file__).resolve().parents[3]  # config/load.py → handlers/ 
 ECOSYSTEM_ROOT = PRAX_ROOT.parent  # prax/ → aipass/ (contains all sibling modules)
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -56,9 +58,11 @@ def _find_repo_root() -> Path:
             return parent
     return Path.cwd()
 
+
 # Lazy SYSTEM_LOGS_DIR — resolved on first access, not at import time.
 # Callers should use get_system_logs_dir() for guaranteed initialization.
 _system_logs_dir_cache: Path | None = None
+
 
 def get_system_logs_dir() -> Path:
     """Lazily resolve and create system_logs directory (package-relative).
@@ -83,14 +87,18 @@ def _warn_routing(module_name: str, destination: object) -> None:
     """Log routing warning when a module's log path falls outside ECOSYSTEM_ROOT."""
     try:
         from aipass.prax.apps.modules.logger import get_direct_logger
+
         get_direct_logger().warning(
             "[get_module_logs_dir] '%s' not in ECOSYSTEM_ROOT; routing to %s",
-            module_name, destination,
+            module_name,
+            destination,
         )
     except Exception as e:
         logger.warning(
             "[get_module_logs_dir] '%s' routing to %s (logger unavailable: %s)",
-            module_name, destination, e,
+            module_name,
+            destination,
+            e,
         )
 
 
@@ -149,8 +157,11 @@ def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
     if caller_cwd:
         caller_path = Path(caller_cwd)
         project_root = next(
-            (c for c in [caller_path, *caller_path.parents]
-             if (c / ".git").exists() or (c / "pyproject.toml").exists()),
+            (
+                c
+                for c in [caller_path, *caller_path.parents]
+                if (c / ".git").exists() or (c / "pyproject.toml").exists()
+            ),
             None,
         )
         if project_root:
@@ -166,29 +177,23 @@ def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
     _warn_routing(module_name, "system_logs/external/")
     return logs_dir
 
+
 # Config file
 PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
 # Default configuration constants
-LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 DEFAULT_LOG_LEVEL = "INFO"
 
-DEFAULT_SYSTEM_LOGS = {
-    "max_lines": 1000,
-    "backup_count": 1,
-    "log_level": "INFO"
-}
+DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 1, "log_level": "INFO"}
 
-DEFAULT_LOCAL_LOGS = {
-    "max_lines": 250,
-    "backup_count": 1,
-    "log_level": "INFO"
-}
+DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 1, "log_level": "INFO"}
 
 # =============================================
 # HANDLER FUNCTIONS
 # =============================================
+
 
 def lines_to_bytes(num_lines: int, avg_line_length: int = 200) -> int:
     """Convert number of lines to approximate bytes for log rotation
@@ -202,6 +207,7 @@ def lines_to_bytes(num_lines: int, avg_line_length: int = 200) -> int:
     """
     return num_lines * avg_line_length
 
+
 def get_debug_prints_enabled() -> bool:
     """Check if debug prints are enabled in config
 
@@ -210,12 +216,13 @@ def get_debug_prints_enabled() -> bool:
     """
     try:
         if PRAX_LOGGER_CONFIG_FILE.exists():
-            with open(PRAX_LOGGER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(PRAX_LOGGER_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                return config.get('config', {}).get('debug_prints_enabled', False)
+                return config.get("config", {}).get("debug_prints_enabled", False)
     except (json.JSONDecodeError, OSError) as e:
         logger.info(f"Config load error (using defaults): {e}")
     return False
+
 
 def load_log_config() -> Dict[str, Any]:
     """Load logging config from JSON, fallback to defaults
@@ -246,18 +253,18 @@ def load_log_config() -> Dict[str, Any]:
     """
     try:
         if PRAX_LOGGER_CONFIG_FILE.exists():
-            with open(PRAX_LOGGER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            with open(PRAX_LOGGER_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
 
                 # Extract system and local log settings
-                system_logs = config.get('config', {}).get('system_logs', DEFAULT_SYSTEM_LOGS)
-                local_logs = config.get('config', {}).get('local_logs', DEFAULT_LOCAL_LOGS)
+                system_logs = config.get("config", {}).get("system_logs", DEFAULT_SYSTEM_LOGS)
+                local_logs = config.get("config", {}).get("local_logs", DEFAULT_LOCAL_LOGS)
 
                 result = {
-                    'system_logs': system_logs,
-                    'local_logs': local_logs,
-                    'log_format': config.get('config', {}).get('log_format', LOG_FORMAT),
-                    'date_format': config.get('config', {}).get('date_format', DATE_FORMAT)
+                    "system_logs": system_logs,
+                    "local_logs": local_logs,
+                    "log_format": config.get("config", {}).get("log_format", LOG_FORMAT),
+                    "date_format": config.get("config", {}).get("date_format", DATE_FORMAT),
                 }
                 json_handler.log_operation("config_loaded", {"source": str(PRAX_LOGGER_CONFIG_FILE)})
                 return result
@@ -266,8 +273,8 @@ def load_log_config() -> Dict[str, Any]:
 
     # Fallback to code defaults
     return {
-        'system_logs': DEFAULT_SYSTEM_LOGS,
-        'local_logs': DEFAULT_LOCAL_LOGS,
-        'log_format': LOG_FORMAT,
-        'date_format': DATE_FORMAT
+        "system_logs": DEFAULT_SYSTEM_LOGS,
+        "local_logs": DEFAULT_LOCAL_LOGS,
+        "log_format": LOG_FORMAT,
+        "date_format": DATE_FORMAT,
     }

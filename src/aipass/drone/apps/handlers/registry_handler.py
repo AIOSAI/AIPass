@@ -170,6 +170,7 @@ def reset_registry_path() -> None:
 # Registry loading and querying
 # ---------------------------------------------------------------------------
 
+
 def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     """Read, parse, and normalize a registry file.
 
@@ -184,8 +185,7 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     """
     if not registry_path.exists():
         raise RegistryNotFoundError(
-            f"Registry not found at {registry_path}. "
-            "Create a *_REGISTRY.json file in your project root."
+            f"Registry not found at {registry_path}. Create a *_REGISTRY.json file in your project root."
         )
 
     try:

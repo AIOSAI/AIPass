@@ -87,9 +87,7 @@ def _extract_readme_standard_names(readme_text: str) -> set[str]:
     names: set[str] = set()
 
     # Parse the comma/and-separated list in the Checker Packs section.
-    checks_pattern = re.compile(
-        r"pack\s+checks?:\s*(.+?)(?:\.|$)", re.IGNORECASE | re.DOTALL
-    )
+    checks_pattern = re.compile(r"pack\s+checks?:\s*(.+?)(?:\.|$)", re.IGNORECASE | re.DOTALL)
     match = checks_pattern.search(readme_text)
     if match:
         raw_list = match.group(1)
@@ -167,8 +165,7 @@ def scan(pack_dir: Path) -> dict:
         for ref in count_refs:
             if ref["number"] != actual_check_count:
                 issues.append(
-                    f"Line {ref['line']}: README says {ref['number']} but "
-                    f"actual count is {actual_check_count}"
+                    f"Line {ref['line']}: README says {ref['number']} but actual count is {actual_check_count}"
                 )
 
     # -- Name references --
@@ -207,10 +204,7 @@ def scan(pack_dir: Path) -> dict:
 
     # -- Summary --
     if passed:
-        summary = (
-            f"README is current. {actual_check_count} checkers, "
-            f"all documented, no stale references."
-        )
+        summary = f"README is current. {actual_check_count} checkers, all documented, no stale references."
     else:
         parts: list[str] = []
         if count_mismatch:

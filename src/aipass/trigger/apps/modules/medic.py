@@ -46,6 +46,7 @@ def print_introspection():
     except ImportError:
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
+
         console = Console()
 
     console.print()
@@ -76,7 +77,9 @@ def _systemctl(action: str) -> bool:
     try:
         result = subprocess.run(
             ["systemctl", "--user", action, SERVICE_NAME],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return result.returncode == 0
     except Exception as exc:
@@ -102,9 +105,9 @@ def _extract_branch_name(raw: str) -> str:
     Returns:
         Lowercase branch name (e.g., 'speakeasy')
     """
-    cleaned = raw.lstrip('@')
+    cleaned = raw.lstrip("@")
     # If it looks like a path, take the last directory component
-    if '/' in cleaned:
+    if "/" in cleaned:
         cleaned = Path(cleaned).name
     return cleaned.lower()
 
@@ -249,15 +252,17 @@ def _handle_on(console) -> None:
         else:
             logger.warning("[MEDIC] Could not start log watcher service")
 
-    watcher_status = 'running' if _is_service_active() else 'failed to start'
-    console.print(Panel(
-        "[bold green]Medic ENABLED[/bold green]\n\n"
-        "Error dispatch is [green]active[/green]. Errors detected in branch logs\n"
-        "will be dispatched to affected branches automatically.\n"
-        f"Log watcher: [green]{watcher_status}[/green]",
-        title="Medic",
-        border_style="green",
-    ))
+    watcher_status = "running" if _is_service_active() else "failed to start"
+    console.print(
+        Panel(
+            "[bold green]Medic ENABLED[/bold green]\n\n"
+            "Error dispatch is [green]active[/green]. Errors detected in branch logs\n"
+            "will be dispatched to affected branches automatically.\n"
+            f"Log watcher: [green]{watcher_status}[/green]",
+            title="Medic",
+            border_style="green",
+        )
+    )
 
 
 def _handle_off(console) -> None:
@@ -273,14 +278,16 @@ def _handle_off(console) -> None:
         _systemctl("stop")
         logger.info("[MEDIC] Log watcher service stopped")
 
-    console.print(Panel(
-        "[bold yellow]Medic DISABLED[/bold yellow]\n\n"
-        "Error dispatch is [yellow]suppressed[/yellow]. Errors are still detected\n"
-        "and logged to [dim]medic_suppressed.log[/dim] for review.\n"
-        "Log watcher: [yellow]stopped[/yellow]",
-        title="Medic",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            "[bold yellow]Medic DISABLED[/bold yellow]\n\n"
+            "Error dispatch is [yellow]suppressed[/yellow]. Errors are still detected\n"
+            "and logged to [dim]medic_suppressed.log[/dim] for review.\n"
+            "Log watcher: [yellow]stopped[/yellow]",
+            title="Medic",
+            border_style="yellow",
+        )
+    )
 
 
 def _route_medic_module(args: list) -> bool:
@@ -288,7 +295,7 @@ def _route_medic_module(args: list) -> bool:
     if not args:
         print_introspection()
         return True
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
     return handle_command(args[0], args[1:])
@@ -320,7 +327,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["on", "off", "status", "mute", "unmute"]:
         return False
 
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
@@ -340,8 +347,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 if __name__ == "__main__":
-
-    if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 

@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before branch_log_events module loads."""
@@ -54,17 +55,20 @@ def _mock_infrastructure(monkeypatch):
     mock_log_watcher.start_branch_log_watcher = MagicMock(return_value=MagicMock())
     mock_log_watcher.stop_branch_log_watcher = MagicMock()
     mock_log_watcher.is_branch_log_watcher_active = MagicMock(return_value=False)
-    mock_log_watcher.get_watcher_status = MagicMock(return_value={
-        "active": True,
-        "watchdog_available": True,
-        "seen_hashes_count": 0,
-        "aipass_root": "/fake/path",
-    })
+    mock_log_watcher.get_watcher_status = MagicMock(
+        return_value={
+            "active": True,
+            "watchdog_available": True,
+            "seen_hashes_count": 0,
+            "aipass_root": "/fake/path",
+        }
+    )
     mock_log_watcher.clear_seen_hashes = MagicMock()
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.log_watcher", mock_log_watcher)
 
     # -- trigger config -----------------------------------------------------
     from aipass.trigger.apps.config import atomic_write_json
+
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = "/fake/trigger"
     mock_config.AIPASS_PKG_ROOT = "/fake/aipass"
@@ -95,6 +99,7 @@ def _mock_infrastructure(monkeypatch):
 def _import_module():
     """Import branch_log_events module fresh (after mocks are in place)."""
     import aipass.trigger.apps.modules.branch_log_events as mod
+
     return mod
 
 
@@ -136,6 +141,7 @@ def _get_print_str_args(console):
 # Tests -- start()
 # ---------------------------------------------------------------------------
 
+
 def test_start_success_returns_true():
     """start() returns True when start_branch_log_watcher returns an observer."""
     mod = _import_module()
@@ -173,6 +179,7 @@ def test_start_failure_returns_false():
 # Tests -- stop()
 # ---------------------------------------------------------------------------
 
+
 def test_stop_calls_stop_branch_log_watcher():
     """stop() calls stop_branch_log_watcher."""
     mod = _import_module()
@@ -184,6 +191,7 @@ def test_stop_calls_stop_branch_log_watcher():
 # ---------------------------------------------------------------------------
 # Tests -- status()
 # ---------------------------------------------------------------------------
+
 
 def test_status_returns_dict_from_handler():
     """status() returns the dict from get_watcher_status."""
@@ -208,6 +216,7 @@ def test_status_calls_get_watcher_status():
 # Tests -- reset_hashes()
 # ---------------------------------------------------------------------------
 
+
 def test_reset_hashes_calls_clear_seen_hashes():
     """reset_hashes() calls clear_seen_hashes."""
     mod = _import_module()
@@ -219,6 +228,7 @@ def test_reset_hashes_calls_clear_seen_hashes():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command routing
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_start_success():
     """handle_command('start', []) starts watcher and returns True."""
@@ -238,9 +248,7 @@ def test_handle_command_start_failure_prints_error():
     assert result is True
     console = _get_console()
     printed = _get_print_str_args(console)
-    assert any("Failed to start" in s for s in printed), (
-        f"Expected failure message in printed args: {printed}"
-    )
+    assert any("Failed to start" in s for s in printed), f"Expected failure message in printed args: {printed}"
 
 
 def test_handle_command_stop():
@@ -288,6 +296,7 @@ def test_handle_command_unknown_returns_false():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command module-name routing
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_module_name_routes_to_subcommand():
     """handle_command('branch_log_events', ['start']) recurses to start."""
@@ -338,6 +347,7 @@ def test_handle_command_module_name_help_word():
 # Tests -- handle_command help flags on direct subcommands
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_subcommand_help_flag():
     """handle_command('start', ['--help']) shows help instead of starting."""
     mod = _import_module()
@@ -380,6 +390,7 @@ def test_handle_command_direct_help_word():
 # Tests -- print_introspection output
 # ---------------------------------------------------------------------------
 
+
 def test_print_introspection_outputs_module_name():
     """print_introspection prints module name and handler info."""
     mod = _import_module()
@@ -395,6 +406,7 @@ def test_print_introspection_outputs_module_name():
 # ---------------------------------------------------------------------------
 # Tests -- print_help output
 # ---------------------------------------------------------------------------
+
 
 def test_print_help_outputs_commands():
     """print_help prints command reference."""
@@ -412,6 +424,7 @@ def test_print_help_outputs_commands():
 # ---------------------------------------------------------------------------
 # Tests -- handle_command status output content
 # ---------------------------------------------------------------------------
+
 
 def test_handle_command_status_prints_all_fields():
     """handle_command('status', []) prints active, watchdog, hashes, root."""

@@ -45,6 +45,7 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 # HANDLER FUNCTION
 # =============================================
 
+
 def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
     """Load PLAN registry
 
@@ -67,13 +68,16 @@ def load_registry(registry_file: str | None = None) -> Dict[str, Any]:
         return {"plans": {}, "next_number": 1}
 
     try:
-        with open(target, 'r', encoding='utf-8') as f:
+        with open(target, "r", encoding="utf-8") as f:
             data = json.load(f)
-        json_handler.log_operation("registry_loaded", {
-            "target_file": target.name,
-            "plan_count": len(data.get("plans", {})),
-            "success": True,
-        })
+        json_handler.log_operation(
+            "registry_loaded",
+            {
+                "target_file": target.name,
+                "plan_count": len(data.get("plans", {})),
+                "success": True,
+            },
+        )
         return data
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to load registry from {target}: {e}")

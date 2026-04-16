@@ -18,10 +18,10 @@ import sys
 from unittest.mock import MagicMock, patch
 
 
-
 # ---------------------------------------------------------------------------
 # handle_command tests
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommand:
     """Test the top-level command router."""
@@ -29,19 +29,23 @@ class TestHandleCommand:
     def _import_monitor(self):
         """Import monitor module fresh (after conftest mocks are in place)."""
         # Additional mocks for monitoring handler imports
-        with patch.dict(sys.modules, {
-            "aipass.prax.apps.handlers.monitoring": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "aipass.prax.apps.handlers.monitoring": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
+            },
+        ):
             import importlib
+
             if "aipass.prax.apps.modules.monitor" in sys.modules:
                 mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
             else:
@@ -100,23 +104,28 @@ class TestHandleCommand:
 # _get_watch_directories tests
 # ---------------------------------------------------------------------------
 
+
 class TestGetWatchDirectories:
     """Test directory enumeration from registry."""
 
     def _import_monitor(self):
-        with patch.dict(sys.modules, {
-            "aipass.prax.apps.handlers.monitoring": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
-            "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "aipass.prax.apps.handlers.monitoring": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.event_queue": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.filesystem_handler": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.log_watcher": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.unified_stream": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.module_tracker": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.branch_detector": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.interactive_filter": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.monitoring_filters": MagicMock(),
+                "aipass.prax.apps.handlers.monitoring.file_watcher_integration": MagicMock(),
+            },
+        ):
             import importlib
+
             if "aipass.prax.apps.modules.monitor" in sys.modules:
                 mod = importlib.reload(sys.modules["aipass.prax.apps.modules.monitor"])
             else:
@@ -140,11 +149,7 @@ class TestGetWatchDirectories:
         apps_dir.mkdir(parents=True)
         trinity_dir.mkdir(parents=True)
 
-        registry = {
-            "branches": [
-                {"name": "flow", "path": "src/aipass/flow"}
-            ]
-        }
+        registry = {"branches": [{"name": "flow", "path": "src/aipass/flow"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 
@@ -166,11 +171,7 @@ class TestGetWatchDirectories:
     def test_skips_nonexistent_branch_paths(self, tmp_path):
         """Branches whose path doesn't exist on disk are skipped."""
         mod = self._import_monitor()
-        registry = {
-            "branches": [
-                {"name": "ghost", "path": "src/aipass/ghost"}
-            ]
-        }
+        registry = {"branches": [{"name": "ghost", "path": "src/aipass/ghost"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 
@@ -203,11 +204,7 @@ class TestGetWatchDirectories:
         branch_dir.mkdir(parents=True)
         trinity_dir.mkdir(parents=True)
 
-        registry = {
-            "branches": [
-                {"name": "minimal", "path": "src/aipass/minimal"}
-            ]
-        }
+        registry = {"branches": [{"name": "minimal", "path": "src/aipass/minimal"}]}
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text(json.dumps(registry), encoding="utf-8")
 

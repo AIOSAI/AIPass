@@ -238,11 +238,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     # -- Filter out bypassed lines --
-    non_bypassed = [
-        ln
-        for ln in hit_lines
-        if not is_bypassed(module_path, "debug_print", ln, bypass_rules)
-    ]
+    non_bypassed = [ln for ln in hit_lines if not is_bypassed(module_path, "debug_print", ln, bypass_rules)]
 
     # -- Build result --
     checks: list[Dict] = []
@@ -262,10 +258,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             {
                 "name": "Debug print calls",
                 "passed": False,
-                "message": (
-                    f"{len(non_bypassed)} bare print() call(s) "
-                    f"on lines {sample}{suffix}"
-                ),
+                "message": (f"{len(non_bypassed)} bare print() call(s) on lines {sample}{suffix}"),
             }
         )
 

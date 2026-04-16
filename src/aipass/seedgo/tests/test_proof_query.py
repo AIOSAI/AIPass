@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for proof_query."""
@@ -63,15 +64,18 @@ def _mock_infrastructure(monkeypatch):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
     """No args triggers introspection (returns True)."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     result = handle_command("proof_query", [])
     assert result is True
 
@@ -79,6 +83,7 @@ def test_handle_command_no_args_shows_introspection():
 def test_handle_command_help_flag():
     """--help flag is handled without error."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     result = handle_command("proof_query", ["--help"])
     assert result is True
 
@@ -86,6 +91,7 @@ def test_handle_command_help_flag():
 def test_handle_command_h_flag():
     """-h flag is handled without error."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     result = handle_command("proof_query", ["-h"])
     assert result is True
 
@@ -93,6 +99,7 @@ def test_handle_command_h_flag():
 def test_handle_command_help_word():
     """'help' word is handled without error."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     result = handle_command("proof_query", ["help"])
     assert result is True
 
@@ -100,6 +107,7 @@ def test_handle_command_help_word():
 def test_handle_command_unknown_pack():
     """Unknown pack name returns True (error displayed to user)."""
     from aipass.seedgo.apps.modules.proof_query import handle_command
+
     result = handle_command("proof_query", ["nonexistent_pack_xyz"])
     assert result is True
 
@@ -108,26 +116,26 @@ def test_print_introspection_runs():
     """print_introspection produces console output."""
     import sys
     from aipass.seedgo.apps.modules.proof_query import print_introspection
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_introspection()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_introspection should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_introspection should produce console output"
 
 
 def test_print_help_runs():
     """print_help produces console output."""
     import sys
     from aipass.seedgo.apps.modules.proof_query import print_help
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     mock_cli.header.reset_mock()
     result = print_help()
     assert result is None
-    assert mock_cli.console.print.called or mock_cli.header.called, \
-        "print_help should produce console output"
+    assert mock_cli.console.print.called or mock_cli.header.called, "print_help should produce console output"
 
 
 def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
@@ -164,6 +172,7 @@ def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch):
 def test_discover_proof_content_empty_dir(tmp_path):
     """_discover_proof_content returns empty dict for a directory with no content files."""
     from aipass.seedgo.apps.modules.proof_query import _discover_proof_content
+
     result = _discover_proof_content(tmp_path)
     assert result == {}
 
@@ -171,6 +180,7 @@ def test_discover_proof_content_empty_dir(tmp_path):
 def test_discover_proof_content_finds_content_files(tmp_path):
     """_discover_proof_content discovers *_content.py files correctly."""
     from aipass.seedgo.apps.modules.proof_query import _discover_proof_content
+
     # Create a fake content file
     (tmp_path / "triplet_content.py").write_text("# fake", encoding="utf-8")
     (tmp_path / "not_a_content.py").write_text("# fake", encoding="utf-8")

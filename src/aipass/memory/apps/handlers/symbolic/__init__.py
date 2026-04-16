@@ -35,18 +35,18 @@ from .extractor import (
     extract_key_learnings,
     extract_context_triggers,
     extract_symbolic_dimensions,
-    analyze_conversation
+    analyze_conversation,
 )
 
 from .chroma_client import get_chroma_client
 
 __all__ = [
-    'extract_technical_flow',
-    'extract_emotional_journey',
-    'extract_collaboration_patterns',
-    'extract_key_learnings',
-    'extract_context_triggers',
-    'extract_symbolic_dimensions',
-    'analyze_conversation',
-    'get_chroma_client'
+    "extract_technical_flow",
+    "extract_emotional_journey",
+    "extract_collaboration_patterns",
+    "extract_key_learnings",
+    "extract_context_triggers",
+    "extract_symbolic_dimensions",
+    "analyze_conversation",
+    "get_chroma_client",
 ]

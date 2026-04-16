@@ -1,4 +1,3 @@
-
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: apps/__init__.py

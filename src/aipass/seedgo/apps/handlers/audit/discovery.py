@@ -31,6 +31,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # PRIVATE BRANCH DETECTION
 # =============================================================================
 
+
 def _is_branch_private(branch_name: str) -> bool:
     """Check if branch is in the private registry."""
     registry_path = _find_registry()
@@ -38,7 +39,7 @@ def _is_branch_private(branch_name: str) -> bool:
     if not priv_path or not priv_path.exists():
         return False
     try:
-        with open(priv_path, 'r', encoding='utf-8') as f:
+        with open(priv_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
         for branch in registry.get("branches", []):
             if branch.get("name", "").upper() == branch_name.upper():
@@ -51,6 +52,7 @@ def _is_branch_private(branch_name: str) -> bool:
 # =============================================================================
 # PUBLIC API
 # =============================================================================
+
 
 def _find_registry() -> Path:
     """
@@ -91,19 +93,19 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
         return branches
 
     try:
-        with open(registry_path, 'r', encoding='utf-8') as f:
+        with open(registry_path, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
 
         registry_dir = registry_path.parent
 
-        raw_branches = registry_data.get('branches', [])
+        raw_branches = registry_data.get("branches", [])
         # Handle both list format and dict format (keyed by name)
         if isinstance(raw_branches, dict):
             raw_branches = list(raw_branches.values())
 
         for branch in raw_branches:
-            branch_name = branch.get('name', '')
-            raw_path = branch.get('path', '')
+            branch_name = branch.get("name", "")
+            raw_path = branch.get("path", "")
             branch_path = Path(raw_path)
 
             # Resolve relative paths against registry location
@@ -123,17 +125,13 @@ def discover_branches(include_private: bool = False) -> List[Dict[str, str]]:
                 entry_file = branch_entry
 
             if entry_file:
-                branches.append({
-                    'name': branch_name,
-                    'path': str(branch_path),
-                    'entry_file': str(entry_file)
-                })
+                branches.append({"name": branch_name, "path": str(branch_path), "entry_file": str(entry_file)})
 
         if not include_private:
-            branches = [b for b in branches if not _is_branch_private(b['name'])]
+            branches = [b for b in branches if not _is_branch_private(b["name"])]
 
         json_handler.log_operation("branches_discovered", {"count": len(branches)})
-        return sorted(branches, key=lambda x: x['name'])
+        return sorted(branches, key=lambda x: x["name"])
 
     except (json.JSONDecodeError, IOError):
         logger.info("Cannot read registry for branch discovery")
@@ -156,8 +154,8 @@ def check_internal_access(branch_name: str) -> bool:
     _branch_path = None
     _priv_branches = discover_branches(include_private=True)
     for _b in _priv_branches:
-        if _b['name'].upper() == branch_name.upper():
-            _branch_path = Path(_b['path'])
+        if _b["name"].upper() == branch_name.upper():
+            _branch_path = Path(_b["path"])
             break
 
     if _branch_path is None:

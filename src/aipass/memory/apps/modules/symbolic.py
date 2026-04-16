@@ -53,6 +53,7 @@ _SUBCOMMANDS = {
 # PUBLIC API - Delegated to handlers
 # =============================================================================
 
+
 def extract_technical_flow(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Analyze technical patterns from conversation
@@ -156,43 +157,38 @@ def analyze_conversation(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
 # STORAGE API - Delegated to handlers
 # =============================================================================
 
+
 def create_fragment(
-    analysis: Dict[str, Any],
-    content: str | None = None,
-    source_branch: str | None = None
+    analysis: Dict[str, Any], content: str | None = None, source_branch: str | None = None
 ) -> Dict[str, Any]:
     """Create fragment from analysis, fire trigger on success"""
     result = storage.create_fragment(analysis, content, source_branch)
-    if result.get('success'):
+    if result.get("success"):
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('fragment_created',
-                        fragment_id=result['fragment'].get('id'),
-                        source_branch=source_branch or 'unknown')
+
+            trigger.fire(
+                "fragment_created", fragment_id=result["fragment"].get("id"), source_branch=source_branch or "unknown"
+            )
         except Exception as e:
             logger.warning(f"[symbolic] Trigger fire for fragment_created failed: {e}")
     return result
 
 
-def store_fragment(
-    fragment: Dict[str, Any],
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def store_fragment(fragment: Dict[str, Any], db_path: Path | None = None) -> Dict[str, Any]:
     """Store fragment in ChromaDB, fire trigger on success"""
     result = storage.store_fragment(fragment, db_path)
-    if result.get('success'):
+    if result.get("success"):
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('fragment_stored', fragment_id=result.get('fragment_id'))
+
+            trigger.fire("fragment_stored", fragment_id=result.get("fragment_id"))
         except Exception as e:
             logger.warning(f"[symbolic] Trigger fire for fragment_stored failed: {e}")
     return result
 
 
-def store_fragments_batch(
-    fragments: List[Dict[str, Any]],
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def store_fragments_batch(fragments: List[Dict[str, Any]], db_path: Path | None = None) -> Dict[str, Any]:
     """
     Store multiple fragments in ChromaDB in batch
 
@@ -229,10 +225,9 @@ def flatten_dimensions(fragment: Dict[str, Any]) -> Dict[str, Any]:
 # v2 LLM PIPELINE - Extract, Deduplicate, Store
 # =============================================================================
 
+
 def store_llm_fragment(
-    fragment: Dict[str, Any],
-    source_branch: str | None = None,
-    db_path: Path | None = None
+    fragment: Dict[str, Any], source_branch: str | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Store a single LLM-extracted fragment in ChromaDB
@@ -249,9 +244,7 @@ def store_llm_fragment(
 
 
 def store_llm_fragments_batch(
-    fragments: List[Dict[str, Any]],
-    source_branch: str | None = None,
-    db_path: Path | None = None
+    fragments: List[Dict[str, Any]], source_branch: str | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Store multiple LLM-extracted fragments in ChromaDB in batch
@@ -267,10 +260,7 @@ def store_llm_fragments_batch(
     return storage.store_llm_fragments_batch(fragments, source_branch, db_path)
 
 
-def deduplicate_fragment(
-    new_fragment: Dict[str, Any],
-    existing_fragments: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+def deduplicate_fragment(new_fragment: Dict[str, Any], existing_fragments: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compare a new LLM-extracted fragment against existing ones via AUDN pattern
 
@@ -286,9 +276,7 @@ def deduplicate_fragment(
 
 
 def extract_and_store_llm(
-    chat_history: List[Dict[str, Any]],
-    source_branch: str | None = None,
-    db_path: Path | None = None
+    chat_history: List[Dict[str, Any]], source_branch: str | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     End-to-end pipeline: extract LLM fragments, deduplicate, and store
@@ -312,44 +300,26 @@ def extract_and_store_llm(
     extract_result = extractor.extract_fragments_llm(chat_history)
 
     # Log any per-chunk errors even on partial success
-    chunk_errors = extract_result.get('chunk_errors', [])
+    chunk_errors = extract_result.get("chunk_errors", [])
     if chunk_errors:
         for ce in chunk_errors:
             logger.warning(f"[symbolic] Chunk extraction error: {ce}")
 
-    if not extract_result.get('success'):
-        error_msg = extract_result.get('error', 'Unknown extraction error')
+    if not extract_result.get("success"):
+        error_msg = extract_result.get("error", "Unknown extraction error")
         logger.error(f"[symbolic] LLM extraction failed: {error_msg}")
         try:
             from aipass.trigger.apps.modules.errors import report_error
-            report_error(
-                error_type="ExtractionError",
-                message=error_msg,
-                component="memory",
-                severity="high"
-            )
+
+            report_error(error_type="ExtractionError", message=error_msg, component="memory", severity="high")
         except Exception as e:
             logger.warning(f"[symbolic] Error report trigger unavailable: {e}")
-        return {
-            'success': False,
-            'processed': 0,
-            'added': 0,
-            'updated': 0,
-            'skipped': 0,
-            'errors': [error_msg]
-        }
+        return {"success": False, "processed": 0, "added": 0, "updated": 0, "skipped": 0, "errors": [error_msg]}
 
-    fragments = extract_result.get('fragments', [])
+    fragments = extract_result.get("fragments", [])
     if not fragments:
         logger.info("[symbolic] No fragments extracted from conversation")
-        return {
-            'success': True,
-            'processed': 0,
-            'added': 0,
-            'updated': 0,
-            'skipped': 0,
-            'errors': []
-        }
+        return {"success": True, "processed": 0, "added": 0, "updated": 0, "skipped": 0, "errors": []}
 
     logger.info(f"[symbolic] Extracted {len(fragments)} fragments, starting dedup")
 
@@ -362,55 +332,41 @@ def extract_and_store_llm(
     for frag in fragments:
         try:
             # Find similar existing fragments via vector search
-            search_query = frag.get('summary', '')
-            similar_result = retriever.search_by_vector(
-                search_query, n_results=5, db_path=db_path
-            )
+            search_query = frag.get("summary", "")
+            similar_result = retriever.search_by_vector(search_query, n_results=5, db_path=db_path)
 
             existing = []
-            if similar_result.get('success'):
-                existing = similar_result.get('results', [])
+            if similar_result.get("success"):
+                existing = similar_result.get("results", [])
 
             # Deduplicate
             dedup_result = deduplicator.deduplicate_fragment(frag, existing)
-            action = dedup_result.get('action', 'ADD')
-            deduped_frag = dedup_result.get('fragment', frag)
+            action = dedup_result.get("action", "ADD")
+            deduped_frag = dedup_result.get("fragment", frag)
 
-            if action == 'ADD':
-                store_result = storage.store_llm_fragment(
-                    deduped_frag, source_branch, db_path
-                )
-                if store_result.get('success'):
+            if action == "ADD":
+                store_result = storage.store_llm_fragment(deduped_frag, source_branch, db_path)
+                if store_result.get("success"):
                     added += 1
                 else:
-                    errors.append(
-                        f"ADD store failed: {store_result.get('error', 'Unknown')}"
-                    )
+                    errors.append(f"ADD store failed: {store_result.get('error', 'Unknown')}")
 
-            elif action == 'UPDATE':
-                store_result = storage.store_llm_fragment(
-                    deduped_frag, source_branch, db_path
-                )
-                if store_result.get('success'):
+            elif action == "UPDATE":
+                store_result = storage.store_llm_fragment(deduped_frag, source_branch, db_path)
+                if store_result.get("success"):
                     updated += 1
                 else:
-                    errors.append(
-                        f"UPDATE store failed: {store_result.get('error', 'Unknown')}"
-                    )
+                    errors.append(f"UPDATE store failed: {store_result.get('error', 'Unknown')}")
 
-            elif action == 'DELETE':
-                delete_id = dedup_result.get('delete_id', '')
+            elif action == "DELETE":
+                delete_id = dedup_result.get("delete_id", "")
                 if delete_id:
                     del_result = storage.delete_fragment(delete_id, db_path)
-                    if del_result.get('success'):
-                        logger.info(
-                            f"[symbolic] DELETED {delete_id}: "
-                            f"{dedup_result.get('reason', 'no reason')}"
-                        )
+                    if del_result.get("success"):
+                        logger.info(f"[symbolic] DELETED {delete_id}: {dedup_result.get('reason', 'no reason')}")
                     else:
                         logger.warning(
-                            f"[symbolic] DELETE failed for {delete_id}: "
-                            f"{del_result.get('error', 'unknown')}"
+                            f"[symbolic] DELETE failed for {delete_id}: {del_result.get('error', 'unknown')}"
                         )
                 skipped += 1
 
@@ -429,12 +385,12 @@ def extract_and_store_llm(
     )
 
     return {
-        'success': True,
-        'processed': total_processed,
-        'added': added,
-        'updated': updated,
-        'skipped': skipped,
-        'errors': errors
+        "success": True,
+        "processed": total_processed,
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
     }
 
 
@@ -442,12 +398,13 @@ def extract_and_store_llm(
 # RETRIEVAL API - Delegated to handlers
 # =============================================================================
 
+
 def retrieve_fragments(
     query: str | None = None,
     dimension_filters: Dict[str, str] | None = None,
     trigger_keywords: List[str] | None = None,
     n_results: int = 5,
-    db_path: Path | None = None
+    db_path: Path | None = None,
 ) -> Dict[str, Any]:
     """
     Retrieve fragments using combined search methods
@@ -467,11 +424,7 @@ def retrieve_fragments(
     return retriever.retrieve_fragments(query, dimension_filters, trigger_keywords, n_results, db_path)
 
 
-def search_fragments_by_vector(
-    query: str,
-    n_results: int = 5,
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def search_fragments_by_vector(query: str, n_results: int = 5, db_path: Path | None = None) -> Dict[str, Any]:
     """
     Search fragments by vector similarity only
 
@@ -487,9 +440,7 @@ def search_fragments_by_vector(
 
 
 def search_fragments_by_dimensions(
-    dimension_filters: Dict[str, str],
-    n_results: int = 5,
-    db_path: Path | None = None
+    dimension_filters: Dict[str, str], n_results: int = 5, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Search fragments by dimension filters only
@@ -506,9 +457,7 @@ def search_fragments_by_dimensions(
 
 
 def search_fragments_by_triggers(
-    keywords: List[str],
-    n_results: int = 5,
-    db_path: Path | None = None
+    keywords: List[str], n_results: int = 5, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Search fragments by trigger keywords only
@@ -528,10 +477,8 @@ def search_fragments_by_triggers(
 # HOOK API - Delegated to handlers
 # =============================================================================
 
-def extract_conversation_context(
-    messages: List[Dict[str, Any]],
-    max_messages: int = 5
-) -> Dict[str, Any]:
+
+def extract_conversation_context(messages: List[Dict[str, Any]], max_messages: int = 5) -> Dict[str, Any]:
     """
     Extract keywords, themes, and mood from recent conversation messages
 
@@ -545,11 +492,7 @@ def extract_conversation_context(
     return hook.extract_conversation_context(messages, max_messages)
 
 
-def find_relevant_fragments(
-    context: Dict[str, Any],
-    n_results: int = 3,
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+def find_relevant_fragments(context: Dict[str, Any], n_results: int = 3, db_path: Path | None = None) -> Dict[str, Any]:
     """
     Query fragments based on extracted conversation context
 
@@ -579,10 +522,7 @@ def format_fragment_recall(fragment: Dict[str, Any]) -> str:
     return hook.format_fragment_recall(fragment)
 
 
-def should_surface_fragment(
-    fragment: Dict[str, Any] | None = None,
-    config: Dict[str, Any] | None = None
-) -> tuple:
+def should_surface_fragment(fragment: Dict[str, Any] | None = None, config: Dict[str, Any] | None = None) -> tuple:
     """
     Check if a fragment should be surfaced based on rules
 
@@ -597,9 +537,7 @@ def should_surface_fragment(
 
 
 def process_hook(
-    messages: List[Dict[str, Any]],
-    config: Dict[str, Any] | None = None,
-    db_path: Path | None = None
+    messages: List[Dict[str, Any]], config: Dict[str, Any] | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Main hook function - process messages and surface relevant fragments
@@ -647,6 +585,7 @@ def get_hook_session_state() -> Dict[str, Any]:
 # INTROSPECTION (seedgo standard)
 # =============================================================================
 
+
 def _discover_handlers() -> dict[str, list[str]]:
     """Auto-discover handler directories and their Python files."""
     handlers_dir = Path(__file__).resolve().parent.parent / "handlers"
@@ -656,10 +595,7 @@ def _discover_handlers() -> dict[str, list[str]]:
     for d in sorted(handlers_dir.iterdir()):
         if not d.is_dir() or d.name.startswith("__"):
             continue
-        py_files = sorted(
-            f.name for f in d.iterdir()
-            if f.is_file() and f.suffix == ".py" and f.name != "__init__.py"
-        )
+        py_files = sorted(f.name for f in d.iterdir() if f.is_file() and f.suffix == ".py" and f.name != "__init__.py")
         if py_files:
             result[d.name] = py_files
     return result
@@ -669,7 +605,9 @@ def print_introspection() -> None:
     """Display module introspection (seedgo standard: no args = structure/discovery)."""
     console.print()
     console.print("[bold cyan]symbolic[/bold cyan] — Fragmented Memory Extraction")
-    console.print("[dim]Extracts symbolic dimensions from conversations and stores as searchable vector fragments[/dim]")
+    console.print(
+        "[dim]Extracts symbolic dimensions from conversations and stores as searchable vector fragments[/dim]"
+    )
     console.print()
 
     handlers = _discover_handlers()
@@ -695,6 +633,7 @@ def print_introspection() -> None:
 # COMMAND HANDLERS
 # =============================================================================
 
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle symbolic memory commands
@@ -715,18 +654,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     # Top-level help (backward compat -- entry point may send these)
-    if command in ('--help', '-h', 'help'):
+    if command in ("--help", "-h", "help"):
         print_help()
         return True
 
-    if command == 'symbolic':
+    if command == "symbolic":
         # No args -> introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
         # --help / -h / help -> full help
-        if args[0] in ('--help', '-h', 'help'):
+        if args[0] in ("--help", "-h", "help"):
             print_help()
             return True
 
@@ -734,11 +673,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         sub = args[0]
         remaining = args[1:]
 
-        if sub == 'demo':
+        if sub == "demo":
             run_demo()
             return True
 
-        if sub == 'analyze':
+        if sub == "analyze":
             if not remaining:
                 console.print("[red]Error:[/red] File path required")
                 console.print("Usage: symbolic analyze <conversation.json>")
@@ -746,7 +685,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             analyze_file(remaining[0])
             return True
 
-        if sub == 'extract':
+        if sub == "extract":
             if not remaining:
                 console.print("[red]Error:[/red] File path required")
                 console.print("Usage: symbolic extract <conversation.json>")
@@ -754,30 +693,30 @@ def handle_command(command: str, args: List[str]) -> bool:
             extract_file(remaining[0], source_branch=remaining[1] if len(remaining) > 1 else None)
             return True
 
-        if sub == 'bootstrap':
+        if sub == "bootstrap":
             max_sessions = 8
             for arg in remaining:
-                if arg.startswith('--max='):
-                    max_sessions = int(arg.split('=')[1])
+                if arg.startswith("--max="):
+                    max_sessions = int(arg.split("=")[1])
             bootstrap_from_jsonl(max_sessions=max_sessions)
             return True
 
-        if sub == 'fragments':
+        if sub == "fragments":
             search_fragments_cli(remaining)
             return True
 
-        if sub == 'hook-test':
+        if sub == "hook-test":
             run_hook_test(remaining)
             return True
 
         return False
 
     # Backward-compat: direct command routing (entry point may send these)
-    if command == 'demo':
+    if command == "demo":
         run_demo()
         return True
 
-    if command == 'analyze':
+    if command == "analyze":
         if not args:
             console.print("[red]Error:[/red] File path required")
             console.print("Usage: symbolic analyze <conversation.json>")
@@ -785,7 +724,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         analyze_file(args[0])
         return True
 
-    if command == 'extract':
+    if command == "extract":
         if not args:
             console.print("[red]Error:[/red] File path required")
             console.print("Usage: symbolic extract <conversation.json>")
@@ -793,19 +732,19 @@ def handle_command(command: str, args: List[str]) -> bool:
         extract_file(args[0], source_branch=args[1] if len(args) > 1 else None)
         return True
 
-    if command == 'bootstrap':
+    if command == "bootstrap":
         max_sessions = 8
         for arg in args:
-            if arg.startswith('--max='):
-                max_sessions = int(arg.split('=')[1])
+            if arg.startswith("--max="):
+                max_sessions = int(arg.split("=")[1])
         bootstrap_from_jsonl(max_sessions=max_sessions)
         return True
 
-    if command == 'fragments':
+    if command == "fragments":
         search_fragments_cli(args)
         return True
 
-    if command == 'hook-test':
+    if command == "hook-test":
         run_hook_test(args)
         return True
 
@@ -858,19 +797,21 @@ def print_help() -> None:
     console.print("  [dim]drone @memory symbolic extract chat_history.json memory[/dim]")
     console.print()
     console.print("  # Search fragments by query")
-    console.print("  [dim]drone @memory symbolic fragments \"debugging frustration\"[/dim]")
+    console.print('  [dim]drone @memory symbolic fragments "debugging frustration"[/dim]')
     console.print()
     console.print("  # Search with dimension filter")
-    console.print("  [dim]drone @memory symbolic fragments \"debug\" --dimension emotional_0=frustration_to_breakthrough[/dim]")
+    console.print(
+        '  [dim]drone @memory symbolic fragments "debug" --dimension emotional_0=frustration_to_breakthrough[/dim]'
+    )
     console.print()
     console.print("  # Search with trigger keywords")
-    console.print("  [dim]drone @memory symbolic fragments \"error\" --trigger error --trigger debug[/dim]")
+    console.print('  [dim]drone @memory symbolic fragments "error" --trigger error --trigger debug[/dim]')
     console.print()
     console.print("  # Test hook with sample text")
-    console.print("  [dim]drone @memory symbolic hook-test \"I'm stuck on this error\"[/dim]")
+    console.print('  [dim]drone @memory symbolic hook-test "I\'m stuck on this error"[/dim]')
     console.print()
     console.print("  # Test hook bypassing cooldown")
-    console.print("  [dim]drone @memory symbolic hook-test \"debugging frustration\" --bypass[/dim]")
+    console.print('  [dim]drone @memory symbolic hook-test "debugging frustration" --bypass[/dim]')
     console.print()
 
 
@@ -886,21 +827,21 @@ def run_demo() -> None:
         {"role": "assistant", "content": "Let me help debug this issue. Can you trace where it's failing?"},
         {"role": "user", "content": "I tried checking the logs but I'm confused about what's wrong"},
         {"role": "assistant", "content": "Let's try a different approach. I'll explain the fix step by step."},
-        {"role": "user", "content": "Got it! That works! Finally a breakthrough! This is awesome!"}
+        {"role": "user", "content": "Got it! That works! Finally a breakthrough! This is awesome!"},
     ]
 
     console.print("[cyan]Sample conversation:[/cyan]")
     for msg in demo_chat:
-        role = msg['role'].capitalize()
+        role = msg["role"].capitalize()
         console.print(f"  [{role}]: {msg['content'][:60]}...")
     console.print()
 
     # Analyze
     result = analyze_conversation(demo_chat)
 
-    if result['success']:
-        dims = result['dimensions']
-        meta = result['metadata']
+    if result["success"]:
+        dims = result["dimensions"]
+        meta = result["metadata"]
 
         console.print("[green]✓[/green] Analysis complete")
         console.print()
@@ -933,7 +874,7 @@ def run_demo() -> None:
             "type": "episodic",
             "triggers": ["error", "debug", "stuck", "breakthrough"],
             "emotional_tone": "excited",
-            "technical_domain": "debugging"
+            "technical_domain": "debugging",
         },
         {
             "summary": "Collaborative pattern where assistant explains reasoning before giving solutions leads to better understanding",
@@ -941,8 +882,8 @@ def run_demo() -> None:
             "type": "procedural",
             "triggers": ["explain", "step by step", "understanding"],
             "emotional_tone": "focused",
-            "technical_domain": "collaboration"
-        }
+            "technical_domain": "collaboration",
+        },
     ]
 
     for i, frag in enumerate(mock_fragments, 1):
@@ -956,15 +897,15 @@ def run_demo() -> None:
 
         # Show how format_fragment_recall would render this
         mock_stored = {
-            'content': frag['summary'],
-            'metadata': {
-                'schema_version': 'v2',
-                'summary': frag['summary'],
-                'insight': frag['insight'],
-                'type': frag['type'],
-                'emotional_tone': frag['emotional_tone'],
-                'technical_domain': frag['technical_domain'],
-            }
+            "content": frag["summary"],
+            "metadata": {
+                "schema_version": "v2",
+                "summary": frag["summary"],
+                "insight": frag["insight"],
+                "type": frag["type"],
+                "emotional_tone": frag["emotional_tone"],
+                "technical_domain": frag["technical_domain"],
+            },
         }
         recall = format_fragment_recall(mock_stored)
         console.print(f"    [green]Recall:[/green]     {recall}")
@@ -987,21 +928,21 @@ def search_fragments_cli(args: List[str]) -> None:
 
     i = 0
     while i < len(args):
-        if args[i] == '--dimension' and i + 1 < len(args):
+        if args[i] == "--dimension" and i + 1 < len(args):
             # Parse KEY=VALUE
             dim_arg = args[i + 1]
-            if '=' in dim_arg:
-                key, value = dim_arg.split('=', 1)
+            if "=" in dim_arg:
+                key, value = dim_arg.split("=", 1)
                 dimension_filters[key] = value
             else:
                 console.print(f"[red]Error:[/red] Invalid dimension format: {dim_arg}")
                 console.print("Expected: --dimension KEY=VALUE")
                 return
             i += 2
-        elif args[i] == '--trigger' and i + 1 < len(args):
+        elif args[i] == "--trigger" and i + 1 < len(args):
             trigger_keywords.append(args[i + 1])
             i += 2
-        elif args[i] == '--n' and i + 1 < len(args):
+        elif args[i] == "--n" and i + 1 < len(args):
             try:
                 n_results = int(args[i + 1])
             except ValueError:
@@ -1013,7 +954,7 @@ def search_fragments_cli(args: List[str]) -> None:
             query_parts.append(args[i])
             i += 1
 
-    query = ' '.join(query_parts) if query_parts else None
+    query = " ".join(query_parts) if query_parts else None
 
     if not query and not dimension_filters and not trigger_keywords:
         console.print("[red]Error:[/red] Search query, dimension filter, or trigger required")
@@ -1039,17 +980,17 @@ def search_fragments_cli(args: List[str]) -> None:
         query=query,
         dimension_filters=dimension_filters if dimension_filters else None,
         trigger_keywords=trigger_keywords if trigger_keywords else None,
-        n_results=n_results
+        n_results=n_results,
     )
 
-    if not result.get('success'):
-        error_msg = result.get('error', 'Unknown error')
+    if not result.get("success"):
+        error_msg = result.get("error", "Unknown error")
         logger.error(f"[symbolic] Fragment search failed: {error_msg}")
         console.print(f"[red]Error:[/red] {error_msg}")
         return
 
-    results = result.get('results', [])
-    methods = result.get('search_methods', [])
+    results = result.get("results", [])
+    methods = result.get("search_methods", [])
 
     console.print(f"[green]Found {len(results)} fragments[/green] (methods: {', '.join(methods)})")
     console.print()
@@ -1065,48 +1006,48 @@ def search_fragments_cli(args: List[str]) -> None:
 
     # Display results
     for i, frag in enumerate(results, 1):
-        content = frag.get('content', '')
-        metadata = frag.get('metadata', {})
-        relevance = frag.get('relevance_score', frag.get('similarity', 0))
-        sources = frag.get('_sources', ['unknown'])
-        tier = frag.get('relevance_tier', '')
+        content = frag.get("content", "")
+        metadata = frag.get("metadata", {})
+        relevance = frag.get("relevance_score", frag.get("similarity", 0))
+        sources = frag.get("_sources", ["unknown"])
+        tier = frag.get("relevance_tier", "")
 
         # Build metadata display
         meta_lines = []
-        if metadata.get('timestamp'):
+        if metadata.get("timestamp"):
             meta_lines.append(f"Time: {metadata['timestamp']}")
-        if metadata.get('source_branch'):
+        if metadata.get("source_branch"):
             meta_lines.append(f"Branch: {metadata['source_branch']}")
 
         # Schema-aware metadata display
-        if metadata.get('schema_version') == 'v2':
+        if metadata.get("schema_version") == "v2":
             # v2 fragment: show summary, insight, type, tone, domain
-            if metadata.get('type'):
+            if metadata.get("type"):
                 meta_lines.append(f"Type: {metadata['type']}")
-            if metadata.get('emotional_tone'):
+            if metadata.get("emotional_tone"):
                 meta_lines.append(f"Tone: {metadata['emotional_tone']}")
-            if metadata.get('technical_domain'):
+            if metadata.get("technical_domain"):
                 meta_lines.append(f"Domain: {metadata['technical_domain']}")
 
             meta_text = " | ".join(meta_lines) if meta_lines else ""
 
             # Build rich content for v2
             panel_content = ""
-            if metadata.get('summary'):
+            if metadata.get("summary"):
                 panel_content += f"[bold]Summary:[/bold] {metadata['summary']}\n"
-            if metadata.get('insight'):
+            if metadata.get("insight"):
                 panel_content += f"[bold]Insight:[/bold] {metadata['insight']}\n"
-            if content and content != metadata.get('summary', ''):
+            if content and content != metadata.get("summary", ""):
                 panel_content += f"\n> {content}\n"
             if meta_text:
                 panel_content += f"\n[dim]{meta_text}[/dim]"
         else:
             # v1 fragment: show dimensions
-            if metadata.get('depth'):
+            if metadata.get("depth"):
                 meta_lines.append(f"Depth: {metadata['depth']}")
 
             dim_parts = []
-            for key in ['technical_0', 'emotional_0', 'collaboration_0', 'learnings_0']:
+            for key in ["technical_0", "emotional_0", "collaboration_0", "learnings_0"]:
                 if key in metadata:
                     dim_parts.append(f"{key.replace('_0', '')}: {metadata[key]}")
             if dim_parts:
@@ -1118,16 +1059,18 @@ def search_fragments_cli(args: List[str]) -> None:
             if meta_text:
                 panel_content += f"\n\n[dim]{meta_text}[/dim]"
 
-        schema_tag = "v2" if metadata.get('schema_version') == 'v2' else "v1"
+        schema_tag = "v2" if metadata.get("schema_version") == "v2" else "v1"
         tier_tag = f" [{tier}]" if tier else ""
         panel_title = f"Result {i} ({schema_tag}) - Relevance: {relevance:.2%}{tier_tag} (via {', '.join(sources)})"
 
-        console.print(Panel(
-            panel_content,
-            title=panel_title,
-            title_align="left",
-            border_style="cyan" if relevance > 0.7 else "blue" if relevance > 0.5 else "dim"
-        ))
+        console.print(
+            Panel(
+                panel_content,
+                title=panel_title,
+                title_align="left",
+                border_style="cyan" if relevance > 0.7 else "blue" if relevance > 0.5 else "dim",
+            )
+        )
 
     console.print()
     logger.info(f"[symbolic] Displayed {len(results)} fragment results")
@@ -1143,21 +1086,19 @@ def run_hook_test(args: List[str]) -> None:
     bypass_checks = False
 
     for arg in args:
-        if arg == '--bypass':
+        if arg == "--bypass":
             bypass_checks = True
         else:
             text_parts.append(arg)
 
-    text = ' '.join(text_parts) if text_parts else "I'm stuck on this error and need help debugging"
+    text = " ".join(text_parts) if text_parts else "I'm stuck on this error and need help debugging"
 
     console.print()
     header("Fragmented Memory Hook - Test")
     console.print()
 
     # Build sample messages from text
-    messages = [
-        {"role": "user", "content": text}
-    ]
+    messages = [{"role": "user", "content": text}]
 
     console.print(f"[cyan]Test input:[/cyan] {text}")
     console.print(f"[cyan]Bypass checks:[/cyan] {bypass_checks}")
@@ -1168,14 +1109,14 @@ def run_hook_test(args: List[str]) -> None:
 
     # If bypassing, set session state to allow surfacing
     if bypass_checks:
-        hook.SESSION_STATE['messages_since_last'] = 100
-        hook.SESSION_STATE['last_surface_time'] = 0
+        hook.SESSION_STATE["messages_since_last"] = 100
+        hook.SESSION_STATE["last_surface_time"] = 0
 
     # Extract context first
     console.print("[bold]Step 1: Context Extraction[/bold]")
     context = extract_conversation_context(messages)
 
-    if context.get('success'):
+    if context.get("success"):
         console.print(f"  [green]Keywords:[/green] {context.get('keywords', [])}")
         console.print(f"  [green]Mood:[/green] {context.get('mood', 'neutral')}")
         console.print(f"  [green]Themes:[/green] {context.get('themes', [])}")
@@ -1189,16 +1130,16 @@ def run_hook_test(args: List[str]) -> None:
     console.print("[bold]Step 2: Fragment Search[/bold]")
     frag_result = find_relevant_fragments(context, n_results=3)
 
-    if frag_result.get('success'):
-        fragments = frag_result.get('fragments', [])
+    if frag_result.get("success"):
+        fragments = frag_result.get("fragments", [])
         console.print(f"  [green]Query used:[/green] {frag_result.get('query_used', '')}")
         console.print(f"  [green]Threshold:[/green] {frag_result.get('threshold_applied', 0.3)}")
         console.print(f"  [green]Fragments found:[/green] {len(fragments)}")
 
         if fragments:
             for i, frag in enumerate(fragments, 1):
-                score = frag.get('relevance_score', frag.get('similarity', 0))
-                content = frag.get('content', '')[:80]
+                score = frag.get("relevance_score", frag.get("similarity", 0))
+                content = frag.get("content", "")[:80]
                 console.print(f"    [{i}] Score: {score:.2%} - {content}...")
     else:
         console.print(f"  [yellow]No fragments:[/yellow] {frag_result.get('message', frag_result.get('error', ''))}")
@@ -1217,17 +1158,13 @@ def run_hook_test(args: List[str]) -> None:
     console.print("[bold]Step 4: Full Hook Process[/bold]")
     result = process_hook(messages)
 
-    if result.get('success'):
-        if result.get('surfaced'):
+    if result.get("success"):
+        if result.get("surfaced"):
             console.print("[green]Fragment surfaced![/green]")
             console.print()
 
-            recall = result.get('recall', '')
-            console.print(Panel(
-                recall,
-                title="Memory Recall",
-                border_style="green"
-            ))
+            recall = result.get("recall", "")
+            console.print(Panel(recall, title="Memory Recall", border_style="green"))
 
             console.print()
             console.print(f"[dim]Fragment ID: {result.get('fragment_id')}[/dim]")
@@ -1241,10 +1178,10 @@ def run_hook_test(args: List[str]) -> None:
 
     # v2 Format Preview - show how found fragments would look with v2 formatting
     console.print("[bold]Step 5: v2 Format Preview[/bold]")
-    if frag_result.get('success') and frag_result.get('fragments'):
-        for i, frag in enumerate(frag_result['fragments'], 1):
-            frag_metadata = frag.get('metadata', {})
-            if frag_metadata.get('schema_version') == 'v2':
+    if frag_result.get("success") and frag_result.get("fragments"):
+        for i, frag in enumerate(frag_result["fragments"], 1):
+            frag_metadata = frag.get("metadata", {})
+            if frag_metadata.get("schema_version") == "v2":
                 recall_preview = format_fragment_recall(frag)
                 console.print(f"  [green]Fragment {i} (v2):[/green] {recall_preview}")
             else:
@@ -1262,7 +1199,9 @@ def run_hook_test(args: List[str]) -> None:
     console.print(f"  [dim]Fragments surfaced:[/dim] {state.get('fragments_surfaced', 0)}")
     console.print(f"  [dim]Messages since last:[/dim] {state.get('messages_since_last', 0)}")
     console.print()
-    json_handler.log_operation("symbolic_hook_test", {"surfaced": result.get('surfaced', False), "success": result.get('success', False)})
+    json_handler.log_operation(
+        "symbolic_hook_test", {"surfaced": result.get("surfaced", False), "success": result.get("success", False)}
+    )
 
 
 def analyze_file(file_path: str) -> None:
@@ -1275,11 +1214,11 @@ def analyze_file(file_path: str) -> None:
         return
 
     read_result = memory_files.read_memory_file(path)
-    if not read_result.get('success'):
+    if not read_result.get("success"):
         console.print(f"[red]Error:[/red] {read_result.get('error', 'Failed to read JSON')}")
         return
 
-    chat_history = read_result.get('data')
+    chat_history = read_result.get("data")
 
     if not isinstance(chat_history, list):
         console.print("[red]Error:[/red] Expected JSON array of messages")
@@ -1291,9 +1230,9 @@ def analyze_file(file_path: str) -> None:
 
     result = analyze_conversation(chat_history)
 
-    if result['success']:
-        dims = result['dimensions']
-        meta = result['metadata']
+    if result["success"]:
+        dims = result["dimensions"]
+        meta = result["metadata"]
 
         console.print("[green]✓[/green] Analysis complete")
         console.print()
@@ -1311,7 +1250,7 @@ def analyze_file(file_path: str) -> None:
         console.print(f"  [dim]Words:[/dim]    {meta.get('total_words', 0)}")
         console.print(f"  [dim]Depth:[/dim]    {meta.get('depth', 'unknown')}")
         console.print()
-        json_handler.log_operation("symbolic_analyze", {"file": path.name, "messages": result['message_count']})
+        json_handler.log_operation("symbolic_analyze", {"file": path.name, "messages": result["message_count"]})
     else:
         console.print(f"[red]✗[/red] Analysis failed: {result.get('error', 'Unknown error')}")
 
@@ -1335,11 +1274,11 @@ def extract_file(file_path: str, source_branch: str | None = None) -> None:
         return
 
     read_result = memory_files.read_memory_file(path)
-    if not read_result.get('success'):
+    if not read_result.get("success"):
         console.print(f"[red]Error:[/red] {read_result.get('error', 'Failed to read JSON')}")
         return
 
-    chat_history = read_result.get('data')
+    chat_history = read_result.get("data")
 
     if not isinstance(chat_history, list):
         console.print("[red]Error:[/red] Expected JSON array of messages")
@@ -1359,7 +1298,7 @@ def extract_file(file_path: str, source_branch: str | None = None) -> None:
 
     result = extract_and_store_llm(chat_history, source_branch=source_branch)
 
-    if result.get('success'):
+    if result.get("success"):
         console.print("[green]Pipeline complete[/green]")
         console.print()
         console.print(f"  [cyan]Processed:[/cyan]  {result.get('processed', 0)}")
@@ -1367,18 +1306,21 @@ def extract_file(file_path: str, source_branch: str | None = None) -> None:
         console.print(f"  [yellow]Updated:[/yellow]    {result.get('updated', 0)}")
         console.print(f"  [dim]Skipped:[/dim]    {result.get('skipped', 0)}")
 
-        if result.get('errors'):
+        if result.get("errors"):
             console.print()
             console.print(f"  [red]Errors ({len(result['errors'])}):[/red]")
-            for err in result['errors']:
+            for err in result["errors"]:
                 console.print(f"    - {err}")
     else:
         console.print(f"[red]Pipeline failed:[/red] {result.get('errors', ['Unknown error'])}")
 
     console.print()
     logger.info(f"[symbolic] extract_file complete: {result}")
-    if result.get('success'):
-        json_handler.log_operation("symbolic_extract", {"file": path.name, "added": result.get('added', 0), "updated": result.get('updated', 0)})
+    if result.get("success"):
+        json_handler.log_operation(
+            "symbolic_extract",
+            {"file": path.name, "added": result.get("added", 0), "updated": result.get("updated", 0)},
+        )
 
 
 # =============================================================================
@@ -1402,7 +1344,7 @@ def _parse_jsonl_to_chat_history(jsonl_path: Path) -> List[Dict[str, Any]]:
     """
     messages = []
     try:
-        with open(jsonl_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(jsonl_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -1413,38 +1355,34 @@ def _parse_jsonl_to_chat_history(jsonl_path: Path) -> List[Dict[str, Any]]:
                     logger.info("[symbolic] Skipping malformed JSONL line during bootstrap parse")
                     continue
 
-                msg_type = entry.get('type', '')
-                msg_data = entry.get('message', {})
-                role = msg_data.get('role', '')
-                content = msg_data.get('content', '')
+                msg_type = entry.get("type", "")
+                msg_data = entry.get("message", {})
+                role = msg_data.get("role", "")
+                content = msg_data.get("content", "")
 
-                if msg_type == 'user' and role == 'user':
+                if msg_type == "user" and role == "user":
                     if isinstance(content, str) and content.strip():
-                        messages.append({'role': 'user', 'content': content.strip()})
+                        messages.append({"role": "user", "content": content.strip()})
                     elif isinstance(content, list):
                         texts = [
-                            item.get('text', '').strip()
+                            item.get("text", "").strip()
                             for item in content
-                            if isinstance(item, dict)
-                            and item.get('type') == 'text'
-                            and item.get('text', '').strip()
+                            if isinstance(item, dict) and item.get("type") == "text" and item.get("text", "").strip()
                         ]
                         if texts:
-                            messages.append({'role': 'user', 'content': ' '.join(texts)})
+                            messages.append({"role": "user", "content": " ".join(texts)})
 
-                elif msg_type == 'assistant' and role == 'assistant':
+                elif msg_type == "assistant" and role == "assistant":
                     if isinstance(content, str) and content.strip():
-                        messages.append({'role': 'assistant', 'content': content.strip()})
+                        messages.append({"role": "assistant", "content": content.strip()})
                     elif isinstance(content, list):
                         texts = [
-                            item.get('text', '').strip()
+                            item.get("text", "").strip()
                             for item in content
-                            if isinstance(item, dict)
-                            and item.get('type') == 'text'
-                            and item.get('text', '').strip()
+                            if isinstance(item, dict) and item.get("type") == "text" and item.get("text", "").strip()
                         ]
                         if texts:
-                            messages.append({'role': 'assistant', 'content': ' '.join(texts)})
+                            messages.append({"role": "assistant", "content": " ".join(texts)})
 
     except OSError as e:
         logger.error(f"[symbolic] Failed to read JSONL: {e}")
@@ -1471,14 +1409,14 @@ def _find_bootstrap_sessions(max_sessions: int = 8) -> List[Path]:
 
     # Priority branch directories (diverse content sources)
     priority_dirs = [
-        '-home-patrick-Projects-AIPass-src-aipass-memory',
-        '-home-patrick-Projects-AIPass-src-aipass-devpulse',
-        '-home-patrick-Projects-AIPass-src-aipass-seedgo',
-        '-home-patrick-Projects-AIPass-src-aipass-drone',
-        '-home-patrick-Projects-AIPass-src-aipass-flow',
-        '-home-patrick-Projects-AIPass-src-aipass-prax',
-        '-home-patrick-Projects-AIPass-src-aipass-ai-mail',
-        '-home-patrick-Projects-AIPass-src-aipass-api',
+        "-home-patrick-Projects-AIPass-src-aipass-memory",
+        "-home-patrick-Projects-AIPass-src-aipass-devpulse",
+        "-home-patrick-Projects-AIPass-src-aipass-seedgo",
+        "-home-patrick-Projects-AIPass-src-aipass-drone",
+        "-home-patrick-Projects-AIPass-src-aipass-flow",
+        "-home-patrick-Projects-AIPass-src-aipass-prax",
+        "-home-patrick-Projects-AIPass-src-aipass-ai-mail",
+        "-home-patrick-Projects-AIPass-src-aipass-api",
     ]
 
     selected = []
@@ -1564,12 +1502,12 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
         # Derive branch name from parent directory
         branch_dir = jsonl_path.parent.name
         # New layout: -home-patrick-Projects-AIPass-src-aipass-<branch>
-        branch_name = branch_dir.rsplit('-aipass-', 1)[-1].replace('-', '_').upper()
+        branch_name = branch_dir.rsplit("-aipass-", 1)[-1].replace("-", "_").upper()
         # Legacy layout fallback
-        if branch_name.startswith('AIPASS_CORE_'):
-            branch_name = branch_name.replace('AIPASS_CORE_', '')
-        if branch_name.startswith('AIPASS_OS_'):
-            branch_name = branch_name.replace('AIPASS_OS_', '')
+        if branch_name.startswith("AIPASS_CORE_"):
+            branch_name = branch_name.replace("AIPASS_CORE_", "")
+        if branch_name.startswith("AIPASS_OS_"):
+            branch_name = branch_name.replace("AIPASS_OS_", "")
 
         file_size_kb = jsonl_path.stat().st_size / 1024
         console.print(
@@ -1585,22 +1523,16 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
             continue
 
         console.print(f"  {len(chat_history)} messages, extracting...")
-        logger.info(
-            f"[symbolic] bootstrap [{i}/{len(sessions)}]: "
-            f"{branch_name} ({len(chat_history)} msgs)"
-        )
+        logger.info(f"[symbolic] bootstrap [{i}/{len(sessions)}]: {branch_name} ({len(chat_history)} msgs)")
 
         # Run the extraction pipeline
-        result = extract_and_store_llm(
-            chat_history,
-            source_branch=branch_name
-        )
+        result = extract_and_store_llm(chat_history, source_branch=branch_name)
 
-        if result.get('success'):
-            a = result.get('added', 0)
-            u = result.get('updated', 0)
-            s = result.get('skipped', 0)
-            e = len(result.get('errors', []))
+        if result.get("success"):
+            a = result.get("added", 0)
+            u = result.get("updated", 0)
+            s = result.get("skipped", 0)
+            e = len(result.get("errors", []))
             total_added += a
             total_updated += u
             total_skipped += s
@@ -1614,7 +1546,7 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
             )
         else:
             total_errors += 1
-            err_msg = result.get('errors', ['Unknown'])
+            err_msg = result.get("errors", ["Unknown"])
             console.print(f"  [red]Failed: {err_msg}[/red]")
 
         # Brief pause between API calls to avoid rate limiting
@@ -1636,10 +1568,9 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
     # Verify collection count
     try:
         import chromadb
-        client = chromadb.PersistentClient(
-            path=str(Path(__file__).resolve().parent.parent.parent / '.chroma')
-        )
-        col = client.get_collection('symbolic_fragments')
+
+        client = chromadb.PersistentClient(path=str(Path(__file__).resolve().parent.parent.parent / ".chroma"))
+        col = client.get_collection("symbolic_fragments")
         console.print(f"  [bold green]Collection total: {col.count()} fragments[/bold green]")
     except Exception as e:
         logger.warning(f"[symbolic] Failed to read ChromaDB collection count: {e}")
@@ -1650,7 +1581,9 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
         f"{total_added} added, {total_updated} updated, "
         f"{total_skipped} skipped, {total_errors} errors"
     )
-    json_handler.log_operation("symbolic_bootstrap", {"sessions": processed_count, "added": total_added, "errors": total_errors})
+    json_handler.log_operation(
+        "symbolic_bootstrap", {"sessions": processed_count, "added": total_added, "errors": total_errors}
+    )
 
 
 # =============================================================================
@@ -1659,8 +1592,8 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
 
 if __name__ == "__main__":
     # Handle --help before argparse (module standard)
-    if len(sys.argv) < 2 or sys.argv[1] in ('--help', '-h', 'help'):
-        handle_command('help', [])
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h", "help"):
+        handle_command("help", [])
         sys.exit(0)
 
     # Execute command via handle_command

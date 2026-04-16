@@ -1,4 +1,5 @@
 """Prax - Monitoring and logging for AIPass."""
+
 try:
     from aipass.prax.apps.modules.logger import system_logger as logger
 except Exception:

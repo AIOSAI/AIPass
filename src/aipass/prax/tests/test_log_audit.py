@@ -21,25 +21,32 @@ from unittest.mock import MagicMock
 # HELPERS
 # =============================================
 
+
 def _ensure_watchdog_mock(monkeypatch):
     """Inject a mock for the log_watchdog handler."""
     mock_watchdog = MagicMock()
-    mock_watchdog.scan_log_files = MagicMock(return_value=[
-        {"name": "system.log", "lines": 500, "size_kb": 45, "status": "ok"},
-        {"name": "error.log", "lines": 2500, "size_kb": 200, "status": "oversized"},
-    ])
-    mock_watchdog.log_health_summary = MagicMock(return_value={
-        "total_files": 2,
-        "total_lines": 3000,
-        "largest_file": "error.log",
-        "largest_lines": 2500,
-        "healthy": False,
-        "oversized_count": 1,
-        "critical_count": 0,
-    })
-    mock_watchdog.enforce_log_limits = MagicMock(return_value=[
-        {"name": "error.log", "truncated": True, "original_lines": 2500, "new_lines": 1000},
-    ])
+    mock_watchdog.scan_log_files = MagicMock(
+        return_value=[
+            {"name": "system.log", "lines": 500, "size_kb": 45, "status": "ok"},
+            {"name": "error.log", "lines": 2500, "size_kb": 200, "status": "oversized"},
+        ]
+    )
+    mock_watchdog.log_health_summary = MagicMock(
+        return_value={
+            "total_files": 2,
+            "total_lines": 3000,
+            "largest_file": "error.log",
+            "largest_lines": 2500,
+            "healthy": False,
+            "oversized_count": 1,
+            "critical_count": 0,
+        }
+    )
+    mock_watchdog.enforce_log_limits = MagicMock(
+        return_value=[
+            {"name": "error.log", "truncated": True, "original_lines": 2500, "new_lines": 1000},
+        ]
+    )
     monkeypatch.setitem(
         sys.modules,
         "aipass.prax.apps.handlers.logging.log_watchdog",
@@ -58,12 +65,14 @@ def _fresh_import():
         print_introspection,
         _display_audit,
     )
+
     return handle_command, print_help, print_introspection, _display_audit
 
 
 # =============================================
 # TESTS
 # =============================================
+
 
 def test_handle_command_help(mock_prax_infrastructure, monkeypatch):
     """--help flag returns True and displays help text."""

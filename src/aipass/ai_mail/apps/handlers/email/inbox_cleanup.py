@@ -33,6 +33,7 @@ def _get_inbox_lock():
     global _inbox_lock
     if _inbox_lock is None:
         from aipass.ai_mail.apps.handlers.email.inbox_lock import inbox_lock
+
         _inbox_lock = inbox_lock
     return _inbox_lock
 
@@ -40,12 +41,14 @@ def _get_inbox_lock():
 def _get_push_dashboard_update() -> Any:
     """Lazy import push_dashboard_update from dashboard_sync."""
     from aipass.ai_mail.apps.handlers.email.dashboard_sync import push_dashboard_update
+
     return push_dashboard_update
 
 
 def _get_update_central() -> Any:
     """Lazy import update_central."""
     from aipass.ai_mail.apps.handlers.central_writer import update_central
+
     return update_central
 
 
@@ -66,7 +69,7 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
     # Generate filename (same pattern as sent/)
     timestamp = datetime.now()
     subject = message.get("subject", "No Subject")
-    safe_subject = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in subject)
+    safe_subject = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in subject)
     safe_subject = safe_subject[:50].strip()
     filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{safe_subject}.json"
 
@@ -74,7 +77,7 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
     message["archived_at"] = timestamp.isoformat()
 
     email_file = deleted_folder / filename
-    with open(email_file, 'w', encoding='utf-8') as f:
+    with open(email_file, "w", encoding="utf-8") as f:
         json.dump(message, f, indent=2, ensure_ascii=False)
 
     return email_file
@@ -96,7 +99,7 @@ def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
         return 0
 
     try:
-        with open(deleted_json, 'r', encoding='utf-8') as f:
+        with open(deleted_json, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         messages = data.get("messages", [])
@@ -153,7 +156,7 @@ def mark_read_and_archive(branch_path: Path, message_id: str) -> Tuple[bool, str
     try:
         with _get_inbox_lock()(inbox_file):
             # Load inbox
-            with open(inbox_file, 'r', encoding='utf-8') as f:
+            with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
             # Find message by ID
@@ -181,14 +184,15 @@ def mark_read_and_archive(branch_path: Path, message_id: str) -> Tuple[bool, str
             inbox_data["total_messages"] = len(messages)
             # v2 status counts
             new_count = sum(
-                1 for m in messages
+                1
+                for m in messages
                 if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
             )
             opened_count = sum(1 for m in messages if m.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
             # Save inbox
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
             # Save to deleted/ folder (new pattern)
@@ -229,7 +233,7 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
     try:
         with _get_inbox_lock()(inbox_file):
             # Load inbox
-            with open(inbox_file, 'r', encoding='utf-8') as f:
+            with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
             messages = inbox_data.get("messages", [])
@@ -249,7 +253,7 @@ def mark_all_read_and_archive(branch_path: Path) -> Tuple[bool, str, int]:
             inbox_data["unread_count"] = 0
 
             # Save inbox
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
         # Update dashboard (outside lock - not inbox.json)
@@ -287,6 +291,7 @@ def _trigger_deleted_purge(branch_path: Path) -> None:
     """
     try:
         from aipass.ai_mail.apps.handlers.email.purge import purge_deleted_folder
+
         mailbox_path = branch_path / ".ai_mail.local"
         purge_deleted_folder(mailbox_path)
     except Exception as e:
@@ -296,6 +301,7 @@ def _trigger_deleted_purge(branch_path: Path) -> None:
 # =============================================================================
 # V2 SCHEMA FUNCTIONS (status: new/opened/closed)
 # =============================================================================
+
 
 def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optional[Dict]]:
     """
@@ -317,7 +323,7 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
 
     try:
         with _get_inbox_lock()(inbox_file):
-            with open(inbox_file, 'r', encoding='utf-8') as f:
+            with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
             messages = inbox_data.get("messages", [])
@@ -338,13 +344,14 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
 
             # Recalculate status counts (v2 schema)
             new_count = sum(
-                1 for m in messages
+                1
+                for m in messages
                 if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
             )
             opened_count = sum(1 for m in messages if m.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
         # Update dashboard (outside lock - not inbox.json)
@@ -382,7 +389,7 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
 
     try:
         with _get_inbox_lock()(inbox_file):
-            with open(inbox_file, 'r', encoding='utf-8') as f:
+            with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
             messages = inbox_data.get("messages", [])
@@ -410,13 +417,14 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             inbox_data["total_messages"] = len(messages)
             # v2 status counts
             new_count = sum(
-                1 for m in messages
+                1
+                for m in messages
                 if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
             )
             opened_count = sum(1 for m in messages if m.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
-            with open(inbox_file, 'w', encoding='utf-8') as f:
+            with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
 
             # Save to deleted/ folder (inside lock to ensure consistency)
@@ -438,10 +446,11 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
 
 if __name__ == "__main__":
     from rich.console import Console
+
     c = Console()
-    c.print("\n" + "="*70)
+    c.print("\n" + "=" * 70)
     c.print("INBOX CLEANUP HANDLER")
-    c.print("="*70)
+    c.print("=" * 70)
     c.print("\nPURPOSE:")
     c.print("  Marks emails as read and moves them to deleted/ folder")
     c.print()
@@ -462,4 +471,4 @@ if __name__ == "__main__":
     c.print("  - Automatically migrates deleted.json to deleted/ on first access")
     c.print("  - Old deleted.json archived to .archive/")
     c.print()
-    c.print("="*70 + "\n")
+    c.print("=" * 70 + "\n")

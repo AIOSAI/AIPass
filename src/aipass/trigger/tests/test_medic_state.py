@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports before medic_state module loads."""
@@ -46,6 +47,7 @@ def _mock_infrastructure(monkeypatch):
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
     from aipass.trigger.apps.config import atomic_write_json
+
     config_mod = MagicMock()
     config_mod.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
     config_mod.atomic_write_json = atomic_write_json
@@ -79,6 +81,7 @@ def _get_json_handler():
 # ---------------------------------------------------------------------------
 # Tests -- read_config
 # ---------------------------------------------------------------------------
+
 
 class TestReadConfig:
     """Tests for read_config."""
@@ -116,6 +119,7 @@ class TestReadConfig:
 # Tests -- write_config
 # ---------------------------------------------------------------------------
 
+
 class TestWriteConfig:
     """Tests for write_config."""
 
@@ -146,6 +150,7 @@ class TestWriteConfig:
 # Tests -- is_enabled
 # ---------------------------------------------------------------------------
 
+
 class TestIsEnabled:
     """Tests for is_enabled."""
 
@@ -159,9 +164,7 @@ class TestIsEnabled:
         """is_enabled returns True when medic_enabled is True."""
         config_file = state_mod.TRIGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            json.dumps({"config": {"medic_enabled": True}}), encoding="utf-8"
-        )
+        config_file.write_text(json.dumps({"config": {"medic_enabled": True}}), encoding="utf-8")
 
         result = state_mod.is_enabled()
 
@@ -171,9 +174,7 @@ class TestIsEnabled:
         """is_enabled returns False when medic_enabled is False."""
         config_file = state_mod.TRIGGER_CONFIG_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(
-            json.dumps({"config": {"medic_enabled": False}}), encoding="utf-8"
-        )
+        config_file.write_text(json.dumps({"config": {"medic_enabled": False}}), encoding="utf-8")
 
         result = state_mod.is_enabled()
 
@@ -193,6 +194,7 @@ class TestIsEnabled:
 # ---------------------------------------------------------------------------
 # Tests -- set_enabled
 # ---------------------------------------------------------------------------
+
 
 class TestSetEnabled:
     """Tests for set_enabled."""
@@ -228,9 +230,7 @@ class TestSetEnabled:
         state_mod.set_enabled(True)
 
         jh = _get_json_handler()
-        jh.log_operation.assert_called_with(
-            "state_persisted", {"key": "medic_enabled", "value": True}
-        )
+        jh.log_operation.assert_called_with("state_persisted", {"key": "medic_enabled", "value": True})
 
     def test_set_enabled_preserves_existing_config(self, state_mod):
         """set_enabled preserves other config keys when updating."""
@@ -251,6 +251,7 @@ class TestSetEnabled:
 # ---------------------------------------------------------------------------
 # Tests -- _normalize_branch_name
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeBranchName:
     """Tests for _normalize_branch_name."""
@@ -280,6 +281,7 @@ class TestNormalizeBranchName:
 # ---------------------------------------------------------------------------
 # Tests -- get_muted_branches
 # ---------------------------------------------------------------------------
+
 
 class TestGetMutedBranches:
     """Tests for get_muted_branches."""
@@ -321,6 +323,7 @@ class TestGetMutedBranches:
 # Tests -- mute_branch
 # ---------------------------------------------------------------------------
 
+
 class TestMuteBranch:
     """Tests for mute_branch."""
 
@@ -361,6 +364,7 @@ class TestMuteBranch:
 # Tests -- unmute_branch
 # ---------------------------------------------------------------------------
 
+
 class TestUnmuteBranch:
     """Tests for unmute_branch."""
 
@@ -396,6 +400,7 @@ class TestUnmuteBranch:
 # ---------------------------------------------------------------------------
 # Tests -- get_suppression_stats
 # ---------------------------------------------------------------------------
+
 
 class TestGetSuppressionStats:
     """Tests for get_suppression_stats."""
@@ -449,6 +454,7 @@ class TestGetSuppressionStats:
 # ---------------------------------------------------------------------------
 # Tests -- get_rate_limit_stats
 # ---------------------------------------------------------------------------
+
 
 class TestGetRateLimitStats:
     """Tests for get_rate_limit_stats."""

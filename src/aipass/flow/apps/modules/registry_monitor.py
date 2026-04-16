@@ -90,6 +90,7 @@ ECOSYSTEM_ROOT = REPO_ROOT  # Scan from repo root
 # THIN ORCHESTRATION WRAPPERS
 # =============================================
 
+
 def scan_plan_files() -> Dict[str, Any]:
     """
     Scan ecosystem for PLAN files and fire events to heal registry (thin orchestrator)
@@ -119,7 +120,7 @@ def start_monitoring():
     elif status == "started":
         console.print(f"[green]OK[/green] {result['message']}")
     elif status == "error":
-        error(result['message'])
+        error(result["message"])
     return result.get("success", False)
 
 
@@ -150,6 +151,7 @@ def get_status() -> Dict[str, Any]:
 # =============================================
 # COMMAND HANDLER
 # =============================================
+
 
 def handle_command(command: str, args: List[str]) -> bool:
     """
@@ -186,10 +188,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcommand = args[0] if args else "status"
 
     # Log the operation
-    json_handler.log_operation(
-        "registry_monitor",
-        {"command": command, "subcommand": subcommand}
-    )
+    json_handler.log_operation("registry_monitor", {"command": command, "subcommand": subcommand})
 
     if subcommand in ["scan", "heal"]:
         console.print("[bold]Scanning for PLAN files...[/bold]")
@@ -203,9 +202,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Removed: {len(result['removed'])}")
         console.print(f"  • Renumbered: {len(result['renumbered'])}")
 
-        if result['healing_performed']:
-            change_count = len(result['added']) + len(result['updated']) + len(result['removed'])
-            warning(f"Registry scan found {change_count} mismatch(es) — trigger event handlers not wired, no changes applied")
+        if result["healing_performed"]:
+            change_count = len(result["added"]) + len(result["updated"]) + len(result["removed"])
+            warning(
+                f"Registry scan found {change_count} mismatch(es) — trigger event handlers not wired, no changes applied"
+            )
         else:
             console.print("\n[dim]No changes needed - registry is healthy[/dim]")
 
@@ -251,7 +252,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print("[bold cyan]Registry Monitor Status[/bold cyan]")
         console.print()
         console.print(f"  • Version: {status['version']}")
-        console.print(f"  • Monitoring: {'[green]Active[/green]' if status['monitoring_active'] else '[yellow]Inactive[/yellow]'}")
+        console.print(
+            f"  • Monitoring: {'[green]Active[/green]' if status['monitoring_active'] else '[yellow]Inactive[/yellow]'}"
+        )
         console.print(f"  • Watch location: {status['watch_location']}")
         console.print(f"  • Total plans: {status['total_plans']}")
         console.print(f"  • Open plans: {status['open_plans']}")
@@ -278,6 +281,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================
 # INTROSPECTION
 # =============================================
+
 
 def print_introspection():
     """Display module info and usage"""
@@ -349,7 +353,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Handle help flag
-    if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
@@ -357,10 +361,7 @@ if __name__ == "__main__":
     logger.info("Prax logger connected to registry_monitor")
 
     # Log standalone execution
-    json_handler.log_operation(
-        "registry_monitor",
-        {"command": "standalone"}
-    )
+    json_handler.log_operation("registry_monitor", {"command": "standalone"})
 
     # Call handle_command
     args = sys.argv[1:] if len(sys.argv) > 1 else []

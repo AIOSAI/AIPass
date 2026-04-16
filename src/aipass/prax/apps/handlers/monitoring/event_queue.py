@@ -19,29 +19,27 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
+
 @dataclass(order=True)
 class MonitoringEvent:
     """Unified event structure for all monitoring sources"""
+
     priority: int = field(compare=True)
     timestamp: datetime = field(compare=False, default_factory=datetime.now)
-    event_type: str = field(compare=False, default='')  # 'file', 'log', 'module', 'command'
-    branch: str = field(compare=False, default='')
-    action: str = field(compare=False, default='')  # 'created', 'modified', 'deleted', 'executed'
-    message: str = field(compare=False, default='')
-    level: str = field(compare=False, default='info')  # 'info', 'warning', 'error'
+    event_type: str = field(compare=False, default="")  # 'file', 'log', 'module', 'command'
+    branch: str = field(compare=False, default="")
+    action: str = field(compare=False, default="")  # 'created', 'modified', 'deleted', 'executed'
+    message: str = field(compare=False, default="")
+    level: str = field(compare=False, default="info")  # 'info', 'warning', 'error'
     caller: Optional[str] = field(compare=False, default=None)  # Branch that initiated command
     pid: Optional[int] = field(compare=False, default=None)  # Process ID of the agent
 
     def __post_init__(self):
         # Convert level to priority number for queue ordering
         if self.priority == 0:  # Not set
-            priority_map = {
-                'error': 1,
-                'warning': 2,
-                'info': 3,
-                'debug': 4
-            }
+            priority_map = {"error": 1, "warning": 2, "info": 3, "debug": 4}
             self.priority = priority_map.get(self.level, 3)
+
 
 class MonitoringQueue:
     """Thread-safe event queue with deduplication"""
@@ -70,7 +68,9 @@ class MonitoringQueue:
                     self.recent_events.pop(0)
                 return True
             except Exception as e:
-                logger.warning(f"[event_queue] Failed to enqueue event (type={event.event_type}, branch={event.branch}): {e}")
+                logger.warning(
+                    f"[event_queue] Failed to enqueue event (type={event.event_type}, branch={event.branch}): {e}"
+                )
                 return False
 
     def dequeue(self, timeout: float = 0.1) -> Optional[MonitoringEvent]:
@@ -98,17 +98,20 @@ class MonitoringQueue:
     def _is_duplicate(self, event: MonitoringEvent) -> bool:
         """Check if event duplicates recent event. Caller must hold self.lock."""
         for recent in self.recent_events[-10:]:
-            if (recent.event_type == event.event_type and
-                recent.branch == event.branch and
-                recent.action == event.action and
-                recent.message == event.message and
-                abs((event.timestamp - recent.timestamp).total_seconds()) < 1):
+            if (
+                recent.event_type == event.event_type
+                and recent.branch == event.branch
+                and recent.action == event.action
+                and recent.message == event.message
+                and abs((event.timestamp - recent.timestamp).total_seconds()) < 1
+            ):
                 return True
         return False
 
     def size(self) -> int:
         """Get current queue size"""
         return self.queue.qsize()
+
 
 # Global instance for the monitoring system
 global_queue = MonitoringQueue()

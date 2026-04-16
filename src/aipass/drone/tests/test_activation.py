@@ -38,6 +38,7 @@ from aipass.drone.apps.handlers.executor import CommandResult
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point the registry at a temp file so tests never touch the real one."""
@@ -62,6 +63,7 @@ def _seed_commands(**commands: dict[str, Any]) -> None:
 # ===================================================================
 # 1. Formatters
 # ===================================================================
+
 
 class TestFormatCommandList:
     """Tests for format_command_list()."""
@@ -171,6 +173,7 @@ class TestFormatRemoval:
 # 2. _handle_activate
 # ===================================================================
 
+
 class TestHandleActivate:
     """Tests for _handle_activate() in drone.py."""
 
@@ -178,6 +181,7 @@ class TestHandleActivate:
     def _get_handler(self):
         """Import the handler to test."""
         from aipass.drone.apps.drone import _handle_activate
+
         return _handle_activate
 
     @patch("aipass.drone.apps.modules.commands.format_activation_results")
@@ -259,6 +263,7 @@ class TestHandleActivate:
 # 3. _handle_list
 # ===================================================================
 
+
 class TestHandleList:
     """Tests for _handle_list() in drone.py."""
 
@@ -292,6 +297,7 @@ class TestHandleList:
 # 4. _handle_remove
 # ===================================================================
 
+
 class TestHandleRemove:
     """Tests for _handle_remove() in drone.py."""
 
@@ -323,6 +329,7 @@ class TestHandleRemove:
 # 5. _handle_custom_command
 # ===================================================================
 
+
 class TestHandleCustomCommand:
     """Tests for _handle_custom_command() in drone.py."""
 
@@ -334,14 +341,19 @@ class TestHandleCustomCommand:
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
-            stdout="ok\n", stderr="", exit_code=0, branch="seedgo", command="audit",
+            stdout="ok\n",
+            stderr="",
+            exit_code=0,
+            branch="seedgo",
+            command="audit",
         )
 
         result = _handle_custom_command(["audit"])
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo", "audit",
+            "@seedgo",
+            "audit",
             args=["aipass"],
             interactive=True,
         )
@@ -354,14 +366,19 @@ class TestHandleCustomCommand:
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="seedgo", command="audit",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="seedgo",
+            command="audit",
         )
 
         result = _handle_custom_command(["audit", "@drone"])
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo", "audit",
+            "@seedgo",
+            "audit",
             args=["aipass", "@drone"],
             interactive=True,
         )
@@ -382,7 +399,11 @@ class TestHandleCustomCommand:
         ops.add_command("mon", "@prax", "monitor")
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="prax", command="monitor",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="prax",
+            command="monitor",
         )
 
         _handle_custom_command(["mon"])
@@ -398,7 +419,11 @@ class TestHandleCustomCommand:
         ops.add_command("status", "@cli", "status")
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="cli", command="status",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="cli",
+            command="status",
         )
 
         _handle_custom_command(["status"])
@@ -412,7 +437,11 @@ class TestHandleCustomCommand:
         from aipass.drone.apps.drone import _handle_target
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="devpulse", command="watchdog",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="devpulse",
+            command="watchdog",
         )
 
         _handle_target(["@devpulse", "watchdog", "--help"])
@@ -428,7 +457,11 @@ class TestHandleCustomCommand:
         ops.add_command("failing", "@test", "fail")
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="error\n", exit_code=2, branch="test", command="fail",
+            stdout="",
+            stderr="error\n",
+            exit_code=2,
+            branch="test",
+            command="fail",
         )
 
         result = _handle_custom_command(["failing"])
@@ -457,7 +490,11 @@ class TestHandleCustomCommand:
         ops.add_command("simple", "@test", "simple")
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0, branch="test", command="simple",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="test",
+            command="simple",
         )
 
         _handle_custom_command(["simple"])
@@ -469,6 +506,7 @@ class TestHandleCustomCommand:
 # ===================================================================
 # 6. main() integration
 # ===================================================================
+
 
 class TestMainIntegration:
     """Tests for main() routing of new commands."""
@@ -563,8 +601,11 @@ class TestMainIntegration:
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
-            stdout="audit output\n", stderr="", exit_code=0,
-            branch="seedgo", command="audit",
+            stdout="audit output\n",
+            stderr="",
+            exit_code=0,
+            branch="seedgo",
+            command="audit",
         )
 
         with patch("sys.argv", ["drone", "audit"]):
@@ -572,7 +613,8 @@ class TestMainIntegration:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo", "audit",
+            "@seedgo",
+            "audit",
             args=["aipass"],
             interactive=True,
         )
@@ -585,8 +627,11 @@ class TestMainIntegration:
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
         mock_route.return_value = CommandResult(
-            stdout="", stderr="", exit_code=0,
-            branch="seedgo", command="audit",
+            stdout="",
+            stderr="",
+            exit_code=0,
+            branch="seedgo",
+            command="audit",
         )
 
         with patch("sys.argv", ["drone", "audit", "@drone"]):
@@ -594,7 +639,8 @@ class TestMainIntegration:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@seedgo", "audit",
+            "@seedgo",
+            "audit",
             args=["aipass", "@drone"],
             interactive=True,
         )
@@ -629,6 +675,7 @@ class TestMainIntegration:
 # 7. match_command integration
 # ===================================================================
 
+
 class TestMatchCommandIntegration:
     """Tests verifying match_command works correctly with registered commands."""
 
@@ -652,8 +699,11 @@ class TestMatchCommandIntegration:
         ops.add_command("plan create", "@flow", "create", args=["--type=plan"])
 
         mock_route.return_value = CommandResult(
-            stdout="created\n", stderr="", exit_code=0,
-            branch="flow", command="create",
+            stdout="created\n",
+            stderr="",
+            exit_code=0,
+            branch="flow",
+            command="create",
         )
 
         with patch("sys.argv", ["drone", "plan", "create", "my-plan"]):
@@ -661,7 +711,8 @@ class TestMatchCommandIntegration:
 
         assert result == 0
         mock_route.assert_called_once_with(
-            "@flow", "create",
+            "@flow",
+            "create",
             args=["--type=plan", "my-plan"],
             interactive=False,
         )

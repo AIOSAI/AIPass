@@ -55,9 +55,7 @@ class _ExternalModuleConfig:
 def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
     """Load external module declarations from routing_config.json."""
     if not _ROUTING_CONFIG_PATH.exists():
-        logger.warning(
-            "_load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH
-        )
+        logger.warning("_load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH)
         return {}
     try:
         with open(_ROUTING_CONFIG_PATH, encoding="utf-8") as fh:
@@ -73,9 +71,7 @@ def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
             )
         return result
     except Exception as exc:
-        logger.warning(
-            "_load_external_modules: failed to load config: %s", exc
-        )
+        logger.warning("_load_external_modules: failed to load config: %s", exc)
         return {}
 
 
@@ -150,9 +146,7 @@ def get_module_info(name: str) -> ModuleInfo | None:
         return None
 
 
-def route_module_command(
-    name: str, command: str, args: list[str] | None = None
-) -> dict:
+def route_module_command(name: str, command: str, args: list[str] | None = None) -> dict:
     """Route a command to a module.
 
     For external modules: uses generic_adapter.capture_main().
@@ -163,9 +157,7 @@ def route_module_command(
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
         result = capture_main(ext.entry_point, ext.name, command, args)
-        json_handler.log_operation(
-            "route_module_command", {"module": name, "command": command}
-        )
+        json_handler.log_operation("route_module_command", {"module": name, "command": command})
         return result
 
     adapter_path = _INTERNAL_MODULES[name]
@@ -175,9 +167,7 @@ def route_module_command(
     # Internal modules may return bool (standard) instead of dict (adapter)
     if isinstance(result, bool):
         result = {"stdout": "", "stderr": "", "exit_code": 0 if result else 1}
-    json_handler.log_operation(
-        "route_module_command", {"module": name, "command": command}
-    )
+    json_handler.log_operation("route_module_command", {"module": name, "command": command})
     return result
 
 
@@ -234,9 +224,7 @@ def get_module_introspective(name: str) -> str:
             return help_fn(None)
         return ""
     except (ImportError, AttributeError) as exc:
-        logger.warning(
-            "get_module_introspective: failed for module '%s': %s", name, exc
-        )
+        logger.warning("get_module_introspective: failed for module '%s': %s", name, exc)
         return ""
 
 

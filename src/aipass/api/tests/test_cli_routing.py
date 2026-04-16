@@ -27,6 +27,7 @@ from aipass.api.apps.modules import api_key
 # handle_command routing tests
 # ---------------------------------------------------------------------------
 
+
 @patch("aipass.api.apps.modules.api_key.console")
 @patch("aipass.api.apps.modules.api_key.header")
 @patch("aipass.api.apps.modules.api_key.json_handler")
@@ -88,6 +89,7 @@ def test_handle_command_return_bool(mock_jh, mock_header, mock_console):
 # ---------------------------------------------------------------------------
 # Output capture tests
 # ---------------------------------------------------------------------------
+
 
 def test_output_capture_help(capsys):
     """--help flag triggers console output (output capture with capsys)."""

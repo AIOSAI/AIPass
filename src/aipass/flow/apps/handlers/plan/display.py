@@ -22,6 +22,7 @@ from aipass.flow.apps.handlers.json import json_handler
 
 # CREATE PLAN DISPLAY FUNCTIONS
 
+
 def display_plan_created(
     plan_num: int,
     relative_location: str,
@@ -48,9 +49,11 @@ def display_plan_created(
     lines = [
         f"[FLOW] Created {plan_id} in {relative_location}",
         f"[FLOW] Template: {template_type}",
-        f"[FLOW] Subject: {subject}"
+        f"[FLOW] Subject: {subject}",
     ]
-    json_handler.log_operation("plan_displayed", {"plan_id": plan_id, "location": relative_location, "template": template_type})
+    json_handler.log_operation(
+        "plan_displayed", {"plan_id": plan_id, "location": relative_location, "template": template_type}
+    )
     return "\n".join(lines)
 
 
@@ -87,6 +90,7 @@ def display_plan_result(
 
 # DELETE PLAN DISPLAY FUNCTIONS
 
+
 def format_plan_deletion_header(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
     """
     Format plan information header for deletion confirmation
@@ -111,7 +115,7 @@ def format_plan_deletion_header(plan_key: str, plan_info: Dict[str, Any], prefix
         f"  [dim]File:[/dim]     {plan_file}",
         "",
         "[dim]─" + "─" * 68 + "[/dim]",
-        ""
+        "",
     ]
     return "\n".join(lines)
 
@@ -175,17 +179,12 @@ def format_delete_usage_error() -> str:
     Returns:
         Formatted usage instructions
     """
-    lines = [
-        "",
-        "ERROR: Plan number required",
-        "",
-        "Usage: delete <plan_number> [--yes]",
-        ""
-    ]
+    lines = ["", "ERROR: Plan number required", "", "Usage: delete <plan_number> [--yes]", ""]
     return "\n".join(lines)
 
 
 # RESTORE PLAN DISPLAY FUNCTIONS
+
 
 def format_restore_header(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
     """
@@ -215,7 +214,7 @@ def format_restore_header(plan_key: str, plan_info: Dict[str, Any], prefix: str 
         f"  [dim]File:[/dim]          {plan_file}",
         "",
         "[dim]─" + "─" * 68 + "[/dim]",
-        ""
+        "",
     ]
     return "\n".join(lines)
 
@@ -237,7 +236,9 @@ def format_restore_success(plan_key: str, restored_location: str | None = None, 
     return f"\n[SUCCESS] {prefix}-{plan_key} restored to open status\n"
 
 
-def format_restore_error(error_type: str, plan_key: str | None = None, details: str | None = None, prefix: str = "FPLAN") -> str:
+def format_restore_error(
+    error_type: str, plan_key: str | None = None, details: str | None = None, prefix: str = "FPLAN"
+) -> str:
     """
     Format error messages for restore operations
 
@@ -271,17 +272,12 @@ def format_restore_usage_error() -> str:
     Returns:
         Formatted usage instructions
     """
-    lines = [
-        "",
-        "ERROR: Plan number required",
-        "",
-        "Usage: restore <plan_number>",
-        ""
-    ]
+    lines = ["", "ERROR: Plan number required", "", "Usage: restore <plan_number>", ""]
     return "\n".join(lines)
 
 
 # LIST PLAN DISPLAY FUNCTIONS
+
 
 def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
     """
@@ -310,7 +306,7 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
     # Format created date if it's an ISO timestamp
     if created != "unknown":
         try:
-            dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
             created = dt.strftime("%Y-%m-%d %H:%M")
         except (ValueError, AttributeError) as e:
             logger.warning(f"[display] Failed to parse created date '{created}': {e}")
@@ -321,9 +317,7 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
 
 
 def format_plans_list(
-    plans: Dict[str, Dict[str, Any]],
-    filter_status: str | None = None,
-    show_header: bool = True
+    plans: Dict[str, Dict[str, Any]], filter_status: str | None = None, show_header: bool = True
 ) -> str:
     """
     Format multiple plans for display with optional filtering
@@ -341,10 +335,7 @@ def format_plans_list(
 
     # Filter plans if needed
     if filter_status:
-        filtered_plans = {
-            k: v for k, v in plans.items()
-            if v.get("status") == filter_status
-        }
+        filtered_plans = {k: v for k, v in plans.items() if v.get("status") == filter_status}
     else:
         filtered_plans = plans
 
@@ -390,10 +381,10 @@ def format_statistics_summary(stats: Dict[str, Any]) -> str:
         "[bold]Summary:[/bold]",
         f"  Total plans: {stats['total_plans']}",
         f"  Open: {stats['open_plans']}",
-        f"  Closed: {stats['closed_plans']}"
+        f"  Closed: {stats['closed_plans']}",
     ]
 
-    if stats['other_plans'] > 0:
+    if stats["other_plans"] > 0:
         lines.append(f"  Other: {stats['other_plans']}")
 
     lines.append("")

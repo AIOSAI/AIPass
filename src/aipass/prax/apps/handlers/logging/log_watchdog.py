@@ -22,6 +22,7 @@ Two modes:
 """
 
 import logging
+
 logger = logging.getLogger(__name__)
 import sys
 from datetime import datetime
@@ -35,6 +36,7 @@ from aipass.prax.apps.handlers.json import json_handler
 # CONSTANTS
 # =============================================================================
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
     current = Path(__file__).resolve().parent
@@ -43,7 +45,9 @@ def _find_repo_root() -> Path:
             return parent
     return Path.cwd()
 
+
 _system_logs_dir_cache: Path | None = None
+
 
 def _get_system_logs_dir() -> Path:
     """Lazily resolve system_logs directory (package-relative)."""
@@ -52,15 +56,17 @@ def _get_system_logs_dir() -> Path:
         _system_logs_dir_cache = _find_repo_root() / "system_logs"
     return _system_logs_dir_cache
 
+
 # Thresholds
-WARN_THRESHOLD_LINES = 5000    # Fire warning at this line count
-DEFAULT_MAX_LINES = 1000       # Truncate to this many lines (matches prax config)
+WARN_THRESHOLD_LINES = 5000  # Fire warning at this line count
+DEFAULT_MAX_LINES = 1000  # Truncate to this many lines (matches prax config)
 CRITICAL_THRESHOLD_LINES = 10000  # Immediate action recommended
 
 
 # =============================================================================
 # SCANNING
 # =============================================================================
+
 
 def _count_lines(filepath: Path) -> int:
     """
@@ -73,7 +79,7 @@ def _count_lines(filepath: Path) -> int:
         Line count, or 0 on error
     """
     try:
-        with open(filepath, 'rb') as f:
+        with open(filepath, "rb") as f:
             return sum(1 for _ in f)
     except OSError as e:
         logger.info("Failed to count lines in %s: %s", filepath, e)
@@ -121,13 +127,15 @@ def scan_log_files() -> List[Dict[str, Any]]:
         else:
             status = "ok"
 
-        results.append({
-            "path": str(log_file),
-            "name": log_file.name,
-            "lines": lines,
-            "size_kb": round(size_kb, 1),
-            "status": status
-        })
+        results.append(
+            {
+                "path": str(log_file),
+                "name": log_file.name,
+                "lines": lines,
+                "size_kb": round(size_kb, 1),
+                "status": status,
+            }
+        )
 
     # Sort by line count descending (biggest problems first)
     results.sort(key=lambda x: x["lines"], reverse=True)
@@ -152,6 +160,7 @@ def get_oversized_files(threshold: int = WARN_THRESHOLD_LINES) -> List[Dict[str,
 # ENFORCEMENT
 # =============================================================================
 
+
 def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tuple[int, int]:
     """
     Truncate a log file to keep only the last N lines.
@@ -167,7 +176,7 @@ def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tu
         Tuple of (original_lines, new_lines)
     """
     try:
-        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
 
         original_count = len(all_lines)
@@ -184,7 +193,7 @@ def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tu
             f"| was {original_count} lines, kept last {keep_lines} ---\n"
         )
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(marker)
             f.writelines(kept_lines)
 
@@ -195,8 +204,9 @@ def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tu
         return 0, 0
 
 
-def enforce_log_limits(max_lines: int = DEFAULT_MAX_LINES,
-                       threshold: int = WARN_THRESHOLD_LINES) -> List[Dict[str, Any]]:
+def enforce_log_limits(
+    max_lines: int = DEFAULT_MAX_LINES, threshold: int = WARN_THRESHOLD_LINES
+) -> List[Dict[str, Any]]:
     """
     Scan and truncate all oversized log files.
 
@@ -218,12 +228,9 @@ def enforce_log_limits(max_lines: int = DEFAULT_MAX_LINES,
         filepath = Path(file_info["path"])
         original, new = truncate_log_file(filepath, max_lines)
 
-        actions.append({
-            "name": file_info["name"],
-            "original_lines": original,
-            "new_lines": new,
-            "truncated": original != new
-        })
+        actions.append(
+            {"name": file_info["name"], "original_lines": original, "new_lines": new, "truncated": original != new}
+        )
 
     return actions
 
@@ -231,6 +238,7 @@ def enforce_log_limits(max_lines: int = DEFAULT_MAX_LINES,
 # =============================================================================
 # HEALTH CHECK (for monitoring integration)
 # =============================================================================
+
 
 def log_health_summary() -> Dict[str, Any]:
     """
@@ -250,7 +258,7 @@ def log_health_summary() -> Dict[str, Any]:
             "critical_count": 0,
             "largest_file": None,
             "largest_lines": 0,
-            "healthy": True
+            "healthy": True,
         }
 
     total_lines = sum(f["lines"] for f in files)
@@ -265,7 +273,7 @@ def log_health_summary() -> Dict[str, Any]:
         "critical_count": len(critical),
         "largest_file": largest["name"] if largest else None,
         "largest_lines": largest["lines"] if largest else 0,
-        "healthy": len(oversized) == 0
+        "healthy": len(oversized) == 0,
     }
 
 

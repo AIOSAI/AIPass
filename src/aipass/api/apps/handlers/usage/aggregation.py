@@ -47,6 +47,7 @@ API_JSON_DIR = Path(__file__).resolve().parent.parent.parent.parent / "api_json"
 # AGGREGATION FUNCTIONS
 # =============================================
 
+
 def get_overall_stats() -> Dict[str, Any]:
     """
     Aggregate usage statistics across all callers.
@@ -62,7 +63,7 @@ def get_overall_stats() -> Dict[str, Any]:
             logger.info(f"[{MODULE_NAME}] No usage data file found")
             return {}
 
-        with open(data_path, 'r', encoding='utf-8') as f:
+        with open(data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if not data or "data" not in data:
@@ -122,7 +123,7 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
             logger.info(f"[{MODULE_NAME}] No usage data file found")
             return {}
 
-        with open(data_path, 'r', encoding='utf-8') as f:
+        with open(data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if not data or "data" not in data:
@@ -164,7 +165,7 @@ def get_session_summary(session_id: Optional[str] = None) -> Dict[str, Any]:
             logger.info(f"[{MODULE_NAME}] No session data file found")
             return {}
 
-        with open(data_path, 'r', encoding='utf-8') as f:
+        with open(data_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         if not data or "data" not in data:
@@ -184,5 +185,3 @@ def get_session_summary(session_id: Optional[str] = None) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to get session summary: {e}")
         return {}
-
-

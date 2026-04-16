@@ -230,11 +230,13 @@ def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        mod, "find_all_inbox_files",
+        mod,
+        "find_all_inbox_files",
         lambda: [seedgo_mail / "inbox.json", drone_mail / "inbox.json"],
     )
     monkeypatch.setattr(
-        mod, "get_valid_branch_names",
+        mod,
+        "get_valid_branch_names",
         lambda: {"SEEDGO", "DRONE"},
     )
 
@@ -262,11 +264,13 @@ def test_aggregate_branch_stats_skips_unregistered(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        mod, "find_all_inbox_files",
+        mod,
+        "find_all_inbox_files",
         lambda: [rogue_mail / "inbox.json", valid_mail / "inbox.json"],
     )
     monkeypatch.setattr(
-        mod, "get_valid_branch_names",
+        mod,
+        "get_valid_branch_names",
         lambda: {"SEEDGO"},  # ROGUE not registered
     )
 
@@ -290,11 +294,13 @@ def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        mod, "find_all_inbox_files",
+        mod,
+        "find_all_inbox_files",
         lambda: [bad_mail / "inbox.json", good_mail / "inbox.json"],
     )
     monkeypatch.setattr(
-        mod, "get_valid_branch_names",
+        mod,
+        "get_valid_branch_names",
         lambda: {"BAD", "GOOD"},
     )
 

@@ -47,7 +47,9 @@ def print_help():
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
-    console.print("  [green]builder[/green]      Full 3-layer scaffold (apps/, modules/, handlers/) [dim][default][/dim]")
+    console.print(
+        "  [green]builder[/green]      Full 3-layer scaffold (apps/, modules/, handlers/) [dim][default][/dim]"
+    )
     console.print("  [green]birthright[/green]   Minimal citizenship (.trinity/, .aipass/, README.md)")
     console.print()
     console.print("[bold cyan]OPTIONS:[/bold cyan]")
@@ -131,7 +133,7 @@ def handle_create(args):
         console.print()
         return 0
     else:
-        error(result['error'])
+        error(result["error"])
         return 1
 
 
@@ -222,26 +224,32 @@ def main():
 
     if command == "update":
         from aipass.spawn.apps.modules.update import handle_update
+
         return handle_update(remaining)
 
     if command == "delete":
         from aipass.spawn.apps.modules.delete import handle_delete
+
         return handle_delete(remaining)
 
     if command == "sync-registry":
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
+
         return handle_sync_registry(remaining)
 
     if command == "sync-templates":
         from aipass.spawn.apps.modules.sync_templates import handle_sync_templates
+
         return handle_sync_templates(remaining)
 
     if command == "passport":
         from aipass.spawn.apps.modules.passport import handle_passport
+
         return handle_passport(remaining)
 
     if command == "regenerate-registry":
         from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
+
         return handle_regenerate_registry(remaining)
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")

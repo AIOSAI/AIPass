@@ -84,9 +84,7 @@ class TestEnsureDirectory:
 class TestCopyTemplate:
     """Tests for copy_template()."""
 
-    def test_copy_template_basic(
-        self, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_basic(self, tmp_path: Path, mock_json_handler) -> None:
         """Template file with placeholder is copied with content replaced."""
         template = tmp_path / "template"
         template.mkdir()
@@ -105,9 +103,7 @@ class TestCopyTemplate:
         assert "readme.txt" in copied
         mock_json_handler.assert_called_once()
 
-    def test_copy_template_skips_pycache(
-        self, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_skips_pycache(self, tmp_path: Path, mock_json_handler) -> None:
         """__pycache__ directories and their contents are skipped."""
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -123,16 +119,12 @@ class TestCopyTemplate:
         assert not (target / "__pycache__").exists()
         assert any("__pycache__" in s for s in skipped)
 
-    def test_copy_template_skips_template_registry(
-        self, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_skips_template_registry(self, tmp_path: Path, mock_json_handler) -> None:
         """.template_registry.json is skipped during copy."""
         _ = mock_json_handler
         template = tmp_path / "template"
         template.mkdir()
-        (template / ".template_registry.json").write_text(
-            "{}", encoding="utf-8"
-        )
+        (template / ".template_registry.json").write_text("{}", encoding="utf-8")
         (template / "keep.txt").write_text("keep", encoding="utf-8")
 
         target = tmp_path / "target"
@@ -144,9 +136,7 @@ class TestCopyTemplate:
         assert (target / "keep.txt").exists()
         assert any(".template_registry.json" in s for s in skipped)
 
-    def test_copy_template_creates_directories(
-        self, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_creates_directories(self, tmp_path: Path, mock_json_handler) -> None:
         """Subdirectories inside the template are created in the target."""
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -164,9 +154,7 @@ class TestCopyTemplate:
         # Directory entries recorded
         assert any("apps/" in c and "(dir)" in c for c in copied)
 
-    def test_copy_template_skips_existing_files(
-        self, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_skips_existing_files(self, tmp_path: Path, mock_json_handler) -> None:
         """Existing files in the target directory are not overwritten."""
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -184,9 +172,7 @@ class TestCopyTemplate:
         assert any("config.txt" in s and "exists" in s for s in skipped)
 
     @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_copy_template_binary_fallback(
-        self, _mock_logger, tmp_path: Path, mock_json_handler
-    ) -> None:
+    def test_copy_template_binary_fallback(self, _mock_logger, tmp_path: Path, mock_json_handler) -> None:
         """Binary files trigger fallback to shutil.copy2."""
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -236,9 +222,7 @@ class TestRenamePlaceholderPaths:
         assert not (target / "{{BRANCH}}_config.json").exists()
         assert len(renamed) == 1
 
-    def test_rename_placeholder_paths_no_overwrite(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rename_placeholder_paths_no_overwrite(self, tmp_path: Path) -> None:
         """If the renamed target already exists, the rename is skipped."""
         target = tmp_path / "branch"
         target.mkdir(parents=True)
@@ -351,9 +335,7 @@ class TestRegenerateTemplateRegistry:
     """Tests for regenerate_template_registry()."""
 
     @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_creates_json(
-        self, mock_logger, tmp_path: Path
-    ) -> None:
+    def test_regenerate_template_registry_creates_json(self, mock_logger, tmp_path: Path) -> None:
         """Running regeneration creates .spawn/.template_registry.json."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -371,9 +353,7 @@ class TestRegenerateTemplateRegistry:
         assert data["metadata"]["generated"] is True
 
     @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_hashes_content(
-        self, mock_logger, tmp_path: Path
-    ) -> None:
+    def test_regenerate_template_registry_hashes_content(self, mock_logger, tmp_path: Path) -> None:
         """SHA-256 hashes in the registry match actual file content."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -386,9 +366,7 @@ class TestRegenerateTemplateRegistry:
         registry_file = spawn_dir / ".template_registry.json"
         data = json.loads(registry_file.read_text(encoding="utf-8"))
 
-        expected_hash = hashlib.sha256(
-            content.encode("utf-8")
-        ).hexdigest()[:12]
+        expected_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
         # Find the file entry
         files = data["files"]
@@ -398,36 +376,26 @@ class TestRegenerateTemplateRegistry:
         assert entry["content_hash"] == expected_hash
 
     @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_detects_placeholders(
-        self, mock_logger, tmp_path: Path
-    ) -> None:
+    def test_regenerate_template_registry_detects_placeholders(self, mock_logger, tmp_path: Path) -> None:
         """Files containing {{BRANCH}} are flagged with has_branch_placeholder."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
 
-        (tmp_path / "with_placeholder.txt").write_text(
-            "Name: {{BRANCH}}", encoding="utf-8"
-        )
-        (tmp_path / "no_placeholder.txt").write_text(
-            "Just plain text", encoding="utf-8"
-        )
+        (tmp_path / "with_placeholder.txt").write_text("Name: {{BRANCH}}", encoding="utf-8")
+        (tmp_path / "no_placeholder.txt").write_text("Just plain text", encoding="utf-8")
 
         regenerate_template_registry(tmp_path)
 
         registry_file = spawn_dir / ".template_registry.json"
         data = json.loads(registry_file.read_text(encoding="utf-8"))
 
-        files_by_name = {
-            v["name"]: v for v in data["files"].values()
-        }
+        files_by_name = {v["name"]: v for v in data["files"].values()}
 
         assert files_by_name["with_placeholder.txt"]["has_branch_placeholder"] is True
         assert files_by_name["no_placeholder.txt"]["has_branch_placeholder"] is False
 
     @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_skips_spawn_dir(
-        self, mock_logger, tmp_path: Path
-    ) -> None:
+    def test_regenerate_template_registry_skips_spawn_dir(self, mock_logger, tmp_path: Path) -> None:
         """.spawn/ internal files are excluded from the registry."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -445,9 +413,7 @@ class TestRegenerateTemplateRegistry:
         # No .spawn/ files should appear
         assert not any(".spawn" in p for p in all_paths)
 
-    def test_regenerate_template_registry_no_spawn_dir_noop(
-        self, tmp_path: Path
-    ) -> None:
+    def test_regenerate_template_registry_no_spawn_dir_noop(self, tmp_path: Path) -> None:
         """If .spawn/ directory does not exist, function returns early."""
         (tmp_path / "file.txt").write_text("content", encoding="utf-8")
 

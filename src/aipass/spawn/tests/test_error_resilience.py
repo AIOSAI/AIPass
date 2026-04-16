@@ -26,6 +26,7 @@ from aipass.spawn.apps.handlers.json.json_handler import read_json, write_json
 # Error Resilience Tests (4 tests)
 # ============================================================================
 
+
 def test_missing_file(tmp_path: Path) -> None:  # ER-001
     """Loading a non-existent file returns None gracefully (FileNotFoundError handled)."""
     target = tmp_path / "ghost_config.json"

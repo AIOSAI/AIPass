@@ -44,6 +44,7 @@ _PACKAGE_BASE = "aipass.memory.apps.modules"
 # INTROSPECTION DISPLAY
 # =============================================================================
 
+
 def print_introspection():
     """Display discovered modules and status"""
     console.print()
@@ -59,7 +60,7 @@ def print_introspection():
     console.print()
 
     for module in modules:
-        module_name = module.__name__.split('.')[-1]
+        module_name = module.__name__.split(".")[-1]
         console.print(f"  [cyan]*[/cyan] {module_name}")
 
     if not modules:
@@ -74,15 +75,18 @@ def print_introspection():
 # HELP SYSTEM
 # =============================================================================
 
+
 def print_help():
     """Display Rich-formatted help"""
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Central Memory Archive System[/bold cyan]\n[dim]Vector search, memory rollover, and fragmented memory for AIPass[/dim]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]Memory - Central Memory Archive System[/bold cyan]\n[dim]Vector search, memory rollover, and fragmented memory for AIPass[/dim]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        )
+    )
     console.print()
 
     # What is Memory section
@@ -91,12 +95,9 @@ def print_help():
         "  [green]>[/green] Provides semantic search across all branch memories\n"
         "  [green]>[/green] Archives memories when branches hit rollover limits"
     )
-    console.print(Panel(
-        what_content,
-        title="[bold cyan]What is Memory?[/bold cyan]",
-        border_style="dim",
-        box=box.ROUNDED
-    ))
+    console.print(
+        Panel(what_content, title="[bold cyan]What is Memory?[/bold cyan]", border_style="dim", box=box.ROUNDED)
+    )
     console.print()
 
     console.print("[bold cyan]AVAILABLE COMMANDS:[/bold cyan]")
@@ -128,12 +129,12 @@ def print_help():
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
     console.print("  [bold]Via Drone (recommended):[/bold]")
-    console.print("    [dim]drone @memory search \"performance patterns\"[/dim]")
+    console.print('    [dim]drone @memory search "performance patterns"[/dim]')
     console.print("    [dim]drone @memory rollover status[/dim]")
     console.print("    [dim]drone @memory rollover run[/dim]")
     console.print()
     console.print("  [bold]Direct execution:[/bold]")
-    console.print("    [dim]drone @memory search \"query\"[/dim]")
+    console.print('    [dim]drone @memory search "query"[/dim]')
     console.print("    [dim]drone @memory rollover run[/dim]")
     console.print()
     console.print("-" * 70)
@@ -146,7 +147,7 @@ def print_help():
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
     console.print("  [bold]Example:[/bold]")
-    console.print("    [dim]drone @memory search \"registry bugs\" --branch SEEDGO --n 10[/dim]")
+    console.print('    [dim]drone @memory search "registry bugs" --branch SEEDGO --n 10[/dim]')
     console.print()
     console.print("-" * 70)
     console.print()
@@ -171,6 +172,7 @@ def print_help():
 # =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
+
 
 def discover_modules() -> List[Any]:
     """
@@ -197,7 +199,7 @@ def discover_modules() -> List[Any]:
             module = importlib.import_module(module_name)
 
             # Duck typing: If it has handle_command(), it's a module
-            if hasattr(module, 'handle_command'):
+            if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"[memory] Discovered module: {module_name}")
         except Exception as e:
@@ -221,7 +223,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         True if command was handled, False otherwise
     """
     # Built-in commands handled by entry point
-    if command == 'watch':
+    if command == "watch":
         start_watch()
         return True
 
@@ -239,6 +241,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 # WATCH MODE
 # =============================================================================
 
+
 def start_watch() -> None:
     """
     Start memory watcher - monitors branch memory files for auto-rollover
@@ -250,7 +253,7 @@ def start_watch() -> None:
     """
     from ..handlers.monitor.memory_watcher import (  # type: ignore[import-not-found]
         start_memory_watcher,
-        stop_memory_watcher
+        stop_memory_watcher,
     )
     from ..handlers.monitor.detector import get_rollover_stats  # type: ignore[import-not-found]
 
@@ -266,17 +269,13 @@ def start_watch() -> None:
     signal.signal(signal.SIGINT, signal_handler)
 
     console.print()
-    console.print(Panel.fit(
-        "[bold cyan]Memory - Watch Mode[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED
-    ))
+    console.print(Panel.fit("[bold cyan]Memory - Watch Mode[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
     # Start the watcher
     result = start_memory_watcher()
 
-    if not result.get('success'):
+    if not result.get("success"):
         error(f"Failed to start watcher: {result.get('error')}")
         return
 
@@ -287,9 +286,9 @@ def start_watch() -> None:
 
     # Show initial status
     stats = get_rollover_stats()
-    if stats.get('success'):
-        ready = stats.get('files_ready', 0)
-        total = stats.get('files_checked', 0)
+    if stats.get("success"):
+        ready = stats.get("files_ready", 0)
+        total = stats.get("files_checked", 0)
         status_marker = "[red]![/red]" if ready > 0 else "[green]OK[/green]"
         console.print(f"{status_marker} Current: {total} files monitored, {ready} ready for rollover")
         console.print()
@@ -304,6 +303,7 @@ def start_watch() -> None:
 # MAIN ENTRY POINT
 # =============================================================================
 
+
 def main():
     """Main entry point - routes commands or shows help"""
 
@@ -316,12 +316,12 @@ def main():
         return
 
     # Version flag
-    if args[0] in ['--version', '-V']:
+    if args[0] in ["--version", "-V"]:
         console.print("memory v1.0.0")
         return
 
     # Show help only for explicit help flags
-    if args[0] in ['--help', '-h', 'help']:
+    if args[0] in ["--help", "-h", "help"]:
         print_help()
         return
 

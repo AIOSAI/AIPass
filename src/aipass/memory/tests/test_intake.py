@@ -31,6 +31,7 @@ from unittest.mock import MagicMock
 # Import helper
 # ---------------------------------------------------------------------------
 
+
 def _import_pool_processor(monkeypatch):
     """Import pool_processor with mocked dependencies."""
     sys.modules.pop("aipass.memory.apps.handlers.intake.pool_processor", None)
@@ -46,6 +47,7 @@ def _import_pool_processor(monkeypatch):
 # ===========================================================================
 # Tests: find_source_file
 # ===========================================================================
+
 
 class TestFindSourceFile:
     """Test find_source_file function."""
@@ -105,19 +107,17 @@ class TestFindSourceFile:
 # Tests: load_config
 # ===========================================================================
 
+
 class TestLoadConfig:
     """Test load_config function."""
 
     def test_loads_valid_config(self, monkeypatch, tmp_path):
         mod = _import_pool_processor(monkeypatch)
         config_file = tmp_path / "memory_bank.config.json"
-        config_file.write_text(json.dumps({
-            "memory_pool": {
-                "enabled": True,
-                "keep_recent": 5,
-                "collection_name": "test_pool"
-            }
-        }), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"memory_pool": {"enabled": True, "keep_recent": 5, "collection_name": "test_pool"}}),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(mod, "CONFIG_PATH", config_file)
 
         result = mod.load_config()
@@ -150,6 +150,7 @@ class TestLoadConfig:
 # Tests: get_pool_files
 # ===========================================================================
 
+
 class TestGetPoolFiles:
     """Test get_pool_files function."""
 
@@ -180,6 +181,7 @@ class TestGetPoolFiles:
         old_file = pool / "old.md"
         old_file.write_text("old content", encoding="utf-8")
         import os
+
         os.utime(str(old_file), (1000000, 1000000))
 
         new_file = pool / "new.md"
@@ -213,6 +215,7 @@ class TestGetPoolFiles:
 # Tests: read_file_content
 # ===========================================================================
 
+
 class TestReadFileContent:
     """Test read_file_content function."""
 
@@ -242,6 +245,7 @@ class TestReadFileContent:
 # ===========================================================================
 # Tests: chunk_content
 # ===========================================================================
+
 
 class TestChunkContent:
     """Test chunk_content function."""
@@ -313,6 +317,7 @@ class TestChunkContent:
 # Tests: process_file_to_vectors
 # ===========================================================================
 
+
 class TestProcessFileToVectors:
     """Test process_file_to_vectors with mocked chromadb."""
 
@@ -366,7 +371,7 @@ class TestProcessFileToVectors:
         monkeypatch.delitem(sys.modules, "sentence_transformers", raising=False)
 
         # Patch the builtins __import__ to raise for chromadb
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
         def fake_import(name, *args, **kwargs):
             if name == "chromadb":
@@ -385,6 +390,7 @@ class TestProcessFileToVectors:
 # Tests: archive_old_files
 # ===========================================================================
 
+
 class TestArchiveOldFiles:
     """Test archive_old_files function."""
 
@@ -398,9 +404,7 @@ class TestArchiveOldFiles:
         monkeypatch.setattr(mod, "_MEMORY_ROOT", tmp_path)
 
         # Mock load_config to return supported extensions
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "supported_extensions": [".md", ".txt"]
-        })
+        monkeypatch.setattr(mod, "load_config", lambda: {"supported_extensions": [".md", ".txt"]})
 
         result = mod.archive_old_files(keep_recent=5)
 
@@ -423,9 +427,7 @@ class TestArchiveOldFiles:
             f.write_text(f"content {i}", encoding="utf-8")
             os.utime(str(f), (1000000 + (3 - i) * 1000, 1000000 + (3 - i) * 1000))
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "supported_extensions": [".md"]
-        })
+        monkeypatch.setattr(mod, "load_config", lambda: {"supported_extensions": [".md"]})
 
         archive_dir_name = "test_archive"
         result = mod.archive_old_files(keep_recent=2, archive_path=archive_dir_name)
@@ -459,9 +461,7 @@ class TestArchiveOldFiles:
         archive_dir.mkdir()
         (archive_dir / "file2.md").write_text("pre-existing", encoding="utf-8")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "supported_extensions": [".md"]
-        })
+        monkeypatch.setattr(mod, "load_config", lambda: {"supported_extensions": [".md"]})
 
         result = mod.archive_old_files(keep_recent=1, archive_path="test_archive")
 
@@ -476,6 +476,7 @@ class TestArchiveOldFiles:
 # ===========================================================================
 # Tests: process_memory_pool
 # ===========================================================================
+
 
 class TestProcessMemoryPool:
     """Test process_memory_pool main entry point."""
@@ -494,15 +495,19 @@ class TestProcessMemoryPool:
         mod = _import_pool_processor(monkeypatch)
         pool = tmp_path / "pool"
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": True,
-            "keep_recent": 10,
-            "collection_name": "test",
-            "chunk_size": 1000,
-            "chunk_overlap": 100,
-            "supported_extensions": [".md"],
-            "archive_path": "archive"
-        })
+        monkeypatch.setattr(
+            mod,
+            "load_config",
+            lambda: {
+                "enabled": True,
+                "keep_recent": 10,
+                "collection_name": "test",
+                "chunk_size": 1000,
+                "chunk_overlap": 100,
+                "supported_extensions": [".md"],
+                "archive_path": "archive",
+            },
+        )
         monkeypatch.setattr(mod, "get_pool_files", lambda extensions=None: [])
 
         result = mod.process_memory_pool()
@@ -519,27 +524,30 @@ class TestProcessMemoryPool:
         test_file = tmp_path / "test.md"
         test_file.write_text("content", encoding="utf-8")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": True,
-            "keep_recent": 10,
-            "collection_name": "test",
-            "chunk_size": 1000,
-            "chunk_overlap": 100,
-            "supported_extensions": [".md"],
-            "archive_path": "archive"
-        })
+        monkeypatch.setattr(
+            mod,
+            "load_config",
+            lambda: {
+                "enabled": True,
+                "keep_recent": 10,
+                "collection_name": "test",
+                "chunk_size": 1000,
+                "chunk_overlap": 100,
+                "supported_extensions": [".md"],
+                "archive_path": "archive",
+            },
+        )
         monkeypatch.setattr(mod, "get_pool_files", lambda extensions=None: [test_file])
-        monkeypatch.setattr(mod, "process_file_to_vectors", lambda fp, cn, cs=1000, co=100: {
-            "success": True,
-            "file": fp.name,
-            "chunks_stored": 3,
-            "collection": cn
-        })
-        monkeypatch.setattr(mod, "archive_old_files", lambda keep, archive_path="": {
-            "success": True,
-            "archived_count": 0,
-            "kept_count": 1
-        })
+        monkeypatch.setattr(
+            mod,
+            "process_file_to_vectors",
+            lambda fp, cn, cs=1000, co=100: {"success": True, "file": fp.name, "chunks_stored": 3, "collection": cn},
+        )
+        monkeypatch.setattr(
+            mod,
+            "archive_old_files",
+            lambda keep, archive_path="": {"success": True, "archived_count": 0, "kept_count": 1},
+        )
         monkeypatch.setattr(mod, "_update_central_and_dashboard", lambda: None)
 
         mock_jh = MagicMock()
@@ -561,25 +569,30 @@ class TestProcessMemoryPool:
         test_file = tmp_path / "bad.md"
         test_file.write_text("content", encoding="utf-8")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": True,
-            "keep_recent": 10,
-            "collection_name": "test",
-            "chunk_size": 1000,
-            "chunk_overlap": 100,
-            "supported_extensions": [".md"],
-            "archive_path": "archive"
-        })
+        monkeypatch.setattr(
+            mod,
+            "load_config",
+            lambda: {
+                "enabled": True,
+                "keep_recent": 10,
+                "collection_name": "test",
+                "chunk_size": 1000,
+                "chunk_overlap": 100,
+                "supported_extensions": [".md"],
+                "archive_path": "archive",
+            },
+        )
         monkeypatch.setattr(mod, "get_pool_files", lambda extensions=None: [test_file])
-        monkeypatch.setattr(mod, "process_file_to_vectors", lambda fp, cn, cs=1000, co=100: {
-            "success": False,
-            "error": "chromadb failed"
-        })
-        monkeypatch.setattr(mod, "archive_old_files", lambda keep, archive_path="": {
-            "success": True,
-            "archived_count": 0,
-            "kept_count": 0
-        })
+        monkeypatch.setattr(
+            mod,
+            "process_file_to_vectors",
+            lambda fp, cn, cs=1000, co=100: {"success": False, "error": "chromadb failed"},
+        )
+        monkeypatch.setattr(
+            mod,
+            "archive_old_files",
+            lambda keep, archive_path="": {"success": True, "archived_count": 0, "kept_count": 0},
+        )
         mock_notify = MagicMock()
         monkeypatch.setattr(mod, "_notify_failure", mock_notify)
 
@@ -597,6 +610,7 @@ class TestProcessMemoryPool:
 # Tests: get_pool_status
 # ===========================================================================
 
+
 class TestGetPoolStatus:
     """Test get_pool_status function."""
 
@@ -608,12 +622,16 @@ class TestGetPoolStatus:
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
         monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": True,
-            "keep_recent": 10,
-            "collection_name": "test_pool",
-            "supported_extensions": [".md"]
-        })
+        monkeypatch.setattr(
+            mod,
+            "load_config",
+            lambda: {
+                "enabled": True,
+                "keep_recent": 10,
+                "collection_name": "test_pool",
+                "supported_extensions": [".md"],
+            },
+        )
 
         # Mock chromadb
         mock_collection = MagicMock()
@@ -642,13 +660,10 @@ class TestGetPoolStatus:
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
         monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": False,
-            "supported_extensions": [".md"]
-        })
+        monkeypatch.setattr(mod, "load_config", lambda: {"enabled": False, "supported_extensions": [".md"]})
 
         # Make chromadb import raise
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
         def fake_import(name, *args, **kwargs):
             if name == "chromadb":
@@ -671,11 +686,11 @@ class TestGetPoolStatus:
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
         monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
 
-        monkeypatch.setattr(mod, "load_config", lambda: {
-            "enabled": True,
-            "supported_extensions": [".md"],
-            "collection_name": "test_pool"
-        })
+        monkeypatch.setattr(
+            mod,
+            "load_config",
+            lambda: {"enabled": True, "supported_extensions": [".md"], "collection_name": "test_pool"},
+        )
 
         # chromadb returns empty collection list
         mock_client = MagicMock()

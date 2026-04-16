@@ -14,6 +14,7 @@ Provides Rich-formatted reference text for the CLI flags standard.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_cli_flags_standards() -> str:
     """Return Rich-formatted CLI flags standards text"""
     json_handler.log_operation("standard_content_queried", {"standard": "cli_flags"})

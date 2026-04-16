@@ -50,6 +50,7 @@ _TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 # CORE READ/WRITE OPERATIONS
 # =============================================================================
 
+
 def read_memory_file(file_path: Path) -> Dict[str, Any]:
     """
     Safe read of memory JSON file
@@ -69,41 +70,25 @@ def read_memory_file(file_path: Path) -> Dict[str, Any]:
             sessions = data.get('sessions', [])
     """
     if not file_path.exists():
-        return {
-            'success': False,
-            'error': f"File not found: {file_path}"
-        }
+        return {"success": False, "error": f"File not found: {file_path}"}
 
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        return {
-            'success': True,
-            'file': str(file_path),
-            'data': data
-        }
+        return {"success": True, "file": str(file_path), "data": data}
 
     except json.JSONDecodeError as e:
         logger.warning(f"[memory_files] Corrupt JSON in {file_path.name}: {e}")
-        return {
-            'success': False,
-            'error': f"Corrupt JSON in {file_path.name}: {e}"
-        }
+        return {"success": False, "error": f"Corrupt JSON in {file_path.name}: {e}"}
 
     except PermissionError:
         logger.warning(f"[memory_files] Permission denied reading {file_path.name}")
-        return {
-            'success': False,
-            'error': f"Permission denied reading {file_path.name}"
-        }
+        return {"success": False, "error": f"Permission denied reading {file_path.name}"}
 
     except Exception as e:
         logger.warning(f"[memory_files] Failed to read {file_path.name}: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to read {file_path.name}: {e}"
-        }
+        return {"success": False, "error": f"Failed to read {file_path.name}: {e}"}
 
 
 def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,34 +118,24 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         - Original file unchanged if write fails
     """
     if not isinstance(data, dict):
-        return {
-            'success': False,
-            'error': f"Data must be dict, got {type(data).__name__}"
-        }
+        return {"success": False, "error": f"Data must be dict, got {type(data).__name__}"}
 
     try:
         # Create temp file in same directory (for atomic rename)
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=file_path.parent,
-            prefix=f".{file_path.name}.",
-            suffix=".tmp"
-        )
+        temp_fd, temp_path = tempfile.mkstemp(dir=file_path.parent, prefix=f".{file_path.name}.", suffix=".tmp")
 
         try:
             # Write to temp file
-            with open(temp_fd, 'w', encoding='utf-8') as f:
+            with open(temp_fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write('\n')  # Add final newline
+                f.write("\n")  # Add final newline
 
             # Atomic replace (os.replace overwrites on both Linux and Windows)
             os.replace(temp_path, file_path)
 
             json_handler.log_operation("write_memory_file", {"file": file_path.name, "success": True})
 
-            return {
-                'success': True,
-                'file': str(file_path)
-            }
+            return {"success": True, "file": str(file_path)}
 
         except Exception as e:
             # Clean up temp file on failure
@@ -170,22 +145,17 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     except PermissionError:
         logger.warning(f"[memory_files] Permission denied writing {file_path.name}")
-        return {
-            'success': False,
-            'error': f"Permission denied writing {file_path.name}"
-        }
+        return {"success": False, "error": f"Permission denied writing {file_path.name}"}
 
     except Exception as e:
         logger.warning(f"[memory_files] Failed to write {file_path.name}: {e}")
-        return {
-            'success': False,
-            'error': f"Failed to write {file_path.name}: {e}"
-        }
+        return {"success": False, "error": f"Failed to write {file_path.name}: {e}"}
 
 
 # =============================================================================
 # METADATA HELPERS
 # =============================================================================
+
 
 def update_metadata(
     file_path: Path,
@@ -220,20 +190,20 @@ def update_metadata(
     """
     # Read current data
     read_result = read_memory_file(file_path)
-    if not read_result['success']:
+    if not read_result["success"]:
         return read_result
 
-    data = read_result['data']
+    data = read_result["data"]
 
     # Ensure metadata structure exists
-    if 'document_metadata' not in data:
-        data['document_metadata'] = {}
+    if "document_metadata" not in data:
+        data["document_metadata"] = {}
 
-    if 'status' not in data['document_metadata']:
-        data['document_metadata']['status'] = {}
+    if "status" not in data["document_metadata"]:
+        data["document_metadata"]["status"] = {}
 
     # Apply updates
-    status = data['document_metadata']['status']
+    status = data["document_metadata"]["status"]
     for key, value in updates.items():
         status[key] = value
 
@@ -246,6 +216,7 @@ def update_metadata(
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
+
 
 def read_memory_file_data(file_path: Path) -> Optional[Dict[str, Any]]:
     """
@@ -266,8 +237,8 @@ def read_memory_file_data(file_path: Path) -> Optional[Dict[str, Any]]:
             sessions = data.get('sessions', [])
     """
     result = read_memory_file(file_path)
-    if result['success']:
-        return result.get('data')
+    if result["success"]:
+        return result.get("data")
     return None
 
 
@@ -290,12 +261,13 @@ def write_memory_file_simple(file_path: Path, data: Dict[str, Any]) -> bool:
             print("Success!")
     """
     result = write_memory_file(file_path, data)
-    return result['success']
+    return result["success"]
 
 
 # =============================================================================
 # VALIDATION HELPERS
 # =============================================================================
+
 
 def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
     """
@@ -318,16 +290,16 @@ def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
     if not isinstance(data, dict):
         return False, "Data is not a dictionary"
 
-    if 'document_metadata' not in data:
+    if "document_metadata" not in data:
         return False, "Missing 'document_metadata' field"
 
-    metadata = data['document_metadata']
+    metadata = data["document_metadata"]
 
     if not isinstance(metadata, dict):
         return False, "'document_metadata' is not a dictionary"
 
     # Check for expected fields
-    expected = ['document_type', 'document_name', 'version']
+    expected = ["document_type", "document_name", "version"]
     missing = [field for field in expected if field not in metadata]
 
     if missing:
@@ -357,11 +329,11 @@ if __name__ == "__main__":
         print(f"[TEST] Reading {test_file.name}...")
         result = read_memory_file(test_file)
 
-        if result['success']:
-            file_data = result['data']
+        if result["success"]:
+            file_data = result["data"]
             print("+ Read successful")
             print(f"   Document type: {file_data.get('document_metadata', {}).get('document_type')}")
-            file_status = file_data.get('document_metadata', {}).get('status', {}).get('health')
+            file_status = file_data.get("document_metadata", {}).get("status", {}).get("health")
             print(f"   Status: {file_status}")
 
             # Validate structure

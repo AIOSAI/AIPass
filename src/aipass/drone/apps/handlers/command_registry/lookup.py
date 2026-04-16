@@ -40,6 +40,7 @@ MODULE_NAME = "command_lookup"
 # Lookup functions
 # ---------------------------------------------------------------------------
 
+
 def lookup_command(name: str) -> dict[str, Any] | None:
     """Look up a custom command by exact name.
 
@@ -126,10 +127,7 @@ def list_commands_by_branch(branch_name: str) -> list[dict[str, Any]]:
     try:
         registry = load_registry()
         commands = registry.get("commands", {})
-        filtered = [
-            cmd for cmd in commands.values()
-            if cmd.get("source_branch") == branch_name
-        ]
+        filtered = [cmd for cmd in commands.values() if cmd.get("source_branch") == branch_name]
         return sorted(filtered, key=lambda c: c.get("name", ""))
     except Exception as exc:
         logger.error("[%s] Failed to list commands for branch '%s': %s", MODULE_NAME, branch_name, exc)

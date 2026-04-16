@@ -54,6 +54,7 @@ def _get_memory_python() -> str:
 # COMMAND HANDLERS
 # =============================================================================
 
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle verify commands with seedgo-compliant introspection.
@@ -71,18 +72,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     # Top-level help (backward compat -- entry point may send these)
-    if command in ('--help', '-h', 'help'):
+    if command in ("--help", "-h", "help"):
         print_help()
         return True
 
-    if command == 'verify':
+    if command == "verify":
         # No args -> introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
         # --help / -h / help -> full help
-        if args[0] in ('--help', '-h', 'help'):
+        if args[0] in ("--help", "-h", "help"):
             print_help()
             return True
 
@@ -98,6 +99,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # VERIFICATION LOGIC
 # =============================================================================
 
+
 def _check_plan_subprocess(plan_label: str) -> dict:
     """
     Check plan vectorization via chroma_subprocess.
@@ -109,33 +111,31 @@ def _check_plan_subprocess(plan_label: str) -> dict:
         Dict with success, found, count, source_files
     """
     python_path = _get_memory_python()
-    input_data = json.dumps({
-        'operation': 'check_plan',
-        'plan_label': plan_label,
-    })
+    input_data = json.dumps(
+        {
+            "operation": "check_plan",
+            "plan_label": plan_label,
+        }
+    )
 
     try:
         result = subprocess.run(
-            [python_path, str(CHROMA_SUBPROCESS_SCRIPT)],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=60
+            [python_path, str(CHROMA_SUBPROCESS_SCRIPT)], input=input_data, capture_output=True, text=True, timeout=60
         )
 
         if result.returncode != 0:
-            return {'success': False, 'error': result.stderr or 'Subprocess failed'}
+            return {"success": False, "error": result.stderr or "Subprocess failed"}
 
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired:
         logger.warning("[verify] Plan check subprocess timed out")
-        return {'success': False, 'error': 'Check operation timed out'}
+        return {"success": False, "error": "Check operation timed out"}
     except json.JSONDecodeError as e:
         logger.warning(f"[verify] Invalid JSON from plan check subprocess: {e}")
-        return {'success': False, 'error': f'Invalid JSON response: {e}'}
+        return {"success": False, "error": f"Invalid JSON response: {e}"}
     except Exception as e:
         logger.error(f"[verify] Plan check subprocess failed: {e}")
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 def is_plan_vectorized(plan_label: str) -> dict:
@@ -162,13 +162,13 @@ def _verify_plan(plan_label: str) -> None:
     """
     result = _check_plan_subprocess(plan_label)
 
-    if not result.get('success'):
-        error(result.get('error', 'Unknown error'))
+    if not result.get("success"):
+        error(result.get("error", "Unknown error"))
         json_handler.log_operation("verify_plan", {"plan_label": plan_label, "success": False})
         return
 
-    found = result.get('found', False)
-    count = result.get('count', 0)
+    found = result.get("found", False)
+    count = result.get("count", 0)
 
     console.print()
     if found:
@@ -177,17 +177,21 @@ def _verify_plan(plan_label: str) -> None:
         console.print(f"  Plan {plan_label}: [red]NOT vectorized[/red]")
     console.print()
 
-    json_handler.log_operation("verify_plan", {
-        "plan_label": plan_label,
-        "found": found,
-        "count": count,
-        "success": True,
-    })
+    json_handler.log_operation(
+        "verify_plan",
+        {
+            "plan_label": plan_label,
+            "found": found,
+            "count": count,
+            "success": True,
+        },
+    )
 
 
 # =============================================================================
 # INTROSPECTION
 # =============================================================================
+
 
 def _discover_handlers() -> dict[str, list[str]]:
     """Auto-discover handler directories and their Python files.
@@ -205,10 +209,7 @@ def _discover_handlers() -> dict[str, list[str]]:
     for d in sorted(handlers_dir.iterdir()):
         if not d.is_dir() or d.name.startswith("__"):
             continue
-        py_files = sorted(
-            f.name for f in d.iterdir()
-            if f.is_file() and f.suffix == ".py" and f.name != "__init__.py"
-        )
+        py_files = sorted(f.name for f in d.iterdir() if f.is_file() and f.suffix == ".py" and f.name != "__init__.py")
         if py_files:
             result[d.name] = py_files
     return result
@@ -238,7 +239,7 @@ def print_introspection() -> None:
 
     # Next-step hints
     console.print("[yellow]Next:[/yellow]")
-    console.print('  [green]drone @memory verify FPLAN-0126[/green]     [dim]# Check if plan is vectorized[/dim]')
+    console.print("  [green]drone @memory verify FPLAN-0126[/green]     [dim]# Check if plan is vectorized[/dim]")
     console.print("  [green]drone @memory verify --help[/green]         [dim]# Full usage guide[/dim]")
     console.print()
 
@@ -273,12 +274,12 @@ def print_help() -> None:
 if __name__ == "__main__":
     # No args -> introspection (seedgo standard)
     if len(sys.argv) < 2:
-        handle_command('verify', [])
+        handle_command("verify", [])
         sys.exit(0)
 
     # --help -> full help
-    if sys.argv[1] in ('--help', '-h', 'help'):
-        handle_command('verify', ['--help'])
+    if sys.argv[1] in ("--help", "-h", "help"):
+        handle_command("verify", ["--help"])
         sys.exit(0)
 
     # Execute command via handle_command

@@ -40,9 +40,7 @@ _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
 if _handler_pkg not in sys.modules:
     _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = (
-        Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    )
+    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
     sys.modules[_handler_pkg] = _stub
 
@@ -69,8 +67,7 @@ for _candidate in _JSON_DIR_CANDIDATES:
 
 if _JSON_DIR_ATTR is None:
     pytest.skip(
-        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler — "
-        f"tried: {_JSON_DIR_CANDIDATES}",
+        f"Cannot find JSON_DIR attribute on {BRANCH_MODULE}.json_handler — tried: {_JSON_DIR_CANDIDATES}",
         allow_module_level=True,
     )
 
@@ -78,6 +75,7 @@ if _JSON_DIR_ATTR is None:
 # ---------------------------------------------------------------------------
 # Default factory discovery
 # ---------------------------------------------------------------------------
+
 
 def _get_default_for_type(json_type: str, module_name: str = "test_mod") -> Any:
     """Call whichever default factory the branch exposes."""
@@ -113,6 +111,7 @@ def _default_factory_raises_on_unknown() -> bool:
 # Isolation fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def isolate_json_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect JSON operations to tmp_path for test isolation."""
@@ -130,6 +129,7 @@ def _json_dir_as_path(tmp_path: Path) -> Path:
 # ============================================================================
 # Group 1 — _create_default / default templates
 # ============================================================================
+
 
 def test_default_config_returns_dict_with_required_keys() -> None:
     if not _has_default_factory():
@@ -168,6 +168,7 @@ def test_default_unknown_type_raises_value_error() -> None:
 # ============================================================================
 # Group 2 — validate_json_structure
 # ============================================================================
+
 
 def test_validate_valid_config() -> None:
     data = {"module_name": "x", "version": "1.0.0", "config": {}}
@@ -220,6 +221,7 @@ def test_validate_none_input_returns_false() -> None:
 # Group 3 — get_json_path
 # ============================================================================
 
+
 def test_get_json_path_returns_path_type(tmp_path: Path) -> None:
     result = json_handler.get_json_path("mymod", "config")
     assert isinstance(result, (Path, str))
@@ -240,6 +242,7 @@ def test_get_json_path_different_combos_differ(tmp_path: Path) -> None:
 # ============================================================================
 # Group 4 — ensure_json_exists
 # ============================================================================
+
 
 def test_ensure_creates_file_when_missing(tmp_path: Path) -> None:
     result = json_handler.ensure_json_exists("ens_mod", "config")
@@ -298,6 +301,7 @@ def test_ensure_returns_bool(tmp_path: Path) -> None:
 # Group 5 — load_json
 # ============================================================================
 
+
 def test_load_creates_default_when_missing(tmp_path: Path) -> None:
     result = json_handler.load_json("fresh_mod", "log")
     assert result is not None
@@ -329,6 +333,7 @@ def test_load_returns_list_for_log(tmp_path: Path) -> None:
 # ============================================================================
 # Group 6 — save_json
 # ============================================================================
+
 
 def test_save_roundtrip(tmp_path: Path) -> None:
     json_dir = _json_dir_as_path(tmp_path)
@@ -384,6 +389,7 @@ def test_save_writes_valid_json_to_disk(tmp_path: Path) -> None:
 # Group 7 — log_operation
 # ============================================================================
 
+
 def test_log_operation_appends_entry(tmp_path: Path) -> None:
     json_handler.log_operation("deploy", module_name="logmod")
     json_dir = _json_dir_as_path(tmp_path)
@@ -427,6 +433,7 @@ def test_log_operation_multiple_calls_accumulate(tmp_path: Path) -> None:
 # ============================================================================
 # Group 8 — ensure_module_jsons
 # ============================================================================
+
 
 def test_ensure_module_jsons_creates_all_three(tmp_path: Path) -> None:
     json_handler.ensure_module_jsons("triple")

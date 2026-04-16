@@ -3,21 +3,24 @@
 from unittest.mock import MagicMock, patch
 
 
-
 # ─── Helpers ─────────────────────────────────────────────
+
 
 def _import_extract_prefix():
     from aipass.flow.apps.handlers.plan.close_ops import _extract_prefix
+
     return _extract_prefix
 
 
 def _import_close_plan_impl():
     from aipass.flow.apps.handlers.plan.close_ops import close_plan_impl
+
     return close_plan_impl
 
 
 def _import_close_all_plans_impl():
     from aipass.flow.apps.handlers.plan.close_ops import close_all_plans_impl
+
     return close_all_plans_impl
 
 
@@ -43,8 +46,8 @@ def _make_deps(**overrides) -> dict:
 # 1. _extract_prefix
 # ═══════════════════════════════════════════════════════════
 
-class TestExtractPrefix:
 
+class TestExtractPrefix:
     def test_fplan_prefix(self):
         fn = _import_extract_prefix()
         assert fn("FPLAN-0001") == "FPLAN"
@@ -90,6 +93,7 @@ class TestExtractPrefix:
 # ═══════════════════════════════════════════════════════════
 # 2. close_plan_impl — single plan closure
 # ═══════════════════════════════════════════════════════════
+
 
 class TestClosePlanImplNoNumber:
     """Plan number is required for single plan closure."""
@@ -261,9 +265,11 @@ class TestClosePlanImplSuccess:
         deps["load_registry"].return_value = registry
         deps["validate_plan_exists"].return_value = (True, None)
 
-        with patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=True), \
-             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler"), \
-             patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True):
+        with (
+            patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=True),
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler"),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+        ):
             result = close_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is True
@@ -325,6 +331,7 @@ class TestClosePlanImplValueError:
 # ═══════════════════════════════════════════════════════════
 # 3. close_all_plans_impl
 # ═══════════════════════════════════════════════════════════
+
 
 class TestCloseAllNoPlans:
     """No open plans to close."""
@@ -403,10 +410,12 @@ class TestCloseAllPartialFailure:
         ]
         mock_get = MagicMock(return_value=open_plans)
         # First succeeds, second fails
-        mock_close = MagicMock(side_effect=[
-            {"success": True, "messages": []},
-            {"success": False, "messages": []},
-        ])
+        mock_close = MagicMock(
+            side_effect=[
+                {"success": True, "messages": []},
+                {"success": False, "messages": []},
+            ]
+        )
 
         result = close_all(get_open_plans=mock_get, close_plan_fn=mock_close)
         assert result["success"] is True  # At least one succeeded

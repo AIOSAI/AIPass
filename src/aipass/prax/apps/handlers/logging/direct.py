@@ -45,6 +45,8 @@ class RotatingFileHandler(_BaseRotatingFileHandler):
             super().doRollover()
         except (PermissionError, OSError) as exc:
             logger.warning("Log rotation skipped (file locked): %s", exc)
+
+
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -53,7 +55,7 @@ from aipass.prax.apps.handlers.config.load import (
     get_module_logs_dir,
     DEFAULT_LOG_LEVEL,
     load_log_config,
-    lines_to_bytes
+    lines_to_bytes,
 )
 from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
 from aipass.prax.apps.handlers.json import json_handler
@@ -87,25 +89,21 @@ def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
             current = current.f_back
             if current is None:
                 break
-            path = current.f_globals.get('__file__', '')
+            path = current.f_globals.get("__file__", "")
             if not path:
                 continue
             # Only skip our own internal frames
-            if '/logging/direct.py' in path or '/modules/logger.py' in path:
+            if "/logging/direct.py" in path or "/modules/logger.py" in path:
                 continue
             module_name = Path(path).stem
             branch_path = detect_branch_from_path(path)
             return module_name, branch_path
-        return 'unknown_module', None
+        return "unknown_module", None
     finally:
         del frame
 
 
-def _create_direct_logger(
-    module_name: str,
-    branch_name: str,
-    branch_path: Optional[str]
-) -> logging.Logger:
+def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optional[str]) -> logging.Logger:
     """Create a standalone logger with dual RotatingFileHandlers.
 
     Same dual-logging setup as setup_individual_logger but with NO
@@ -128,33 +126,30 @@ def _create_direct_logger(
     logger.propagate = False  # Critical: no root logger propagation
 
     config = load_log_config()
-    formatter = logging.Formatter(
-        config['log_format'],
-        config['date_format']
-    )
+    formatter = logging.Formatter(config["log_format"], config["date_format"])
 
     target = branch_name if branch_path else "prax"
 
     # Handler 1: System-wide log (central aggregation)
     sys_log_file = get_system_logs_dir() / f"{target}_{module_name}.log"
-    sys_limits = config['system_logs']
+    sys_limits = config["system_logs"]
     sys_handler = RotatingFileHandler(
         sys_log_file,
-        maxBytes=lines_to_bytes(sys_limits['max_lines']),
-        backupCount=sys_limits['backup_count'],
-        encoding='utf-8'
+        maxBytes=lines_to_bytes(sys_limits["max_lines"]),
+        backupCount=sys_limits["backup_count"],
+        encoding="utf-8",
     )
     sys_handler.setFormatter(formatter)
     logger.addHandler(sys_handler)
 
     # Handler 2: Module-local log (local debugging)
     local_log_file = get_module_logs_dir(target) / f"{module_name}.log"
-    local_limits = config['local_logs']
+    local_limits = config["local_logs"]
     local_handler = RotatingFileHandler(
         local_log_file,
-        maxBytes=lines_to_bytes(local_limits['max_lines']),
-        backupCount=local_limits['backup_count'],
-        encoding='utf-8'
+        maxBytes=lines_to_bytes(local_limits["max_lines"]),
+        backupCount=local_limits["backup_count"],
+        encoding="utf-8",
     )
     local_handler.setFormatter(formatter)
     logger.addHandler(local_handler)
@@ -162,10 +157,7 @@ def _create_direct_logger(
     return logger
 
 
-def _get_or_create_logger(
-    module_name: str,
-    branch_path: Optional[str]
-) -> logging.Logger:
+def _get_or_create_logger(module_name: str, branch_path: Optional[str]) -> logging.Logger:
     """Get cached logger or create a new one.
 
     Args:
@@ -178,9 +170,7 @@ def _get_or_create_logger(
     branch_name = Path(branch_path).name if branch_path else "unknown"
     key = f"{branch_name}_{module_name}"
     if key not in _direct_loggers:
-        _direct_loggers[key] = _create_direct_logger(
-            module_name, branch_name, branch_path
-        )
+        _direct_loggers[key] = _create_direct_logger(module_name, branch_name, branch_path)
     return _direct_loggers[key]
 
 
@@ -209,9 +199,7 @@ class DirectLogger:
             The cached direct logger instance.
         """
         if self._logger is None:
-            self._logger = _get_or_create_logger(
-                self._module_name, self._branch_path
-            )
+            self._logger = _get_or_create_logger(self._module_name, self._branch_path)
         return self._logger
 
     def info(self, message: str, *args, **kwargs) -> None:

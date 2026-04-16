@@ -298,11 +298,11 @@ def _global_prompt_md(name: str) -> str:
         "\n"
         "### Dispatch — Send Task + Wake an Agent (DEFAULT)\n"
         "```\n"
-        "drone @ai_mail dispatch @<agent> \"Subject\" \"Body\"        # Send + wake (default)\n"
-        "drone @ai_mail dispatch @<agent> \"Subject\" \"Body\" --fresh # Send + wake fresh session\n"
+        'drone @ai_mail dispatch @<agent> "Subject" "Body"        # Send + wake (default)\n'
+        'drone @ai_mail dispatch @<agent> "Subject" "Body" --fresh # Send + wake fresh session\n'
         "drone @ai_mail dispatch wake @<agent>                    # Wake without sending\n"
         "drone @ai_mail dispatch wake --fresh @<agent>            # Wake fresh\n"
-        "drone @ai_mail email @<agent> \"Subject\" \"Body\"           # FYI only (no wake)\n"
+        'drone @ai_mail email @<agent> "Subject" "Body"           # FYI only (no wake)\n'
         "```\n"
         "\n"
         "Use `dispatch` by default. Use `email` only when you don't need the agent to act now.\n"
@@ -316,14 +316,14 @@ def _global_prompt_md(name: str) -> str:
         "\n"
         "### Feedback\n"
         "```\n"
-        "drone @devpulse feedback send \"Subject\" \"Body\"  # Send feedback (cross-project)\n"
+        'drone @devpulse feedback send "Subject" "Body"  # Send feedback (cross-project)\n'
         "```\n"
         "\n"
         "### Plans (flow)\n"
         "```\n"
-        "drone @flow create . \"Subject\" dplan   # Create DPLAN (design/thinking)\n"
-        "drone @flow create . \"Subject\" master  # Create FPLAN master (execution)\n"
-        "drone @flow create . \"Subject\" aplan   # Create APLAN (agent-level task)\n"
+        'drone @flow create . "Subject" dplan   # Create DPLAN (design/thinking)\n'
+        'drone @flow create . "Subject" master  # Create FPLAN master (execution)\n'
+        'drone @flow create . "Subject" aplan   # Create APLAN (agent-level task)\n'
         "drone @flow list open                  # List active plans\n"
         "drone @flow list                       # List all plans\n"
         "drone @flow close <id>                 # Close a plan\n"
@@ -422,9 +422,9 @@ def _claude_settings(aipass_home: str | None = None) -> str:
     """
     _local_prompt_cmd = (
         'python3 -c "'
-        'from pathlib import Path; '
+        "from pathlib import Path; "
         "p=next((x/'.aipass'/'aipass_local_prompt.md' "
-        'for x in [Path.cwd(),*Path.cwd().parents] '
+        "for x in [Path.cwd(),*Path.cwd().parents] "
         "if (x/'.aipass'/'aipass_local_prompt.md').exists()),None); "
         "p and print(p.read_text(encoding='utf-8'),end='')"
         '"'
@@ -545,16 +545,19 @@ def _prep_md() -> str:
 
 def _inbox_json() -> str:
     """Generate .ai_mail.local/inbox.json — empty project mailbox structure."""
-    return json.dumps(
-        {
-            "mailbox": "inbox",
-            "total_messages": 0,
-            "unread_count": 0,
-            "messages": [],
-        },
-        indent=2,
-        ensure_ascii=False,
-    ) + "\n"
+    return (
+        json.dumps(
+            {
+                "mailbox": "inbox",
+                "total_messages": 0,
+                "unread_count": 0,
+                "messages": [],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
 def _with_source(content: str, file_path: Path) -> str:
@@ -590,10 +593,7 @@ def init_project(target: Path, project_name: str | None = None) -> dict:
     raw_name = project_name or target.name
     name = _sanitize_name(raw_name)
     if not name:
-        raise ValueError(
-            f"Cannot derive project name from '{raw_name}'. "
-            "Pass a project name explicitly."
-        )
+        raise ValueError(f"Cannot derive project name from '{raw_name}'. Pass a project name explicitly.")
 
     registry_id = str(uuid.uuid4())
     today = date.today().isoformat()
@@ -675,12 +675,7 @@ def init_project(target: Path, project_name: str | None = None) -> dict:
     status_md_path = target / "STATUS.local.md"
     if not status_md_path.exists():
         status_md_path.write_text(
-            f"# {name}\n\n"
-            "**State:** New\n"
-            f"**Last update:** {today}\n\n"
-            "## Current Work\n\n"
-            "## Known Issues\n"
-            "- None\n",
+            f"# {name}\n\n**State:** New\n**Last update:** {today}\n\n## Current Work\n\n## Known Issues\n- None\n",
             encoding="utf-8",
         )
         created.append(str(status_md_path))
@@ -761,9 +756,7 @@ def update_project(target: Path) -> dict:
     # derive the project name without parsing JSON (filename encodes the name).
     registry_files = list(target.glob("*_REGISTRY.json"))
     if not registry_files:
-        raise ValueError(
-            "No AIPass project found — run 'aipass init' first"
-        )
+        raise ValueError("No AIPass project found — run 'aipass init' first")
     registry_path = registry_files[0]
     name = registry_path.stem.replace("_REGISTRY", "")
 

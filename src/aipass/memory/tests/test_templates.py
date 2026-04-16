@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 # Helpers: build the full mock graph that templates.py needs at import time
 # ---------------------------------------------------------------------------
 
+
 def _prepare_templates_mocks(monkeypatch):
     """Insert mocks for every module-level import templates.py touches.
 
@@ -58,38 +59,62 @@ def _prepare_templates_mocks(monkeypatch):
 
     # -- aipass.memory.apps.handlers.templates.pusher --
     mock_pusher = MagicMock()
-    mock_pusher.push_templates = MagicMock(return_value={
-        "success": True, "branches_scanned": 5, "branches_updated": 2,
-        "files_modified": 3, "changes": [], "errors": [],
-    })
-    mock_pusher.get_template_status = MagicMock(return_value={
-        "version": "2.0.0", "last_push": "2026-03-20",
-        "local_template_exists": True, "observations_template_exists": True,
-        "templates_dir": "/tmp/templates", "last_push_branches": [],
-    })
+    mock_pusher.push_templates = MagicMock(
+        return_value={
+            "success": True,
+            "branches_scanned": 5,
+            "branches_updated": 2,
+            "files_modified": 3,
+            "changes": [],
+            "errors": [],
+        }
+    )
+    mock_pusher.get_template_status = MagicMock(
+        return_value={
+            "version": "2.0.0",
+            "last_push": "2026-03-20",
+            "local_template_exists": True,
+            "observations_template_exists": True,
+            "templates_dir": "/tmp/templates",
+            "last_push_branches": [],
+        }
+    )
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.templates.pusher", mock_pusher)
 
     # -- aipass.memory.apps.handlers.templates.differ --
     mock_differ = MagicMock()
-    mock_differ.diff_template_vs_branch = MagicMock(return_value={
-        "local": [], "observations": [], "errors": [],
-    })
+    mock_differ.diff_template_vs_branch = MagicMock(
+        return_value={
+            "local": [],
+            "observations": [],
+            "errors": [],
+        }
+    )
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.templates.differ", mock_differ)
 
     # -- aipass.memory.apps.handlers.templates.spawn_pusher --
     mock_spawn_pusher = MagicMock()
-    mock_spawn_pusher.push_to_spawn_templates = MagicMock(return_value={
-        "success": True, "template_sets_found": [], "template_sets_updated": 0,
-        "files_modified": 0, "changes": [],
-    })
+    mock_spawn_pusher.push_to_spawn_templates = MagicMock(
+        return_value={
+            "success": True,
+            "template_sets_found": [],
+            "template_sets_updated": 0,
+            "files_modified": 0,
+            "changes": [],
+        }
+    )
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.templates.spawn_pusher", mock_spawn_pusher)
 
     # -- parent packages that Python needs to resolve dotted imports --
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.templates", MagicMock(
-        pusher=mock_pusher,
-        differ=mock_differ,
-        spawn_pusher=mock_spawn_pusher,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "aipass.memory.apps.handlers.templates",
+        MagicMock(
+            pusher=mock_pusher,
+            differ=mock_differ,
+            spawn_pusher=mock_spawn_pusher,
+        ),
+    )
 
     return {
         "console": mock_console,
@@ -126,6 +151,7 @@ def _import_templates(monkeypatch):
 # ===========================================================================
 # Tests: _find_repo_root
 # ===========================================================================
+
 
 class TestFindRepoRoot:
     """Tests for _find_repo_root -- walks up from __file__ to find AIPASS_REGISTRY.json."""
@@ -195,6 +221,7 @@ class TestFindRepoRoot:
 # ===========================================================================
 # Tests: _discover_handlers
 # ===========================================================================
+
 
 class TestDiscoverHandlers:
     """Tests for _discover_handlers -- auto-discovers handler directories."""
@@ -336,6 +363,7 @@ class TestDiscoverHandlers:
 # ===========================================================================
 # Tests: handle_command routing
 # ===========================================================================
+
 
 class TestHandleCommand:
     """Tests for handle_command -- routes subcommands correctly."""
@@ -573,6 +601,7 @@ class TestHandleCommand:
 # Tests: _load_branches_from_registry
 # ===========================================================================
 
+
 class TestLoadBranchesFromRegistry:
     """Tests for _load_branches_from_registry -- loads active branches from registry."""
 
@@ -675,6 +704,7 @@ class TestLoadBranchesFromRegistry:
 # ===========================================================================
 # Tests: _SUBCOMMANDS dict
 # ===========================================================================
+
 
 class TestSubcommands:
     """Verify the _SUBCOMMANDS dict exists with expected keys."""

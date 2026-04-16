@@ -50,7 +50,7 @@ def _get_caller_module_name() -> str:
     if len(stack) > 2:
         caller_path = Path(stack[2].filename)
         module_name = caller_path.stem
-        if module_name and not module_name.startswith('_'):
+        if module_name and not module_name.startswith("_"):
             return module_name
     return "unknown"
 

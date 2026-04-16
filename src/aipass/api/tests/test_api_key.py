@@ -461,7 +461,9 @@ def test_handle_command_logs_operation(mock_jh, mock_header, mock_console):
 @patch(PATCH_ERROR)
 @patch(PATCH_JSON_HANDLER)
 @patch(PATCH_KEYS)
-def test_handle_command_logs_operation_for_get_key(mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console):
+def test_handle_command_logs_operation_for_get_key(
+    mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console
+):
     """get-key command should log api_key_get-key operation."""
     mock_keys.get_api_key.return_value = "FAKE-sk-test1234567890"
 
@@ -536,13 +538,10 @@ class TestGetKeyFromConfig:
         config_dir = tmp_path / "api_json"
         config_dir.mkdir()
         config_file = config_dir / "api_connect_config.json"
-        config_file.write_text(json.dumps({
-            "config": {
-                "providers": {
-                    "openrouter": {"api_key": "FAKE-sk-or-testkey-abc123"}
-                }
-            }
-        }), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"config": {"providers": {"openrouter": {"api_key": "FAKE-sk-or-testkey-abc123"}}}}),
+            encoding="utf-8",
+        )
 
         monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
 
@@ -565,13 +564,9 @@ class TestGetKeyFromConfig:
         config_dir = tmp_path / "api_json"
         config_dir.mkdir()
         config_file = config_dir / "api_connect_config.json"
-        config_file.write_text(json.dumps({
-            "config": {
-                "providers": {
-                    "openai": {"api_key": "FAKE-sk-openai-key-123"}
-                }
-            }
-        }), encoding="utf-8")
+        config_file.write_text(
+            json.dumps({"config": {"providers": {"openai": {"api_key": "FAKE-sk-openai-key-123"}}}}), encoding="utf-8"
+        )
 
         monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
 
@@ -585,13 +580,7 @@ class TestGetKeyFromConfig:
         config_dir = tmp_path / "api_json"
         config_dir.mkdir()
         config_file = config_dir / "api_connect_config.json"
-        config_file.write_text(json.dumps({
-            "config": {
-                "providers": {
-                    "openrouter": {"api_key": ""}
-                }
-            }
-        }), encoding="utf-8")
+        config_file.write_text(json.dumps({"config": {"providers": {"openrouter": {"api_key": ""}}}}), encoding="utf-8")
 
         monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
 
@@ -633,15 +622,20 @@ class TestGetKeyFromConfig:
         config_dir = tmp_path / "api_json"
         config_dir.mkdir()
         config_file = config_dir / "api_connect_config.json"
-        config_file.write_text(json.dumps({
-            "config": {
-                "providers": {
-                    "openrouter": {"api_key": "FAKE-sk-or-key"},
-                    "openai": {"api_key": "FAKE-sk-openai-key"},
-                    "anthropic": {"api_key": "FAKE-sk-ant-key"},
+        config_file.write_text(
+            json.dumps(
+                {
+                    "config": {
+                        "providers": {
+                            "openrouter": {"api_key": "FAKE-sk-or-key"},
+                            "openai": {"api_key": "FAKE-sk-openai-key"},
+                            "anthropic": {"api_key": "FAKE-sk-ant-key"},
+                        }
+                    }
                 }
-            }
-        }), encoding="utf-8")
+            ),
+            encoding="utf-8",
+        )
 
         monkeypatch.setattr(auth_keys, "API_JSON_DIR", config_dir)
 

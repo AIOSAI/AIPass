@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for readme handlers."""
@@ -50,9 +51,11 @@ def _mock_infrastructure(monkeypatch):
 # Tests -- readme_generator.generate_tree_section
 # ---------------------------------------------------------------------------
 
+
 def test_generate_tree_section_nonexistent():
     """generate_tree_section returns empty string for missing directory."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_tree_section
+
     result = generate_tree_section("/nonexistent/path")
     assert result == ""
 
@@ -64,6 +67,7 @@ def test_generate_tree_section_basic(tmp_path):
     (apps_dir / "main.py").write_text("# entry\n", encoding="utf-8")
 
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_tree_section
+
     result = generate_tree_section(str(tmp_path))
     assert result.startswith("```")
     assert result.endswith("```")
@@ -78,6 +82,7 @@ def test_generate_tree_section_excludes_pycache(tmp_path):
     (tmp_path / "real_file.py").write_text("# code\n", encoding="utf-8")
 
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_tree_section
+
     result = generate_tree_section(str(tmp_path))
     assert "__pycache__" not in result
 
@@ -86,15 +91,18 @@ def test_generate_tree_section_excludes_pycache(tmp_path):
 # Tests -- readme_generator._should_skip_entry
 # ---------------------------------------------------------------------------
 
+
 def test_should_skip_entry_pycache():
     """_should_skip_entry skips __pycache__."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _should_skip_entry
+
     assert _should_skip_entry("__pycache__") is True
 
 
 def test_should_skip_entry_hidden():
     """_should_skip_entry skips hidden directories (dot-prefixed)."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _should_skip_entry
+
     assert _should_skip_entry(".git") is True
     assert _should_skip_entry(".env") is True
 
@@ -102,6 +110,7 @@ def test_should_skip_entry_hidden():
 def test_should_skip_entry_normal_file():
     """_should_skip_entry does not skip normal files."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _should_skip_entry
+
     assert _should_skip_entry("main.py") is False
     assert _should_skip_entry("apps") is False
 
@@ -110,9 +119,11 @@ def test_should_skip_entry_normal_file():
 # Tests -- readme_generator.generate_modules_section
 # ---------------------------------------------------------------------------
 
+
 def test_generate_modules_section_no_modules(tmp_path):
     """generate_modules_section returns empty string when no modules dir."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_modules_section
+
     result = generate_modules_section(str(tmp_path))
     assert result == ""
 
@@ -128,6 +139,7 @@ def test_generate_modules_section_with_modules(tmp_path):
     (modules_dir / "__init__.py").write_text("", encoding="utf-8")
 
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_modules_section
+
     result = generate_modules_section(str(tmp_path))
     assert "audit_ops" in result
     assert "Audit Operations Module" in result
@@ -137,9 +149,11 @@ def test_generate_modules_section_with_modules(tmp_path):
 # Tests -- readme_generator.generate_last_updated
 # ---------------------------------------------------------------------------
 
+
 def test_generate_last_updated_format():
     """generate_last_updated returns a date string in expected format."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_last_updated
+
     result = generate_last_updated()
     assert result.startswith("*Last Updated:")
     assert result.endswith("*")
@@ -149,9 +163,11 @@ def test_generate_last_updated_format():
 # Tests -- readme_generator.generate_all_sections
 # ---------------------------------------------------------------------------
 
+
 def test_generate_all_sections_returns_dict(tmp_path):
     """generate_all_sections returns a dict with all section names."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import generate_all_sections
+
     result = generate_all_sections(str(tmp_path))
     assert isinstance(result, dict)
     for key in ("header", "tree", "modules", "commands", "last_updated"):
@@ -162,9 +178,11 @@ def test_generate_all_sections_returns_dict(tmp_path):
 # Tests -- readme_generator._extract_description_from_content
 # ---------------------------------------------------------------------------
 
+
 def test_extract_description_from_docstring():
     """_extract_description_from_content extracts first docstring line."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _extract_description_from_content
+
     content = '"""My cool module\n\nMore details here.\n"""\nx = 1\n'
     assert _extract_description_from_content(content) == "My cool module"
 
@@ -172,6 +190,7 @@ def test_extract_description_from_docstring():
 def test_extract_description_from_meta_header():
     """_extract_description_from_content extracts from META Name line."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _extract_description_from_content
+
     content = '# Name: mod.py - The Description\n"""Docstring"""\n'
     assert _extract_description_from_content(content) == "The Description"
 
@@ -179,4 +198,5 @@ def test_extract_description_from_meta_header():
 def test_extract_description_empty():
     """_extract_description_from_content returns empty for bare code."""
     from aipass.seedgo.apps.handlers.readme.readme_generator import _extract_description_from_content
+
     assert _extract_description_from_content("x = 1\ny = 2\n") == ""

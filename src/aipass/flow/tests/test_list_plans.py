@@ -87,9 +87,7 @@ class TestHandleCommandRouting:
 
     def test_unknown_filter_defaults_to_open_with_warning(self):
         """Unknown filter arg should default to 'open' and emit a warning."""
-        with patch(f"{_MOD}.list_plans") as mock_lp, \
-             patch(f"{_MOD}.warning") as mock_warn, \
-             patch(f"{_MOD}.console"):
+        with patch(f"{_MOD}.list_plans") as mock_lp, patch(f"{_MOD}.warning") as mock_warn, patch(f"{_MOD}.console"):
             from aipass.flow.apps.modules.list_plans import handle_command
 
             result = handle_command("list", ["garbage"])
@@ -101,8 +99,7 @@ class TestHandleCommandRouting:
 
     def test_json_handler_called_on_filter_commands(self):
         """json_handler.log_operation should be called for filter commands."""
-        with patch(f"{_MOD}.list_plans"), \
-             patch(f"{_MOD}.json_handler") as mock_jh:
+        with patch(f"{_MOD}.list_plans"), patch(f"{_MOD}.json_handler") as mock_jh:
             from aipass.flow.apps.modules.list_plans import handle_command
 
             result = handle_command("list", ["open"])
@@ -132,8 +129,10 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl, \
-             patch(f"{_MOD}.console") as mock_console:
+        with (
+            patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl,
+            patch(f"{_MOD}.console") as mock_console,
+        ):
             from aipass.flow.apps.modules.list_plans import list_plans
 
             result = list_plans("open")
@@ -155,8 +154,7 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), \
-             patch(f"{_MOD}.warning") as mock_warn:
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.warning") as mock_warn:
             from aipass.flow.apps.modules.list_plans import list_plans
 
             result = list_plans("all")
@@ -175,8 +173,7 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), \
-             patch(f"{_MOD}.error") as mock_error:
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
             from aipass.flow.apps.modules.list_plans import list_plans
 
             result = list_plans("open")
@@ -195,8 +192,7 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), \
-             patch(f"{_MOD}.error") as mock_error:
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
             from aipass.flow.apps.modules.list_plans import list_plans
 
             result = list_plans("open")
@@ -214,11 +210,13 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl, \
-             patch(f"{_MOD}.load_registry") as mock_lr, \
-             patch(f"{_MOD}.get_registry_statistics") as mock_gs, \
-             patch(f"{_MOD}.format_plans_list") as mock_fpl, \
-             patch(f"{_MOD}.format_statistics_summary") as mock_fss:
+        with (
+            patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl,
+            patch(f"{_MOD}.load_registry") as mock_lr,
+            patch(f"{_MOD}.get_registry_statistics") as mock_gs,
+            patch(f"{_MOD}.format_plans_list") as mock_fpl,
+            patch(f"{_MOD}.format_statistics_summary") as mock_fss,
+        ):
             from aipass.flow.apps.modules.list_plans import list_plans
 
             list_plans("closed")
@@ -241,8 +239,7 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), \
-             patch(f"{_MOD}.console") as mock_console:
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.console") as mock_console:
             mock_console.print.side_effect = BrokenPipeError("pipe closed")
 
             from aipass.flow.apps.modules.list_plans import list_plans
@@ -262,8 +259,7 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), \
-             patch(f"{_MOD}.error") as mock_error:
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
             mock_error.side_effect = BrokenPipeError("pipe closed")
 
             from aipass.flow.apps.modules.list_plans import list_plans

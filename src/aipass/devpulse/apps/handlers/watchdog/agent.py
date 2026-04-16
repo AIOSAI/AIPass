@@ -60,7 +60,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
 
     registry_file = repo_root / "AIPASS_REGISTRY.json"
     try:
-        registry = json.loads(registry_file.read_text(encoding='utf-8'))
+        registry = json.loads(registry_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("[watchdog.agent] failed to read registry: %s", exc)
         return None
@@ -79,7 +79,7 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
 def _is_zombie_linux(pid: int) -> bool:
     """Linux-only zombie check via /proc. Returns True if zombie."""
     try:
-        status_text = Path(f"/proc/{pid}/status").read_text(encoding='utf-8')
+        status_text = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
     except OSError as exc:
         logger.info("[watchdog.agent] /proc/%s/status unreadable: %s", pid, exc)
         return False
@@ -146,7 +146,7 @@ def _read_lock(lock_file: Path) -> dict | None:
     if not lock_file.exists():
         return None
     try:
-        return json.loads(lock_file.read_text(encoding='utf-8'))
+        return json.loads(lock_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("[watchdog.agent] could not read lock %s: %s", lock_file, exc)
         return None
@@ -160,11 +160,13 @@ def _classify_exit(branch_path: Path, lock_existed: bool) -> tuple[str, str, int
     bounce_file = branch_path / ".ai_mail.local" / "last_bounce.json"
     if bounce_file.exists():
         try:
-            data = json.loads(bounce_file.read_text(encoding='utf-8'))
+            data = json.loads(bounce_file.read_text(encoding="utf-8"))
             exit_code = data.get("exit_code")
-            return ("crashed",
-                    f"agent crashed (last_bounce.json exit_code={exit_code})",
-                    exit_code if isinstance(exit_code, int) else None)
+            return (
+                "crashed",
+                f"agent crashed (last_bounce.json exit_code={exit_code})",
+                exit_code if isinstance(exit_code, int) else None,
+            )
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("[watchdog.agent] bounce file unreadable: %s", exc)
             return ("crashed", "agent crashed (bounce file present, unreadable)", None)
@@ -254,8 +256,7 @@ def watch_agent(
                 _stderr(f"[watchdog.agent] {agent_id}: lock removed — agent done")
                 elapsed_int = int(time.monotonic() - started_at)
                 state, reason, exit_code = _classify_exit(branch_path, lock_existed=True)
-                logger.info("[watchdog.agent] wake agent_id=%s state=%s elapsed=%s",
-                            agent_id, state, elapsed_int)
+                logger.info("[watchdog.agent] wake agent_id=%s state=%s elapsed=%s", agent_id, state, elapsed_int)
                 return {
                     "woke": True,
                     "reason": reason,
@@ -267,15 +268,16 @@ def watch_agent(
                 }
 
             if isinstance(initial_pid, int) and not _pid_alive(initial_pid):
-                _stderr(f"[watchdog.agent] {agent_id}: monitor PID {initial_pid} dead "
-                        f"but lock still present — treating as crash")
+                _stderr(
+                    f"[watchdog.agent] {agent_id}: monitor PID {initial_pid} dead "
+                    f"but lock still present — treating as crash"
+                )
                 elapsed_int = int(time.monotonic() - started_at)
                 state, reason, exit_code = _classify_exit(branch_path, lock_existed=True)
                 if state == "completed":
                     state = "crashed"
                     reason = f"monitor PID {initial_pid} dead, lock still present"
-                logger.info("[watchdog.agent] wake agent_id=%s state=%s elapsed=%s",
-                            agent_id, state, elapsed_int)
+                logger.info("[watchdog.agent] wake agent_id=%s state=%s elapsed=%s", agent_id, state, elapsed_int)
                 return {
                     "woke": True,
                     "reason": reason,

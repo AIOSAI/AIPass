@@ -35,6 +35,7 @@ import pytest
 # Per-test fixture: force-reimport memory_files with fresh mocks
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _fresh_memory_files(monkeypatch):
     """Ensure memory_files module is freshly imported each test.
@@ -149,12 +150,8 @@ class TestReadMemoryFile:
         from aipass.memory.apps.handlers.json.memory_files import read_memory_file
 
         data = {
-            "document_metadata": {
-                "status": {"health": "healthy", "current_lines": 120}
-            },
-            "sessions": [
-                {"session_number": 1, "entries": [{"type": "learning", "text": "test"}]}
-            ],
+            "document_metadata": {"status": {"health": "healthy", "current_lines": 120}},
+            "sessions": [{"session_number": 1, "entries": [{"type": "learning", "text": "test"}]}],
         }
         file_path = tmp_path / "nested.json"
         file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")

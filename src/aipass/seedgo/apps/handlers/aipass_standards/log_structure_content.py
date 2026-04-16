@@ -16,6 +16,7 @@ logs/ at branch root only.
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
+
 def get_log_structure_standards() -> str:
     """Return formatted log structure standards for display."""
     lines = [

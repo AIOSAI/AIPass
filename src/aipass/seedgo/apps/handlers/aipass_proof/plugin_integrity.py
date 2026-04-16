@@ -68,6 +68,7 @@ AMBIGUOUS_NAMES: set[str] = {
 # TARGET MODULE RESOLUTION
 # =============================================================================
 
+
 def _resolve_target_modules(
     pack_dir: Path,
 ) -> list[dict[str, Path | str | bool]]:
@@ -117,6 +118,7 @@ def _resolve_target_modules(
 # STANDARD NAME DISCOVERY
 # =============================================================================
 
+
 def _discover_standard_names(pack_dir: Path) -> list[str]:
     """Discover standard names from *_check.py files in the pack directory.
 
@@ -135,6 +137,7 @@ def _discover_standard_names(pack_dir: Path) -> list[str]:
 # =============================================================================
 # AST HELPERS
 # =============================================================================
+
 
 def _enclosing_context(node: ast.AST, parents: dict[int, ast.AST]) -> str:
     """Walk up the parent chain to find the enclosing function/class name."""
@@ -158,11 +161,7 @@ def _is_docstring(node: ast.Constant, tree: ast.Module) -> bool:
         if not isinstance(body, list) or not body:
             continue
         first = body[0]
-        if (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and first.value is node
-        ):
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and first.value is node:
             return True
     return False
 
@@ -188,11 +187,17 @@ def _is_display_string(
     if isinstance(parent, ast.Call):
         func = parent.func
         if isinstance(func, ast.Attribute) and func.attr in (
-            "print", "info", "error", "warning", "debug",
+            "print",
+            "info",
+            "error",
+            "warning",
+            "debug",
         ):
             return True
         if isinstance(func, ast.Name) and func.id in (
-            "header", "error", "warning",
+            "header",
+            "error",
+            "warning",
         ):
             return True
 
@@ -201,11 +206,14 @@ def _is_display_string(
     if isinstance(grandparent, ast.Call):
         func = grandparent.func
         if isinstance(func, ast.Attribute) and func.attr in (
-            "print", "log_operation",
+            "print",
+            "log_operation",
         ):
             return True
         if isinstance(func, ast.Name) and func.id in (
-            "header", "error", "warning",
+            "header",
+            "error",
+            "warning",
         ):
             return True
 
@@ -241,6 +249,7 @@ def _is_dict_key_access(
 # =============================================================================
 # AST SCANNER
 # =============================================================================
+
 
 def _scan_file_ast(
     file_path: Path,
@@ -288,13 +297,15 @@ def _scan_file_ast(
             continue
 
         context = _enclosing_context(node, parents)
-        findings.append({
-            "line": getattr(node, "lineno", 0),
-            "name": value,
-            "context": context,
-            "value": value,
-            "kind": "ast_string_literal",
-        })
+        findings.append(
+            {
+                "line": getattr(node, "lineno", 0),
+                "name": value,
+                "context": context,
+                "value": value,
+                "kind": "ast_string_literal",
+            }
+        )
 
     return findings
 
@@ -302,6 +313,7 @@ def _scan_file_ast(
 # =============================================================================
 # REGEX SCANNER
 # =============================================================================
+
 
 def _scan_file_regex(
     file_path: Path,
@@ -351,35 +363,41 @@ def _scan_file_regex(
             # Pattern 1: check_<standard>( -- direct checker call
             fn_pat = rf"\bcheck_{re.escape(sn)}\s*\("
             if re.search(fn_pat, code_part):
-                findings.append({
-                    "line": lineno,
-                    "name": sn,
-                    "context": stripped[:80],
-                    "value": stripped[:80],
-                    "kind": "hardcoded_function_call",
-                })
+                findings.append(
+                    {
+                        "line": lineno,
+                        "name": sn,
+                        "context": stripped[:80],
+                        "value": stripped[:80],
+                        "kind": "hardcoded_function_call",
+                    }
+                )
 
             # Pattern 2: <standard>_violations -- hardcoded violation key
             viol_pat = rf"\b{re.escape(sn)}_violations\b"
             if re.search(viol_pat, code_part):
-                findings.append({
-                    "line": lineno,
-                    "name": sn,
-                    "context": stripped[:80],
-                    "value": stripped[:80],
-                    "kind": "hardcoded_violation_key",
-                })
+                findings.append(
+                    {
+                        "line": lineno,
+                        "name": sn,
+                        "context": stripped[:80],
+                        "value": stripped[:80],
+                        "kind": "hardcoded_violation_key",
+                    }
+                )
 
             # Pattern 3: == '<standard>' -- hardcoded branching
             branch_pat = rf"""==\s*['"]{re.escape(sn)}['"]"""
             if re.search(branch_pat, code_part):
-                findings.append({
-                    "line": lineno,
-                    "name": sn,
-                    "context": stripped[:80],
-                    "value": stripped[:80],
-                    "kind": "hardcoded_branch",
-                })
+                findings.append(
+                    {
+                        "line": lineno,
+                        "name": sn,
+                        "context": stripped[:80],
+                        "value": stripped[:80],
+                        "kind": "hardcoded_branch",
+                    }
+                )
 
     return findings
 
@@ -387,6 +405,7 @@ def _scan_file_regex(
 # =============================================================================
 # PUBLIC SCAN INTERFACE
 # =============================================================================
+
 
 def scan(pack_dir: Path) -> dict:
     """Run the full plugin integrity scan.
@@ -472,8 +491,7 @@ def scan(pack_dir: Path) -> dict:
                         "hardcoded_branch": "branch condition",
                     }.get(str(finding["kind"]), str(finding["kind"]))
                     issues.append(
-                        f"{label} L{finding['line']}: hardcoded {kind_label} "
-                        f"referencing standard '{finding['name']}'"
+                        f"{label} L{finding['line']}: hardcoded {kind_label} referencing standard '{finding['name']}'"
                     )
         else:
             result["status"] = "clean"

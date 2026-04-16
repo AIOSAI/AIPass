@@ -39,7 +39,8 @@ from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, fo
 from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox
 from aipass.ai_mail.apps.handlers.email.inbox_cleanup import (
     mark_all_read_and_archive,
-    mark_as_opened, mark_as_closed_and_archive
+    mark_as_opened,
+    mark_as_closed_and_archive,
 )
 from aipass.ai_mail.apps.handlers.email.reply import get_email_by_id, send_reply
 from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
@@ -47,7 +48,10 @@ from aipass.ai_mail.apps.handlers.users.user import get_current_user
 from aipass.ai_mail.apps.handlers.registry.read import get_all_branches, get_branch_by_email
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.send import (
-    resolve_sender_info, send_to_broadcast, send_to_single, collect_interactive_input
+    resolve_sender_info,
+    send_to_broadcast,
+    send_to_single,
+    collect_interactive_input,
 )
 from aipass.ai_mail.apps.handlers.email.error_dispatch import dispatch_send_error, on_email_delivered
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args, resolve_dispatch_target
@@ -63,9 +67,14 @@ except ImportError as e:
 
 def _delivery_callback(branch_path, new_count, opened_count, total):
     """Post-delivery callback: delegates to error_dispatch handler."""
-    on_email_delivered(branch_path, new_count, opened_count, total,
-                       push_dashboard_fn=push_dashboard_update,
-                       update_central_fn=update_central)
+    on_email_delivered(
+        branch_path,
+        new_count,
+        opened_count,
+        total,
+        push_dashboard_fn=push_dashboard_update,
+        update_central_fn=update_central,
+    )
 
 
 def _resolve_branch_path() -> Path:
@@ -122,15 +131,20 @@ def handle_command(command: str, args: List[str]) -> bool:
     valid = ["send", "email", "inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
     if command not in valid:
         return False
-    if args and args[0] in ['--help', '-h', 'help']:
+    if args and args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
     dispatch = {
-        "send": handle_send, "email": handle_send,
-        "inbox": handle_inbox, "view": handle_view,
-        "close": handle_close, "reply": handle_reply, "read": handle_view,
-        "sent": handle_sent, "contacts": handle_contacts,
+        "send": handle_send,
+        "email": handle_send,
+        "inbox": handle_inbox,
+        "view": handle_view,
+        "close": handle_close,
+        "reply": handle_reply,
+        "read": handle_view,
+        "sent": handle_sent,
+        "contacts": handle_contacts,
         "register": handle_register,
     }
     return dispatch[command](args)
@@ -142,8 +156,8 @@ def handle_send(args: List[str]) -> bool:
     parsed = parse_send_args(args)
 
     if parsed["mode"] == "error":
-        error(parsed['error'])
-        console.print("   Multiple: send @branch1 @branch2 \"Subject\" \"Message\"")
+        error(parsed["error"])
+        console.print('   Multiple: send @branch1 @branch2 "Subject" "Message"')
         return False
 
     if parsed["mode"] == "interactive":
@@ -154,17 +168,31 @@ def handle_send(args: List[str]) -> bool:
     from_branch = parsed.get("from_branch")
     if len(recipients) == 1:
         target = resolve_dispatch_target(recipients[0], parsed["auto_execute"], _get_branch_info_fn())
-        return _send_direct(recipients[0], parsed["subject"], parsed["message"],
-                            parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"],
-                            from_branch=from_branch)
+        return _send_direct(
+            recipients[0],
+            parsed["subject"],
+            parsed["message"],
+            parsed["auto_execute"],
+            parsed["reply_to"],
+            target,
+            parsed["no_memory_save"],
+            from_branch=from_branch,
+        )
 
     console.print(f"\n[bold]Group send to {len(recipients)} recipients...[/bold]")
     ok = 0
     for r in recipients:
         target = resolve_dispatch_target(r, parsed["auto_execute"], _get_branch_info_fn())
-        if _send_direct(r, parsed["subject"], parsed["message"],
-                        parsed["auto_execute"], parsed["reply_to"], target, parsed["no_memory_save"],
-                        from_branch=from_branch):
+        if _send_direct(
+            r,
+            parsed["subject"],
+            parsed["message"],
+            parsed["auto_execute"],
+            parsed["reply_to"],
+            target,
+            parsed["no_memory_save"],
+            from_branch=from_branch,
+        ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
     return ok > 0
@@ -174,6 +202,7 @@ def _get_branch_info_fn():
     """Return branch info lookup fn for dispatch target resolution, or None."""
     try:
         from aipass.ai_mail.apps.handlers.users.branch_detection import get_branch_info_from_registry
+
         return get_branch_info_from_registry
     except ImportError as e:
         logger.warning("[email] branch_detection import unavailable: %s", e)
@@ -198,24 +227,44 @@ def _send_interactive() -> bool:
     console.print("\n" + "=" * 50)
     console.print(f"To: {result['to']}\nSubject: {result['subject']}\nMessage:\n{result['message']}")
     console.print("=" * 50)
-    return _send_direct(result['to'], result['subject'], result['message'])
+    return _send_direct(result["to"], result["subject"], result["message"])
 
 
-def _send_direct(to_branch, subject, message, auto_execute=False,
-                 reply_to=None, dispatched_to=None, no_memory_save=False, from_branch=None) -> bool:
+def _send_direct(
+    to_branch,
+    subject,
+    message,
+    auto_execute=False,
+    reply_to=None,
+    dispatched_to=None,
+    no_memory_save=False,
+    from_branch=None,
+) -> bool:
     """Direct email send - thin wrapper over send handlers."""
     try:
         user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
         if auto_execute:
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 
-        if to_branch.lower() in ['all', '@all']:
+        if to_branch.lower() in ["all", "@all"]:
             return _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to)
 
         success, error_msg = send_to_single(
-            to_branch, subject, message, user_info, auto_execute, no_memory_save,
-            reply_to, dispatched_to, create_email_file, load_email_file,
-            deliver_email_to_branch, _delivery_callback, json_handler.log_operation, update_central)
+            to_branch,
+            subject,
+            message,
+            user_info,
+            auto_execute,
+            no_memory_save,
+            reply_to,
+            dispatched_to,
+            create_email_file,
+            load_email_file,
+            deliver_email_to_branch,
+            _delivery_callback,
+            json_handler.log_operation,
+            update_central,
+        )
 
         if success:
             label = "\\[dispatch: queued for daemon]" if auto_execute else ""
@@ -240,7 +289,7 @@ def _send_direct(to_branch, subject, message, auto_execute=False,
 def _fire_dispatch_trigger(to_branch: str, subject: str) -> None:
     """Fire email_dispatched trigger event if auto_execute enabled."""
     try:
-        trigger.fire('email_dispatched', to=to_branch, subject=subject)
+        trigger.fire("email_dispatched", to=to_branch, subject=subject)
     except Exception as e:
         logger.warning("[email] trigger fire for email_dispatched failed: %s", e)
 
@@ -250,9 +299,21 @@ def _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, r
     branches = get_all_branches()
     console.print(f"\nBroadcasting to {len(branches)} branches...")
     ok, success_count, total, results = send_to_broadcast(
-        subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to,
-        branches, create_email_file, load_email_file, deliver_email_to_branch,
-        _delivery_callback, json_handler.log_operation, update_central)
+        subject,
+        message,
+        user_info,
+        auto_execute,
+        no_memory_save,
+        reply_to,
+        dispatched_to,
+        branches,
+        create_email_file,
+        load_email_file,
+        deliver_email_to_branch,
+        _delivery_callback,
+        json_handler.log_operation,
+        update_central,
+    )
     if isinstance(results, str) or results is None:
         error("Failed to load email file for broadcast")
         return False
@@ -270,6 +331,7 @@ def handle_inbox(args: List[str]) -> bool:
     json_handler.log_operation("inbox_viewed")
     try:
         first_arg = args[0] if args else None
+
         def _get_user_with_fallback():
             try:
                 return get_current_user()
@@ -279,9 +341,10 @@ def handle_inbox(args: List[str]) -> bool:
                     "mailbox_path": str(_AI_MAIL_DIR / ".ai_mail.local"),
                     "display_name": "AI_MAIL",
                 }
+
         ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, _get_user_with_fallback)
         if not ok:
-            error(info['error'])
+            error(info["error"])
             return False
 
         inbox_file = info["inbox_file"]
@@ -343,9 +406,9 @@ def handle_view(args: List[str]) -> bool:
             return True
         header = format_email_header(email_data)
         console.print(f"\n{header}")
-        console.print(f"\n{email_data.get('message', '')}\n{'='*70}")
+        console.print(f"\n{email_data.get('message', '')}\n{'=' * 70}")
         console.print(f"[dim]Status: opened | ID: {args[0]}[/dim]")
-        console.print(f"[dim]To reply: drone @ai_mail reply {args[0]} \"your message\"[/dim]")
+        console.print(f'[dim]To reply: drone @ai_mail reply {args[0]} "your message"[/dim]')
         console.print(f"[dim]To close: drone @ai_mail close {args[0]}[/dim]")
         json_handler.log_operation("email_viewed", {"message_id": args[0]})
         return True
@@ -390,8 +453,7 @@ def handle_close(args: List[str]) -> bool:
             except ImportError as e:
                 logger.warning("[email] purge import unavailable: %s", e)
                 run_purge = None
-            batch_close_post_ops(branch_path, push_dashboard_update, update_central,
-                                 run_purge)
+            batch_close_post_ops(branch_path, push_dashboard_update, update_central, run_purge)
             console.print(f"\nClosed {closed}, failed {failed}")
         return True
     except Exception as e:
@@ -404,7 +466,7 @@ def handle_reply(args: List[str]) -> bool:
     """Reply to an email."""
     json_handler.log_operation("reply_email_initiated", {"args": args})
     if len(args) < 2:
-        error("Usage: drone @ai_mail reply <message_id> \"your message\"")
+        error('Usage: drone @ai_mail reply <message_id> "your message"')
         return True
     try:
         branch_path = _resolve_branch_path()
@@ -485,6 +547,7 @@ def handle_register(args: List[str]) -> bool:
     inbox_path = args[1]
     project = args[2] if len(args) > 2 else ""
     from aipass.ai_mail.apps.handlers.email.contacts import register_contact
+
     ok = register_contact(branch_name, project, inbox_path)
     if ok:
         console.print(f"[green]Registered @{branch_name} -> {inbox_path}[/green]")
@@ -539,7 +602,7 @@ def print_introspection():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
+    if len(sys.argv) == 1 or sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
     command = sys.argv[1]

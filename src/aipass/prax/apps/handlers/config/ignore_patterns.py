@@ -45,15 +45,25 @@ PRAX_LOGGER_CONFIG_FILE = PRAX_JSON_DIR / "prax_logger_config.json"
 
 # Hardcoded fallback patterns
 DEFAULT_IGNORE_FOLDERS = {
-    '.git', '__pycache__', '.venv', 'vendor', 'node_modules',
-    'Archive', 'Backups', 'External_Code_Sources', 'WorkShop',
-    '.claude-server-commander-logs',
-    'backup', 'backups', 'archive.local'
+    ".git",
+    "__pycache__",
+    ".venv",
+    "vendor",
+    "node_modules",
+    "Archive",
+    "Backups",
+    "External_Code_Sources",
+    "WorkShop",
+    ".claude-server-commander-logs",
+    "backup",
+    "backups",
+    "archive.local",
 }
 
 # =============================================
 # HANDLER FUNCTION
 # =============================================
+
 
 def load_ignore_patterns_from_config() -> Set[str]:
     """Load ignore patterns from prax_logger config file
@@ -74,14 +84,16 @@ def load_ignore_patterns_from_config() -> Set[str]:
         if not PRAX_LOGGER_CONFIG_FILE.exists():
             return DEFAULT_IGNORE_FOLDERS
 
-        with open(PRAX_LOGGER_CONFIG_FILE, 'r', encoding='utf-8') as f:
+        with open(PRAX_LOGGER_CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        patterns = config.get('config', {}).get('ignore_patterns', [])
+        patterns = config.get("config", {}).get("ignore_patterns", [])
         if patterns:
             json_handler.log_operation("ignore_patterns_loaded", {"pattern_count": len(patterns)})
             return set(patterns)
     except Exception as e:
-        logger.warning("ignore_patterns: failed to load config from '%s', using defaults: %s", PRAX_LOGGER_CONFIG_FILE, e)
+        logger.warning(
+            "ignore_patterns: failed to load config from '%s', using defaults: %s", PRAX_LOGGER_CONFIG_FILE, e
+        )
 
     return DEFAULT_IGNORE_FOLDERS

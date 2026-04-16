@@ -79,22 +79,14 @@ def execute_command(
     except KeyboardInterrupt:
         # Clean exit on Ctrl+C — no traceback
         if interactive:
-            return CommandResult(
-                stdout="", stderr="", exit_code=130, branch="", command=""
-            )
+            return CommandResult(stdout="", stderr="", exit_code=130, branch="", command="")
         raise
     except subprocess.TimeoutExpired as e:
-        raise CommandExecutionError(
-            f"Command timed out after {timeout}s: {' '.join(full_cmd)}"
-        ) from e
+        raise CommandExecutionError(f"Command timed out after {timeout}s: {' '.join(full_cmd)}") from e
     except FileNotFoundError as e:
-        raise CommandExecutionError(
-            f"Executable not found: {executable!r}"
-        ) from e
+        raise CommandExecutionError(f"Executable not found: {executable!r}") from e
     except OSError as e:
-        raise CommandExecutionError(
-            f"OS error executing command: {e}"
-        ) from e
+        raise CommandExecutionError(f"OS error executing command: {e}") from e
 
     if interactive:
         return CommandResult(

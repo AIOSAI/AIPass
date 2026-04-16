@@ -23,6 +23,7 @@ from aipass.ai_mail.apps.handlers.email.identity import (
 
 # ---- Fixtures ------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
@@ -32,6 +33,7 @@ def _silence_json_handler():
 
 
 # ---- create_identity() tests --------------------------------
+
 
 def test_create_identity_writes_file(tmp_path):
     """create_identity writes identity.json with correct fields."""
@@ -82,6 +84,7 @@ def test_create_identity_overwrites_existing(tmp_path):
 
 
 # ---- read_identity() tests ----------------------------------
+
 
 def test_read_identity_reads_back(tmp_path):
     """read_identity returns the dict written by create_identity."""

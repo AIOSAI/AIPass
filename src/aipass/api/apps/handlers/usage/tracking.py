@@ -56,7 +56,10 @@ MAX_GENERATION_TRACKING = 500  # Maximum entries in generation_tracking before t
 # CORE TRACKING FUNCTIONS
 # =============================================
 
-def track_usage(generation_id: str, caller: str, model: str = "unknown", api_key: Optional[str] = None) -> Dict[str, Any]:
+
+def track_usage(
+    generation_id: str, caller: str, model: str = "unknown", api_key: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Track API usage for generation ID by querying OpenRouter metrics
 
@@ -83,6 +86,7 @@ def track_usage(generation_id: str, caller: str, model: str = "unknown", api_key
             # Import here to avoid circular dependencies
             try:
                 from aipass.api.apps.handlers.auth.keys import get_api_key
+
                 api_key = get_api_key("openrouter")
             except Exception as e:
                 logger.error(f"[{MODULE_NAME}] Failed to load API key: {e}")
@@ -105,7 +109,9 @@ def track_usage(generation_id: str, caller: str, model: str = "unknown", api_key
         # Store the usage data
         if store_usage_data(caller, model, generation_id, metrics):
             # Successfully tracked usage
-            json_handler.log_operation("usage_tracked", {"caller": caller, "model": model, "generation_id": generation_id})
+            json_handler.log_operation(
+                "usage_tracked", {"caller": caller, "model": model, "generation_id": generation_id}
+            )
             return {"success": True, "metrics": metrics}
         else:
             # Failed to store usage data
@@ -140,17 +146,11 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
     """
     try:
         # Set up request headers
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
         # Query the generation endpoint
         response = requests.get(  # type: ignore[attr-defined]
-            GENERATION_ENDPOINT,
-            params={"id": generation_id},
-            headers=headers,
-            timeout=DEFAULT_REQUEST_TIMEOUT
+            GENERATION_ENDPOINT, params={"id": generation_id}, headers=headers, timeout=DEFAULT_REQUEST_TIMEOUT
         )
 
         # Check response status
@@ -159,7 +159,9 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
 
             # Validate response structure
             if not data or "data" not in data:
-                logger.warning(f"[{MODULE_NAME}] Invalid response structure from OpenRouter for generation {generation_id}")
+                logger.warning(
+                    f"[{MODULE_NAME}] Invalid response structure from OpenRouter for generation {generation_id}"
+                )
                 return None
 
             # Extract metrics from response (use `or 0` to handle explicit None values)
@@ -170,14 +172,16 @@ def get_generation_metrics(generation_id: str, api_key: str) -> Optional[Dict[st
                 "tokens_completion": int(metrics.get("tokens_completion") or 0),
                 "generation_time": int(metrics.get("generation_time") or 0),
                 "latency": int(metrics.get("latency") or 0),
-                "provider_name": metrics.get("provider_name") or "unknown"
+                "provider_name": metrics.get("provider_name") or "unknown",
             }
 
             # Retrieved metrics for generation_id
             return result
 
         else:
-            logger.warning(f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}")
+            logger.warning(
+                f"[{MODULE_NAME}] OpenRouter API returned status {response.status_code} for generation {generation_id}"
+            )
             return None
 
     except requests.exceptions.Timeout as e:
@@ -223,7 +227,7 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
 
         # Load current data or create initial structure
         if data_path.exists():
-            with open(data_path, 'r', encoding='utf-8') as f:
+            with open(data_path, "r", encoding="utf-8") as f:
                 data_wrapper = json.load(f)
             current_data = data_wrapper.get("data", {})
         else:
@@ -232,12 +236,12 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
                     "start_time": datetime.now().isoformat(),
                     "total_requests": 0,
                     "total_cost": 0.0,
-                    "total_tokens": 0
+                    "total_tokens": 0,
                 },
                 "usage_by_caller": {},
                 "daily_totals": {},
                 "monthly_totals": {},
-                "generation_tracking": {}
+                "generation_tracking": {},
             }
 
         # Calculate total tokens
@@ -255,7 +259,7 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
                 "total_cost": 0.0,
                 "total_tokens": 0,
                 "models_used": {},
-                "last_request": None
+                "last_request": None,
             }
 
         caller_data = current_data["usage_by_caller"][caller]
@@ -272,11 +276,7 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         # Update daily totals
         today = datetime.now().date().isoformat()
         if today not in current_data["daily_totals"]:
-            current_data["daily_totals"][today] = {
-                "requests": 0,
-                "cost": 0.0,
-                "tokens": 0
-            }
+            current_data["daily_totals"][today] = {"requests": 0, "cost": 0.0, "tokens": 0}
 
         current_data["daily_totals"][today]["requests"] += 1
         current_data["daily_totals"][today]["cost"] += metrics["total_cost"]
@@ -287,22 +287,13 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         if "monthly_totals" not in current_data:
             current_data["monthly_totals"] = {}
         if month not in current_data["monthly_totals"]:
-            current_data["monthly_totals"][month] = {
-                "requests": 0,
-                "cost": 0.0,
-                "tokens": 0
-            }
+            current_data["monthly_totals"][month] = {"requests": 0, "cost": 0.0, "tokens": 0}
         current_data["monthly_totals"][month]["requests"] += 1
         current_data["monthly_totals"][month]["cost"] += metrics["total_cost"]
         current_data["monthly_totals"][month]["tokens"] += total_tokens
 
         # Store generation details with newest-first ordering
-        new_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "caller": caller,
-            "model": model,
-            "usage_data": metrics
-        }
+        new_entry = {"timestamp": datetime.now().isoformat(), "caller": caller, "model": model, "usage_data": metrics}
 
         # Create new dict with new entry first, then existing entries
         current_tracking = current_data["generation_tracking"]
@@ -315,13 +306,9 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
                 del current_data["generation_tracking"][old_key]
 
         # Save updated data with proper wrapper structure
-        data_wrapper = {
-            "module_name": "api_usage",
-            "timestamp": datetime.now().isoformat(),
-            "data": current_data
-        }
+        data_wrapper = {"module_name": "api_usage", "timestamp": datetime.now().isoformat(), "data": current_data}
 
-        with open(data_path, 'w', encoding='utf-8') as f:
+        with open(data_path, "w", encoding="utf-8") as f:
             json.dump(data_wrapper, f, indent=2, ensure_ascii=False)
 
         # Stored usage data for caller
@@ -330,5 +317,3 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to store usage data: {e}")
         return False
-
-

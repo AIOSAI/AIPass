@@ -45,21 +45,17 @@ DEFAULT_CONFIG = {
     "threshold": 0.3,
     "max_fragments_per_session": 5,
     "min_messages_between": 10,
-    "cooldown_seconds": 300
+    "cooldown_seconds": 300,
 }
 
 # Session state for tracking surfacing frequency
-SESSION_STATE = {
-    "fragments_surfaced": 0,
-    "messages_since_last": 0,
-    "last_surface_time": 0,
-    "surfaced_ids": set()
-}
+SESSION_STATE = {"fragments_surfaced": 0, "messages_since_last": 0, "last_surface_time": 0, "surfaced_ids": set()}
 
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
+
 
 def load_config(config_path: Path | None = None) -> Dict[str, Any]:
     """
@@ -75,8 +71,8 @@ def load_config(config_path: Path | None = None) -> Dict[str, Any]:
 
     if path.exists():
         result = memory_files.read_memory_file(path)
-        if result.get('success'):
-            config = result.get('data', {})
+        if result.get("success"):
+            config = result.get("data", {})
             # Merge with defaults for any missing keys
             return {**DEFAULT_CONFIG, **config}
 
@@ -106,10 +102,8 @@ def save_config(config: Dict[str, Any], config_path: Path | None = None) -> Dict
 # CONTEXT EXTRACTION
 # =============================================================================
 
-def extract_conversation_context(
-    messages: List[Dict[str, Any]],
-    max_messages: int = 5
-) -> Dict[str, Any]:
+
+def extract_conversation_context(messages: List[Dict[str, Any]], max_messages: int = 5) -> Dict[str, Any]:
     """
     Extract keywords, themes, and mood from recent conversation messages
 
@@ -126,27 +120,21 @@ def extract_conversation_context(
         Dict with 'success', 'keywords', 'mood', 'themes'
     """
     if not messages:
-        return {
-            'success': True,
-            'keywords': [],
-            'mood': 'neutral',
-            'themes': [],
-            'message': 'No messages to analyze'
-        }
+        return {"success": True, "keywords": [], "mood": "neutral", "themes": [], "message": "No messages to analyze"}
 
     # Take only recent messages
     recent = messages[-max_messages:] if len(messages) > max_messages else messages
 
     # Combine all content
-    all_content = ' '.join((msg.get('content') or '') for msg in recent).lower()
+    all_content = " ".join((msg.get("content") or "") for msg in recent).lower()
 
     # Extract keywords (technical terms and significant words)
     keyword_pattern = (
-        r'\b(?:error|bug|fix|debug|issue|problem|solution|work|stuck|'
-        r'module|system|memory|vector|storage|file|function|method|class|'
-        r'api|token|embedding|json|import|script|handler|branch|pattern|'
-        r'frustrated|excited|confused|understand|learn|discover|insight|'
-        r'help|create|build|implement|design|architecture)\b'
+        r"\b(?:error|bug|fix|debug|issue|problem|solution|work|stuck|"
+        r"module|system|memory|vector|storage|file|function|method|class|"
+        r"api|token|embedding|json|import|script|handler|branch|pattern|"
+        r"frustrated|excited|confused|understand|learn|discover|insight|"
+        r"help|create|build|implement|design|architecture)\b"
     )
 
     keywords = list(set(re.findall(keyword_pattern, all_content)))
@@ -158,12 +146,12 @@ def extract_conversation_context(
     themes = _extract_themes(all_content)
 
     return {
-        'success': True,
-        'keywords': keywords[:10],  # Limit to top 10
-        'mood': mood,
-        'themes': themes,
-        'analyzed_messages': len(recent),
-        'content_length': len(all_content)
+        "success": True,
+        "keywords": keywords[:10],  # Limit to top 10
+        "mood": mood,
+        "themes": themes,
+        "analyzed_messages": len(recent),
+        "content_length": len(all_content),
     }
 
 
@@ -178,11 +166,11 @@ def _detect_mood(content: str) -> str:
         Detected mood string (frustrated, curious, excited, confused, focused, or neutral)
     """
     mood_indicators = {
-        'frustrated': ['frustrated', 'annoying', 'stuck', 'difficult', 'ugh', 'damn', 'hate'],
-        'curious': ['wonder', 'curious', 'interesting', 'what if', 'how does', 'why'],
-        'excited': ['cool', 'awesome', 'great', 'amazing', 'perfect', 'love', 'finally'],
-        'confused': ['confused', 'unclear', 'dont understand', "don't understand", 'lost'],
-        'focused': ['need to', 'want to', 'lets', "let's", 'should', 'must']
+        "frustrated": ["frustrated", "annoying", "stuck", "difficult", "ugh", "damn", "hate"],
+        "curious": ["wonder", "curious", "interesting", "what if", "how does", "why"],
+        "excited": ["cool", "awesome", "great", "amazing", "perfect", "love", "finally"],
+        "confused": ["confused", "unclear", "dont understand", "don't understand", "lost"],
+        "focused": ["need to", "want to", "lets", "let's", "should", "must"],
     }
 
     mood_scores: Dict[str, int] = {}
@@ -193,7 +181,7 @@ def _detect_mood(content: str) -> str:
 
     if mood_scores:
         return max(mood_scores, key=lambda k: mood_scores[k])
-    return 'neutral'
+    return "neutral"
 
 
 def _extract_themes(content: str) -> List[str]:
@@ -209,12 +197,12 @@ def _extract_themes(content: str) -> List[str]:
     themes = []
 
     theme_patterns = {
-        'debugging': ['debug', 'error', 'fix', 'trace', 'bug'],
-        'building': ['create', 'build', 'implement', 'design', 'architecture'],
-        'learning': ['learn', 'understand', 'discover', 'insight', 'realize'],
-        'memory_systems': ['memory', 'storage', 'vector', 'embedding', 'chroma'],
-        'coding': ['code', 'function', 'module', 'class', 'import'],
-        'problem_solving': ['problem', 'solution', 'approach', 'method', 'way']
+        "debugging": ["debug", "error", "fix", "trace", "bug"],
+        "building": ["create", "build", "implement", "design", "architecture"],
+        "learning": ["learn", "understand", "discover", "insight", "realize"],
+        "memory_systems": ["memory", "storage", "vector", "embedding", "chroma"],
+        "coding": ["code", "function", "module", "class", "import"],
+        "problem_solving": ["problem", "solution", "approach", "method", "way"],
     }
 
     for theme, indicators in theme_patterns.items():
@@ -228,11 +216,8 @@ def _extract_themes(content: str) -> List[str]:
 # FRAGMENT FINDING
 # =============================================================================
 
-def find_relevant_fragments(
-    context: Dict[str, Any],
-    n_results: int = 3,
-    db_path: Path | None = None
-) -> Dict[str, Any]:
+
+def find_relevant_fragments(context: Dict[str, Any], n_results: int = 3, db_path: Path | None = None) -> Dict[str, Any]:
     """
     Query fragments based on extracted conversation context
 
@@ -246,56 +231,51 @@ def find_relevant_fragments(
     Returns:
         Dict with 'success', 'fragments' list with relevance scores
     """
-    keywords = context.get('keywords', [])
-    mood = context.get('mood', 'neutral')
-    themes = context.get('themes', [])
+    keywords = context.get("keywords", [])
+    mood = context.get("mood", "neutral")
+    themes = context.get("themes", [])
 
     if not keywords and not themes:
-        return {
-            'success': True,
-            'fragments': [],
-            'message': 'No context to search with'
-        }
+        return {"success": True, "fragments": [], "message": "No context to search with"}
 
     # Build search query from context
     search_terms = keywords[:5] + themes[:3]
-    if mood != 'neutral':
+    if mood != "neutral":
         search_terms.append(mood)
 
-    query = ' '.join(search_terms)
+    query = " ".join(search_terms)
 
     # Use retriever to find fragments
     result = retriever.retrieve_fragments(
-        query=query,
-        trigger_keywords=keywords[:5] if keywords else None,
-        n_results=n_results,
-        db_path=db_path
+        query=query, trigger_keywords=keywords[:5] if keywords else None, n_results=n_results, db_path=db_path
     )
 
-    if not result.get('success'):
+    if not result.get("success"):
         return result
 
     # Filter results by minimum threshold
     config = load_config()
-    threshold = config.get('threshold', 0.3)
+    threshold = config.get("threshold", 0.3)
 
     fragments = [
-        frag for frag in result.get('results', [])
-        if frag.get('relevance_score', frag.get('similarity', 0)) >= threshold
+        frag
+        for frag in result.get("results", [])
+        if frag.get("relevance_score", frag.get("similarity", 0)) >= threshold
     ]
 
     return {
-        'success': True,
-        'fragments': fragments,
-        'query_used': query,
-        'threshold_applied': threshold,
-        'total_before_filter': len(result.get('results', []))
+        "success": True,
+        "fragments": fragments,
+        "query_used": query,
+        "threshold_applied": threshold,
+        "total_before_filter": len(result.get("results", [])),
     }
 
 
 # =============================================================================
 # FRAGMENT FORMATTING
 # =============================================================================
+
 
 def format_fragment_recall(fragment: Dict[str, Any]) -> str:
     """
@@ -311,11 +291,11 @@ def format_fragment_recall(fragment: Dict[str, Any]) -> str:
     Returns:
         Formatted recall string
     """
-    content = fragment.get('content', '')
-    metadata = fragment.get('metadata', {})
+    content = fragment.get("content", "")
+    metadata = fragment.get("metadata", {})
 
     # v2 schema: LLM-extracted fragments with summary/insight/type
-    if metadata.get('schema_version') == 'v2':
+    if metadata.get("schema_version") == "v2":
         return _format_v2_recall(content, metadata)
 
     # v1 schema: dimension-based fragments (original format)
@@ -335,16 +315,16 @@ def _format_v2_recall(content: str, metadata: Dict[str, Any]) -> str:
     Returns:
         Formatted v2 recall string
     """
-    summary = metadata.get('summary', content or 'a past experience')
-    insight = metadata.get('insight', '')
-    frag_type = metadata.get('type', '')
+    summary = metadata.get("summary", content or "a past experience")
+    insight = metadata.get("insight", "")
+    frag_type = metadata.get("type", "")
 
     # Type-based opening
     TYPE_PREFIXES = {
-        'episodic': f"During a session, {summary}",
-        'procedural': f"We learned how to: {summary}",
-        'semantic': f"An important concept: {summary}",
-        'emotional': f"A meaningful moment: {summary}",
+        "episodic": f"During a session, {summary}",
+        "procedural": f"We learned how to: {summary}",
+        "semantic": f"An important concept: {summary}",
+        "emotional": f"A meaningful moment: {summary}",
     }
 
     recall_text = TYPE_PREFIXES.get(frag_type, f"I remember: {summary}")
@@ -354,8 +334,8 @@ def _format_v2_recall(content: str, metadata: Dict[str, Any]) -> str:
         recall_text = f"{recall_text}. The key insight: {insight}."
     else:
         # Ensure trailing period
-        if not recall_text.endswith('.'):
-            recall_text += '.'
+        if not recall_text.endswith("."):
+            recall_text += "."
 
     return recall_text
 
@@ -373,39 +353,39 @@ def _format_v1_recall(content: str, metadata: Dict[str, Any]) -> str:
     Returns:
         Formatted v1 recall string
     """
-    emotional = metadata.get('emotional_0', '')
-    technical = metadata.get('technical_0', '')
-    learnings = metadata.get('learnings_0', '')
+    emotional = metadata.get("emotional_0", "")
+    technical = metadata.get("technical_0", "")
+    learnings = metadata.get("learnings_0", "")
 
     # Build recall phrase
     recall_parts = []
 
     # Opening
-    if emotional and 'frustration' in emotional:
+    if emotional and "frustration" in emotional:
         recall_parts.append("This reminds me of a conversation where we dealt with a similar frustration")
-    elif emotional and 'curiosity' in emotional:
+    elif emotional and "curiosity" in emotional:
         recall_parts.append("This brings back a curious exploration")
-    elif emotional and 'excitement' in emotional:
+    elif emotional and "excitement" in emotional:
         recall_parts.append("This reminds me of an exciting moment")
     else:
         recall_parts.append("This reminds me of a past conversation")
 
     # Context
     if technical:
-        technical_desc = technical.replace('_', ' ')
+        technical_desc = technical.replace("_", " ")
         recall_parts.append(f"involving {technical_desc}")
 
     # Pattern
     if emotional:
-        emotional_desc = emotional.replace('_', '-')
-        recall_parts.append(f"The pattern was \"{emotional_desc}\"")
+        emotional_desc = emotional.replace("_", "-")
+        recall_parts.append(f'The pattern was "{emotional_desc}"')
 
     # Insight
     if learnings:
-        learnings_desc = learnings.replace('_', ' ')
+        learnings_desc = learnings.replace("_", " ")
         recall_parts.append(f"and the key insight was about {learnings_desc}")
 
-    recall_text = '. '.join(recall_parts) + '.'
+    recall_text = ". ".join(recall_parts) + "."
 
     # Add compressed content if available
     if content and len(content) < 200:
@@ -432,8 +412,8 @@ def format_multiple_recalls(fragments: List[Dict[str, Any]]) -> str:
 
     recalls = []
     for frag in fragments:
-        metadata = frag.get('metadata', {})
-        schema = metadata.get('schema_version', 'v1')
+        metadata = frag.get("metadata", {})
+        schema = metadata.get("schema_version", "v1")
         recall = format_fragment_recall(frag)
         recalls.append(f"[{schema}] {recall}")
 
@@ -444,9 +424,9 @@ def format_multiple_recalls(fragments: List[Dict[str, Any]]) -> str:
 # SURFACING CONTROL
 # =============================================================================
 
+
 def should_surface_fragment(
-    fragment: Dict[str, Any] | None = None,
-    config: Dict[str, Any] | None = None
+    fragment: Dict[str, Any] | None = None, config: Dict[str, Any] | None = None
 ) -> Tuple[bool, str]:
     """
     Check if a fragment should be surfaced based on rules
@@ -469,30 +449,30 @@ def should_surface_fragment(
         config = load_config()
 
     # Check if enabled
-    if not config.get('enabled', True):
+    if not config.get("enabled", True):
         return False, "Hook is disabled"
 
     # Check max fragments per session
-    max_frags = config.get('max_fragments_per_session', 5)
-    if SESSION_STATE['fragments_surfaced'] >= max_frags:
+    max_frags = config.get("max_fragments_per_session", 5)
+    if SESSION_STATE["fragments_surfaced"] >= max_frags:
         return False, f"Max fragments ({max_frags}) reached for session"
 
     # Check messages since last surface
-    min_messages = config.get('min_messages_between', 10)
-    if SESSION_STATE['messages_since_last'] < min_messages:
+    min_messages = config.get("min_messages_between", 10)
+    if SESSION_STATE["messages_since_last"] < min_messages:
         return False, f"Only {SESSION_STATE['messages_since_last']}/{min_messages} messages since last surface"
 
     # Check cooldown
-    cooldown = config.get('cooldown_seconds', 300)
-    elapsed = time.time() - SESSION_STATE['last_surface_time']
+    cooldown = config.get("cooldown_seconds", 300)
+    elapsed = time.time() - SESSION_STATE["last_surface_time"]
     if elapsed < cooldown:
         remaining = int(cooldown - elapsed)
         return False, f"Cooldown active ({remaining}s remaining)"
 
     # Check if already surfaced
     if fragment:
-        frag_id = fragment.get('id')
-        if frag_id and frag_id in SESSION_STATE['surfaced_ids']:
+        frag_id = fragment.get("id")
+        if frag_id and frag_id in SESSION_STATE["surfaced_ids"]:
             return False, "Fragment already surfaced this session"
 
     return True, "Ready to surface"
@@ -507,13 +487,13 @@ def record_surface(fragment: Dict[str, Any]) -> None:
     Args:
         fragment: The fragment that was surfaced
     """
-    SESSION_STATE['fragments_surfaced'] += 1
-    SESSION_STATE['messages_since_last'] = 0
-    SESSION_STATE['last_surface_time'] = time.time()
+    SESSION_STATE["fragments_surfaced"] += 1
+    SESSION_STATE["messages_since_last"] = 0
+    SESSION_STATE["last_surface_time"] = time.time()
 
-    frag_id = fragment.get('id')
+    frag_id = fragment.get("id")
     if frag_id:
-        SESSION_STATE['surfaced_ids'].add(frag_id)
+        SESSION_STATE["surfaced_ids"].add(frag_id)
 
 
 def record_message() -> None:
@@ -522,7 +502,7 @@ def record_message() -> None:
 
     Increments the messages_since_last counter.
     """
-    SESSION_STATE['messages_since_last'] += 1
+    SESSION_STATE["messages_since_last"] += 1
 
 
 def reset_session() -> None:
@@ -531,10 +511,10 @@ def reset_session() -> None:
 
     Clears all tracking counters and surfaced fragment IDs.
     """
-    SESSION_STATE['fragments_surfaced'] = 0
-    SESSION_STATE['messages_since_last'] = 0
-    SESSION_STATE['last_surface_time'] = 0
-    SESSION_STATE['surfaced_ids'] = set()
+    SESSION_STATE["fragments_surfaced"] = 0
+    SESSION_STATE["messages_since_last"] = 0
+    SESSION_STATE["last_surface_time"] = 0
+    SESSION_STATE["surfaced_ids"] = set()
 
 
 def get_session_state() -> Dict[str, Any]:
@@ -545,10 +525,10 @@ def get_session_state() -> Dict[str, Any]:
         Dict with session state values
     """
     return {
-        "fragments_surfaced": SESSION_STATE['fragments_surfaced'],
-        "messages_since_last": SESSION_STATE['messages_since_last'],
-        "last_surface_time": SESSION_STATE['last_surface_time'],
-        "surfaced_count": len(SESSION_STATE['surfaced_ids'])
+        "fragments_surfaced": SESSION_STATE["fragments_surfaced"],
+        "messages_since_last": SESSION_STATE["messages_since_last"],
+        "last_surface_time": SESSION_STATE["last_surface_time"],
+        "surfaced_count": len(SESSION_STATE["surfaced_ids"]),
     }
 
 
@@ -556,10 +536,9 @@ def get_session_state() -> Dict[str, Any]:
 # MAIN HOOK FUNCTION
 # =============================================================================
 
+
 def process_hook(
-    messages: List[Dict[str, Any]],
-    config: Dict[str, Any] | None = None,
-    db_path: Path | None = None
+    messages: List[Dict[str, Any]], config: Dict[str, Any] | None = None, db_path: Path | None = None
 ) -> Dict[str, Any]:
     """
     Main hook function - process messages and surface relevant fragments
@@ -580,45 +559,27 @@ def process_hook(
     # Check if we should attempt to surface
     can_surface, reason = should_surface_fragment(config=config)
     if not can_surface:
-        return {
-            'success': True,
-            'surfaced': False,
-            'reason': reason
-        }
+        return {"success": True, "surfaced": False, "reason": reason}
 
     # Extract context from recent messages
     context = extract_conversation_context(messages)
-    if not context.get('success'):
-        return {
-            'success': False,
-            'error': context.get('error', 'Context extraction failed')
-        }
+    if not context.get("success"):
+        return {"success": False, "error": context.get("error", "Context extraction failed")}
 
     # Find relevant fragments
     result = find_relevant_fragments(context, n_results=1, db_path=db_path)
-    if not result.get('success'):
-        return {
-            'success': False,
-            'error': result.get('error', 'Fragment retrieval failed')
-        }
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "Fragment retrieval failed")}
 
-    fragments = result.get('fragments', [])
+    fragments = result.get("fragments", [])
     if not fragments:
-        return {
-            'success': True,
-            'surfaced': False,
-            'reason': 'No relevant fragments found above threshold'
-        }
+        return {"success": True, "surfaced": False, "reason": "No relevant fragments found above threshold"}
 
     # Check the specific fragment
     fragment = fragments[0]
     can_surface, reason = should_surface_fragment(fragment=fragment, config=config)
     if not can_surface:
-        return {
-            'success': True,
-            'surfaced': False,
-            'reason': reason
-        }
+        return {"success": True, "surfaced": False, "reason": reason}
 
     # Format the recall
     recall_text = format_fragment_recall(fragment)
@@ -626,16 +587,16 @@ def process_hook(
     # Record the surface
     record_surface(fragment)
 
-    json_handler.log_operation("symbolic_hook", {"fragment_id": fragment.get('id'), "surfaced": True, "success": True})
+    json_handler.log_operation("symbolic_hook", {"fragment_id": fragment.get("id"), "surfaced": True, "success": True})
     return {
-        'success': True,
-        'surfaced': True,
-        'recall': recall_text,
-        'fragment_id': fragment.get('id'),
-        'relevance_score': fragment.get('relevance_score', fragment.get('similarity', 0)),
-        'context_used': {
-            'keywords': context.get('keywords', []),
-            'mood': context.get('mood'),
-            'themes': context.get('themes', [])
-        }
+        "success": True,
+        "surfaced": True,
+        "recall": recall_text,
+        "fragment_id": fragment.get("id"),
+        "relevance_score": fragment.get("relevance_score", fragment.get("similarity", 0)),
+        "context_used": {
+            "keywords": context.get("keywords", []),
+            "mood": context.get("mood"),
+            "themes": context.get("themes", []),
+        },
     }

@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for standards_query."""
@@ -61,15 +62,18 @@ def _mock_infrastructure(monkeypatch):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
     """No args triggers introspection (returns True)."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     result = handle_command("standards_query", [])
     assert result is True
 
@@ -77,6 +81,7 @@ def test_handle_command_no_args_shows_introspection():
 def test_handle_command_help_flag():
     """--help flag is handled without error."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     result = handle_command("standards_query", ["--help"])
     assert result is True
 
@@ -84,6 +89,7 @@ def test_handle_command_help_flag():
 def test_handle_command_h_flag():
     """-h flag is handled without error."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     result = handle_command("standards_query", ["-h"])
     assert result is True
 
@@ -91,6 +97,7 @@ def test_handle_command_h_flag():
 def test_handle_command_help_word():
     """'help' word is handled without error."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     result = handle_command("standards_query", ["help"])
     assert result is True
 
@@ -98,6 +105,7 @@ def test_handle_command_help_word():
 def test_handle_command_unknown_pack():
     """Unknown pack name returns True (error displayed to user)."""
     from aipass.seedgo.apps.modules.standards_query import handle_command
+
     result = handle_command("standards_query", ["nonexistent_pack_xyz"])
     assert result is True
 
@@ -105,18 +113,21 @@ def test_handle_command_unknown_pack():
 def test_print_introspection_runs():
     """print_introspection executes without raising."""
     from aipass.seedgo.apps.modules.standards_query import print_introspection
+
     print_introspection()
 
 
 def test_print_help_runs():
     """print_help executes without raising."""
     from aipass.seedgo.apps.modules.standards_query import print_help
+
     print_help()
 
 
 def test_discover_packs_returns_dict():
     """_discover_packs returns a dict."""
     from aipass.seedgo.apps.modules.standards_query import _discover_packs
+
     packs = _discover_packs()
     assert isinstance(packs, dict)
 
@@ -124,6 +135,7 @@ def test_discover_packs_returns_dict():
 def test_discover_standards_empty_dir(tmp_path):
     """_discover_standards returns empty dict for a directory with no content files."""
     from aipass.seedgo.apps.modules.standards_query import _discover_standards
+
     result = _discover_standards(tmp_path)
     assert result == {}
 
@@ -131,6 +143,7 @@ def test_discover_standards_empty_dir(tmp_path):
 def test_discover_standards_finds_content_files(tmp_path):
     """_discover_standards discovers *_content.py files correctly."""
     from aipass.seedgo.apps.modules.standards_query import _discover_standards
+
     # Create a fake content file
     (tmp_path / "architecture_content.py").write_text("# fake", encoding="utf-8")
     (tmp_path / "not_a_content.py").write_text("# fake", encoding="utf-8")

@@ -41,6 +41,7 @@ from aipass.api.apps.handlers.json import json_handler
 
 try:
     from googleapiclient.discovery import build
+
     GOOGLE_BUILD_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Google API client library not available: {e}")
@@ -54,7 +55,9 @@ except ImportError as e:
 
 
 def build_service(
-    service_name: str = "drive", version: str = "v3", scopes: Optional[list] = None,
+    service_name: str = "drive",
+    version: str = "v3",
+    scopes: Optional[list] = None,
 ) -> Optional[object]:
     """Build an authenticated Google API service object.
 
@@ -85,7 +88,9 @@ def build_service(
 
 
 def build_thread_safe_service(
-    service_name: str = "drive", version: str = "v3", scopes: Optional[list] = None,
+    service_name: str = "drive",
+    version: str = "v3",
+    scopes: Optional[list] = None,
 ) -> Optional[object]:
     """Build an isolated service instance for use in a worker thread.
 

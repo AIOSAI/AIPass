@@ -23,7 +23,6 @@ import json
 from unittest.mock import patch, MagicMock
 
 
-
 # =============================================
 # 1. get_api_key() tests
 # =============================================
@@ -41,11 +40,7 @@ class TestGetApiKey:
         config_path = tmp_path / "api_connect_config.json"
         config_data = {
             "config": {
-                "providers": {
-                    "openrouter": {
-                        "api_key": "sk-or-v1-NOTREAL-test-000000000000000000000000000000000000"
-                    }
-                }
+                "providers": {"openrouter": {"api_key": "sk-or-v1-NOTREAL-test-000000000000000000000000000000000000"}}
             }
         }
         config_path.write_text(json.dumps(config_data), encoding="utf-8")
@@ -53,7 +48,7 @@ class TestGetApiKey:
         mock_api_json_dir.__truediv__ = lambda self, name: tmp_path / name
 
         result = get_api_key("openrouter")
-        #do not add real api kets here
+        # do not add real api kets here
         assert result == "sk-or-v1-NOTREAL-test-000000000000000000000000000000000000"
 
         mock_jh.log_operation.assert_called_once()
@@ -113,15 +108,7 @@ class TestGetApiKey:
         from aipass.api.apps.handlers.auth.keys import get_api_key
 
         config_path = tmp_path / "api_connect_config.json"
-        config_data = {
-            "config": {
-                "providers": {
-                    "openrouter": {
-                        "api_key": "INVALID-PREFIX-key-that-is-long-enough"
-                    }
-                }
-            }
-        }
+        config_data = {"config": {"providers": {"openrouter": {"api_key": "INVALID-PREFIX-key-that-is-long-enough"}}}}
         config_path.write_text(json.dumps(config_data), encoding="utf-8")
         mock_api_json_dir.__truediv__ = lambda self, name: tmp_path / name
 
@@ -230,9 +217,7 @@ class TestGetResponse:
             "model": "anthropic/claude-3.5-sonnet",
         }
 
-        result = get_response(
-            "What is Python?", model="anthropic/claude-3.5-sonnet"
-        )
+        result = get_response("What is Python?", model="anthropic/claude-3.5-sonnet")
 
         assert result is not None
         assert result["content"] == "Hello, world!"
@@ -242,9 +227,7 @@ class TestGetResponse:
     @patch(f"{MODULE}.get_api_key")
     @patch(f"{MODULE}.ensure_caller_config")
     @patch(f"{MODULE}.get_caller_info")
-    def test_no_model_returns_none(
-        self, mock_caller_info, mock_ensure, mock_get_key
-    ):
+    def test_no_model_returns_none(self, mock_caller_info, mock_ensure, mock_get_key):
         """Missing model parameter returns None without making API call."""
         from aipass.api.apps.handlers.openrouter.client import get_response
 
@@ -258,18 +241,14 @@ class TestGetResponse:
     @patch(f"{MODULE}.get_api_key")
     @patch(f"{MODULE}.ensure_caller_config")
     @patch(f"{MODULE}.get_caller_info")
-    def test_no_api_key_returns_none(
-        self, mock_caller_info, mock_ensure, mock_get_key
-    ):
+    def test_no_api_key_returns_none(self, mock_caller_info, mock_ensure, mock_get_key):
         """No API key available returns None."""
         from aipass.api.apps.handlers.openrouter.client import get_response
 
         mock_caller_info.return_value = {"caller_name": "test"}
         mock_get_key.return_value = None
 
-        result = get_response(
-            "What is Python?", model="anthropic/claude-3.5-sonnet"
-        )
+        result = get_response("What is Python?", model="anthropic/claude-3.5-sonnet")
 
         assert result is None
 

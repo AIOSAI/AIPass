@@ -19,10 +19,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
 
-def create_plan_file(
-    plan_file: Path,
-    content: str
-) -> Tuple[bool, str]:
+def create_plan_file(plan_file: Path, content: str) -> Tuple[bool, str]:
     """
     Create plan file with validation
 
@@ -57,7 +54,7 @@ def create_plan_file(
 
     # Create file
     try:
-        with open(plan_file, 'w', encoding='utf-8') as f:
+        with open(plan_file, "w", encoding="utf-8") as f:
             f.write(content)
         json_handler.log_operation("plan_file_created", {"file_path": str(plan_file), "success": True})
         return True, ""

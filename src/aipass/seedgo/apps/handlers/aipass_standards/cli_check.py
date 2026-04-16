@@ -23,20 +23,21 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+
 def is_bypassed(file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None) -> bool:
     """Check if a violation should be bypassed"""
     if not bypass_rules:
         return False
     for rule in bypass_rules:
         # Must match standard
-        if rule.get('standard') and rule.get('standard') != standard:
+        if rule.get("standard") and rule.get("standard") != standard:
             continue
         # Must match file (check if rule file path is in the full path)
-        rule_file = rule.get('file', '')
+        rule_file = rule.get("file", "")
         if rule_file and rule_file not in file_path:
             continue
         # Check line-specific bypass
-        rule_lines = rule.get('lines', [])
+        rule_lines = rule.get("lines", [])
         if rule_lines and line is not None and line not in rule_lines:
             continue
         return True
@@ -69,41 +70,41 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     path = Path(module_path)
 
     # Check if entire standard is bypassed for this file
-    if is_bypassed(module_path, 'cli', bypass_rules=bypass_rules):
+    if is_bypassed(module_path, "cli", bypass_rules=bypass_rules):
         return {
-            'passed': True,
-            'checks': [{'name': 'Bypassed', 'passed': True, 'message': 'Standard bypassed via .seedgo/bypass.json'}],
-            'score': 100,
-            'standard': 'CLI'
+            "passed": True,
+            "checks": [{"name": "Bypassed", "passed": True, "message": "Standard bypassed via .seedgo/bypass.json"}],
+            "score": 100,
+            "standard": "CLI",
         }
 
     # Validate file exists
     if not path.exists():
         return {
-            'passed': False,
-            'checks': [{'name': 'File exists', 'passed': False, 'message': f'File not found: {module_path}'}],
-            'score': 0,
-            'standard': 'CLI'
+            "passed": False,
+            "checks": [{"name": "File exists", "passed": False, "message": f"File not found: {module_path}"}],
+            "score": 0,
+            "standard": "CLI",
         }
 
     # Read file
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-            lines = content.split('\n')
+            lines = content.split("\n")
     except Exception as e:
         logger.info("Cannot read %s: %s", path, e)
         return {
-            'passed': False,
-            'checks': [{'name': 'File readable', 'passed': False, 'message': f'Error reading file: {e}'}],
-            'score': 0,
-            'standard': 'CLI'
+            "passed": False,
+            "checks": [{"name": "File readable", "passed": False, "message": f"Error reading file: {e}"}],
+            "score": 0,
+            "standard": "CLI",
         }
 
     # Determine file type (handle both absolute and relative paths)
-    is_handler = 'handlers/' in module_path
-    is_module = 'modules/' in module_path
-    is_entry_point = path.name.endswith('.py') and 'apps/' in module_path and path.parent.name == 'apps'
+    is_handler = "handlers/" in module_path
+    is_module = "modules/" in module_path
+    is_entry_point = path.name.endswith(".py") and "apps/" in module_path and path.parent.name == "apps"
 
     # Check 1: Handler separation (handlers must NOT have console output)
     if is_handler:
@@ -138,14 +139,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     # treat as passing — these files are not subject to CLI standards
     if not checks:
         return {
-            'passed': True,
-            'checks': [{'name': 'CLI check', 'passed': True, 'message': 'File outside module/handler/entry architecture (skipped)'}],
-            'score': 100,
-            'standard': 'CLI'
+            "passed": True,
+            "checks": [
+                {
+                    "name": "CLI check",
+                    "passed": True,
+                    "message": "File outside module/handler/entry architecture (skipped)",
+                }
+            ],
+            "score": 100,
+            "standard": "CLI",
         }
 
     # Calculate score
-    passed_checks = sum(1 for check in checks if check['passed'])
+    passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
@@ -153,25 +160,20 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli"})
-    return {
-        'passed': overall_passed,
-        'checks': checks,
-        'score': score,
-        'standard': 'CLI'
-    }
+    return {"passed": overall_passed, "checks": checks, "score": score, "standard": "CLI"}
 
 
 def _console_print_in_string(line: str, stripped: str) -> bool:
-    before_pattern = line.split('console.print(')[0]
+    before_pattern = line.split("console.print(")[0]
     single_quotes = before_pattern.count("'")
     double_quotes = before_pattern.count('"')
     if single_quotes % 2 == 1 or double_quotes % 2 == 1:
         return True
-    if '=' in stripped and 'console.print(' in stripped:
-        before_console = stripped.split('console.print(')[0]
-        last_eq_pos = before_console.rfind('=')
+    if "=" in stripped and "console.print(" in stripped:
+        before_console = stripped.split("console.print(")[0]
+        last_eq_pos = before_console.rfind("=")
         if last_eq_pos != -1:
-            after_eq = before_console[last_eq_pos+1:]
+            after_eq = before_console[last_eq_pos + 1 :]
             sq_after = after_eq.count("'")
             dq_after = after_eq.count('"')
             if sq_after % 2 == 1 or dq_after % 2 == 1:
@@ -187,7 +189,7 @@ def check_handler_separation(content: str) -> Dict:
     Only checks actual code (not strings or comments)
     Excludes: if __name__ == '__main__': blocks (test/debug code is OK)
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
 
     # Find code section boundaries (skip docstrings and comments)
     in_docstring = False
@@ -233,56 +235,52 @@ def check_handler_separation(content: str) -> Dict:
             continue
 
         # Skip if in docstring or comment
-        if in_docstring or stripped.startswith('#'):
+        if in_docstring or stripped.startswith("#"):
             continue
 
         # Look for actual console.print() calls
         # Must be actual code, not in a string
-        if 'console.print(' in stripped:
+        if "console.print(" in stripped:
             if _console_print_in_string(line, stripped):
                 continue
             # This is likely an actual call
             console_print_lines.append(i)
 
         # Look for actual CLI service imports (canonical, sub-module, or shortcut)
-        if re.search(r'from aipass\.cli\.apps\.modules[\.\s]', stripped) or 'from aipass.cli import' in stripped:
+        if re.search(r"from aipass\.cli\.apps\.modules[\.\s]", stripped) or "from aipass.cli import" in stripped:
             # Skip if in a string
-            if ('"from aipass.cli' in line or "'from aipass.cli" in line):
+            if '"from aipass.cli' in line or "'from aipass.cli" in line:
                 continue
             # This is likely an actual import
             cli_import_lines.append(i)
 
         # Look for print() calls
-        if re.search(r'^\s*print\s*\(', line):
+        if re.search(r"^\s*print\s*\(", line):
             # This is an actual print call at start of line (not in string)
             print_lines.append(i)
 
     if console_print_lines:
         return {
-            'name': 'Handler separation',
-            'passed': False,
-            'message': f'Handler contains console.print() on lines {console_print_lines[:3]} (violates separation)'
+            "name": "Handler separation",
+            "passed": False,
+            "message": f"Handler contains console.print() on lines {console_print_lines[:3]} (violates separation)",
         }
 
     if cli_import_lines:
         return {
-            'name': 'Handler separation',
-            'passed': False,
-            'message': f'Handler imports CLI services on lines {cli_import_lines[:3]} (handlers should not display)'
+            "name": "Handler separation",
+            "passed": False,
+            "message": f"Handler imports CLI services on lines {cli_import_lines[:3]} (handlers should not display)",
         }
 
     if print_lines:
         return {
-            'name': 'Handler separation',
-            'passed': False,
-            'message': f'Handler contains print() on lines {print_lines[:3]} (use logger instead)'
+            "name": "Handler separation",
+            "passed": False,
+            "message": f"Handler contains print() on lines {print_lines[:3]} (use logger instead)",
         }
 
-    return {
-        'name': 'Handler separation',
-        'passed': True,
-        'message': 'No console output detected (good separation)'
-    }
+    return {"name": "Handler separation", "passed": True, "message": "No console output detected (good separation)"}
 
 
 def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
@@ -293,55 +291,47 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
     Exception: CLI branch itself uses internal imports
     """
     # Exception: CLI branch uses internal imports (it's the implementation)
-    if '/cli/apps/' in module_path:
-        return {
-            'name': 'CLI service imports',
-            'passed': True,
-            'message': 'CLI branch exempt (uses internal imports)'
-        }
+    if "/cli/apps/" in module_path:
+        return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
     # Check for CLI imports (canonical, sub-module, or shortcut via cli/__init__.py)
     # Matches: from aipass.cli.apps.modules import X
     #          from aipass.cli.apps.modules.display import X
     #          from aipass.cli import X
-    has_cli_imports = bool(re.search(r'from aipass\.cli\.apps\.modules[\.\s]', content)) or 'from aipass.cli import' in content
+    has_cli_imports = (
+        bool(re.search(r"from aipass\.cli\.apps\.modules[\.\s]", content)) or "from aipass.cli import" in content
+    )
 
     if has_cli_imports:
         # Check what's imported (canonical full path, sub-module path, or shortcut via __init__.py)
         import_match = (
-            re.search(r'from aipass\.cli\.apps\.modules\.\w+ import (.+)', content)
-            or re.search(r'from aipass\.cli\.apps\.modules import (.+)', content)
-            or re.search(r'from aipass\.cli import (.+)', content)
+            re.search(r"from aipass\.cli\.apps\.modules\.\w+ import (.+)", content)
+            or re.search(r"from aipass\.cli\.apps\.modules import (.+)", content)
+            or re.search(r"from aipass\.cli import (.+)", content)
         )
         if import_match:
             imports = import_match.group(1)
-            return {
-                'name': 'CLI service imports',
-                'passed': True,
-                'message': f'Using CLI services ({imports})'
-            }
+            return {"name": "CLI service imports", "passed": True, "message": f"Using CLI services ({imports})"}
 
     # No CLI imports found - check if there's any output at all
-    has_console_print = 'console.print(' in content
-    has_print = bool(re.search(r'\bprint\s*\(', content))
-    has_raw_write = 'sys.stdout.write(' in content or 'sys.stderr.write(' in content
+    has_console_print = "console.print(" in content
+    has_print = bool(re.search(r"\bprint\s*\(", content))
+    has_raw_write = "sys.stdout.write(" in content or "sys.stderr.write(" in content
 
     if has_console_print or has_print or has_raw_write:
         return {
-            'name': 'CLI service imports',
-            'passed': False,
-            'message': 'Has output but missing CLI service imports (import from cli.apps.modules)'
+            "name": "CLI service imports",
+            "passed": False,
+            "message": "Has output but missing CLI service imports (import from cli.apps.modules)",
         }
 
     # No output at all - that's fine for some modules
-    return {
-        'name': 'CLI service imports',
-        'passed': True,
-        'message': 'No CLI output needed'
-    }
+    return {"name": "CLI service imports", "passed": True, "message": "No CLI output needed"}
 
 
-def check_print_usage(content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
+def check_print_usage(
+    content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None
+) -> Optional[Dict]:
     """
     Check for bare print() statements (should use console.print() instead)
 
@@ -385,78 +375,75 @@ def check_print_usage(content: str, lines: List[str], module_path: str = "", byp
             continue
 
         # Skip comments
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
 
         # Skip bypassed lines
-        if is_bypassed(module_path, 'cli', line=i, bypass_rules=bypass_rules):
+        if is_bypassed(module_path, "cli", line=i, bypass_rules=bypass_rules):
             continue
 
         # Check for parser.print_help() - uses plain print() internally
-        if 'parser.print_help()' in stripped:
+        if "parser.print_help()" in stripped:
             # Skip if in a comment
-            if '#' in line:
-                code_part = line.split('#')[0]
-                if 'parser.print_help()' in code_part:
+            if "#" in line:
+                code_part = line.split("#")[0]
+                if "parser.print_help()" in code_part:
                     parser_print_help_lines.append(i)
             else:
                 parser_print_help_lines.append(i)
 
         # Check for raw sys.stdout.write() / sys.stderr.write() (bypasses Rich)
-        if 'sys.stdout.write(' in stripped or 'sys.stderr.write(' in stripped:
-            if '#' in line:
-                code_part = line.split('#')[0]
-                if 'sys.stdout.write(' in code_part or 'sys.stderr.write(' in code_part:
+        if "sys.stdout.write(" in stripped or "sys.stderr.write(" in stripped:
+            if "#" in line:
+                code_part = line.split("#")[0]
+                if "sys.stdout.write(" in code_part or "sys.stderr.write(" in code_part:
                     raw_write_lines.append(i)
             else:
                 raw_write_lines.append(i)
 
         # Use regex to find BARE print() - not preceded by . or word character
         # This excludes: console.print(), logger.print(), pprint(), etc.
-        if re.search(r'(?<![.\w])print\s*\(', line):
+        if re.search(r"(?<![.\w])print\s*\(", line):
             # Skip if in a comment
-            if '#' in line:
-                code_part = line.split('#')[0]
-                if re.search(r'(?<![.\w])print\s*\(', code_part):
+            if "#" in line:
+                code_part = line.split("#")[0]
+                if re.search(r"(?<![.\w])print\s*\(", code_part):
                     print_lines.append(i)
             else:
                 print_lines.append(i)
 
     # Get filename for better error messages
     from pathlib import Path
+
     filename = Path(module_path).name if module_path else "file"
 
     # Check for parser.print_help() first (more specific violation)
     if parser_print_help_lines:
         return {
-            'name': 'print() usage',
-            'passed': False,
-            'message': f'Found parser.print_help() in {filename} on lines {parser_print_help_lines[:3]} (uses plain print() - use Rich console.print() instead)'
+            "name": "print() usage",
+            "passed": False,
+            "message": f"Found parser.print_help() in {filename} on lines {parser_print_help_lines[:3]} (uses plain print() - use Rich console.print() instead)",
         }
 
     if raw_write_lines:
         return {
-            'name': 'print() usage',
-            'passed': False,
-            'message': f'Found {len(raw_write_lines)} sys.stdout/stderr.write() in {filename} (use console.print() instead) on lines {raw_write_lines[:3]}{"..." if len(raw_write_lines) > 3 else ""}'
+            "name": "print() usage",
+            "passed": False,
+            "message": f"Found {len(raw_write_lines)} sys.stdout/stderr.write() in {filename} (use console.print() instead) on lines {raw_write_lines[:3]}{'...' if len(raw_write_lines) > 3 else ''}",
         }
 
     if print_lines:
         return {
-            'name': 'print() usage',
-            'passed': False,
-            'message': f'Found {len(print_lines)} print() statements in {filename} (use console.print() instead) on lines {print_lines[:3]}{"..." if len(print_lines) > 3 else ""}'
+            "name": "print() usage",
+            "passed": False,
+            "message": f"Found {len(print_lines)} print() statements in {filename} (use console.print() instead) on lines {print_lines[:3]}{'...' if len(print_lines) > 3 else ''}",
         }
 
     # Check if using console.print()
-    has_console_print = 'console.print(' in content
+    has_console_print = "console.print(" in content
 
     if has_console_print:
-        return {
-            'name': 'print() usage',
-            'passed': True,
-            'message': 'Using console.print() (no bare print() found)'
-        }
+        return {"name": "print() usage", "passed": True, "message": "Using console.print() (no bare print() found)"}
 
     return None  # No output at all
 
@@ -468,29 +455,25 @@ def check_help_flag(content: str) -> Optional[Dict]:
     Modules should respond to --help
     """
     # Look for --help handling
-    has_help_flag = '--help' in content and ('-h' in content or 'help' in content)
+    has_help_flag = "--help" in content and ("-h" in content or "help" in content)
 
     # Look for argparse usage
-    has_argparse = 'argparse.ArgumentParser' in content or 'import argparse' in content
+    has_argparse = "argparse.ArgumentParser" in content or "import argparse" in content
 
     # Look for print_help function
-    has_print_help = 'def print_help' in content
+    has_print_help = "def print_help" in content
 
     if has_print_help or (has_help_flag and has_argparse):
-        return {
-            'name': '--help flag',
-            'passed': True,
-            'message': '--help flag implemented'
-        }
+        return {"name": "--help flag", "passed": True, "message": "--help flag implemented"}
 
     # Check if it's a simple module that might not need --help
-    if '__main__' not in content:
+    if "__main__" not in content:
         return None  # Not an executable module
 
     return {
-        'name': '--help flag',
-        'passed': False,
-        'message': '--help flag not implemented (modules should respond to --help)'
+        "name": "--help flag",
+        "passed": False,
+        "message": "--help flag not implemented (modules should respond to --help)",
     }
 
 
@@ -503,32 +486,28 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     Exception: CLI branch itself defines these functions.
     """
     # Exception: CLI branch defines these functions
-    if '/cli/apps/' in module_path:
+    if "/cli/apps/" in module_path:
         return None
 
     # Exception: Prax logger IS the logging system — it defines these legitimately
-    if '/prax/apps/modules/logger' in module_path:
+    if "/prax/apps/modules/logger" in module_path:
         return None
 
     # Display functions that CLI service provides
-    cli_display_functions = ['header', 'success', 'error', 'warning', 'info']
+    cli_display_functions = ["header", "success", "error", "warning", "info"]
 
     # Look for local function definitions that duplicate CLI service
     duplicates_found = []
     for func_name in cli_display_functions:
         # Check for "def header(" pattern
-        if f'def {func_name}(' in content:
+        if f"def {func_name}(" in content:
             duplicates_found.append(func_name)
 
     if duplicates_found:
         return {
-            'name': 'CLI display functions',
-            'passed': False,
-            'message': f'Defines own {", ".join(duplicates_found)}() - use from cli.apps.modules.display import {", ".join(duplicates_found)}'
+            "name": "CLI display functions",
+            "passed": False,
+            "message": f"Defines own {', '.join(duplicates_found)}() - use from cli.apps.modules.display import {', '.join(duplicates_found)}",
         }
 
-    return {
-        'name': 'CLI display functions',
-        'passed': True,
-        'message': 'No duplicate CLI display functions defined'
-    }
+    return {"name": "CLI display functions", "passed": True, "message": "No duplicate CLI display functions defined"}

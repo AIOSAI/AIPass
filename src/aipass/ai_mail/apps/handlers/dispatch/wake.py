@@ -74,6 +74,7 @@ DEFAULT_MODEL = "sonnet"
 
 # ─── Status Step Tracking ───────────────────────────────
 
+
 class DispatchStatus:
     """Collects step-by-step status for a dispatch operation."""
 
@@ -118,12 +119,13 @@ class DispatchStatus:
 
 # ─── Helpers ────────────────────────────────────────────
 
+
 def _read_json(filepath: Path) -> Optional[dict]:
     """Read and parse a JSON file, returning None on failure."""
     if not filepath.exists():
         return None
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("[wake] Failed to read %s: %s", filepath, e)
@@ -136,7 +138,7 @@ def _check_lock(branch_path: Path) -> Optional[dict]:
     if not lock_file.exists():
         return None
     try:
-        with open(lock_file, 'r', encoding='utf-8') as f:
+        with open(lock_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         pid = data.get("pid")
         if pid is not None:
@@ -153,6 +155,7 @@ def _check_lock(branch_path: Path) -> Optional[dict]:
         if ts:
             try:
                 from datetime import datetime
+
                 lock_time = datetime.fromisoformat(ts)
                 age = (datetime.now() - lock_time).total_seconds()
                 if age > 600:
@@ -171,15 +174,11 @@ def _check_lock(branch_path: Path) -> Optional[dict]:
 def _acquire_lock(branch_path: Path, pid: int) -> Tuple[bool, str]:
     """Acquire dispatch lock for branch. Atomic creation."""
     lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
-    lock_data = {
-        "pid": pid,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "branch": str(branch_path)
-    }
+    lock_data = {"pid": pid, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "branch": str(branch_path)}
     try:
         lock_file.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, "w") as f:
             json.dump(lock_data, f, indent=2)
         return True, "Lock acquired"
     except FileExistsError as e:
@@ -208,20 +207,12 @@ def _set_session_name(branch_path: Path, name: str) -> bool:
     projects_dir = Path("~/.claude/projects").expanduser() / encoded_cwd
     if not projects_dir.exists():
         return False
-    jsonl_files = sorted(
-        projects_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True
-    )
+    jsonl_files = sorted(projects_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not jsonl_files:
         return False
     latest = jsonl_files[0]
     session_id = latest.stem
-    entry = json.dumps({
-        "type": "custom-title",
-        "customTitle": name,
-        "sessionId": session_id
-    })
+    entry = json.dumps({"type": "custom-title", "customTitle": name, "sessionId": session_id})
     try:
         with open(latest, "a", encoding="utf-8") as f:
             f.write(entry + "\n")
@@ -234,40 +225,37 @@ def _set_session_name(branch_path: Path, name: str) -> bool:
 def _read_session_type(pid_str: str) -> str:
     """Read AIPASS_SESSION_TYPE from /proc/{pid}/environ. Returns 'interactive' if unset."""
     if sys.platform != "linux":
-        return 'interactive'
+        return "interactive"
     try:
-        with open(f'/proc/{pid_str}/environ', 'rb') as f:
+        with open(f"/proc/{pid_str}/environ", "rb") as f:
             data = f.read()
-        for entry in data.split(b'\0'):
-            if entry.startswith(b'AIPASS_SESSION_TYPE='):
-                return entry.split(b'=', 1)[1].decode('utf-8')
+        for entry in data.split(b"\0"):
+            if entry.startswith(b"AIPASS_SESSION_TYPE="):
+                return entry.split(b"=", 1)[1].decode("utf-8")
     except (OSError, PermissionError):
         logger.info("[wake] Cannot read session type for PID %s", pid_str)
-    return 'interactive'
+    return "interactive"
 
 
 # Session types that should NOT block dispatch (idle/background sessions)
-_NON_BLOCKING_SESSION_TYPES = {'telegram', 'dispatched', 'daemon'}
+_NON_BLOCKING_SESSION_TYPES = {"telegram", "dispatched", "daemon"}
 
 
 def _is_branch_occupied(branch_path: Path) -> bool:
     """Check if an interactive Claude session is running in this branch directory."""
     resolved = str(branch_path.resolve())
     try:
-        result = subprocess.run(
-            ['pgrep', '-x', 'claude'],
-            capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
             return False
-        for pid_str in result.stdout.strip().split('\n'):
+        for pid_str in result.stdout.strip().split("\n"):
             pid_str = pid_str.strip()
             if not pid_str:
                 continue
             try:
                 if sys.platform != "linux":
                     continue
-                cwd = os.readlink(f'/proc/{pid_str}/cwd')
+                cwd = os.readlink(f"/proc/{pid_str}/cwd")
                 if str(Path(cwd).resolve()) == resolved:
                     session_type = _read_session_type(pid_str)
                     if session_type not in _NON_BLOCKING_SESSION_TYPES:
@@ -284,13 +272,10 @@ def _clean_zombies() -> int:
     """Find and report zombie Claude processes. Returns count found."""
     count = 0
     try:
-        result = subprocess.run(
-            ['ps', '-eo', 'pid,stat,comm'],
-            capture_output=True, text=True, timeout=5
-        )
-        for line in result.stdout.strip().split('\n'):
+        result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.strip().split("\n"):
             parts = line.split()
-            if len(parts) >= 3 and parts[2] == 'claude' and 'Z' in parts[1]:
+            if len(parts) >= 3 and parts[2] == "claude" and "Z" in parts[1]:
                 count += 1
                 logger.info("[wake] Found zombie Claude process PID %s", parts[0])
     except (subprocess.SubprocessError, OSError):
@@ -304,10 +289,10 @@ def _check_pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
         # Also verify not zombie via /proc (Linux only)
         if sys.platform == "linux":
-            with open(f'/proc/{pid}/status', 'r') as f:
+            with open(f"/proc/{pid}/status", "r") as f:
                 for line in f:
-                    if line.startswith('State:'):
-                        return 'Z' not in line
+                    if line.startswith("State:"):
+                        return "Z" not in line
         return True
     except (ProcessLookupError, FileNotFoundError) as e:
         logger.warning("[wake] PID %s not found: %s", pid, e)
@@ -318,6 +303,7 @@ def _check_pid_alive(pid: int) -> bool:
 
 
 # ─── Branch Resolution ──────────────────────────────────
+
 
 def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
@@ -344,6 +330,7 @@ def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
     if caller_cwd:
         try:
             from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
+
             caller_branches = get_caller_project_branches(caller_cwd)
             branch_path_str = caller_branches.get(email, "")
             if branch_path_str:
@@ -358,10 +345,15 @@ def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
 
 # ─── Main Wake Function ─────────────────────────────────
 
-def wake_branch(branch_email: str, custom_message: Optional[str] = None,
-                fresh: bool = False, auto: bool = False,
-                sender: str = "@devpulse",
-                model: Optional[str] = None) -> Tuple[DispatchStatus, bool]:
+
+def wake_branch(
+    branch_email: str,
+    custom_message: Optional[str] = None,
+    fresh: bool = False,
+    auto: bool = False,
+    sender: str = "@devpulse",
+    model: Optional[str] = None,
+) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
 
@@ -377,7 +369,9 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
     """
-    json_handler.log_operation("wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL})
+    json_handler.log_operation(
+        "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}
+    )
 
     status = DispatchStatus()
 
@@ -445,19 +439,32 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
 
     if fresh:
         claude_cmd = [
-            _CLAUDE_BIN, "-p", prompt,
-            "--model", resolved_model,
-            "--max-turns", str(max_turns),
-            "--permission-mode", "bypassPermissions",
-            "--output-format", "json"
+            _CLAUDE_BIN,
+            "-p",
+            prompt,
+            "--model",
+            resolved_model,
+            "--max-turns",
+            str(max_turns),
+            "--permission-mode",
+            "bypassPermissions",
+            "--output-format",
+            "json",
         ]
     else:
         claude_cmd = [
-            _CLAUDE_BIN, "-c", "-p", prompt,
-            "--model", resolved_model,
-            "--max-turns", str(max_turns),
-            "--permission-mode", "bypassPermissions",
-            "--output-format", "json"
+            _CLAUDE_BIN,
+            "-c",
+            "-p",
+            prompt,
+            "--model",
+            resolved_model,
+            "--max-turns",
+            str(max_turns),
+            "--permission-mode",
+            "bypassPermissions",
+            "--output-format",
+            "json",
         ]
 
     # Set session name for /resume picker
@@ -472,11 +479,7 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
     stderr_log = str(log_dir / "dispatch_stderr.log")
 
     # Build monitor command
-    monitor_cmd = [
-        sys.executable, str(MONITOR_SCRIPT),
-        email, lock_file_path, sender, stderr_log,
-        "--", *claude_cmd
-    ]
+    monitor_cmd = [sys.executable, str(MONITOR_SCRIPT), email, lock_file_path, sender, stderr_log, "--", *claude_cmd]
 
     # Prepare environment
     spawn_env = os.environ.copy()
@@ -502,7 +505,7 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
             cwd=str(branch_path),
-            env=spawn_env
+            env=spawn_env,
         )
 
         monitor_pid = process.pid
@@ -539,6 +542,7 @@ def wake_branch(branch_email: str, custom_message: Optional[str] = None,
     notif_body = custom_message[:80] if custom_message else "Manual wake: check inbox"
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
+
         send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"))
     except Exception:
         logger.info("[wake] Desktop notification unavailable")
@@ -552,7 +556,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
 
     if not args or args[0] in ("--help", "-h"):
-        print("Usage: wake.py [--fresh] [--auto] [--sender @branch] [--model sonnet|opus] @branch [\"optional message\"]")
+        print('Usage: wake.py [--fresh] [--auto] [--sender @branch] [--model sonnet|opus] @branch ["optional message"]')
         print("  Manually spawn a Claude agent at a branch (daemon not required)")
         print()
         print("Flags:")
@@ -572,7 +576,7 @@ if __name__ == "__main__":
         print("Examples:")
         print("  wake.py @flow                    # Default: check inbox (resume)")
         print("  wake.py --fresh @flow            # Fresh session, check inbox")
-        print("  wake.py @vera \"Review NOTEPAD\"   # Custom prompt (resume)")
+        print('  wake.py @vera "Review NOTEPAD"   # Custom prompt (resume)')
         print("  wake.py --fresh --sender @vera @seedgo  # Fresh, bounce to @vera")
         sys.exit(0)
 
@@ -586,13 +590,13 @@ if __name__ == "__main__":
         idx = args.index("--sender")
         if idx + 1 < len(args):
             use_sender = args[idx + 1]
-            args = args[:idx] + args[idx + 2:]
+            args = args[:idx] + args[idx + 2 :]
 
     if "--model" in args:
         idx = args.index("--model")
         if idx + 1 < len(args):
             use_model = args[idx + 1]
-            args = args[:idx] + args[idx + 2:]
+            args = args[:idx] + args[idx + 2 :]
 
     args = [a for a in args if a not in ("--fresh", "--auto")]
 
@@ -604,8 +608,7 @@ if __name__ == "__main__":
     message = args[1] if len(args) > 1 else None
 
     dispatch_status, success = wake_branch(
-        branch, message, fresh=use_fresh, auto=use_auto, sender=use_sender,
-        model=use_model
+        branch, message, fresh=use_fresh, auto=use_auto, sender=use_sender, model=use_model
     )
     print(dispatch_status.format())
     sys.exit(0 if success else 1)

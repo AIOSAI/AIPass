@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Callable, Tuple, List, Dict, Any
 
 from aipass.prax import logger
+
 # logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -39,16 +40,18 @@ MODULE_NAME = "create_plan"
 # HELPERS
 # =============================================
 
+
 def slugify_subject(subject: str, max_length: int = 40) -> str:
     """Sanitize subject for filename: lowercase, underscores, max *max_length* chars."""
-    slug = re.sub(r'[^\w\s-]', '', subject.lower())
-    slug = re.sub(r'[\s-]+', '_', slug)
-    return slug.strip('_')[:max_length]
+    slug = re.sub(r"[^\w\s-]", "", subject.lower())
+    slug = re.sub(r"[\s-]+", "_", slug)
+    return slug.strip("_")[:max_length]
 
 
 # =============================================
 # CREATE PLAN IMPLEMENTATION
 # =============================================
+
 
 def create_plan_impl(
     location: str | None = None,
@@ -186,10 +189,7 @@ def create_plan_impl(
                     template_path = available[0]
                 elif len(available) > 1:
                     names = [p.stem for p in available]
-                    error_msg = (
-                        f"Multiple templates in {tmpl_dir.name}/. "
-                        f"Specify which one: {names}"
-                    )
+                    error_msg = f"Multiple templates in {tmpl_dir.name}/. Specify which one: {names}"
                     return False, 0, "", "", error_msg, []
                 else:
                     error_msg = f"No templates found in {tmpl_dir.name}/"
@@ -243,7 +243,9 @@ def create_plan_impl(
         # STEP 11b: Push flow section to branch's dashboard via write-through
         branch_dashboard_success = push_flow_to_branch_dashboard(target_dir)
         if not branch_dashboard_success:
-            messages.append({"type": "dim", "text": f"No branch dashboard at {target_dir} -- no branch is tracking this plan"})
+            messages.append(
+                {"type": "dim", "text": f"No branch dashboard at {target_dir} -- no branch is tracking this plan"}
+            )
 
         # STEP 12: Log success
         plan_id = f"{prefix}-{formatted_num}"
@@ -251,19 +253,27 @@ def create_plan_impl(
 
         # Build display message
         display_msg = display_plan_created(
-            NEXT_NUM, RELATIVE_LOCATION, subject, template_type,
-            prefix=prefix, digits=digits,
+            NEXT_NUM,
+            RELATIVE_LOCATION,
+            subject,
+            template_type,
+            prefix=prefix,
+            digits=digits,
         )
         messages.append({"type": "display", "text": display_msg})
 
         # Fire trigger event for plan creation
         try:
             from aipass.trigger.apps.modules.core import trigger
-            trigger.fire('plan_created', plan_number=NEXT_NUM, location=RELATIVE_LOCATION, subject=subject)
+
+            trigger.fire("plan_created", plan_number=NEXT_NUM, location=RELATIVE_LOCATION, subject=subject)
         except ImportError:
             logger.info(f"[{MODULE_NAME}] Trigger module not available, skipping plan_created event")
 
-        json_handler.log_operation("plan_created", {"plan_number": NEXT_NUM, "location": RELATIVE_LOCATION, "template": template_type, "success": True})
+        json_handler.log_operation(
+            "plan_created",
+            {"plan_number": NEXT_NUM, "location": RELATIVE_LOCATION, "template": template_type, "success": True},
+        )
         return True, NEXT_NUM, RELATIVE_LOCATION, template_type, "", messages
 
     except Exception as e:

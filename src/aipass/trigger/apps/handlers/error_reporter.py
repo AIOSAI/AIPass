@@ -87,6 +87,7 @@ Automated recommendation from Medic v2 Error Registry.
 Reply to @trigger with your fix status."""
 
         from datetime import datetime
+
         email_data = {
             "from": "@trigger",
             "from_name": "TRIGGER",
@@ -106,12 +107,7 @@ Reply to @trigger with your fix status."""
 
 
 def report_error(
-    error_type: str,
-    message: str,
-    component: str,
-    log_path: str = "",
-    severity: str = "medium",
-    fire_event: bool = True
+    error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium", fire_event: bool = True
 ) -> dict:
     """Report an error to the registry and optionally fire error_detected event.
 
@@ -150,6 +146,7 @@ def report_error(
 
     try:
         from aipass.trigger.apps.modules.core import trigger as _trigger_bus
+
         _trigger_bus.fire(
             "error_detected",
             branch=component,

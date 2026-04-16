@@ -35,7 +35,8 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
 def _suppress_log_operation(monkeypatch):
     """Prevent json_handler.log_operation from touching real files."""
     monkeypatch.setattr(
-        mod, "json_handler",
+        mod,
+        "json_handler",
         MagicMock(),
     )
 
@@ -164,9 +165,7 @@ def test_run_startup_check_success(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
     monkeypatch.setattr(mod, "_check_jsonl_activity", fake_activity)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == 0
     assert startup_failed is False
 
@@ -190,9 +189,7 @@ def test_run_startup_check_timeout(tmp_path, monkeypatch):
     mock_kill = MagicMock()
     monkeypatch.setattr(mod, "_kill_process", mock_kill)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == -3
     assert startup_failed is True
     mock_kill.assert_called_once()
@@ -213,9 +210,7 @@ def test_run_startup_check_process_exits_during_startup_no_output(tmp_path, monk
 
     monkeypatch.setattr(mod.subprocess, "Popen", lambda *a, **kw: mock_proc)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == 1
     assert startup_failed is True  # Zero output = startup failure
 
@@ -249,9 +244,7 @@ def test_run_startup_check_process_exits_during_startup_with_output(tmp_path, mo
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
     monkeypatch.setattr(mod, "_check_jsonl_activity", lambda d, s: True)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == 1
     assert startup_failed is False  # Had JSONL activity = normal failure, not startup
 
@@ -287,9 +280,7 @@ def test_run_startup_check_hard_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: {})
     monkeypatch.setattr(mod, "_check_jsonl_activity", lambda d, s: True)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == -1
     assert startup_failed is False
     mock_kill.assert_called_once()
@@ -308,9 +299,7 @@ def test_run_startup_check_spawn_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod.subprocess, "Popen", raise_oserror)
 
-    exit_code, startup_failed = _run_with_startup_check(
-        ["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test"
-    )
+    exit_code, startup_failed = _run_with_startup_check(["claude"], stdout_log, stderr_fh, str(tmp_path), {}, "@test")
     assert exit_code == -2
     assert startup_failed is False
 
@@ -340,7 +329,10 @@ def main_argv(tmp_path):
         "@sender",
         str(stderr_log),
         "--",
-        "claude", "-c", "--model", "opus",
+        "claude",
+        "-c",
+        "--model",
+        "opus",
     ]
     return argv, lock_file, stderr_log
 
@@ -380,11 +372,15 @@ def test_main_second_attempt_success(monkeypatch, main_argv):
     monkeypatch.setattr(mod, "_run_with_startup_check", mock_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(mod, "time", MagicMock(
-        time=time.time,
-        strftime=time.strftime,
-        sleep=MagicMock(),
-    ))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(
+            time=time.time,
+            strftime=time.strftime,
+            sleep=MagicMock(),
+        ),
+    )
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=Path("/fake/repo")),
@@ -412,11 +408,15 @@ def test_main_third_attempt_fresh(monkeypatch, main_argv):
     monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(mod, "time", MagicMock(
-        time=time.time,
-        strftime=time.strftime,
-        sleep=MagicMock(),
-    ))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(
+            time=time.time,
+            strftime=time.strftime,
+            sleep=MagicMock(),
+        ),
+    )
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=Path("/fake/repo")),
@@ -441,15 +441,18 @@ def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv):
     mock_bounce = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check",
-                        MagicMock(side_effect=[(1, False), (-3, True), (1, False)]))
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (-3, True), (1, False)]))
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(mod, "time", MagicMock(
-        time=time.time,
-        strftime=time.strftime,
-        sleep=MagicMock(),
-    ))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(
+            time=time.time,
+            strftime=time.strftime,
+            sleep=MagicMock(),
+        ),
+    )
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=Path("/fake/repo")),
@@ -474,8 +477,7 @@ def test_main_rate_limit_delay(monkeypatch, main_argv):
     mock_time.sleep = MagicMock()
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check",
-                        MagicMock(side_effect=[(1, False), (0, False)]))
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=True))
     monkeypatch.setattr(mod, "time", mock_time)
@@ -551,8 +553,7 @@ def test_send_bounce_missing_stderr(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.subprocess, "run", mock_sub_run)
 
     # Pass a nonexistent stderr log
-    result = _send_bounce("@test", "failed", "@sender", str(lock),
-                          str(tmp_path / "nonexistent.log"))
+    result = _send_bounce("@test", "failed", "@sender", str(lock), str(tmp_path / "nonexistent.log"))
     assert result is True
     # The body should contain "(no stderr captured)" fallback
     call_args = mock_sub_run.call_args
@@ -568,8 +569,7 @@ def test_notification_uses_at_branch_format(monkeypatch, main_argv):
     argv, lock_file, stderr_log = main_argv
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check",
-                        MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
@@ -615,9 +615,7 @@ def test_kill_process_terminate_timeout_falls_back_to_sigkill():
     """SIGTERM times out — falls back to SIGKILL."""
     mock_proc = MagicMock()
     mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(
-        side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None]
-    )
+    mock_proc.wait = MagicMock(side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None])
     mock_proc.kill = MagicMock()
 
     _kill_process(mock_proc, "@test")
@@ -676,8 +674,13 @@ def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
     stderr_log.write_text("x" * 520_000, encoding="utf-8")
 
     argv = [
-        "dispatch_monitor.py", "@test", str(tmp_path / ".dispatch.lock"),
-        "@sender", str(stderr_log), "--", "claude",
+        "dispatch_monitor.py",
+        "@test",
+        str(tmp_path / ".dispatch.lock"),
+        "@sender",
+        str(stderr_log),
+        "--",
+        "claude",
     ]
 
     monkeypatch.setattr("sys.argv", argv)
@@ -724,8 +727,13 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
     stdout_log.write_text("x" * 520_000, encoding="utf-8")
 
     argv = [
-        "dispatch_monitor.py", "@test", str(lock),
-        "@sender", str(stderr_log), "--", "claude",
+        "dispatch_monitor.py",
+        "@test",
+        str(lock),
+        "@sender",
+        str(stderr_log),
+        "--",
+        "claude",
     ]
 
     monkeypatch.setattr("sys.argv", argv)
@@ -771,13 +779,18 @@ def test_lock_cleanup_on_failure(monkeypatch, main_argv):
     argv, lock_file, stderr_log = main_argv
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check",
-                        MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(mod, "time", MagicMock(
-        time=time.time, strftime=time.strftime, sleep=MagicMock(),
-    ))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(
+            time=time.time,
+            strftime=time.strftime,
+            sleep=MagicMock(),
+        ),
+    )
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=Path("/fake/repo")),
@@ -857,9 +870,7 @@ def test_kill_process_sigkill_fallback():
     """terminate() times out — falls back to kill()."""
     mock_proc = MagicMock()
     mock_proc.terminate = MagicMock()
-    mock_proc.wait = MagicMock(
-        side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None]
-    )
+    mock_proc.wait = MagicMock(side_effect=[subprocess.TimeoutExpired(cmd="claude", timeout=10), None])
     mock_proc.kill = MagicMock()
 
     _kill_process(mock_proc, "@test")
@@ -883,9 +894,7 @@ def test_main_max_turns_detected(monkeypatch, main_argv):
 
     def fake_run(cmd, stdout_log_path, stderr_fh, cwd, env, branch):
         # Write max_turns stop_reason into stdout log
-        Path(stdout_log_path).write_text(
-            '{"stop_reason":"max_turns"}', encoding="utf-8"
-        )
+        Path(stdout_log_path).write_text('{"stop_reason":"max_turns"}', encoding="utf-8")
         return (0, False)
 
     monkeypatch.setattr("sys.argv", argv)
@@ -930,8 +939,13 @@ def test_stderr_rotation(tmp_path, monkeypatch):
     lock.write_text("{}", encoding="utf-8")
 
     argv = [
-        "dispatch_monitor.py", "@test", str(lock),
-        "@sender", str(stderr_log), "--", "claude",
+        "dispatch_monitor.py",
+        "@test",
+        str(lock),
+        "@sender",
+        str(stderr_log),
+        "--",
+        "claude",
     ]
 
     monkeypatch.setattr("sys.argv", argv)
@@ -968,8 +982,13 @@ def test_stdout_rotation(tmp_path, monkeypatch):
     stdout_log.write_text("x" * 520_000, encoding="utf-8")
 
     argv = [
-        "dispatch_monitor.py", "@test", str(lock),
-        "@sender", str(stderr_log), "--", "claude",
+        "dispatch_monitor.py",
+        "@test",
+        str(lock),
+        "@sender",
+        str(stderr_log),
+        "--",
+        "claude",
     ]
 
     monkeypatch.setattr("sys.argv", argv)
@@ -1015,13 +1034,18 @@ def test_lock_cleaned_on_failure(monkeypatch, main_argv):
     argv, lock_file, stderr_log = main_argv
 
     monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check",
-                        MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(mod, "time", MagicMock(
-        time=time.time, strftime=time.strftime, sleep=MagicMock(),
-    ))
+    monkeypatch.setattr(
+        mod,
+        "time",
+        MagicMock(
+            time=time.time,
+            strftime=time.strftime,
+            sleep=MagicMock(),
+        ),
+    )
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=Path("/fake/repo")),

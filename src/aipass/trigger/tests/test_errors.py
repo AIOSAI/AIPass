@@ -28,6 +28,7 @@ _shared_mocks: dict[str, Any] = {}
 # Infrastructure mocking — autouse fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock all external dependencies before the errors module is imported.
@@ -58,19 +59,23 @@ def _mock_infrastructure(monkeypatch):
     mock_get_entry = MagicMock(return_value=None)
     mock_update_status = MagicMock(return_value=True)
     mock_clear_resolved = MagicMock(return_value=0)
-    mock_get_stats = MagicMock(return_value={
-        "total": 0,
-        "by_status": {},
-        "by_component": {},
-        "by_severity": {},
-    })
-    mock_get_cb_status = MagicMock(return_value={
-        "state": "closed",
-        "opened_at": 0,
-        "cooldown_seconds": 300,
-        "recent_error_count": 0,
-        "summary_sent": False,
-    })
+    mock_get_stats = MagicMock(
+        return_value={
+            "total": 0,
+            "by_status": {},
+            "by_component": {},
+            "by_severity": {},
+        }
+    )
+    mock_get_cb_status = MagicMock(
+        return_value={
+            "state": "closed",
+            "opened_at": 0,
+            "cooldown_seconds": 300,
+            "recent_error_count": 0,
+            "summary_sent": False,
+        }
+    )
     mock_cb_reset = MagicMock()
     mock_update_fix_status = MagicMock(return_value=True)
 
@@ -86,9 +91,13 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", registry_mod)
 
     # --- error_reporter handler ---
-    mock_report_error = MagicMock(return_value={
-        "fingerprint": "abc123", "is_new": True, "dispatched": False,
-    })
+    mock_report_error = MagicMock(
+        return_value={
+            "fingerprint": "abc123",
+            "is_new": True,
+            "dispatched": False,
+        }
+    )
     mock_send_fix_email = MagicMock(return_value=False)
 
     reporter_mod = MagicMock()
@@ -123,24 +132,26 @@ def _mock_infrastructure(monkeypatch):
 
     # Expose mocks to tests via the module-level dict
     _shared_mocks.clear()
-    _shared_mocks.update({
-        "logger": mock_logger,
-        "json_handler": mock_json_handler,
-        "console": mock_console,
-        "error_fn": mock_error_fn,
-        "query": mock_query,
-        "get_entry": mock_get_entry,
-        "update_status": mock_update_status,
-        "clear_resolved": mock_clear_resolved,
-        "get_stats": mock_get_stats,
-        "get_cb_status": mock_get_cb_status,
-        "cb_reset": mock_cb_reset,
-        "update_fix_status": mock_update_fix_status,
-        "report_error": mock_report_error,
-        "send_fix_email": mock_send_fix_email,
-        "table_cls": mock_table_cls,
-        "panel_cls": mock_panel_cls,
-    })
+    _shared_mocks.update(
+        {
+            "logger": mock_logger,
+            "json_handler": mock_json_handler,
+            "console": mock_console,
+            "error_fn": mock_error_fn,
+            "query": mock_query,
+            "get_entry": mock_get_entry,
+            "update_status": mock_update_status,
+            "clear_resolved": mock_clear_resolved,
+            "get_stats": mock_get_stats,
+            "get_cb_status": mock_get_cb_status,
+            "cb_reset": mock_cb_reset,
+            "update_fix_status": mock_update_fix_status,
+            "report_error": mock_report_error,
+            "send_fix_email": mock_send_fix_email,
+            "table_cls": mock_table_cls,
+            "panel_cls": mock_panel_cls,
+        }
+    )
 
 
 def _mocks() -> dict[str, Any]:
@@ -151,6 +162,7 @@ def _mocks() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # handle_command — "list" subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandList:
     """Tests for the 'list' subcommand."""
@@ -215,7 +227,8 @@ class TestHandleCommandList:
         assert has_count, "Expected '1 error(s)' in list summary output"
 
         mocks["json_handler"].log_operation.assert_called_with(
-            "error_command", {"subcommand": "list"},
+            "error_command",
+            {"subcommand": "list"},
         )
 
     def test_list_passes_filters_to_query(self):
@@ -228,7 +241,10 @@ class TestHandleCommandList:
         handle_command("errors", ["list", "--status=new", "--component=FLOW", "--severity=high"])
 
         mocks["query"].assert_called_once_with(
-            status="new", component="FLOW", severity="high", limit=50,
+            status="new",
+            component="FLOW",
+            severity="high",
+            limit=50,
         )
 
     def test_list_custom_limit(self):
@@ -241,13 +257,17 @@ class TestHandleCommandList:
         handle_command("errors", ["list", "--limit=10"])
 
         mocks["query"].assert_called_once_with(
-            status=None, component=None, severity=None, limit=10,
+            status=None,
+            component=None,
+            severity=None,
+            limit=10,
         )
 
 
 # ---------------------------------------------------------------------------
 # handle_command — "stats" subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandStats:
     """Tests for the 'stats' subcommand."""
@@ -304,13 +324,15 @@ class TestHandleCommandStats:
         handle_command("errors", ["stats"])
 
         mocks["json_handler"].log_operation.assert_called_with(
-            "error_command", {"subcommand": "stats"},
+            "error_command",
+            {"subcommand": "stats"},
         )
 
 
 # ---------------------------------------------------------------------------
 # handle_command — "circuit-breaker" subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandCircuitBreaker:
     """Tests for the 'circuit-breaker' subcommand."""
@@ -405,6 +427,7 @@ class TestHandleCommandCircuitBreaker:
 # handle_command — "--help" / "help"
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandHelp:
     """Tests for help display."""
 
@@ -456,6 +479,7 @@ class TestHandleCommandHelp:
 # handle_command — no args (introspection)
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandIntrospection:
     """Tests for introspection display (no arguments)."""
 
@@ -493,6 +517,7 @@ class TestHandleCommandIntrospection:
 # handle_command — wrong command name
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandWrongModule:
     """Tests for command name mismatch."""
 
@@ -508,6 +533,7 @@ class TestHandleCommandWrongModule:
 # ---------------------------------------------------------------------------
 # handle_command — unknown subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandUnknown:
     """Tests for unknown subcommands."""
@@ -525,18 +551,19 @@ class TestHandleCommandUnknown:
 
         # Verify the exact message format: "Unknown subcommand: foobar"
         call_args = mocks["error_fn"].call_args
-        assert call_args[0][0] == "Unknown subcommand: foobar", \
+        assert call_args[0][0] == "Unknown subcommand: foobar", (
             f"Expected exact error message 'Unknown subcommand: foobar', got {call_args[0][0]!r}"
+        )
 
         # Verify suggestion kwarg is passed
         assert "suggestion" in call_args[1], "Expected 'suggestion' keyword argument"
-        assert "help" in call_args[1]["suggestion"].lower(), \
-            "Expected suggestion to mention 'help'"
+        assert "help" in call_args[1]["suggestion"].lower(), "Expected suggestion to mention 'help'"
 
 
 # ---------------------------------------------------------------------------
 # report_error — public API
 # ---------------------------------------------------------------------------
+
 
 class TestReportError:
     """Tests for the report_error public API re-export."""
@@ -575,6 +602,7 @@ class TestReportError:
 # handle_command — "resolve" subcommand
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandResolve:
     """Tests for the 'resolve' subcommand."""
 
@@ -598,8 +626,9 @@ class TestHandleCommandResolve:
         update_call = mocks["update_status"].call_args
 
         # Verify fingerprint (first positional arg) comes from the entry, not the CLI arg
-        assert update_call[0][0] == "abc123def456abc123def456abc123def456abc1", \
+        assert update_call[0][0] == "abc123def456abc123def456abc123def456abc1", (
             "Expected update_status to be called with the full fingerprint from the entry"
+        )
         assert update_call[0][1] == "resolved"
 
         # Verify confirmation message was printed
@@ -624,6 +653,7 @@ class TestHandleCommandResolve:
 # ---------------------------------------------------------------------------
 # handle_command — "clear-resolved" subcommand
 # ---------------------------------------------------------------------------
+
 
 class TestHandleCommandClearResolved:
     """Tests for the 'clear-resolved' subcommand."""
@@ -668,6 +698,7 @@ class TestHandleCommandClearResolved:
 # ---------------------------------------------------------------------------
 # Internal helpers — _parse_args and _fmt_time
 # ---------------------------------------------------------------------------
+
 
 class TestInternalHelpers:
     """Tests for small internal helper functions."""
@@ -730,6 +761,7 @@ class TestInternalHelpers:
 # Contract gap: query() result structure
 # ---------------------------------------------------------------------------
 
+
 class TestQueryResultStructure:
     """Tests verifying query result structure flows correctly through list command."""
 
@@ -771,6 +803,7 @@ class TestQueryResultStructure:
 # Contract gap: handle_command with None args
 # ---------------------------------------------------------------------------
 
+
 class TestHandleCommandNoneArgs:
     """Tests for edge-case None args input."""
 
@@ -782,6 +815,7 @@ class TestHandleCommandNoneArgs:
 
         # None is falsy like [], so `if not args` branch triggers introspection
         from typing import Any
+
         none_as_list: Any = None
         result = handle_command("errors", none_as_list)
 

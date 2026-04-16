@@ -62,6 +62,7 @@ def _find_spawn_templates_dir() -> Path:
 # TEMPLATE SET DISCOVERY
 # =============================================================================
 
+
 def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
     """
     Auto-discover spawn template sets that contain a .trinity/ directory.
@@ -84,10 +85,12 @@ def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
             continue
         trinity_dir = child / ".trinity"
         if trinity_dir.is_dir():
-            template_sets.append({
-                "name": child.name,
-                "trinity_path": trinity_dir,
-            })
+            template_sets.append(
+                {
+                    "name": child.name,
+                    "trinity_path": trinity_dir,
+                }
+            )
 
     return template_sets
 
@@ -95,6 +98,7 @@ def _discover_template_sets(spawn_templates_dir: Path) -> List[Dict[str, Any]]:
 # =============================================================================
 # JSON COMPARISON
 # =============================================================================
+
 
 def _read_json(path: Path) -> dict | None:
     """Read and parse a JSON file. Returns None on any error."""
@@ -128,6 +132,7 @@ def _json_equal(a: dict | None, b: dict | None) -> bool:
 # =============================================================================
 # MAIN PUSH FUNCTION
 # =============================================================================
+
 
 def push_to_spawn_templates(dry_run: bool = False) -> dict:
     """
@@ -208,17 +213,17 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
             action = "updated" if spawn_file.exists() else "created"
             set_changed = True
             result["files_modified"] += 1
-            result["changes"].append({
-                "template_set": ts_name,
-                "file": filename,
-                "action": action,
-            })
+            result["changes"].append(
+                {
+                    "template_set": ts_name,
+                    "file": filename,
+                    "action": action,
+                }
+            )
 
             if not dry_run:
                 if not _write_json(spawn_file, canonical):
-                    result["errors"].append(
-                        f"{ts_name}: Failed to write {filename}"
-                    )
+                    result["errors"].append(f"{ts_name}: Failed to write {filename}")
 
         if set_changed:
             result["template_sets_updated"] += 1
@@ -232,7 +237,15 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
         f"{result['files_modified']} files modified"
     )
 
-    json_handler.log_operation("spawn_template_push", {"sets_updated": result["template_sets_updated"], "files": result["files_modified"], "dry_run": dry_run, "success": True})
+    json_handler.log_operation(
+        "spawn_template_push",
+        {
+            "sets_updated": result["template_sets_updated"],
+            "files": result["files_modified"],
+            "dry_run": dry_run,
+            "success": True,
+        },
+    )
     return result
 
 

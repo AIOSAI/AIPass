@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for checklist."""
@@ -74,15 +75,18 @@ def _mock_infrastructure(monkeypatch):
 # Tests — handle_command
 # ---------------------------------------------------------------------------
 
+
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
     from aipass.seedgo.apps.modules.checklist import handle_command
+
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
     """No args triggers introspection (returns True)."""
     from aipass.seedgo.apps.modules.checklist import handle_command
+
     result = handle_command("checklist", [])
     assert result is True
 
@@ -90,6 +94,7 @@ def test_handle_command_no_args_shows_introspection():
 def test_handle_command_help_flag():
     """--help flag is handled without error."""
     from aipass.seedgo.apps.modules.checklist import handle_command
+
     result = handle_command("checklist", ["--help"])
     assert result is True
 
@@ -97,6 +102,7 @@ def test_handle_command_help_flag():
 def test_handle_command_h_flag():
     """-h flag is handled without error."""
     from aipass.seedgo.apps.modules.checklist import handle_command
+
     result = handle_command("checklist", ["-h"])
     assert result is True
 
@@ -104,6 +110,7 @@ def test_handle_command_h_flag():
 def test_handle_command_help_word():
     """'help' word is handled without error."""
     from aipass.seedgo.apps.modules.checklist import handle_command
+
     result = handle_command("checklist", ["help"])
     assert result is True
 
@@ -112,9 +119,11 @@ def test_handle_command_help_word():
 # Tests — run_checklist
 # ---------------------------------------------------------------------------
 
+
 def test_run_checklist_file_not_found(tmp_path):
     """run_checklist returns error result for missing file."""
     from aipass.seedgo.apps.modules.checklist import run_checklist
+
     results = run_checklist(str(tmp_path / "nonexistent.py"))
     assert len(results) == 1
     assert results[0]["passed"] is False
@@ -124,6 +133,7 @@ def test_run_checklist_file_not_found(tmp_path):
 def test_run_checklist_non_python_file(tmp_path):
     """run_checklist skips non-Python files gracefully."""
     from aipass.seedgo.apps.modules.checklist import run_checklist
+
     txt_file = tmp_path / "readme.txt"
     txt_file.write_text("hello", encoding="utf-8")
     results = run_checklist(str(txt_file))
@@ -135,6 +145,7 @@ def test_run_checklist_non_python_file(tmp_path):
 def test_run_checklist_python_file_no_checkers(tmp_path):
     """run_checklist on a Python file with no applicable checkers returns skip."""
     from aipass.seedgo.apps.modules.checklist import run_checklist
+
     py_file = tmp_path / "sample.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
     results = run_checklist(str(py_file))
@@ -147,37 +158,40 @@ def test_run_checklist_python_file_no_checkers(tmp_path):
 # Tests — print_introspection / print_help
 # ---------------------------------------------------------------------------
 
+
 def test_print_introspection_runs():
     """print_introspection produces console output."""
     import sys
     from aipass.seedgo.apps.modules.checklist import print_introspection
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     result = print_introspection()
     assert result is None
-    assert mock_cli.console.print.called, \
-        "print_introspection should produce console output"
+    assert mock_cli.console.print.called, "print_introspection should produce console output"
 
 
 def test_print_help_runs():
     """print_help produces console output."""
     import sys
     from aipass.seedgo.apps.modules.checklist import print_help
+
     mock_cli = sys.modules["aipass.cli"]
     mock_cli.console.reset_mock()
     result = print_help()
     assert result is None
-    assert mock_cli.console.print.called, \
-        "print_help should produce console output"
+    assert mock_cli.console.print.called, "print_help should produce console output"
 
 
 # ---------------------------------------------------------------------------
 # Tests — internal helpers
 # ---------------------------------------------------------------------------
 
+
 def test_is_entry_point_detection():
     """_is_entry_point correctly identifies apps/{name}.py files."""
     from aipass.seedgo.apps.modules.checklist import _is_entry_point
+
     assert _is_entry_point("/some/branch/apps/flow.py") is True
     assert _is_entry_point("/some/branch/apps/modules/helper.py") is False
     assert _is_entry_point("/some/branch/apps/readme.txt") is False
@@ -186,6 +200,7 @@ def test_is_entry_point_detection():
 def test_format_failure_no_checks():
     """_format_failure returns fallback when no failed checks present."""
     from aipass.seedgo.apps.modules.checklist import _format_failure
+
     result = _format_failure({"checks": []})
     assert "no details" in result.lower()
 
@@ -193,21 +208,27 @@ def test_format_failure_no_checks():
 def test_format_failure_single_failure():
     """_format_failure returns the message from the first failed check."""
     from aipass.seedgo.apps.modules.checklist import _format_failure
-    result = _format_failure({
-        "checks": [
-            {"passed": False, "message": "Missing docstring"},
-        ]
-    })
+
+    result = _format_failure(
+        {
+            "checks": [
+                {"passed": False, "message": "Missing docstring"},
+            ]
+        }
+    )
     assert "Missing docstring" in result
 
 
 def test_format_failure_multiple_failures():
     """_format_failure indicates additional failures."""
     from aipass.seedgo.apps.modules.checklist import _format_failure
-    result = _format_failure({
-        "checks": [
-            {"passed": False, "message": "Missing docstring"},
-            {"passed": False, "message": "No type hints"},
-        ]
-    })
+
+    result = _format_failure(
+        {
+            "checks": [
+                {"passed": False, "message": "Missing docstring"},
+                {"passed": False, "message": "No type hints"},
+            ]
+        }
+    )
     assert "+1 more" in result

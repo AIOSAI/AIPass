@@ -46,6 +46,7 @@ DEFAULT_TEMPLATE = "default"
 # HELPER FUNCTIONS
 # =============================================
 
+
 def _template_search_dirs() -> list[Path]:
     """Determine the ordered list of directories to search for templates"""
     return [TEMPLATES_DIR]
@@ -72,20 +73,16 @@ def _find_template_file(template_name: str) -> Path:
         return candidate
 
     # Not found — error with available templates
-    available = [
-        p.stem for p in search_paths[0].iterdir()
-        if p.suffix == ".md"
-    ] if search_paths[0].is_dir() else []
+    available = [p.stem for p in search_paths[0].iterdir() if p.suffix == ".md"] if search_paths[0].is_dir() else []
     searched = ", ".join(str(path) for path in search_paths)
-    error_msg = (
-        f"Template '{template_name}' not found in: {searched}. "
-        f"Available: {available if available else 'none'}"
-    )
+    error_msg = f"Template '{template_name}' not found in: {searched}. Available: {available if available else 'none'}"
     raise FileNotFoundError(error_msg)
+
 
 # =============================================
 # HANDLER FUNCTION
 # =============================================
+
 
 def get_template(
     template_name: str = "default",
@@ -140,11 +137,11 @@ def get_template(
             template_file = _find_template_file(template_name)
 
         # Read template file
-        with open(template_file, 'r', encoding='utf-8') as f:
+        with open(template_file, "r", encoding="utf-8") as f:
             template_content = f.read()
 
         # Get current date for {today} placeholder
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now().strftime("%Y-%m-%d")
 
         # Build formatted number string (zero-padded)
         formatted_number = f"{number:0{digits}d}"
@@ -161,11 +158,14 @@ def get_template(
             tag="",
         )
 
-        json_handler.log_operation("template_loaded", {
-            "template": template_file.stem,
-            "plan_number": plan_number,
-            "success": True,
-        })
+        json_handler.log_operation(
+            "template_loaded",
+            {
+                "template": template_file.stem,
+                "plan_number": plan_number,
+                "success": True,
+            },
+        )
 
         return formatted_content
 

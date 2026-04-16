@@ -61,6 +61,7 @@ NEAR_ROLLOVER_THRESHOLD = 100
 # DATA COLLECTION
 # =============================================================================
 
+
 def _read_central_stats() -> Dict[str, Any]:
     """
     Read total_vectors and related stats from memory central.json.
@@ -77,7 +78,7 @@ def _read_central_stats() -> Dict[str, Any]:
         return {
             "total_vectors": stats.get("total_vectors", 0),
             "total_archives": stats.get("total_archives", 0),
-            "last_rollover": stats.get("last_rollover", "")
+            "last_rollover": stats.get("last_rollover", ""),
         }
     except Exception as e:
         logger.warning(f"[dashboard_push] Failed to read central stats: {e}")
@@ -124,7 +125,7 @@ def _get_rollover_config() -> Dict[str, Any]:
         rollover = data.get("rollover", {})
         return {
             "defaults": rollover.get("defaults", {"max_lines": 600, "buffer": 100}),
-            "per_branch": rollover.get("per_branch", {})
+            "per_branch": rollover.get("per_branch", {}),
         }
     except Exception as e:
         logger.warning(f"[dashboard_push] Failed to load rollover config: {e}")
@@ -200,27 +201,31 @@ def _find_branches_near_rollover() -> List[Dict[str, Any]]:
                             sessions = data.get("sessions", [])
                             remaining_sessions = max_sessions - len(sessions)
                             if remaining_sessions < 3:
-                                near_rollover.append({
-                                    "branch": branch_name,
-                                    "file_type": suffix,
-                                    "lines_remaining": remaining_sessions,
-                                    "current_lines": len(sessions),
-                                    "max_lines": max_sessions,
-                                    "v2_field": "sessions",
-                                })
+                                near_rollover.append(
+                                    {
+                                        "branch": branch_name,
+                                        "file_type": suffix,
+                                        "lines_remaining": remaining_sessions,
+                                        "current_lines": len(sessions),
+                                        "max_lines": max_sessions,
+                                        "v2_field": "sessions",
+                                    }
+                                )
                         max_kl = limits.get("max_key_learnings")
                         if max_kl is not None:
                             kl = data.get("key_learnings", {})
                             remaining_kl = max_kl - len(kl)
                             if remaining_kl < 3:
-                                near_rollover.append({
-                                    "branch": branch_name,
-                                    "file_type": suffix,
-                                    "lines_remaining": remaining_kl,
-                                    "current_lines": len(kl),
-                                    "max_lines": max_kl,
-                                    "v2_field": "key_learnings",
-                                })
+                                near_rollover.append(
+                                    {
+                                        "branch": branch_name,
+                                        "file_type": suffix,
+                                        "lines_remaining": remaining_kl,
+                                        "current_lines": len(kl),
+                                        "max_lines": max_kl,
+                                        "v2_field": "key_learnings",
+                                    }
+                                )
                         continue
 
                     # v1: line-count based
@@ -232,13 +237,15 @@ def _find_branches_near_rollover() -> List[Dict[str, Any]]:
 
                     remaining = max_lines - current_lines
                     if remaining < NEAR_ROLLOVER_THRESHOLD:
-                        near_rollover.append({
-                            "branch": branch_name,
-                            "file_type": suffix,
-                            "lines_remaining": max(remaining, 0),
-                            "current_lines": current_lines,
-                            "max_lines": max_lines
-                        })
+                        near_rollover.append(
+                            {
+                                "branch": branch_name,
+                                "file_type": suffix,
+                                "lines_remaining": max(remaining, 0),
+                                "current_lines": current_lines,
+                                "max_lines": max_lines,
+                            }
+                        )
                 except Exception as e:
                     # Skip files that can't be read
                     logger.warning(f"[dashboard_push] Failed to read memory file {memory_file}: {e}")
@@ -324,6 +331,7 @@ def _get_all_branch_paths() -> List[Path]:
 # PUBLIC API
 # =============================================================================
 
+
 def build_memory_bank_section() -> Dict[str, Any]:
     """
     Build the memory_bank dashboard section data.
@@ -346,12 +354,11 @@ def build_memory_bank_section() -> Dict[str, Any]:
         "collections_count": collections_count,
         "branches_near_rollover": near_rollover,
         "last_rollover": last_rollover,
-        "template_version": template_version
+        "template_version": template_version,
     }
 
 
-def _write_section_to_all_branches(section_name: str, section_data: Dict,
-                                    branch_paths: List[Path]) -> int:
+def _write_section_to_all_branches(section_name: str, section_data: Dict, branch_paths: List[Path]) -> int:
     """
     Write a dashboard section to multiple branches via a single subprocess.
 
@@ -391,18 +398,12 @@ def _write_section_to_all_branches(section_name: str, section_data: Dict,
             "print(ok)\n"
         )
 
-        input_data = json_dumps({
-            "section_name": section_name,
-            "section_data": section_data,
-            "branch_paths": [str(p) for p in branch_paths]
-        })
+        input_data = json_dumps(
+            {"section_name": section_name, "section_data": section_data, "branch_paths": [str(p) for p in branch_paths]}
+        )
 
         result = subprocess.run(
-            [sys.executable, "-c", script],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=60
+            [sys.executable, "-c", script], input=input_data, capture_output=True, text=True, timeout=60
         )
 
         if result.returncode == 0 and result.stdout.strip().isdigit():
@@ -435,9 +436,7 @@ def push_memory_bank_dashboard() -> bool:
 
         # Push to all branch dashboards via single subprocess
         branch_paths = _get_all_branch_paths()
-        success_count = _write_section_to_all_branches(
-            "memory_bank", section_data, branch_paths
-        )
+        success_count = _write_section_to_all_branches("memory_bank", section_data, branch_paths)
 
         json_handler.log_operation("dashboard_push", {"branches_updated": success_count, "success": success_count > 0})
 

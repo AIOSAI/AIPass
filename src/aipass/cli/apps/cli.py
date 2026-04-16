@@ -52,6 +52,7 @@ SERVICE_MODULES = {"display", "templates"}
 # MODULE DISCOVERY
 # =============================================================================
 
+
 def discover_modules() -> List[Any]:
     """Auto-discover CLI modules in modules/ directory.
 
@@ -97,6 +98,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 # DISPLAY
 # =============================================================================
 
+
 def print_introspection() -> None:
     """Display auto-discovered modules — seedgo-compliant introspection.
 
@@ -106,10 +108,8 @@ def print_introspection() -> None:
     modules = discover_modules()
 
     # Separate command modules from service modules
-    command_modules = [m for m in modules
-                       if getattr(m, "__name__", "").split(".")[-1] not in SERVICE_MODULES]
-    service_modules = [m for m in modules
-                       if getattr(m, "__name__", "").split(".")[-1] in SERVICE_MODULES]
+    command_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] not in SERVICE_MODULES]
+    service_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] in SERVICE_MODULES]
 
     CONSOLE.print()
     CONSOLE.print("[bold cyan]CLI - Command Line Interface Branch[/bold cyan]")
@@ -199,15 +199,9 @@ def print_help() -> None:
     services_table.add_column("Purpose", style="dim")
 
     services_table.add_row(
-        "display",
-        "header(), success(), error(), warning(), section()",
-        "Terminal output formatting"
+        "display", "header(), success(), error(), warning(), section()", "Terminal output formatting"
     )
-    services_table.add_row(
-        "templates",
-        "operation_start(), operation_complete()",
-        "Standard operation patterns"
-    )
+    services_table.add_row("templates", "operation_start(), operation_complete()", "Standard operation patterns")
 
     CONSOLE.print(services_table)
     CONSOLE.print()
@@ -270,6 +264,7 @@ def show_version():
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
+
 
 def main() -> int:
     """Main entry point - routes to modules."""
