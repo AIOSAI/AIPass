@@ -150,6 +150,12 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
             break
         if list(parent.glob("*_REGISTRY.json")):
             return True
+    # AIPASS_HOME fallback — for external projects / global drone usage
+    aipass_home = os.environ.get("AIPASS_HOME")
+    if aipass_home:
+        home = Path(aipass_home)
+        if home.is_dir() and list(home.glob("*_REGISTRY.json")):
+            return True
     return False
 
 
