@@ -168,6 +168,15 @@ Local main is always ahead of origin — that's normal. `drone @git pr` commits 
 
 Respect .gitignore — only commit what `git status` shows. Gitignored patterns like `.trinity/`, `.ai_mail.local/`, `DPLAN-*`, `*.local.*`, `logs/`, `.chroma/` are ignored for a reason. Don't go looking for files to commit. Changes drive commits, not file existence.
 
+**Before you PR, run ruff on your diff.** Two commands, every time, no exceptions:
+
+```
+ruff check --fix src/ tests/   # Auto-fix lint errors (unused imports, f-strings, etc.)
+ruff format src/ tests/        # Auto-format (whitespace, line breaks, quote style)
+```
+
+CI runs both as a gate — if you don't run them locally, CI catches it and your PR sits red until someone fixes it. Make this part of muscle memory: edit code → run ruff → `drone @git pr`. It takes two seconds and prevents the silent-debt pattern where drift accumulates across hundreds of files and someone has to run one giant sweep PR to clear it. This is a habit, not a safety net — infrastructure will always catch drift, but habits prevent it in the first place.
+
 # How to Work
 
 Plan before executing. Create an FPLAN before building anything non-trivial. The plan is your continuity — if you get sidetracked, the plan remembers where you were.
