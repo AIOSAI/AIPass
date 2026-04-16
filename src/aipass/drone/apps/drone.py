@@ -551,6 +551,17 @@ def main() -> int:
         return custom_result
 
     # Unknown command — check if it's a bare branch name missing @
+    #
+    # The @ prefix is a hard contract: it's our routing convention and cannot be
+    # silently auto-inferred. Bare `drone prax` must error — any relaxation makes
+    # typos route to branches and hides bugs.
+    #
+    # Windows caveat: PowerShell treats `@` as a splatting operator, so
+    # `drone @prax` reaches drone as `drone prax` — the @ is consumed before we
+    # ever see it. This is NOT fixed here. It is fixed via a PowerShell profile
+    # wrapper (setup.sh writes it for Windows users) that uses $MyInvocation.Line
+    # to reconstruct the original command string with @ intact. See issue #340.
+    # Git Bash on Windows is fine — it passes @ through like Linux.
     try:
         from aipass.drone.apps.modules.resolver import branch_exists
         if branch_exists(command):
