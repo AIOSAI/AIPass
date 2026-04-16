@@ -59,7 +59,6 @@ def _fresh_memory_files(monkeypatch):
 
     try:
         # Import the real package so memory_files can be found
-        import aipass.memory.apps.handlers.json  # noqa: F811
         real_json_pkg = sys.modules.get("aipass.memory.apps.handlers.json")
     except Exception:
         # If we can't import the real package, restore the mock
@@ -73,7 +72,6 @@ def _fresh_memory_files(monkeypatch):
         importlib.reload(existing)
     else:
         sys.modules.pop(mem_files_key, None)
-        import aipass.memory.apps.handlers.json.memory_files  # noqa: F811
 
     yield
 

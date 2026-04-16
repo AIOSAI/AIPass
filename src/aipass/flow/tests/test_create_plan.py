@@ -1,8 +1,7 @@
 """Tests for create_plan module -- handle_command routing."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 # ─── Patch targets ───────────────────────────────────────

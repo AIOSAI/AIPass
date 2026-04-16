@@ -25,7 +25,7 @@ from typing import List, Callable
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services
-from aipass.cli.apps.modules import console, header, success, error, warning
+from aipass.cli.apps.modules import console, error, warning
 
 # =============================================================================
 # MODULE DISCOVERY

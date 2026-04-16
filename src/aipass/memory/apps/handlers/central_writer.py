@@ -17,7 +17,6 @@ Purpose:
     Provide current stats to dashboard
 """
 
-import logging
 from json import load as json_load, dump as json_dump
 from pathlib import Path
 from datetime import datetime

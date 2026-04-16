@@ -20,7 +20,6 @@ THE STANDARD:
 - Prax's own logging infrastructure is exempt (it IS the implementation)
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List

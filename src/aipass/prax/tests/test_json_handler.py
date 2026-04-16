@@ -13,9 +13,7 @@ import json
 import sys
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-from io import StringIO
-import importlib
+from unittest.mock import MagicMock
 
 
 # =============================================

@@ -1,8 +1,7 @@
 """Tests for aggregate_central module -- handle_command routing and orchestration."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 # ─── Patch targets ───────────────────────────────────────

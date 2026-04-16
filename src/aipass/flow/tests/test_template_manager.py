@@ -9,7 +9,7 @@
 """Tests for the template_manager module -- prefix suggestion, command routing."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)

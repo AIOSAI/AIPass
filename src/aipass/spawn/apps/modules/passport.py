@@ -158,7 +158,7 @@ def handle_passport(args: list[str]) -> int:
         json_handler.log_operation("passport_granted", data={"branch": result["branch_name"]})
         console.print()
         console.print(f"[green]Passport granted: {result['branch_name']}[/green]")
-        console.print(f"  Class: birthright")
+        console.print("  Class: birthright")
         console.print(f"  Path: {result['path']}")
         console.print(f"  Files: {result['files_copied']}")
         console.print(f"  Registry: {'updated' if result['registry_updated'] else 'not updated'}")

@@ -18,7 +18,6 @@ Usage:
     drone @prax monitor run          # Monitor all branches
 """
 
-import signal
 import sys
 import argparse
 import threading

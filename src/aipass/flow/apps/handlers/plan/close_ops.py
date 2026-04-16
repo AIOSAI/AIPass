@@ -22,7 +22,7 @@ import sys
 import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Callable, Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 from aipass.prax import logger
 # logger imported from aipass.prax

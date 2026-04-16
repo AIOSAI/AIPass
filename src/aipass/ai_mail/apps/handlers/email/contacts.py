@@ -15,7 +15,6 @@ Solves the BRANCH DETECTION FAILED problem when external projects call drone
 """
 
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger

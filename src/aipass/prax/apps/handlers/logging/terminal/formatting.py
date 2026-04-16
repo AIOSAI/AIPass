@@ -13,7 +13,6 @@ Terminal output formatting with branch-aware display.
 """
 
 import sys
-from pathlib import Path
 
 import logging
 from typing import Optional

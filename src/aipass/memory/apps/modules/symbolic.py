@@ -1118,7 +1118,7 @@ def search_fragments_cli(args: List[str]) -> None:
             if meta_text:
                 panel_content += f"\n\n[dim]{meta_text}[/dim]"
 
-        schema_tag = f"v2" if metadata.get('schema_version') == 'v2' else "v1"
+        schema_tag = "v2" if metadata.get('schema_version') == 'v2' else "v1"
         tier_tag = f" [{tier}]" if tier else ""
         panel_title = f"Result {i} ({schema_tag}) - Relevance: {relevance:.2%}{tier_tag} (via {', '.join(sources)})"
 

@@ -13,7 +13,6 @@ Global logging.getLogger() override for automatic log routing.
 Intercepts logging.getLogger() calls and routes to module-specific logs.
 """
 
-from pathlib import Path
 
 import logging
 import sys

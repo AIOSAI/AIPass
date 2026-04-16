@@ -13,7 +13,6 @@ Bypass entries for architecture and encapsulation are in .seedgo/bypass.json.
 
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from aipass.ai_mail.apps.handlers.email.identity import (

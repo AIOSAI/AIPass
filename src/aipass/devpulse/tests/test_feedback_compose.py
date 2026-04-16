@@ -6,7 +6,6 @@
 """Tests for feedback compose — send, reply, ai_mail delivery."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

@@ -9,7 +9,7 @@
 # =============================================
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock
 from pathlib import Path
 
 
@@ -226,7 +226,6 @@ def test_help_text_at_prefix_consistency():
     patterns that should use @ prefix but don't.
     """
     import re
-    from pathlib import Path
 
     branch_root = Path(__file__).resolve().parents[1]
     files_to_check = [

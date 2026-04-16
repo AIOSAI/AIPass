@@ -12,7 +12,7 @@ import json
 import shutil
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # Pre-import modules so patch() path resolution works.
 # Without these imports, the intermediate packages lack the sub-module

@@ -16,12 +16,10 @@ Independent handler - no module dependencies.
 import json
 import os
 import uuid
-import subprocess
 from pathlib import Path
 from typing import Dict, Tuple, List, Optional, Callable
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-from aipass.ai_mail.apps.handlers.json_utils.json_handler import load_json, save_json
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.registry.read import get_all_branches

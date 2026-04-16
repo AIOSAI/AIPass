@@ -11,7 +11,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_check import (
     check_module as stderr_check_module,

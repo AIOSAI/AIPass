@@ -10,7 +10,7 @@
 
 import subprocess
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.notify as mod
 

@@ -19,7 +19,6 @@ No vectorization - just a searchable catalog.
 
 import ast
 import json
-import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List

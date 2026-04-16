@@ -28,7 +28,6 @@ from aipass.trigger.apps.handlers.log_watcher import (
     set_event_callback,
     start_branch_log_watcher,
     stop_branch_log_watcher,
-    is_branch_log_watcher_active,
     get_watcher_status,
     clear_seen_hashes
 )
@@ -211,7 +210,6 @@ def handle_command(command: str, args: list) -> bool:
 
 if __name__ == "__main__":
     import argparse
-    from aipass.cli.apps.modules import console
 
     if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
         print_help()

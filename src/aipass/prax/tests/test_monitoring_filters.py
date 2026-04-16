@@ -14,7 +14,6 @@ filter_log_content, and apply_content_filter.
 
 from pathlib import Path
 
-import pytest
 
 
 # =============================================

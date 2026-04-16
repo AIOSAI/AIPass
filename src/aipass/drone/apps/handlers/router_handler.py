@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError

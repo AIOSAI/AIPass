@@ -170,10 +170,10 @@ def _dry_run_create(target_path, citizen_class, parsed):
     dir_count = sum(1 for d in template.rglob("*") if d.is_dir() and "__pycache__" not in str(d))
 
     console.print()
-    console.print(f"  [bold cyan]Would create:[/bold cyan]")
+    console.print("  [bold cyan]Would create:[/bold cyan]")
     console.print(f"    Files:       ~{file_count}")
     console.print(f"    Directories: ~{dir_count}")
-    console.print(f"    Registry:    add to AIPASS_REGISTRY.json")
+    console.print("    Registry:    add to AIPASS_REGISTRY.json")
     console.print()
     console.print("  [dim]No files were created. Remove --dry-run to execute.[/dim]")
     console.print()

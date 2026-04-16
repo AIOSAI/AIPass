@@ -13,7 +13,6 @@ Validates module compliance with AIPass module standards.
 Checks handle_command pattern, thin orchestration, file size guidelines.
 """
 
-import sys
 import re
 import ast
 from pathlib import Path

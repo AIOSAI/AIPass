@@ -13,7 +13,6 @@ Validates module compliance with AIPass CLI standards.
 Checks console.print() usage, CLI service imports, handler separation.
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List, Optional

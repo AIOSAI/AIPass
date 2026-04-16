@@ -19,7 +19,6 @@ from aipass.ai_mail.apps.ai_mail import (
     print_introspection,
     route_command,
     main,
-    discover_modules,
 )
 
 

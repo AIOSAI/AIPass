@@ -18,7 +18,6 @@ branch dashboards (every branch benefits from knowing system memory health).
 """
 
 import sys
-import logging
 import subprocess
 from json import loads as json_loads
 from pathlib import Path

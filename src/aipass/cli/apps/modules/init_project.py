@@ -263,7 +263,7 @@ def _handle_init(args: List[str]) -> bool:
     if result.get("aipass_home"):
         console.print()
         console.print(f"[bold cyan]AIPASS_HOME:[/bold cyan] [yellow]{result['aipass_home']}[/yellow]")
-        console.print(f"[dim]For terminal usage, add to your shell profile:[/dim]")
+        console.print("[dim]For terminal usage, add to your shell profile:[/dim]")
         console.print(f"  [green]export AIPASS_HOME={result['aipass_home']}[/green]")
 
     json_handler.log_operation("aipass_init", {
@@ -275,9 +275,9 @@ def _handle_init(args: List[str]) -> bool:
     # Next steps
     console.print()
     console.print("[bold cyan]Next steps:[/bold cyan]")
-    console.print(f"  [green]1.[/green] Create your first agent:  [yellow]aipass init agent <name>[/yellow]")
-    console.print(f"  [green]2.[/green] Start a session:          [dim]cd src/<name>/ && claude[/dim]")
-    console.print(f"  [green]3.[/green] Read the docs:            [dim]cat README.md[/dim]")
+    console.print("  [green]1.[/green] Create your first agent:  [yellow]aipass init agent <name>[/yellow]")
+    console.print("  [green]2.[/green] Start a session:          [dim]cd src/<name>/ && claude[/dim]")
+    console.print("  [green]3.[/green] Read the docs:            [dim]cat README.md[/dim]")
     console.print()
 
     return True

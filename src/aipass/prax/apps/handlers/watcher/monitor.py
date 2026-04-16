@@ -14,8 +14,7 @@ Monitors all files (including __pycache__, .pyc, etc.) to provide
 complete visibility into branch modifications.
 """
 
-from pathlib import Path
-from typing import List, Callable, Optional, TYPE_CHECKING, Any
+from typing import List, Callable, Any
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler

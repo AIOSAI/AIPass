@@ -13,7 +13,6 @@ devpulse's personal feedback mailbox.
 from rich.console import Console
 from rich.table import Table
 
-from aipass.prax import logger
 from aipass.devpulse.apps.handlers.feedback.storage import load_inbox, save_inbox
 
 console = Console(stderr=True)

@@ -297,23 +297,23 @@ def check_status():
 
     if api_key:
         masked = api_key[:8] + "..." + api_key[-4:]
-        console.print(f"  [cyan]Key configured:[/cyan]  [green]yes[/green]")
+        console.print("  [cyan]Key configured:[/cyan]  [green]yes[/green]")
         console.print(f"  [cyan]Key:[/cyan]             {masked}")
     else:
-        console.print(f"  [cyan]Key configured:[/cyan]  [red]no[/red]")
+        console.print("  [cyan]Key configured:[/cyan]  [red]no[/red]")
         diagnosis = keys.diagnose_key("openrouter")
         console.print(f"  [cyan]Reason:[/cyan]          {diagnosis}")
 
-    console.print(f"  [cyan]Provider:[/cyan]        OpenRouter")
-    console.print(f"  [cyan]Base URL:[/cyan]        https://openrouter.ai/api/v1")
+    console.print("  [cyan]Provider:[/cyan]        OpenRouter")
+    console.print("  [cyan]Base URL:[/cyan]        https://openrouter.ai/api/v1")
 
     # OpenAI SDK availability
     try:
         import openai  # noqa: F401
-        console.print(f"  [cyan]OpenAI SDK:[/cyan]     [green]available[/green]")
+        console.print("  [cyan]OpenAI SDK:[/cyan]     [green]available[/green]")
     except ImportError:
         logger.warning("OpenAI SDK not installed")
-        console.print(f"  [cyan]OpenAI SDK:[/cyan]     [red]missing[/red]")
+        console.print("  [cyan]OpenAI SDK:[/cyan]     [red]missing[/red]")
 
     # Client cache stats
     cache_stats = client.get_cache_stats()

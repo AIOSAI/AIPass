@@ -7,7 +7,6 @@ use tmp_path to stay fully isolated from the live filesystem.
 import json
 import uuid
 from datetime import date
-from pathlib import Path
 
 import pytest
 

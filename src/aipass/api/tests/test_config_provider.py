@@ -18,9 +18,8 @@ Tests:
 - get_validation_rules unknown provider returns None
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
 from aipass.api.apps.handlers.config import provider as config_provider
 

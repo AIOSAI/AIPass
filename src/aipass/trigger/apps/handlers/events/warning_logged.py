@@ -23,7 +23,6 @@ Event data expected:
     - level: Log level (always 'warning' for this handler)
 """
 
-from pathlib import Path
 from typing import Any
 from aipass.trigger.apps.handlers.json import json_handler
 

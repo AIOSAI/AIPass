@@ -14,7 +14,6 @@ Checks 3-layer pattern, handler independence, file size, domain organization.
 For entry points, also verifies entire branch structure against template baseline.
 """
 
-import sys
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -195,7 +194,7 @@ def check_layer_location(module_path: str, is_entry_point: bool, is_module: bool
         return {
             'name': '3-layer pattern',
             'passed': False,
-            'message': f'File not in standard 3-layer structure (apps/, apps/modules/, apps/handlers/)'
+            'message': 'File not in standard 3-layer structure (apps/, apps/modules/, apps/handlers/)'
         }
 
 

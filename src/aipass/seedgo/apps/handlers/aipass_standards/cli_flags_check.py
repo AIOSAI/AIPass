@@ -21,7 +21,6 @@ apps/handlers/ or apps/modules/). Non-entry-point files are skipped
 with a pass.
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List

@@ -12,8 +12,6 @@ README Standards Content
 Provides Rich-formatted reference text for the README standard.
 """
 
-import sys
-from pathlib import Path
 
 from aipass.seedgo.apps.handlers.json import json_handler
 

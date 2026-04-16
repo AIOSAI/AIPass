@@ -14,10 +14,6 @@ malformed JSON, mixed valid/invalid files, service name derivation.
 
 import json
 import sys
-import importlib
-import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 
 # =============================================

@@ -11,7 +11,6 @@
 import json
 import os
 import pytest
-from pathlib import Path
 from datetime import datetime, timedelta
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
@@ -400,7 +399,6 @@ def test_clean_zombies_none_found(monkeypatch):
 
 def test_clean_zombies_subprocess_error(monkeypatch):
     """Returns 0 on subprocess failure."""
-    import subprocess
     monkeypatch.setattr(
         "subprocess.run",
         _raise_subprocess_error,

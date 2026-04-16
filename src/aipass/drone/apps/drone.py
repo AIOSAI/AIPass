@@ -26,7 +26,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, err_console
 from aipass.drone.apps.modules import BranchNotFoundError, CommandExecutionError, RegistryError
 from aipass.drone.apps.modules.discovery import get_help
-from aipass.drone.apps.modules.resolver import get_all_branches, list_branches
+from aipass.drone.apps.modules.resolver import get_all_branches
 from aipass.drone.apps.modules.router import route_command
 from aipass.drone.apps.modules.module_registry import (
     is_module,

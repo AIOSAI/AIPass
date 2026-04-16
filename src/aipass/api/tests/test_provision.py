@@ -20,7 +20,6 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from aipass.api.apps.handlers.openrouter.provision import (
     create_caller_config,

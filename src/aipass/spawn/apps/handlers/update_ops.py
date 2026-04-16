@@ -116,7 +116,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
 
     if first_time:
         if trace:
-            logger.info(f"[update] No branch_meta found — generating initial metadata (adoption)")
+            logger.info("[update] No branch_meta found — generating initial metadata (adoption)")
         branch_meta = generate_branch_meta(branch_dir, template_registry)
         if not dry_run:
             save_branch_meta(branch_dir, branch_meta)

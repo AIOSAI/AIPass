@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 import inspect
 
 from aipass.trigger.apps.config import atomic_write_json

@@ -17,7 +17,6 @@ This is the thick implementation that modules/logger.py calls.
 
 import sys
 import time
-from pathlib import Path
 from typing import Callable, Dict, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger

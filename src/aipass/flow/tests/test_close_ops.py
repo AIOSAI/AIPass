@@ -1,9 +1,7 @@
 """Tests for close_ops handler — plan closure business logic."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ─── Helpers ─────────────────────────────────────────────

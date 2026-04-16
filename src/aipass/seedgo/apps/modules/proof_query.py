@@ -31,7 +31,7 @@ from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error, warning
+from aipass.cli.apps.modules import warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler

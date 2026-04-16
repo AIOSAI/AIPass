@@ -10,7 +10,6 @@
 
 import json
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod

@@ -19,7 +19,7 @@ import importlib
 import argparse
 import signal
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, List
 
 # Handle broken pipe gracefully (e.g. output piped to head)
 # SIGPIPE does not exist on Windows

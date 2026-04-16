@@ -6,9 +6,8 @@ import time
 import types
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ─── Import helpers ───────────────────────────────────────

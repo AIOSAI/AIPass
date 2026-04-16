@@ -30,8 +30,6 @@ import json
 import sys
 from io import StringIO
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -52,7 +50,7 @@ def _fresh_json_handler(monkeypatch):
     saved_mf = sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
 
     try:
-        import aipass.memory.apps.handlers.json  # noqa: F811
+        pass  # noqa: F811
     except Exception:
         if saved_json_pkg is not None:
             sys.modules["aipass.memory.apps.handlers.json"] = saved_json_pkg
@@ -63,7 +61,6 @@ def _fresh_json_handler(monkeypatch):
         importlib.reload(existing)
     else:
         sys.modules.pop(jh_key, None)
-        import aipass.memory.apps.handlers.json.json_handler  # noqa: F811
 
     yield
 
@@ -77,7 +74,7 @@ def _get_memory_files():
     """Import and return the memory_files module."""
     mf_key = "aipass.memory.apps.handlers.json.memory_files"
     if mf_key not in sys.modules:
-        import aipass.memory.apps.handlers.json.memory_files  # noqa: F811
+        pass  # noqa: F811
     return sys.modules[mf_key]
 
 

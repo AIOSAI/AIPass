@@ -8,7 +8,6 @@
 
 """Tests for spawn handler modules: meta_ops, reconcile, change_detection, json_ops."""
 
-import json
 import pytest
 from pathlib import Path
 

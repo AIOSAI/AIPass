@@ -21,8 +21,7 @@ Tests:
 - json_handler.log_operation called on valid commands
 """
 
-from unittest.mock import patch, MagicMock, call
-from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 

@@ -11,7 +11,6 @@
 Placeholder for future memory event handling.
 """
 
-from pathlib import Path
 
 from aipass.trigger.apps.handlers.json import json_handler
 

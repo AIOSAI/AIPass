@@ -27,7 +27,6 @@ Format:
 import sys
 import re
 import json
-import logging
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple

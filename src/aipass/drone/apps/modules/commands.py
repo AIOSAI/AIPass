@@ -21,9 +21,7 @@ from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.command_registry.ops import (
     add_command as _add_command,
-    command_exists as _command_exists,
     remove_command as _remove_command,
-    update_command as _update_command,
 )
 from aipass.drone.apps.handlers.command_registry.lookup import (
     list_commands as _list_commands,

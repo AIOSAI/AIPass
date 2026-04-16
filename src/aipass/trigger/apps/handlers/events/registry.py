@@ -8,7 +8,6 @@
 
 """Event Handler Registry - Setup all event handlers on startup"""
 
-from pathlib import Path
 
 from datetime import datetime, timezone
 

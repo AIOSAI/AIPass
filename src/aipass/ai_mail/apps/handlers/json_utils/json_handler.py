@@ -16,7 +16,7 @@ Never manually create JSONs - they build themselves.
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 import inspect
 
 from aipass.prax.apps.modules.logger import system_logger as logger

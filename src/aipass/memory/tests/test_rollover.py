@@ -15,7 +15,6 @@ All tests use mocks or tmp_path — no live filesystem or infrastructure access.
 """
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 

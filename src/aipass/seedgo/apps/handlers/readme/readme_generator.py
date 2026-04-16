@@ -28,7 +28,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler

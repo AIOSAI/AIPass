@@ -202,7 +202,7 @@ def print_help():
     _cli_root = _display_path.parents[2]  # display.py -> modules -> apps -> cli
     CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{_display_path}[/dim]")
     CONSOLE.print(f"  [yellow]Handlers:[/yellow]    [dim]{_cli_root / 'apps' / 'handlers' / 'display'}[/dim]")
-    CONSOLE.print(f"  [yellow]Standards:[/yellow]   [dim]See CODE_STANDARDS/cli.md[/dim]")
+    CONSOLE.print("  [yellow]Standards:[/yellow]   [dim]See CODE_STANDARDS/cli.md[/dim]")
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()

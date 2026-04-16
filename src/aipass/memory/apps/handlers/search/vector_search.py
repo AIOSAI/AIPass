@@ -28,7 +28,6 @@ Dependencies (optional):
     - torch
 """
 
-import logging
 from typing import List, Dict, Any
 from pathlib import Path
 

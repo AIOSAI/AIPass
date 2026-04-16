@@ -20,10 +20,8 @@ All external dependencies are mocked. File-based tests use tmp_path.
 """
 
 import json
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 
 # =============================================

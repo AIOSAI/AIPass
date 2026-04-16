@@ -140,7 +140,6 @@ def _import_symbolic():
     Must also clear the parent package's cached attribute so Python
     re-executes the module code with fresh mocks.
     """
-    import importlib
 
     # Remove from sys.modules if still present
     sys.modules.pop("aipass.memory.apps.modules.symbolic", None)

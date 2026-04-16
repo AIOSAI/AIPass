@@ -3,8 +3,7 @@
 Covers parse_create_plan_args, parse_close_command_args, and
 parse_restore_command_args from apps/handlers/plan/command_parser.py.
 """
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 # ---------------------------------------------------------------------------

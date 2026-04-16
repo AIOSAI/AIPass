@@ -10,7 +10,6 @@
 
 import json
 import pytest
-from pathlib import Path
 from datetime import datetime, timedelta
 
 import aipass.ai_mail.apps.handlers.dispatch.status as status_mod

@@ -24,17 +24,14 @@ from typing import Dict, List
 from aipass.prax import logger
 # CLI service
 from aipass.cli import console
-from aipass.cli import header
 from aipass.cli.apps.modules import error, warning
 
 # JSON handler for logging
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Drone services for @ resolution
-from aipass.drone.apps.modules import normalize_branch_arg
 
 # Diagnostics handlers
-from aipass.seedgo.apps.handlers.diagnostics.discovery import discover_branches
 
 
 def print_branch_diagnostics(result: Dict):

@@ -180,7 +180,7 @@ def sync_registry(fix: bool = False) -> dict:
                 "name": name.upper(),
                 "path": rel_path,
                 "profile": "library",
-                "description": f"Auto-registered branch",
+                "description": "Auto-registered branch",
                 "email": f"@{name}",
                 "status": "active",
                 "created": today,

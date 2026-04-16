@@ -6,7 +6,6 @@
 # Modified: 2026-02-04
 # =============================================
 
-from pathlib import Path
 
 from aipass.ai_mail.apps.handlers.json import json_handler
 

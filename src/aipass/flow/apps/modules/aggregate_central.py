@@ -31,13 +31,12 @@ Standalone:
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import List
 
 # INFRASTRUCTURE IMPORT PATTERN
 _PKG_ROOT = Path(__file__).resolve().parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console
 
 # JSON handler for operation tracking

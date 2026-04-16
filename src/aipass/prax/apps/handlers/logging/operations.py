@@ -12,7 +12,6 @@ PRAX Logging Operations
 Operation logging and configuration management for prax logger.
 """
 
-from pathlib import Path
 
 import json
 from datetime import datetime, timezone

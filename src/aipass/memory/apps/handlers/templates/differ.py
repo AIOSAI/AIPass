@@ -25,7 +25,7 @@ Independence:
 import json
 import copy
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler

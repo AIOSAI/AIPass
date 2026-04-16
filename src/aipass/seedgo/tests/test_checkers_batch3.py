@@ -16,7 +16,6 @@ silent_catch_check.
 Each checker gets 3 tests: clean pass, violation caught, bypass respected.
 """
 
-import os
 import sys
 import textwrap
 import pytest

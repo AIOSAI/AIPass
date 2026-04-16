@@ -21,7 +21,7 @@ Tests:
 - is_ssl_error() delegation
 """
 
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 

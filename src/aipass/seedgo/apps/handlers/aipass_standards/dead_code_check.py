@@ -20,7 +20,6 @@ Score: referenced_files / total_files * 100, threshold 75%.
 
 import re
 from pathlib import Path
-from typing import Dict
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler

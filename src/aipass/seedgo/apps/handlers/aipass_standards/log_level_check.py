@@ -20,7 +20,6 @@ THE STANDARD:
 - INFO = Normal operations, successful completions, discoveries
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List, Optional

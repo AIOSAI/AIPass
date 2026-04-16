@@ -41,7 +41,6 @@ from ..handlers.rollover.orchestrator import (
     execute_rollover as _handler_execute_rollover,
     sync_line_counts as _handler_sync_line_counts,
 )
-from ..handlers.monitor.memory_watcher import check_and_rollover
 
 
 # =============================================================================

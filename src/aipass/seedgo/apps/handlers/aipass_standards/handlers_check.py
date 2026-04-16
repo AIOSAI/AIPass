@@ -13,7 +13,6 @@ Validates handler compliance with AIPass handler standards.
 Checks handler independence, auto-detection pattern, no orchestration.
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List, Optional

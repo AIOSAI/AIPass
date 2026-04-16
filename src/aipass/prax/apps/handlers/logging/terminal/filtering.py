@@ -14,7 +14,6 @@ Filters terminal output to reduce noise from internal modules.
 
 import logging
 logger = logging.getLogger(__name__)
-from pathlib import Path
 
 import json
 from typing import Set, Optional

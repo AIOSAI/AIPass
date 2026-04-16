@@ -18,7 +18,6 @@ Event data expected:
     - timestamp: When the update occurred (optional)
 """
 
-from pathlib import Path
 from typing import Any
 
 from aipass.trigger.apps.handlers.json import json_handler

@@ -24,11 +24,10 @@ Independence:
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any
 
 if TYPE_CHECKING:
-    from watchdog.observers import Observer as _ObserverType
-    from watchdog.events import FileSystemEventHandler as _HandlerType
+    pass
 
 # Temporary logger for module-level import guards (overwritten below by get_system_logger)
 logger = logging.getLogger(__name__)
@@ -680,7 +679,7 @@ if __name__ == "__main__":
         status = get_watcher_status()
 
         if status['active']:
-            print(f"Watcher is ACTIVE")
+            print("Watcher is ACTIVE")
             print(f"Watching {status['watched_directories']} directories:")
             for path in status['paths']:
                 print(f"  - {path}")

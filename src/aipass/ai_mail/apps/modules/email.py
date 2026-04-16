@@ -28,7 +28,7 @@ _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _AI_MAIL_DIR.parents[2]
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli.apps.modules import console, error
 from aipass.trigger.apps.modules.core import trigger
 
 # Handlers - business logic providers
@@ -38,7 +38,7 @@ from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_em
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
 from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox
 from aipass.ai_mail.apps.handlers.email.inbox_cleanup import (
-    mark_read_and_archive, mark_all_read_and_archive,
+    mark_all_read_and_archive,
     mark_as_opened, mark_as_closed_and_archive
 )
 from aipass.ai_mail.apps.handlers.email.reply import get_email_by_id, send_reply
@@ -218,7 +218,7 @@ def _send_direct(to_branch, subject, message, auto_execute=False,
             deliver_email_to_branch, _delivery_callback, json_handler.log_operation, update_central)
 
         if success:
-            label = f"\\[dispatch: queued for daemon]" if auto_execute else ""
+            label = "\\[dispatch: queued for daemon]" if auto_execute else ""
             console.print(f"[green]Email sent to {to_branch} {label}[/green]")
             if auto_execute:
                 _fire_dispatch_trigger(to_branch, subject)

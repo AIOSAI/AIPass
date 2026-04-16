@@ -23,7 +23,6 @@ These fixtures establish a consistent test environment across all branches.
 """
 
 import importlib
-import json
 import logging
 import sys
 import types

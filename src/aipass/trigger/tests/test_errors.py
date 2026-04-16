@@ -16,7 +16,7 @@ error_reporter, cli display) is mocked via sys.modules before import.
 
 import sys
 from typing import Any
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 

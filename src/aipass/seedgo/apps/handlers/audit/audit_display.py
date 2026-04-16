@@ -13,7 +13,6 @@ Formats and prints audit results to console.
 Module-level display logic for audit output.
 """
 
-from pathlib import Path
 from typing import List, Dict
 from collections import defaultdict
 
@@ -25,7 +24,6 @@ from collections import defaultdict
 # =============================================================================
 
 # Prax logger (system-wide, always first)
-from aipass.prax import logger
 
 # CLI services (display/output formatting)
 from aipass.cli import console, header
@@ -154,7 +152,7 @@ def _render_type_errors(audit_result: dict, console_obj) -> None:
                     msg = diag.get('message', '')[:60]
                     console_obj.print(f"      [dim]L{diag.get('line', '?')}: {msg}[/dim]")
     elif files_checked > 0:
-        console_obj.print(f"  [green]✓[/green] No type errors")
+        console_obj.print("  [green]✓[/green] No type errors")
 
 
 def _render_test_map(audit_result: dict, console_obj) -> None:
@@ -291,7 +289,7 @@ def print_system_summary(audit_results: List[Dict]):
     if total_type_errors > 0:
         console.print(f"  [red]Type errors:           {total_type_errors} ({branches_with_type_errors} branches)[/red]")
     else:
-        console.print(f"  Type errors:           [green]0 ✓[/green]")
+        console.print("  Type errors:           [green]0 ✓[/green]")
     console.print()
 
     # Calculate standard averages
@@ -375,7 +373,7 @@ def print_bypass_audit(bypass_results: List[Dict]):
 
                 if would_pass:
                     console.print(f"  [green]✓[/green] {file_name} [{standard}] → {score}%")
-                    console.print(f"    [green]PASSES NOW - bypass can be removed![/green]")
+                    console.print("    [green]PASSES NOW - bypass can be removed![/green]")
                     console.print(f"    [dim]Reason was: {reason}[/dim]")
                     removable_count += 1
                 else:
@@ -388,13 +386,13 @@ def print_bypass_audit(bypass_results: List[Dict]):
                 console.print(f"    [red]Error: {r.get('error', 'Unknown')}[/red]")
             else:
                 console.print(f"  [dim]?[/dim] {file_name} [{standard}]")
-                console.print(f"    [dim]Unknown standard or status[/dim]")
+                console.print("    [dim]Unknown standard or status[/dim]")
 
         console.print()
 
     # Summary
     console.print("─" * 70)
-    console.print(f"[bold]BYPASS SUMMARY:[/bold]")
+    console.print("[bold]BYPASS SUMMARY:[/bold]")
     console.print(f"  Total bypasses:     {total_count}")
     console.print(f"  Can be removed:     {removable_count} [green]{'← clean these up!' if removable_count > 0 else ''}[/green]")
     console.print(f"  Still needed:       {total_count - removable_count}")

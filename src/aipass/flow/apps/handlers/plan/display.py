@@ -387,7 +387,7 @@ def format_statistics_summary(stats: Dict[str, Any]) -> str:
     """
     lines = [
         "",
-        f"[bold]Summary:[/bold]",
+        "[bold]Summary:[/bold]",
         f"  Total plans: {stats['total_plans']}",
         f"  Open: {stats['open_plans']}",
         f"  Closed: {stats['closed_plans']}"

@@ -22,7 +22,6 @@ Architecture: Module orchestrates, error_registry handler manages data
 import json
 import sys
 import time
-from pathlib import Path
 from typing import Optional
 
 
@@ -33,7 +32,7 @@ from aipass.trigger.apps.handlers.error_registry import (
     get_circuit_breaker_status, circuit_breaker_reset,
     update_source_fix_status,
 )
-from aipass.trigger.apps.handlers.error_reporter import (
+from aipass.trigger.apps.handlers.error_reporter import (  # noqa: F401
     report_error,
     send_source_fix_email as _send_source_fix_email,
 )
@@ -245,6 +244,7 @@ def _cmd_detail(console, args: list) -> bool:
     try:
         entry = _find_by_id_or_fp(args[0])
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
+        logger.warning("Failed to read error registry for '%s': %s", args[0], exc)
         error(f"Failed to read error registry: {exc}", suggestion="Registry may be corrupted — try 'drone @trigger errors list' first")
         return True
 
@@ -308,7 +308,7 @@ def _cmd_suppress(console, args: list) -> bool:
                 console.print(f"  [cyan]Source fix email sent to @{updated_entry.get('component', '?').lower()}[/cyan]")
             else:
                 update_source_fix_status(fp, "pending_fix")
-                console.print(f"  [dim]Source fix email could not be sent (status: pending_fix)[/dim]")
+                console.print("  [dim]Source fix email could not be sent (status: pending_fix)[/dim]")
     else:
         console.print(f"[red]Failed to suppress error[/red] {args[0]}")
     return True
@@ -421,7 +421,6 @@ def _cmd_circuit_breaker(console, args: list) -> bool:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
 
     if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
         print_help()

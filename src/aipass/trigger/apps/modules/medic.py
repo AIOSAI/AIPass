@@ -340,7 +340,6 @@ def handle_command(command: str, args: list) -> bool:
 
 
 if __name__ == "__main__":
-    from aipass.cli.apps.modules import console
 
     if len(sys.argv) == 1 or sys.argv[1] in ['--help', '-h', 'help']:
         print_help()

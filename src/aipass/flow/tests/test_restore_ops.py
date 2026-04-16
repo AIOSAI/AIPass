@@ -1,9 +1,8 @@
 """Tests for restore_ops handler -- plan restore business logic."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ─── Helpers ─────────────────────────────────────────────

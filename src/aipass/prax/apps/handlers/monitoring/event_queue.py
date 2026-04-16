@@ -8,7 +8,6 @@
 
 """Thread-safe event coordination for monitoring system"""
 
-from pathlib import Path
 from queue import Empty, PriorityQueue
 from dataclasses import dataclass, field
 from datetime import datetime

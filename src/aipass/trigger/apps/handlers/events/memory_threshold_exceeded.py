@@ -25,7 +25,6 @@ Event data expected:
 """
 
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from aipass.trigger.apps.config import TRIGGER_ROOT

@@ -16,7 +16,6 @@ Used by dashboard/refresh.py to populate branch dashboards.
 """
 
 import json
-from pathlib import Path
 from typing import Dict
 
 from aipass.prax.apps.modules.logger import get_direct_logger

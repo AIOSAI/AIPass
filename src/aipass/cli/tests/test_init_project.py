@@ -1,8 +1,7 @@
 """Tests for the CLI init_project module — aipass command routing and init orchestration."""
 
 from io import StringIO
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console

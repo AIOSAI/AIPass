@@ -14,7 +14,6 @@ generator loading, and target resolution. Returns data structures for the
 module to display.
 """
 
-import sys
 import json
 import importlib.util
 from pathlib import Path

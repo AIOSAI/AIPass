@@ -1,8 +1,6 @@
 """Tests for plan display handler -- formatting and display functions."""
 
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ─── Helpers ─────────────────────────────────────────────

@@ -250,9 +250,7 @@ def start_watch() -> None:
     """
     from ..handlers.monitor.memory_watcher import (  # type: ignore[import-not-found]
         start_memory_watcher,
-        stop_memory_watcher,
-        is_memory_watcher_active,
-        get_watcher_status
+        stop_memory_watcher
     )
     from ..handlers.monitor.detector import get_rollover_stats  # type: ignore[import-not-found]
 

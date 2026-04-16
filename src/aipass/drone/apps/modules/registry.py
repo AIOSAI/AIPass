@@ -13,7 +13,7 @@ Thin orchestrator that delegates to registry_handler for all
 registry loading and querying operations.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler

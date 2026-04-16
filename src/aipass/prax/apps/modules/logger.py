@@ -39,7 +39,6 @@ __all__ = [
 ]
 
 import logging
-import sys
 import threading
 from typing import Dict, Any
 
@@ -57,7 +56,7 @@ from aipass.prax.apps.handlers.logging.setup import (
     enable_terminal_output as _enable_terminal,
     disable_terminal_output as _disable_terminal,
 )
-from aipass.prax.apps.handlers.logging.introspection import get_calling_module, get_caller_info
+from aipass.prax.apps.handlers.logging.introspection import get_caller_info
 from aipass.prax.apps.handlers.logging.override import (
     is_override_active
 )

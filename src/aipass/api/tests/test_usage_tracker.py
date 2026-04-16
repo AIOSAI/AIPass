@@ -17,8 +17,7 @@ Tests:
 - cleanup_data success/failure, default/custom days
 """
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 

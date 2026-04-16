@@ -19,7 +19,7 @@ Tests:
 - get_response delegation to client handler
 """
 
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 

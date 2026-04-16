@@ -20,7 +20,6 @@ TWO CHECKS:
 Prax logging infrastructure and test files are exempt from both checks.
 """
 
-import sys
 import re
 from pathlib import Path
 from typing import Dict, List

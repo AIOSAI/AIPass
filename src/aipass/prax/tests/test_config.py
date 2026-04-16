@@ -13,10 +13,7 @@ get_debug_prints_enabled, load_log_config) and ignore_patterns.py
 
 import json
 import sys
-import importlib
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 
 # =============================================

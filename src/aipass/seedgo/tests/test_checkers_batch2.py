@@ -14,7 +14,6 @@ Tests for 8 seedgo checker handlers:
 Each checker gets 3 tests: clean pass, violation caught, bypass respected.
 """
 
-import pytest
 from pathlib import Path
 
 from aipass.seedgo.apps.handlers.aipass_standards.error_handling_check import (

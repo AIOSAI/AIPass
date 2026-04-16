@@ -2,13 +2,12 @@
 
 import pytest
 from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from rich.console import Console
 
 from aipass.cli.apps.modules import templates
 from aipass.cli.apps.modules import display
-from aipass.cli.apps.modules.templates import operation_start, operation_complete
 
 
 @pytest.fixture

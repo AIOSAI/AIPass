@@ -17,13 +17,8 @@ Covers 9 items:
     return_bool, print_help, print_introspection, output_capture
 """
 
-import importlib
-import sys
-import types
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
 from aipass.api.apps.modules import api_key
 

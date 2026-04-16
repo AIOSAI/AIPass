@@ -557,7 +557,7 @@ if __name__ == '__main__':
         if result['total_errors'] > 0:
             console.print(f"  [red]Total errors:       {result['total_errors']}[/red]")
         else:
-            console.print(f"  [green]Total errors:       0[/green]")
+            console.print("  [green]Total errors:       0[/green]")
 
         if result['total_warnings'] > 0:
             console.print(f"  [yellow]Total warnings:     {result['total_warnings']}[/yellow]")

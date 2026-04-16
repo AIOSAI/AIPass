@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.drone.apps.plugins.hook_sounds.hook_sounds_plugin import (
-    MUTE_FLAG,
     handle_command,
     is_muted,
     mute,

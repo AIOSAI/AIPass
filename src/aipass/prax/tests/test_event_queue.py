@@ -9,7 +9,6 @@
 """Tests for the thread-safe event queue used by the monitoring system."""
 
 import importlib
-import time
 import threading
 from datetime import datetime, timedelta
 

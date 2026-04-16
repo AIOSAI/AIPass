@@ -28,7 +28,6 @@ Usage:
 
 import json
 import logging
-from pathlib import Path
 from typing import Set
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT

@@ -14,7 +14,6 @@ directories, removing from registry, and safety checks for protected branches.
 
 import shutil
 from datetime import datetime
-from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 

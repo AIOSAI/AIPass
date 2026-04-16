@@ -34,12 +34,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Rich library components
 from rich.table import Table
-from rich.columns import Columns
 from rich.panel import Panel
 from rich import box
 
 # CLI modules (showcasing our own services!)
-from aipass.cli.apps.modules.display import console as CONSOLE, header, success, error, warning, section
+from aipass.cli.apps.modules.display import console as CONSOLE, header, error
 
 VERSION = "2.0.0"
 CLI_ROOT = Path(__file__).parent

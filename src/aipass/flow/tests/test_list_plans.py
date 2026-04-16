@@ -9,7 +9,7 @@
 """Tests for the list_plans module -- command routing and orchestration."""
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)

@@ -192,11 +192,11 @@ def handle_command(command: str, args: List[str]) -> bool:
     )
 
     if subcommand in ["scan", "heal"]:
-        console.print(f"[bold]Scanning for PLAN files...[/bold]")
+        console.print("[bold]Scanning for PLAN files...[/bold]")
         result = scan_plan_files()
 
         console.print()
-        console.print(f"[green]✓[/green] Scan complete")
+        console.print("[green]✓[/green] Scan complete")
         console.print(f"  • Total plans: {result['total_plans']}")
         console.print(f"  • Added: {len(result['added'])}")
         console.print(f"  • Updated: {len(result['updated'])}")
@@ -207,13 +207,13 @@ def handle_command(command: str, args: List[str]) -> bool:
             change_count = len(result['added']) + len(result['updated']) + len(result['removed'])
             warning(f"Registry scan found {change_count} mismatch(es) — trigger event handlers not wired, no changes applied")
         else:
-            console.print(f"\n[dim]No changes needed - registry is healthy[/dim]")
+            console.print("\n[dim]No changes needed - registry is healthy[/dim]")
 
         console.print()
         return True
 
     elif subcommand == "start":
-        console.print(f"[bold]Starting registry monitor...[/bold]")
+        console.print("[bold]Starting registry monitor...[/bold]")
         console.print()
 
         # Run initial scan before starting monitor

@@ -41,7 +41,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 # Audit handlers (implementation)
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch
-from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary, print_bypass_audit
+from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
 
 # Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules

@@ -12,8 +12,6 @@ Log Visibility Standards Content
 Provides Rich-formatted reference text for the log visibility standard.
 """
 
-import sys
-from pathlib import Path
 
 from aipass.seedgo.apps.handlers.json import json_handler
 

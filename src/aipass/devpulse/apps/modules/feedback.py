@@ -10,11 +10,9 @@ Auto-discovered by devpulse.py via handle_command() convention.
 Routes feedback subcommands to the appropriate handler functions.
 """
 
-import shlex
 
 from rich.console import Console
 
-from aipass.prax import logger
 from aipass.devpulse.apps.handlers.feedback.inbox import (
     list_messages,
     view_message,

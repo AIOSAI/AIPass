@@ -14,9 +14,7 @@ continuous logging. Extracted from modules/logger.py to follow
 the 3-tier architecture (modules = orchestration, handlers = implementation).
 """
 
-import sys
-import time
-from typing import Dict, Any, Callable
+from typing import Dict, Any
 
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.logging.setup import (

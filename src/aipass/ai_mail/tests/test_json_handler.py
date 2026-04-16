@@ -13,7 +13,7 @@ import sys
 import importlib
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.json_utils.json_handler as jh_mod
 from aipass.ai_mail.apps.handlers.json_utils.json_handler import (

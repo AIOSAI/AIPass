@@ -18,7 +18,6 @@ Tests:
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-import pytest
 
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_category
 
