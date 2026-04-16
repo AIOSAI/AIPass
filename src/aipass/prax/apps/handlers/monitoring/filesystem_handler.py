@@ -453,7 +453,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
             f.seek(last_pos)
             new_data = f.read()
             self._jsonl_positions[path_key] = f.tell()
-        lines = [l for l in new_data.strip().split('\n') if l.strip()]
+        lines = [line for line in new_data.strip().split('\n') if line.strip()]
         return lines if lines else None
 
     def _safe_parse_json(self, line: str, label: str) -> Optional[dict]:
@@ -535,7 +535,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
                 new_data = f.read()
                 self._jsonl_positions[path_key] = f.tell()
 
-            lines = [l for l in new_data.strip().split('\n') if l.strip()]
+            lines = [line for line in new_data.strip().split('\n') if line.strip()]
             if not lines:
                 return True
 

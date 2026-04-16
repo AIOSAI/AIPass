@@ -101,7 +101,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     is_handler = '/handlers/' in module_path
     is_init_file = path.name == '__init__.py'
-    is_small_file = len([l for l in lines if l.strip() and not l.strip().startswith('#')]) < 20
+    is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith('#')]) < 20
 
     # Check 1: No AIPASS_ROOT (pip packages must not use it)
     if not is_init_file:
