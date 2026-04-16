@@ -32,6 +32,7 @@ jobs:
       - name: Verify drone CLI
         shell: bash
         run: |
+          source .venv/Scripts/activate
           export PYTHONUTF8=1
           drone --version
           drone systems

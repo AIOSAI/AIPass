@@ -85,7 +85,14 @@ if [ "$IS_WINDOWS" -eq 1 ] && [ -f ".venv/Scripts/python.exe" ]; then
     # Bootstrap pip if missing (--without-pip on Windows)
     if ! "$VENV_PYTHON" -m pip --version &>/dev/null 2>&1; then
         echo "Bootstrapping pip in venv ..."
-        "$VENV_PYTHON" -m ensurepip --default-pip --quiet 2>/dev/null || true
+        "$VENV_PYTHON" -m ensurepip --default-pip || true
+        if ! "$VENV_PYTHON" -m pip --version &>/dev/null 2>&1; then
+            echo "ensurepip did not install pip — falling back to get-pip.py"
+            "$VENV_PYTHON" -c "import urllib.request; urllib.request.urlretrieve('https://bootstrap.pypa.io/get-pip.py', 'get-pip.py')"
+            "$VENV_PYTHON" get-pip.py
+            rm -f get-pip.py
+        fi
+        "$VENV_PYTHON" -m pip --version || { echo "ERROR: pip still missing after bootstrap" >&2; exit 1; }
     fi
 else
     source .venv/bin/activate
