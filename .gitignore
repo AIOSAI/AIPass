@@ -118,6 +118,11 @@ README_ORIGINAL_DISABLED.md
 readme_history/
 src/aipass/trigger/trigger_data.lock
 
+# STATUS files — auto-generated, contain developer session data.
+# Gitignored until prax sync is fixed to produce clean public output (#298).
+STATUS.md
+STATUS.local.md
+
 # Private integrations — driver layer (@api) and wrapper layer (all branches)
 # Per DPLAN-0133. Contents are gitignored; only the scaffold README.md is tracked.
 # Drop project-specific code into src/aipass/{branch}/apps/integrations/{project}/
