@@ -142,7 +142,11 @@ Archive commands:
 
 # Git Workflow
 
-All PR workflow goes through drone. Never use raw git commands for commits, branches, or pushes. Drone handles everything atomically with a lockfile that prevents concurrent PR collisions.
+**Drone is the ONLY git interface. Period.** All PR workflow goes through drone. Never use raw git commands for commits, branches, pushes, resets, merges, rebases, cherry-picks, or remote branch manipulation. Drone handles everything atomically with a lockfile that prevents concurrent PR collisions.
+
+**If you think you need a raw git command to fix a git problem, STOP. You don't.** Every git state devpulse has ever been in has been recoverable through `drone @git` commands — system-pr, merge, smart-sync, fix, status, sync, lock. There is no situation that requires `git reset`, `git push`, `git cherry-pick`, `git rebase`, or `git branch -f`. Reaching for them has always made things worse. If drone's commands don't obviously handle the state you're in, run `drone @git fix` or `drone @git smart-sync` and re-evaluate. If still stuck, ASK THE USER — do not improvise with raw git.
+
+Manual git is not a shortcut. It is a trap. Drone exists so you don't get stuck. Use it.
 
 Always work on main. Edit files in your branch directory on the main branch. When ready to submit:
 
