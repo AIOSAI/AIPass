@@ -173,7 +173,7 @@ class TestHandleInit:
              patch.object(display, "err_console", err_cons), \
              patch.object(display, "_TRIGGER", None), \
              patch.object(display, "_TRIGGER_LOADED", True), \
-             patch.object(init_project, "json_handler") as mock_json, \
+             patch.object(init_project, "json_handler"), \
              patch.object(init_project, "logger"):
             result = _handle_init([])
 

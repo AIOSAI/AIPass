@@ -46,20 +46,16 @@ def _fresh_memory_files(monkeypatch):
     2. Temporarily restoring the REAL json package so importlib can find
        the submodule.
     """
-    # Remember what the conftest put in for the json package
-    mock_json_pkg = sys.modules.get("aipass.memory.apps.handlers.json")
-
     # If the real package was ever imported, restore it for the duration
     # of the import.  Otherwise, remove the mock so Python can discover
     # the real package on disk.
-    real_json_pkg = None
     # Try to find the real package by importing with the mock removed
     saved = sys.modules.pop("aipass.memory.apps.handlers.json", None)
-    saved_mf = sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
+    sys.modules.pop("aipass.memory.apps.handlers.json.memory_files", None)
 
     try:
         # Import the real package so memory_files can be found
-        real_json_pkg = sys.modules.get("aipass.memory.apps.handlers.json")
+        sys.modules.get("aipass.memory.apps.handlers.json")
     except Exception:
         # If we can't import the real package, restore the mock
         if saved is not None:

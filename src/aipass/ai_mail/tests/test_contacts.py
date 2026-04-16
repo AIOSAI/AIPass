@@ -112,7 +112,7 @@ def test_register_contact_updates_existing(isolated_contacts):
     register_contact("devpulse", "AIPass", "/path/to/inbox.json")
     first = get_contact("devpulse")
     assert first is not None
-    first_seen = first["last_seen"]
+    assert "last_seen" in first
 
     # Re-register with new path
     register_contact("devpulse", "AIPass", "/new/path/inbox.json")
