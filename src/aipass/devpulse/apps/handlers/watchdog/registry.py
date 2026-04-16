@@ -40,7 +40,6 @@ Registry file schema (version 1):
   }
 """
 
-import fcntl
 import json
 import os
 import secrets
@@ -122,7 +121,7 @@ def _atomic_write_unlocked(storage_path: Path, data: dict) -> None:
 
 
 class _FileLock:
-    """fcntl.flock-based exclusive lock on a sibling .lock file.
+    """Exclusive lock on a sibling .lock file (fcntl on Unix, no-op on Windows).
 
     Using a sibling avoids racing with the atomic replace of the data file:
     if we locked the data file itself, os.replace would swap the inode out
@@ -134,6 +133,9 @@ class _FileLock:
         self._fh = None
 
     def __enter__(self) -> "_FileLock":
+        if sys.platform == "win32":
+            return self  # Windows: skip file locking (single-user typical)
+        import fcntl
         self._lock_path.parent.mkdir(parents=True, exist_ok=True)
         # 'a+' so the file is created if missing and lock survives concurrent opens.
         self._fh = open(self._lock_path, "a+", encoding='utf-8')
@@ -143,6 +145,7 @@ class _FileLock:
     def __exit__(self, exc_type, exc, tb) -> None:
         if self._fh is not None:
             try:
+                import fcntl
                 fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
             finally:
                 self._fh.close()

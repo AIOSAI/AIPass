@@ -26,7 +26,9 @@ import signal
 from typing import List, Any
 
 # Handle broken pipe gracefully (e.g. output piped to head)
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# SIGPIPE does not exist on Windows
+if hasattr(signal, 'SIGPIPE'):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger

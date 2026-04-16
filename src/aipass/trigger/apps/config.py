@@ -13,8 +13,8 @@ Provides package-relative paths for trigger data directories.
 Works in both pip-installed and development environments.
 """
 
-import fcntl
 import json
+import sys
 import os
 import tempfile
 from contextlib import contextmanager
@@ -81,12 +81,17 @@ def json_file_lock(path: Path):
     """
     lock_path = path.with_suffix('.lock')
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, 'w', encoding='utf-8') as lock_f:
-        fcntl.flock(lock_f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_f, fcntl.LOCK_UN)
+    if sys.platform == "win32":
+        # Windows: no fcntl, skip file locking (single-user typical)
+        yield
+    else:
+        import fcntl
+        with open(lock_path, 'w', encoding='utf-8') as lock_f:
+            fcntl.flock(lock_f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
 def print_introspection():
