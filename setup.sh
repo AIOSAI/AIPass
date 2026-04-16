@@ -329,6 +329,17 @@ bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory"   "builder" "Vector 
 
 echo "  15 branches bootstrapped"
 
+# --- Seed branch config files from .example defaults ---
+# Some branches need a config file that's gitignored (contains local state).
+# Ship `*.example.json` in git; seed the real file from it on fresh install.
+MEMORY_CONFIG_DIR="$SCRIPT_DIR/src/aipass/memory/config"
+MEMORY_CONFIG_FILE="$MEMORY_CONFIG_DIR/memory_bank.config.json"
+MEMORY_CONFIG_EXAMPLE="$MEMORY_CONFIG_DIR/memory_bank.config.example.json"
+if [ -f "$MEMORY_CONFIG_EXAMPLE" ] && [ ! -f "$MEMORY_CONFIG_FILE" ]; then
+    cp "$MEMORY_CONFIG_EXAMPLE" "$MEMORY_CONFIG_FILE"
+    echo "  memory_bank.config.json seeded from example"
+fi
+
 # --- Install Claude Code hooks ---
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 
@@ -540,6 +551,31 @@ if [ "$IS_WINDOWS" -eq 1 ]; then
     export AIPASS_HOME="$SCRIPT_DIR"
     export PATH="$VENV_SCRIPTS:$PATH"
     export PYTHONUTF8=1
+
+    # PowerShell profile wrapper — makes `drone @branch cmd` work from PowerShell
+    # without @ being consumed by PS splatting operator. See issue #340.
+    PS_PROFILE_DIR="$HOME/Documents/WindowsPowerShell"
+    PS_PROFILE="$PS_PROFILE_DIR/Microsoft.PowerShell_profile.ps1"
+    mkdir -p "$PS_PROFILE_DIR"
+    if [ ! -f "$PS_PROFILE" ] || ! grep -q "AIPass drone wrapper" "$PS_PROFILE" 2>/dev/null; then
+        cat >> "$PS_PROFILE" <<'PSWRAP'
+
+# AIPass drone wrapper — preserves @branch args that PowerShell would otherwise splat
+function drone {
+    $exe = Join-Path $env:AIPASS_HOME '.venv\Scripts\drone.exe'
+    if (-not (Test-Path $exe)) { Write-Error "drone.exe not found at $exe"; return }
+    $raw = $MyInvocation.Line.Trim()
+    if ($raw -match '^drone\s+(.+)$') {
+        $argsPart = $Matches[1]
+        $argsPart = ($argsPart -split '\s*\|\s*')[0].TrimEnd()
+        cmd /c "`"$exe`" $argsPart"
+    } else { & $exe }
+}
+PSWRAP
+        echo "  PowerShell drone wrapper written to $PS_PROFILE"
+    else
+        echo "  PowerShell drone wrapper already in $PS_PROFILE"
+    fi
 else
     # Linux/macOS: write to ~/.bashrc
     PROFILE="$HOME/.bashrc"

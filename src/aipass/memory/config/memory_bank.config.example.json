@@ -1,0 +1,22 @@
+{
+  "memory_pool": {
+    "enabled": false,
+    "process_on_startup": false,
+    "extensions": [".md", ".txt"]
+  },
+  "rollover": {
+    "defaults": {
+      "max_lines": 500,
+      "archive_oldest": 100
+    },
+    "per_branch": {}
+  },
+  "dashboard_push": {
+    "enabled": false,
+    "interval_seconds": 300
+  },
+  "intake": {
+    "enabled": false,
+    "pool_dir": "memory_pool"
+  }
+}

@@ -151,9 +151,15 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
 
 
 def _atomic_write(json_path: Path, content: str) -> None:
-    """Write content to file atomically via temp file + rename."""
+    """Write content to file atomically via temp file + rename.
+
+    On Windows, ``os.replace`` can fail with PermissionError (WinError 5)
+    when another process briefly holds the target file open (e.g. a reader
+    scan). Retry with exponential backoff before giving up.
+    """
     import os
     import tempfile
+    import time
 
     fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix='.tmp')
     try:
@@ -161,7 +167,18 @@ def _atomic_write(json_path: Path, content: str) -> None:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, json_path)
+
+        last_exc: Exception | None = None
+        for attempt in range(5):
+            try:
+                os.replace(tmp_path, json_path)
+                return
+            except PermissionError as exc:
+                last_exc = exc
+                logger.info("json_handler: os.replace attempt %d failed (PermissionError), retrying: %s", attempt + 1, exc)
+                time.sleep(0.05 * (2 ** attempt))
+        if last_exc is not None:
+            raise last_exc
     except Exception:
         try:
             os.unlink(tmp_path)

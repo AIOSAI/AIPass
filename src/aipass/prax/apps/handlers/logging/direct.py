@@ -31,7 +31,20 @@ Everyone else should use the regular system_logger.
 
 import inspect
 import logging
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler as _BaseRotatingFileHandler
+
+logger = logging.getLogger(__name__)
+
+
+class RotatingFileHandler(_BaseRotatingFileHandler):
+    """Windows-safe RotatingFileHandler — skips rotation on file locking errors."""
+
+    def doRollover(self) -> None:
+        """Rotate log file; skip on Windows file-lock errors rather than crash."""
+        try:
+            super().doRollover()
+        except (PermissionError, OSError) as exc:
+            logger.warning("Log rotation skipped (file locked): %s", exc)
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 

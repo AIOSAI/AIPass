@@ -109,8 +109,16 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
 
 
 def _get_jsonl_projects_dir(cwd: str) -> Path:
-    """Get Claude's JSONL projects directory for a branch CWD."""
-    encoded = cwd.replace("/", "-").replace("_", "-")
+    """Get Claude's JSONL projects directory for a branch CWD.
+
+    Claude encodes the cwd by replacing path separators and ':' with '-'.
+    Windows path ``C:\\repo\\AIPass`` becomes ``C--repo-AIPass``.
+    """
+    encoded = (cwd.replace("\\", "-")
+                  .replace("/", "-")
+                  .replace(":", "-")
+                  .replace("_", "-")
+                  .replace(".", "-"))
     return Path.home() / ".claude" / "projects" / encoded
 
 

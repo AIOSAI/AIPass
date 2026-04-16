@@ -41,7 +41,9 @@ def clean_bridge():
 class TestBridge:
     def test_register_and_resolve(self):
         """register() then resolve() returns the same callable."""
-        fn = lambda: "result"
+        def fn():
+            """Test fixture."""
+            return "result"
         bridge.register("my_contract", fn)
         assert bridge.resolve("my_contract") is fn
 
@@ -62,8 +64,12 @@ class TestBridge:
 
     def test_register_overwrites(self):
         """Registering same name twice replaces the driver."""
-        fn1 = lambda: "first"
-        fn2 = lambda: "second"
+        def fn1():
+            """First test fixture."""
+            return "first"
+        def fn2():
+            """Second test fixture."""
+            return "second"
         bridge.register("dup", fn1)
         bridge.register("dup", fn2)
         assert bridge.resolve("dup") is fn2

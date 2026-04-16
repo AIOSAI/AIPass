@@ -55,8 +55,8 @@ except ImportError as e:
     create_terminal_handler = None  # type: ignore[assignment]
     should_display_terminal = None  # type: ignore[assignment]
 
-class _SafeRotatingHandler(RotatingFileHandler):
-    """RotatingFileHandler that catches PermissionError during rotation on Windows.
+class _WindowsSafeRotatingHandler(RotatingFileHandler):
+    """RotatingFileHandler that catches PermissionError/OSError during rotation on Windows.
 
     Windows enforces mandatory file locking — rename fails if another handle
     has the file open. On rotation failure, skip the rotation and keep writing
@@ -64,11 +64,12 @@ class _SafeRotatingHandler(RotatingFileHandler):
     """
 
     def doRollover(self) -> None:
+        """Rotate log file; skip on Windows file-lock errors rather than crash."""
         try:
             super().doRollover()
-        except PermissionError:
+        except (PermissionError, OSError) as exc:
             # Windows: file locked by another process. Skip rotation, keep writing.
-            pass
+            logger.warning("Log rotation skipped (file locked): %s", exc)
 
 def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) -> logging.Handler:
     """Create RotatingFileHandler — self-heals missing directories, never crashes."""
@@ -78,7 +79,7 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
             parent.mkdir(parents=True, exist_ok=True)
             if _system_logger:
                 _system_logger.warning(f"Self-healed missing log directory: {parent}")
-        return _SafeRotatingHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
+        return _WindowsSafeRotatingHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
     except OSError as e:
         logger.error("Log handler failed for %s: %s", log_file, e)
         return logging.NullHandler()
