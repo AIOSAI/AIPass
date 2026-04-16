@@ -160,8 +160,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             _ensure_loaded()
             sys.exit(_run_call(sub_args[0], sub_args[1:]))
 
-        error(f"Unknown integrations subcommand: {subcommand}", suggestion="Try: list, call")
-        return True
+        error(f"Unknown integrations subcommand: {subcommand}", suggestion="list, call")
+        sys.exit(1)
 
     except SystemExit:
         raise
