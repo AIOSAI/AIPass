@@ -324,6 +324,16 @@
       "file": "tests/test_wake.py",
       "standard": "documentation",
       "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
+    },
+    {
+      "file": "tests/test_daemon.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_daemon.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import handlers directly to exercise internal functions (_has_test_token, scan_and_ack_test_emails, _auto_ack_test_email, poll_cycle). Module entry-point-only rule does not apply to tests."
     }
   ],
   "notes": {

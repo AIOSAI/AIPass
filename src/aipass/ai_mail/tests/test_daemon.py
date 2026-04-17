@@ -507,3 +507,178 @@ def test_is_protected_branch_other():
 def test_is_protected_branch_empty_string():
     """Empty string is not protected."""
     assert is_protected_branch("") is False
+
+
+# --- AIPASS-TEST token tests -----------------------------------------
+
+
+class TestHasTestToken:
+    """Tests for _has_test_token() — exact token detection."""
+
+    TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
+
+    def test_detects_token_alone(self):
+        """Detects token as the entire body."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        assert _has_test_token(self.TOKEN) is True
+
+    def test_detects_token_on_own_line(self):
+        """Detects token when surrounded by other text."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        body = f"Smoke test.\n{self.TOKEN}\nSome trailing text."
+        assert _has_test_token(body) is True
+
+    def test_ignores_token_with_wrong_case(self):
+        """Token match is case-sensitive."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        assert _has_test_token(self.TOKEN.lower()) is False
+        assert _has_test_token(self.TOKEN.upper()) is False
+
+    def test_ignores_partial_token(self):
+        """Partial token does not match."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        assert _has_test_token("[AIPASS-TEST]") is False
+        assert _has_test_token("do not update memories") is False
+
+    def test_ignores_token_inside_code_block(self):
+        """Token inside ``` fences is not matched."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        body = f"Before.\n```\n{self.TOKEN}\n```\nAfter."
+        assert _has_test_token(body) is False
+
+    def test_detects_token_outside_code_block(self):
+        """Token outside code fences is matched even when a code block exists."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        body = f"```\nsome code\n```\n{self.TOKEN}"
+        assert _has_test_token(body) is True
+
+    def test_returns_false_for_empty_body(self):
+        """Empty body returns False."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        assert _has_test_token("") is False
+
+    def test_strips_whitespace_before_comparing(self):
+        """Leading/trailing whitespace on the line is ignored."""
+        from aipass.ai_mail.apps.handlers.dispatch.daemon import _has_test_token
+        body = f"  {self.TOKEN}  "
+        assert _has_test_token(body) is True
+
+
+class TestScanAndAckTestEmails:
+    """Tests for scan_and_ack_test_emails() — inbox scan + auto-ack."""
+
+    TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
+
+    @pytest.fixture(autouse=True)
+    def _suppress_log(self, monkeypatch):
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.json_handler.log_operation",
+            lambda *a, **kw: None,
+        )
+
+    def _make_inbox(self, tmp_path, messages):
+        mail_dir = tmp_path / ".ai_mail.local"
+        mail_dir.mkdir()
+        inbox = mail_dir / "inbox.json"
+        inbox.write_text(json.dumps({"messages": messages}))
+        return tmp_path
+
+    def test_acks_test_token_email(self, tmp_path, monkeypatch):
+        """scan_and_ack_test_emails calls _auto_ack_test_email for test-token messages."""
+        from aipass.ai_mail.apps.handlers.dispatch import daemon as daemon_mod
+        branch_path = self._make_inbox(tmp_path, [
+            {"id": "abc123", "from": "@aipass", "subject": "ping",
+             "message": f"body\n{self.TOKEN}", "status": "new"}
+        ])
+        acked = []
+        monkeypatch.setattr(daemon_mod, "_auto_ack_test_email",
+                            lambda bp, be, msg: acked.append(msg["id"]) or True)
+        count = daemon_mod.scan_and_ack_test_emails(branch_path, "@drone")
+        assert count == 1
+        assert acked == ["abc123"]
+
+    def test_skips_non_test_emails(self, tmp_path, monkeypatch):
+        """Normal emails without the token are not acked."""
+        from aipass.ai_mail.apps.handlers.dispatch import daemon as daemon_mod
+        branch_path = self._make_inbox(tmp_path, [
+            {"id": "abc123", "from": "@devpulse", "subject": "task",
+             "message": "Do the thing.", "status": "new", "auto_execute": True}
+        ])
+        acked = []
+        monkeypatch.setattr(daemon_mod, "_auto_ack_test_email",
+                            lambda bp, be, msg: acked.append(msg["id"]) or True)
+        count = daemon_mod.scan_and_ack_test_emails(branch_path, "@drone")
+        assert count == 0
+        assert acked == []
+
+    def test_skips_closed_messages(self, tmp_path, monkeypatch):
+        """Closed/archived messages are not re-acked."""
+        from aipass.ai_mail.apps.handlers.dispatch import daemon as daemon_mod
+        branch_path = self._make_inbox(tmp_path, [
+            {"id": "abc123", "from": "@aipass", "subject": "ping",
+             "message": f"body\n{self.TOKEN}", "status": "closed"}
+        ])
+        acked = []
+        monkeypatch.setattr(daemon_mod, "_auto_ack_test_email",
+                            lambda bp, be, msg: acked.append(msg["id"]) or True)
+        count = daemon_mod.scan_and_ack_test_emails(branch_path, "@drone")
+        assert count == 0
+
+    def test_returns_zero_for_missing_inbox(self, tmp_path, monkeypatch):
+        """Returns 0 gracefully when inbox.json doesn't exist."""
+        from aipass.ai_mail.apps.handlers.dispatch import daemon as daemon_mod
+        branch_path = tmp_path  # no .ai_mail.local/inbox.json
+        count = daemon_mod.scan_and_ack_test_emails(branch_path, "@drone")
+        assert count == 0
+
+
+class TestPollCycleNoWakeForTestToken:
+    """poll_cycle() must not spawn agents for test-token emails."""
+
+    TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
+
+    @pytest.fixture(autouse=True)
+    def _suppress_log(self, monkeypatch):
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.json_handler.log_operation",
+            lambda *a, **kw: None,
+        )
+
+    def test_no_spawn_for_test_token_email(self, tmp_path, monkeypatch):
+        """A test-token auto_execute email does NOT trigger spawn_agent."""
+        from aipass.ai_mail.apps.handlers.dispatch import daemon as daemon_mod
+
+        branch_path = tmp_path / "testbranch"
+        branch_path.mkdir()
+        mail_dir = branch_path / ".ai_mail.local"
+        mail_dir.mkdir()
+        inbox = mail_dir / "inbox.json"
+        inbox.write_text(json.dumps({"messages": [
+            {"id": "t1", "from": "@aipass", "subject": "ping",
+             "message": f"Ping.\n{self.TOKEN}", "status": "new"}
+        ]}))
+
+        registry_file = tmp_path / "AIPASS_REGISTRY.json"
+        registry_file.write_text(json.dumps({
+            "branches": [{"name": "TESTBRANCH", "email": "@testbranch", "path": str(branch_path)}]
+        }))
+
+        monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", registry_file)
+        monkeypatch.setattr(daemon_mod, "is_kill_switch_active", lambda c: False)
+        monkeypatch.setattr(daemon_mod, "_check_lock", lambda p: None)
+        monkeypatch.setattr(daemon_mod, "_is_branch_occupied", lambda p: False)
+        monkeypatch.setattr(daemon_mod, "is_protected_branch", lambda e: False)
+
+        spawned = []
+        monkeypatch.setattr(daemon_mod, "spawn_agent",
+                            lambda bp, be, msg, cfg, st: spawned.append(be) or True)
+
+        # Mock _auto_ack_test_email to avoid subprocess calls
+        monkeypatch.setattr(daemon_mod, "_auto_ack_test_email", lambda bp, be, msg: True)
+
+        config = {"autonomous_branches": [], "max_dispatches_per_branch_per_day": 10}
+        state = {"daily_counts": {}, "session_cycles": {}}
+
+        daemon_mod.poll_cycle(config, state)
+
+        assert spawned == [], "spawn_agent should NOT be called for test-token emails"

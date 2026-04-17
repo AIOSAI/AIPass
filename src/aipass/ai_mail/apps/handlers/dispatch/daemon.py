@@ -37,6 +37,9 @@ from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 
+# Test-convention token — @aipass ping protocol (DPLAN-0136 / FPLAN-0188 Phase 3.5)
+TEST_TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
+
 # Infrastructure paths
 _REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
@@ -177,6 +180,97 @@ def _check_lock(branch_path: Path) -> Optional[Dict[str, Any]]:
         logger.warning("Corrupt lock file removed at %s", lock_file)
         lock_file.unlink(missing_ok=True)
         return None
+
+
+def _has_test_token(body: str) -> bool:
+    """Detect the AIPASS-TEST ping token in a message body.
+
+    Token must appear on its own line (leading/trailing whitespace stripped)
+    and must not be inside a markdown code block (``` fences).
+    Case-sensitive, exact match only.
+    """
+    in_code_block = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if not in_code_block and stripped == TEST_TOKEN:
+            return True
+    return False
+
+
+def _auto_ack_test_email(branch_path: Path, branch_email: str, message: Dict[str, Any]) -> bool:
+    """Send 'ack' reply and close a test-convention ping email.
+
+    Runs drone commands with cwd=branch_path so ai_mail detects the correct
+    sender identity (the target branch, not ai_mail itself).
+
+    Returns True if the ack email was sent successfully.
+    """
+    sender = message.get("from", "")
+    subject = message.get("subject", "ping")
+    msg_id = message.get("id", "")
+
+    if not sender or not msg_id:
+        logger.warning("[daemon] TEST-ACK skipped for %s: missing sender or id", branch_email)
+        return False
+
+    # Send ack email (CWD=branch_path so sender is detected as the target branch)
+    ack_sent = False
+    try:
+        result = subprocess.run(
+            ["drone", "@ai_mail", "email", sender, f"Re: {subject}", "ack"],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(branch_path),
+        )
+        ack_sent = result.returncode == 0
+        if not ack_sent:
+            logger.warning("[daemon] TEST-ACK email failed for %s→%s: %s",
+                           branch_email, sender, result.stderr[:200])
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning("[daemon] TEST-ACK subprocess failed for %s→%s: %s", branch_email, sender, e)
+
+    # Close the test email so it doesn't get retried
+    try:
+        subprocess.run(
+            ["drone", "@ai_mail", "close", msg_id],
+            capture_output=True, text=True, timeout=15,
+            cwd=str(branch_path),
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning("[daemon] TEST-ACK close failed for %s msg %s: %s", branch_email, msg_id, e)
+
+    logger.info("[daemon] TEST-ACK %s → %s msg=%s sent=%s", branch_email, sender, msg_id, ack_sent)
+    return ack_sent
+
+
+def scan_and_ack_test_emails(branch_path: Path, branch_email: str) -> int:
+    """Scan a branch inbox for test-convention ping emails and auto-ack them.
+
+    Processes all new/opened messages containing the TEST_TOKEN, regardless
+    of auto_execute flag. Returns count of emails handled.
+
+    Called before check_inbox_for_dispatch() in poll_cycle() so test emails
+    are closed before the dispatch scan runs.
+    """
+    inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
+    inbox_data = _read_json(inbox_file)
+    if inbox_data is None:
+        return 0
+
+    count = 0
+    for msg in inbox_data.get("messages", []):
+        if msg.get("status") not in ("new", "opened"):
+            continue
+        body = msg.get("message", "")
+        if _has_test_token(body):
+            if _auto_ack_test_email(branch_path, branch_email, msg):
+                count += 1
+
+    if count:
+        logger.info("[daemon] TEST-ACK handled %d ping email(s) for %s", count, branch_email)
+    return count
 
 
 def _acquire_lock(branch_path: Path, pid: int) -> tuple[bool, str]:
@@ -556,6 +650,9 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
         if existing_lock is not None:
             logger.info(f"SKIP {branch_email}: active lock (PID {existing_lock.get('pid', '?')})")
             continue
+
+        # Handle AIPASS-TEST ping emails before dispatch scan
+        scan_and_ack_test_emails(branch_path, branch_email)
 
         dispatch_msg = check_inbox_for_dispatch(branch_path)
         if dispatch_msg is None:
