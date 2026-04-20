@@ -100,6 +100,11 @@
       "standard": "json_structure",
       "file": "apps/handlers/watchdog/registry.py",
       "reason": "Devpulse is a manager branch with no json_handler. Registry logs through prax system_logger. Same situation as watchdog/agent.py, timer.py, schedule.py."
+    },
+    {
+      "standard": "encapsulation",
+      "file": "tests/test_watchdog_module.py",
+      "reason": "Test file imports aipass.devpulse.apps.modules.watchdog for direct router testing (same-branch import). Encapsulation check pattern-matches on 'from aipass.*.apps.*' shape regardless of same- vs cross-branch. Inherits branch-level gap (manager branch, no apps/handlers/__init__.py inspect.stack guard)."
     }
   ],
   "notes": {

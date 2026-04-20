@@ -178,14 +178,15 @@ def _classify_exit(branch_path: Path, lock_existed: bool) -> tuple[str, str, int
 
 def watch_agent(
     agent_id: str,
-    timeout_seconds: int = 1800,
+    timeout_seconds: int = 600,
     poll_interval: float = 2.0,
 ) -> dict:
     """Block until the dispatched agent at `agent_id` exits.
 
     Args:
         agent_id: Branch token like ``@drone`` (or bare ``drone``).
-        timeout_seconds: Maximum wait. Default 30 min.
+        timeout_seconds: Maximum wait. Default 10 min — catches crashes + silent-finishes
+            fast; long agent watches should pass an explicit ``--timeout``.
         poll_interval: Seconds between checks. Default 2.0.
 
     Returns:

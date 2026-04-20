@@ -279,3 +279,50 @@ def test_agent_subcommand_invalid_timeout(capsys):
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "invalid" in combined.lower() or "--timeout" in combined.lower()
+
+
+def test_agent_subcommand_default_timeout_is_600():
+    """Without an explicit --timeout, the module passes 600s (FPLAN-0189)."""
+    captured_args = {}
+
+    def fake_watch_agent(agent_id, timeout_seconds=9999):
+        """Fake watcher — records the timeout the module passed in."""
+        captured_args["timeout"] = timeout_seconds
+        return {
+            "woke": True,
+            "reason": "fake",
+            "elapsed": 1,
+            "agent_state": "completed",
+            "exit_code": 0,
+            "agent_id": agent_id,
+        }
+
+    fake_module = type(sys)("fake_agent_mod")
+    fake_module.watch_agent = fake_watch_agent
+
+    with patch("importlib.import_module", return_value=fake_module):
+        wd_mod.handle_command("watchdog", ["agent", "@flow"])
+
+    assert captured_args["timeout"] == 600
+
+
+def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
+    """On exit, the CLI prints a 'Next: drone @ai_mail dispatch' breadcrumb (FPLAN-0189)."""
+    fake_result = {
+        "woke": True,
+        "reason": "fake clean exit",
+        "elapsed": 5,
+        "agent_state": "completed",
+        "exit_code": 0,
+        "agent_id": "@drone",
+    }
+    fake_module = type(sys)("fake_agent_mod")
+    fake_module.watch_agent = lambda agent_id, timeout_seconds=600: fake_result
+
+    with patch("importlib.import_module", return_value=fake_module):
+        wd_mod.handle_command("watchdog", ["agent", "@drone"])
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Next: drone @ai_mail dispatch @drone" in combined
+    assert "state=completed" in combined

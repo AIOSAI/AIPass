@@ -32,7 +32,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 
 _VALID_SUBCOMMANDS = ["agent", "timer", "schedule", "status", "cancel", "list"]
-_DEFAULT_AGENT_TIMEOUT = 1800
+_DEFAULT_AGENT_TIMEOUT = 600
 _NOT_IMPLEMENTED_MSG = "{sub} is not yet implemented in this phase — see FPLAN-0186 (Phase {phase})"
 # Phase 4 wired cancel + list for real. Left the map so future deferrals can reuse the shape.
 _PHASE_BY_SUB: dict[str, int] = {}
@@ -353,6 +353,9 @@ def _handle_agent(sub_args: List[str]) -> bool:
     reason = result.get("reason", "")
     elapsed = result.get("elapsed", 0)
     console.print(f"[bold]watchdog agent[/bold] {agent_id} -> state={state} elapsed={elapsed}s reason={reason}")
+    console.print(
+        f'watchdog: {agent_id} stopped (state={state}). Next: drone @ai_mail dispatch {agent_id} "check in" "..."'
+    )
     return True
 
 

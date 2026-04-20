@@ -13,9 +13,10 @@ Key behaviors:
 - Surfaces ALL errors in additionalContext so Claude sees them
 - Smart batching per-file
 
-Version: 5.0.0
+Version: 5.1.0
 
 CHANGELOG:
+  - v5.1.0 (2026-04-19): Added ruff format --check to surface format drift.
   - v5.0.0 (2026-03-17): Replaced mcp__ide__getDiagnostics with direct pyright.
                           Added state file for PreToolUse gate integration.
                           Single-file pyright (not whole project).
@@ -99,7 +100,22 @@ def run_python_checks(file_path: str) -> list[str]:
     except Exception:
         pass
 
-    # 3. AIPass-specific pattern checks
+    # 3. Ruff format check — detect format drift
+    try:
+        result = subprocess.run(
+            ["ruff", "format", "--check", file_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            errors.append(f"FORMAT: {Path(file_path).name} needs ruff format (run: ruff format {Path(file_path).name})")
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    # 4. AIPass-specific pattern checks
     try:
         content = Path(file_path).read_text(encoding="utf-8")
         lines = content.split("\n")
