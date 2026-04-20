@@ -13,12 +13,12 @@
     {
       "file": "apps/handlers/json_utils/json_handler.py",
       "standard": "json_structure",
-      "reason": "This IS the json_handler implementation — cannot import itself."
+      "reason": "This IS the json_handler implementation \u2014 cannot import itself."
     },
     {
       "file": "apps/modules/dispatch.py",
       "standard": "deep_nesting",
-      "reason": "handle_command() depth 4 — entry point router, nested subcommand dispatch is inherent to the pattern"
+      "reason": "handle_command() depth 4 \u2014 entry point router, nested subcommand dispatch is inherent to the pattern"
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
@@ -28,17 +28,17 @@
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "deep_nesting",
-      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type — must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
+      "reason": "3 functions: _check_lock() depth 4 (lock validation with PID checks and age), _is_branch_occupied() depth 5 (process inspection, filters by session type \u2014 must check /proc), resolve_branch() depth 4 (AIPass registry scan + caller-registry fallback for cross-project dispatch)"
     },
     {
       "file": "apps/handlers/email/send.py",
       "standard": "deep_nesting",
-      "reason": "collect_interactive_input() depth 4 — multiple input() calls each need independent try/except for EOF and KeyboardInterrupt"
+      "reason": "collect_interactive_input() depth 4 \u2014 multiple input() calls each need independent try/except for EOF and KeyboardInterrupt"
     },
     {
       "file": "apps/handlers/email/inbox_ops.py",
       "standard": "deep_nesting",
-      "reason": "load_inbox() depth 4 — auto-migration between old and new inbox formats requires nested schema checks"
+      "reason": "load_inbox() depth 4 \u2014 auto-migration between old and new inbox formats requires nested schema checks"
     },
     {
       "file": "apps/handlers/email/delivery.py",
@@ -48,32 +48,32 @@
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
       "standard": "deep_nesting",
-      "reason": "mark_read_and_archive() depth 4 — lock context manager + inbox loading + message search + archive"
+      "reason": "mark_read_and_archive() depth 4 \u2014 lock context manager + inbox loading + message search + archive"
     },
     {
       "file": "apps/handlers/email/inbox_lock.py",
       "standard": "deep_nesting",
-      "reason": "inbox_lock() depth 6 — cross-platform file locking context manager (POSIX fcntl vs Windows msvcrt), platform branching is inherent"
+      "reason": "inbox_lock() depth 6 \u2014 cross-platform file locking context manager (POSIX fcntl vs Windows msvcrt), platform branching is inherent"
     },
     {
       "file": "apps/handlers/users/user.py",
       "standard": "deep_nesting",
-      "reason": "2 functions: get_user_by_email() depth 4, get_all_users() depth 4 — registry lookup with path normalization and validation"
+      "reason": "2 functions: get_user_by_email() depth 4, get_all_users() depth 4 \u2014 registry lookup with path normalization and validation"
     },
     {
       "file": "apps/handlers/email/dashboard_sync.py",
       "standard": "handlers",
-      "reason": "Imports prax.apps.modules.dashboard.write_section — cross-branch module import required for dashboard integration. No ai_mail module wraps this."
+      "reason": "Imports prax.apps.modules.dashboard.write_section \u2014 cross-branch module import required for dashboard integration. No ai_mail module wraps this."
     },
     {
       "file": "apps/handlers/email/delivery.py",
       "standard": "handlers",
-      "reason": "Imports json_utils.json_handler (load_json, save_json) — shared handler utility for JSON I/O, same-branch cross-handler import. Also imports registry.read.get_all_branches — consolidated from dual implementation per DPLAN-0036. Also lazy-imports email.contacts.register_contact inside _auto_register_contact() and _auto_register_sender() for post-delivery contact registration (DPLAN-0121 Phase 5). Also lazy-imports registry.read.get_caller_project_branches inside _load_caller_project_branches() to delegate to shared cross-project registry implementation (issue #283)."
+      "reason": "Imports json_utils.json_handler (load_json, save_json) \u2014 shared handler utility for JSON I/O, same-branch cross-handler import. Also imports registry.read.get_all_branches \u2014 consolidated from dual implementation per DPLAN-0036. Also lazy-imports email.contacts.register_contact inside _auto_register_contact() and _auto_register_sender() for post-delivery contact registration (DPLAN-0121 Phase 5). Also lazy-imports registry.read.get_caller_project_branches inside _load_caller_project_branches() to delegate to shared cross-project registry implementation (issue #283)."
     },
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
       "standard": "handlers",
-      "reason": "Imports central_writer.update_central — same-branch cross-handler import for registry status updates on inbox changes."
+      "reason": "Imports central_writer.update_central \u2014 same-branch cross-handler import for registry status updates on inbox changes."
     },
     {
       "file": "apps/handlers/email/reply.py",
@@ -83,112 +83,112 @@
     {
       "file": "apps/handlers/email/send.py",
       "standard": "handlers",
-      "reason": "Imports trigger.apps.modules.core.trigger — cross-branch module import for firing email_sent events. trigger integration is by design."
+      "reason": "Imports trigger.apps.modules.core.trigger \u2014 cross-branch module import for firing email_sent events. trigger integration is by design."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "handlers",
-      "reason": "Imports notify.send_notification — same-branch cross-handler import for desktop notifications on dispatch events."
+      "reason": "Imports notify.send_notification \u2014 same-branch cross-handler import for desktop notifications on dispatch events."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "handlers",
-      "reason": "Imports notify.send_notification — same-branch cross-handler import for bounce/completion notifications."
+      "reason": "Imports notify.send_notification \u2014 same-branch cross-handler import for bounce/completion notifications."
     },
     {
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "handlers",
-      "reason": "Imports notify.send_notification — same-branch cross-handler import for wake completion notifications. Lazy-imports registry.read.get_caller_project_branches inside resolve_branch() for cross-project branch resolution. Same cross-handler pattern as reply.py, delivery.py, and branch_detection.py."
+      "reason": "Imports notify.send_notification \u2014 same-branch cross-handler import for wake completion notifications. Lazy-imports registry.read.get_caller_project_branches inside resolve_branch() for cross-project branch resolution. Same cross-handler pattern as reply.py, delivery.py, and branch_detection.py."
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "naming",
-      "reason": "dispatch_monitor.py in dispatch/ dir — renaming to monitor.py would break all 3 callers (wake.py, daemon.py, MONITOR_SCRIPT references) and confuse with prax monitor."
+      "reason": "dispatch_monitor.py in dispatch/ dir \u2014 renaming to monitor.py would break all 3 callers (wake.py, daemon.py, MONITOR_SCRIPT references) and confuse with prax monitor."
     },
     {
       "file": "apps/handlers/email/close_ops.py",
       "standard": "naming",
-      "reason": "False positive — results, closed_count, failed_count are local variables, not module-level constants."
+      "reason": "False positive \u2014 results, closed_count, failed_count are local variables, not module-level constants."
     },
     {
       "file": "apps/handlers/email/create.py",
       "standard": "naming",
-      "reason": "False positive — _append_footer is a function reference stored in a local variable, not a module-level constant."
+      "reason": "False positive \u2014 _append_footer is a function reference stored in a local variable, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/dashboard_sync.py",
       "standard": "naming",
-      "reason": "False positive — _write_section is a lazy-import function reference, not a module-level constant."
+      "reason": "False positive \u2014 _write_section is a lazy-import function reference, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/delivery.py",
       "standard": "naming",
-      "reason": "False positive — path_to_email, to_branch, matched are local variables, not module-level constants."
+      "reason": "False positive \u2014 path_to_email, to_branch, matched are local variables, not module-level constants."
     },
     {
       "file": "apps/handlers/email/inbox_cleanup.py",
       "standard": "naming",
-      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
+      "reason": "False positive \u2014 _inbox_lock is a lazy-import function reference, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/inbox_ops.py",
       "standard": "naming",
-      "reason": "False positive — _inbox_lock is a lazy-import function reference, not a module-level constant."
+      "reason": "False positive \u2014 _inbox_lock is a lazy-import function reference, not a module-level constant."
     },
     {
       "file": "apps/handlers/email/inbox_resolve.py",
       "standard": "naming",
-      "reason": "False positive — target_branch, mailbox_path are local variables, not module-level constants."
+      "reason": "False positive \u2014 target_branch, mailbox_path are local variables, not module-level constants."
     },
     {
       "file": "apps/handlers/email/reply.py",
       "standard": "naming",
-      "reason": "False positive — error_msg, reply_email_data, target_branch are local variables, not module-level constants."
+      "reason": "False positive \u2014 error_msg, reply_email_data, target_branch are local variables, not module-level constants."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "naming",
-      "reason": "False positive — claude_cmd, monitor_cmd, stdout are local variables in spawn_agent(), not module-level constants."
+      "reason": "False positive \u2014 claude_cmd, monitor_cmd, stdout are local variables in spawn_agent(), not module-level constants."
     },
     {
       "file": "apps/handlers/email/close_ops.py",
       "standard": "documentation",
-      "reason": "batch_close() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "batch_close() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/delivery.py",
       "standard": "documentation",
-      "reason": "deliver_email_to_branch() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "deliver_email_to_branch() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/error_dispatch.py",
       "standard": "documentation",
-      "reason": "dispatch_send_error() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "dispatch_send_error() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/inbox_resolve.py",
       "standard": "documentation",
-      "reason": "resolve_inbox_target() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "resolve_inbox_target() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/reply.py",
       "standard": "documentation",
-      "reason": "send_reply() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "send_reply() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/send.py",
       "standard": "documentation",
-      "reason": "resolve_sender_info() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "resolve_sender_info() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/email/send_args.py",
       "standard": "documentation",
-      "reason": "resolve_dispatch_target() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "resolve_dispatch_target() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/handlers/dispatch/daemon.py",
       "standard": "documentation",
-      "reason": "spawn_agent() has a full docstring — seedgo AST detection mismatch on multiline function signature."
+      "reason": "spawn_agent() has a full docstring \u2014 seedgo AST detection mismatch on multiline function signature."
     },
     {
       "file": "apps/modules/email.py",
@@ -198,52 +198,52 @@
     {
       "file": "apps/handlers/email/dashboard_sync.py",
       "standard": "deep_nesting",
-      "reason": "_human_readable_age() depth 5, _calculate_section_data() depth 5 — timestamp parsing with multiple fallback formats"
+      "reason": "_human_readable_age() depth 5, _calculate_section_data() depth 5 \u2014 timestamp parsing with multiple fallback formats"
     },
     {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "deep_nesting",
-      "reason": "_send_bounce() depth 4, main() depth 5 — subprocess management with error handling and log rotation"
+      "reason": "_send_bounce() depth 4, main() depth 5 \u2014 subprocess management with error handling and log rotation"
     },
     {
       "file": "apps/handlers/dispatch/status.py",
       "standard": "deep_nesting",
-      "reason": "calculate_age() depth 4 — timestamp parsing with multiple fallback formats"
+      "reason": "calculate_age() depth 4 \u2014 timestamp parsing with multiple fallback formats"
     },
     {
       "file": "apps/handlers/central_writer.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility consolidated from 8 copies per DPLAN-0036."
     },
     {
       "file": "apps/handlers/registry/read.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility consolidated from 8 copies per DPLAN-0036."
     },
     {
       "file": "apps/handlers/registry/read.py",
       "standard": "deep_nesting",
-      "reason": "get_caller_project_branches() depth 4 — walks directory tree with per-registry-file parsing, list/dict branch format detection, and path resolution. Same pattern as delivery.py _load_caller_project_branches()."
+      "reason": "get_caller_project_branches() depth 4 \u2014 walks directory tree with per-registry-file parsing, list/dict branch format detection, and path resolution. Same pattern as delivery.py _load_caller_project_branches()."
     },
     {
       "file": "apps/handlers/email/format.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility consolidated from 8 copies per DPLAN-0036."
     },
     {
       "file": "apps/handlers/email/purge.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility consolidated from 8 copies per DPLAN-0036."
     },
     {
       "file": "apps/handlers/users/branch_detection.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility consolidated from 8 copies per DPLAN-0036. Also lazy-imports email.contacts.get_contact inside _get_contact_info() for contacts-first sender detection (DPLAN-0121 Phase 5)."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility consolidated from 8 copies per DPLAN-0036. Also lazy-imports email.contacts.get_contact inside _get_contact_info() for contacts-first sender detection (DPLAN-0121 Phase 5)."
     },
     {
       "file": "apps/handlers/email/contacts.py",
       "standard": "handlers",
-      "reason": "Imports paths.find_repo_root — shared utility for CONTACTS_FILE path resolution. Same pattern as registry/read.py and other handlers per DPLAN-0036."
+      "reason": "Imports paths.find_repo_root \u2014 shared utility for CONTACTS_FILE path resolution. Same pattern as registry/read.py and other handlers per DPLAN-0036."
     },
     {
       "file": "apps/handlers/email/identity.py",
@@ -253,7 +253,7 @@
     {
       "file": "tests/test_delivery.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_delivery.py",
@@ -263,7 +263,7 @@
     {
       "file": "tests/test_send_identity.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_send_identity.py",
@@ -273,12 +273,12 @@
     {
       "file": "tests/test_send_identity.py",
       "standard": "documentation",
-      "reason": "Test helper functions (_load_active_source, fixtures) are private/internal — docstring requirement does not apply to test infrastructure."
+      "reason": "Test helper functions (_load_active_source, fixtures) are private/internal \u2014 docstring requirement does not apply to test infrastructure."
     },
     {
       "file": "tests/test_contacts.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_contacts.py",
@@ -288,7 +288,7 @@
     {
       "file": "tests/test_identity.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_identity.py",
@@ -298,7 +298,7 @@
     {
       "file": "tests/test_registry_read.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_registry_read.py",
@@ -308,12 +308,12 @@
     {
       "file": "tests/test_registry_read.py",
       "standard": "documentation",
-      "reason": "Test fixture functions (registry_file) are private test infrastructure — docstring requirement does not apply to pytest fixtures."
+      "reason": "Test fixture functions (registry_file) are private test infrastructure \u2014 docstring requirement does not apply to pytest fixtures."
     },
     {
       "file": "tests/test_wake.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_wake.py",
@@ -323,17 +323,27 @@
     {
       "file": "tests/test_wake.py",
       "standard": "documentation",
-      "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
+      "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure \u2014 docstring requirement does not apply to test helpers."
     },
     {
       "file": "tests/test_dispatch_watchdog.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
     },
     {
       "file": "tests/test_dispatch_watchdog.py",
       "standard": "encapsulation",
       "reason": "Unit tests must access _spawn_watchdog directly to verify internal spawn behavior. Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_wake_blocklist.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_wake_blocklist.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import wake handlers directly to verify blocklist behavior. Module entry-point-only rule does not apply to tests."
     }
   ],
   "notes": {

@@ -189,6 +189,15 @@ def _orchestrate_wake(args: List[str]) -> bool:
     branch_email = filtered[0]
     custom_message = filtered[1] if len(filtered) > 1 else None
 
+    from aipass.ai_mail.apps.handlers.dispatch.wake import is_wake_blocked
+
+    if is_wake_blocked(branch_email):
+        error(
+            f"target {branch_email} is protected from manual wake. "
+            f'Use \'drone @ai_mail dispatch {branch_email} "Subject" "Body"\' to send work instead.'
+        )
+        return True
+
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
     console.print(f"\n⏳ Waking {branch_email}...")
 
