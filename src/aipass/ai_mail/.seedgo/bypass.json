@@ -101,6 +101,16 @@
       "reason": "Imports notify.send_notification — same-branch cross-handler import for wake completion notifications. Lazy-imports registry.read.get_caller_project_branches inside resolve_branch() for cross-project branch resolution. Same cross-handler pattern as reply.py, delivery.py, and branch_detection.py."
     },
     {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "encapsulation",
+      "reason": "Pre-existing: wake.py is a handler that imports json_handler and paths — both are default shared utilities. Module entry-point-only rule does not apply to handler-to-handler shared utilities."
+    },
+    {
+      "file": "apps/handlers/dispatch/wake.py",
+      "standard": "log_structure",
+      "reason": "Pre-existing: seedgo checks for logs/ at the path root when given an absolute path — false positive caused by running checklist against /worktrees/ path. The actual ai_mail branch has logs/ at branch root."
+    },
+    {
       "file": "apps/handlers/dispatch/dispatch_monitor.py",
       "standard": "naming",
       "reason": "dispatch_monitor.py in dispatch/ dir — renaming to monitor.py would break all 3 callers (wake.py, daemon.py, MONITOR_SCRIPT references) and confuse with prax monitor."
@@ -326,14 +336,24 @@
       "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
     },
     {
-      "file": "tests/test_dispatch_watchdog.py",
+      "file": "tests/test_wake_blocklist.py",
       "standard": "architecture",
       "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
     },
     {
-      "file": "tests/test_dispatch_watchdog.py",
+      "file": "tests/test_wake_blocklist.py",
       "standard": "encapsulation",
-      "reason": "Unit tests must access _spawn_watchdog directly to verify internal spawn behavior. Module entry-point-only rule does not apply to tests."
+      "reason": "Unit tests must import handlers directly to exercise is_wake_blocked, WAKE_BLOCKLIST from wake.py. Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_wake_blocklist.py",
+      "standard": "documentation",
+      "reason": "Test methods are self-documenting by name; private test infrastructure docstring requirement does not apply to pytest test classes."
+    },
+    {
+      "file": "tests/test_wake_blocklist.py",
+      "standard": "meta",
+      "reason": "Test file — META block header/footer not required for test files per project convention (see test_wake.py, test_delivery.py)."
     }
   ],
   "notes": {

@@ -71,6 +71,15 @@ MODEL_MAP = {
 }
 DEFAULT_MODEL = "sonnet"
 
+# Branches that cannot be woken manually by cross-branch drone commands.
+# Dispatch-send path (dispatch.py._orchestrate_dispatch_send) bypasses this check.
+WAKE_BLOCKLIST: frozenset[str] = frozenset({"@devpulse"})
+
+
+def is_wake_blocked(target: str) -> bool:
+    """Return True if `target` is on the manual-wake blocklist."""
+    return f"@{target.lstrip('@').lower()}" in WAKE_BLOCKLIST
+
 
 # ─── Status Step Tracking ───────────────────────────────
 
