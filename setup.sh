@@ -325,6 +325,11 @@ bootstrap_branch() {
     "last_updated": "${DATE_TODAY}",
     "managed_by": "${name}"
   },
+  "branch_info": {
+    "branch_name": "${name}",
+    "path": "src/aipass/${name}",
+    "email": "@${name}"
+  },
   "identity": {
     "name": "${name}",
     "citizen_class": "${citizen_class}",

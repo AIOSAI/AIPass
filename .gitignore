@@ -54,6 +54,7 @@ docs.local/
 # Claude Code local state
 .claude/hooks/__pycache__/
 .claude/hooks/.last_diagnostics_file
+.claude/worktrees/
 # **/.claude/settings.local.json — UNIGNORED: deny rules are system config that must travel with PRs
 
 # Disabled files (AIPass convention: rename with (disabled) instead of delete)
