@@ -55,6 +55,11 @@ docs.local/
 .claude/hooks/__pycache__/
 .claude/hooks/.last_diagnostics_file
 .claude/worktrees/
+
+# @aipass citizen — under construction, whole branch gitignored until ready.
+# Nothing in the public system depends on aipass, so this can live invisibly
+# while we build + test. Remove this block when ready to reveal (DPLAN-0136).
+src/aipass/aipass/
 # **/.claude/settings.local.json — UNIGNORED: deny rules are system config that must travel with PRs
 
 # Disabled files (AIPass convention: rename with (disabled) instead of delete)
