@@ -122,9 +122,14 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
             return result
 
         # Step 5: Commit on main (changes stay local)
+        # Pathspec ('-- rel_dir/') scopes the commit to branch_dir only,
+        # preventing pre-staged files from other concurrent PRs from being
+        # swept in. The staging step already scoped git add, but another
+        # drone @git pr could stage its own files into the shared index
+        # between our add and our commit.
         commit_msg = f"feat({branch_name}): {description}\n\nCo-Authored-By: @{branch_name} <{branch_name}@aipass>"
         commit = subprocess.run(
-            ["git", "commit", "-m", commit_msg],
+            ["git", "commit", "-m", commit_msg, "--", str(rel_dir) + "/"],
             capture_output=True,
             text=True,
             cwd=str(repo_root),

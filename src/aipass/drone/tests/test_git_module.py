@@ -407,6 +407,7 @@ class TestPRHandler:
         call_count = 0
 
         def mock_subprocess_run(cmd, **kwargs):
+            """Simulate git subprocess returning main branch and staged-nothing."""
             nonlocal call_count
             call_count += 1
             result = MagicMock()
@@ -448,6 +449,7 @@ class TestPRHandler:
         monkeypatch.chdir(tmp_path)
 
         def mock_subprocess_run(cmd, **kwargs):
+            """Simulate git subprocess returning main branch, then early exit on no staged files."""
             result = MagicMock()
             result.stderr = ""
             result.stdout = ""
@@ -477,6 +479,62 @@ class TestPRHandler:
         assert result["success"] is False
         # Lock must always be released, even on early exit
         release_mock.assert_called_once_with(force=True)
+
+    def test_commit_uses_pathspec_not_whole_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Commit is scoped to branch_dir — pre-staged files outside it are excluded.
+
+        Regression test for FPLAN-0190: concurrent drone @git pr calls could
+        contaminate each other's commits because git commit with no pathspec
+        commits the entire index, not just files staged in this invocation.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        commit_cmd_seen: list[list[str]] = []
+
+        def mock_subprocess_run(cmd, **kwargs):
+            """Simulate git/gh subprocess calls, recording commit invocations."""
+            r = MagicMock()
+            r.stderr = ""
+            r.stdout = ""
+            if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
+                r.returncode = 0
+                r.stdout = "main\n"
+            elif cmd[0] == "git" and cmd[1] == "add":
+                r.returncode = 0
+            elif cmd[1:3] == ["diff", "--cached"]:
+                r.returncode = 1  # 1 means something is staged
+            elif cmd[0] == "git" and cmd[1] == "commit":
+                commit_cmd_seen.append(list(cmd))
+                r.returncode = 0
+                r.stdout = "[main abc1234] feat(api): test"
+            elif cmd[0] == "git" and cmd[1] == "branch":
+                r.returncode = 0
+            elif cmd[0] == "git" and cmd[1] == "push":
+                r.returncode = 0
+            elif cmd[0] == "gh":
+                r.returncode = 0
+                r.stdout = "https://github.com/test/repo/pull/1"
+            else:
+                r.returncode = 0
+            return r
+
+        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=mock_subprocess_run):
+            with patch(
+                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
+                return_value={"success": True, "message": "ok"},
+            ):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                    create_pr("api", "test desc", tmp_path / "src" / "aipass" / "api")
+
+        # The commit command must include '--' separator + pathspec to scope to branch_dir
+        assert commit_cmd_seen, "commit was never called"
+        commit_cmd = commit_cmd_seen[0]
+        assert "--" in commit_cmd, "commit missing '--' pathspec separator"
+        pathspec_idx = commit_cmd.index("--")
+        pathspec = commit_cmd[pathspec_idx + 1]
+        assert "src/aipass/api" in pathspec, f"pathspec should target branch_dir, got: {pathspec}"
 
 
 # ===========================================================================
@@ -698,6 +756,7 @@ class TestTriggerFireIntegration:
         call_count = 0
 
         def mock_run(cmd, **kwargs):
+            """Simulate git subprocess calls and count invocations."""
             nonlocal call_count
             call_count += 1
             r = MagicMock()
@@ -749,6 +808,7 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         def mock_run(cmd, **kwargs):
+            """Simulate git/gh subprocess calls for trigger-failure resilience test."""
             r = MagicMock()
             r.stderr = ""
             if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
@@ -790,6 +850,7 @@ class TestTriggerFireIntegration:
         call_idx = 0
 
         def mock_run(cmd, **kwargs):
+            """Simulate gh pr merge and git pull subprocess calls."""
             nonlocal call_idx
             call_idx += 1
             r = MagicMock()

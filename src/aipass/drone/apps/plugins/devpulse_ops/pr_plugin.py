@@ -139,7 +139,10 @@ def create_system_pr(description: str, caller: str) -> dict:
             cwd=str(repo_root),
         )
         if diff_check.returncode != 0:
-            # There are staged changes — commit them
+            # There are staged changes — commit them.
+            # No pathspec needed here: git add -A already staged the whole
+            # repo intentionally (system-pr is global by design), and the
+            # lock prevents concurrent system-prs from racing into the index.
             commit_msg = f"feat(system): {description}\n\nCo-Authored-By: @{caller} <{caller}@aipass>"
             commit = subprocess.run(
                 ["git", "commit", "-m", commit_msg],
