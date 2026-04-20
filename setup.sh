@@ -11,14 +11,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # --- OS detection ---
-# Detect Windows (Git Bash / MSYS2 / Cygwin) — used throughout the script
+# Detect Windows (Git Bash / MSYS2 / Cygwin) and macOS — used throughout the script
 IS_WINDOWS=0
+IS_MACOS=0
 case "${OSTYPE:-}" in
     msys*|cygwin*|mingw*) IS_WINDOWS=1 ;;
+    darwin*) IS_MACOS=1 ;;
     *)
         # Fallback: check uname if OSTYPE is unset
         if uname -s 2>/dev/null | grep -qi "mingw\|msys\|cygwin"; then
             IS_WINDOWS=1
+        elif uname -s 2>/dev/null | grep -qi "darwin"; then
+            IS_MACOS=1
         fi
         ;;
 esac
@@ -35,13 +39,25 @@ fi
 
 # --- Find working Python (#292: Windows python3 → MS Store alias) ---
 PYTHON=""
-# Try python3 first — verify it actually runs (not just exists on PATH)
-if command -v python3 &>/dev/null && python3 -c "import sys" &>/dev/null 2>&1; then
-    PYTHON="python3"
-# Fall back to python (Windows installs as 'python' not 'python3')
-elif command -v python &>/dev/null && python -c "import sys" &>/dev/null 2>&1; then
-    PYTHON="python"
-else
+# Probe versioned binaries first — on macOS, Homebrew installs Python as
+# python3.11 and stock python3 may still point to 3.9. Checking versioned
+# names first finds a suitable interpreter without auto-install on Mac too.
+for v in 3.13 3.12 3.11 3.10; do
+    if command -v "python$v" &>/dev/null && "python$v" -c "import sys" &>/dev/null 2>&1; then
+        PYTHON="python$v"
+        break
+    fi
+done
+# Fall back to python3, then python (Windows installs as 'python' not 'python3')
+if [ -z "$PYTHON" ]; then
+    if command -v python3 &>/dev/null && python3 -c "import sys" &>/dev/null 2>&1; then
+        PYTHON="python3"
+    elif command -v python &>/dev/null && python -c "import sys" &>/dev/null 2>&1; then
+        PYTHON="python"
+    fi
+fi
+
+if [ -z "$PYTHON" ]; then
     echo "FAIL: No working Python found. Install Python 3.10+ and try again."
     echo "  Windows: install from python.org, NOT the Microsoft Store."
     echo "  Then disable the Store alias: Settings > Apps > Advanced app settings > App execution aliases"
@@ -54,8 +70,67 @@ echo "Found $PYTHON $PY_VERSION"
 # --- Check minimum version ---
 PY_OK=$($PYTHON -c 'import sys; print(int(sys.version_info >= (3, 10)))')
 if [ "$PY_OK" != "1" ]; then
-    echo "FAIL: Python 3.10+ required, found $PY_VERSION"
-    exit 1
+    if [ "$IS_MACOS" -eq 1 ]; then
+        # Auto-install on Mac. Stock macOS 12 ships only python3 3.9 and has no
+        # versioned binaries. Try Homebrew if it's already installed (no admin
+        # needed to USE brew — only to install it), then fall back to uv, which
+        # installs entirely in user-space and works on non-admin Mac accounts.
+        echo "Python 3.10+ not found on this Mac. Attempting auto-install ..."
+
+        # Path 1: existing Homebrew. Don't attempt to install brew itself —
+        # that step requires admin/sudo and locks out non-admin accounts.
+        if command -v brew &>/dev/null; then
+            echo "Homebrew present — installing python@3.11 via brew ..."
+            if brew install python@3.11; then
+                if command -v python3.11 &>/dev/null; then
+                    PYTHON="python3.11"
+                elif [ -x /opt/homebrew/opt/python@3.11/bin/python3.11 ]; then
+                    PYTHON="/opt/homebrew/opt/python@3.11/bin/python3.11"
+                elif [ -x /usr/local/opt/python@3.11/bin/python3.11 ]; then
+                    PYTHON="/usr/local/opt/python@3.11/bin/python3.11"
+                fi
+            fi
+            if [ -n "$PYTHON" ] && "$PYTHON" -c 'import sys; exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+                PY_OK=1
+            fi
+        fi
+
+        # Path 2: uv — no sudo, no admin, works on any account.
+        # Installs a prebuilt standalone Python to ~/.local/share/uv/python.
+        if [ "$PY_OK" != "1" ]; then
+            echo "Using uv (no-sudo Python installer) ..."
+            if ! command -v uv &>/dev/null; then
+                echo "Installing uv to ~/.local/bin ..."
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+                export PATH="$HOME/.local/bin:$PATH"
+            fi
+            if ! command -v uv &>/dev/null; then
+                echo "FAIL: uv install did not succeed."
+                echo "Install Python 3.10+ manually from https://www.python.org/downloads/ and retry."
+                exit 1
+            fi
+            echo "Downloading Python 3.11 via uv ..."
+            uv python install 3.11
+            # Locate the installed python
+            UV_PY=$(uv python find 3.11 2>/dev/null || true)
+            if [ -z "$UV_PY" ] || [ ! -x "$UV_PY" ]; then
+                UV_PY=$(ls -1 "$HOME/.local/share/uv/python/"*"/bin/python3.11" 2>/dev/null | head -1)
+            fi
+            if [ -n "$UV_PY" ] && [ -x "$UV_PY" ]; then
+                PYTHON="$UV_PY"
+                PY_OK=1
+            else
+                echo "FAIL: uv installed but python3.11 binary not located."
+                exit 1
+            fi
+        fi
+
+        PY_VERSION=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        echo "Now using $PYTHON $PY_VERSION"
+    else
+        echo "FAIL: Python 3.10+ required, found $PY_VERSION"
+        exit 1
+    fi
 fi
 
 # --- Create venv ---
@@ -380,9 +455,17 @@ if [ -d "$SCRIPT_DIR/.claude/hooks" ]; then
     echo "Installing Claude Code hooks ..."
     mkdir -p "$HOME/.claude"
 
-    # Determine python command for hooks — venv python on Windows, python3 on Unix
+    # Determine python command for hooks.
+    # Linux: keep "python3" — distros ship 3.10+ and hooks import nothing
+    # version-specific beyond that. Leaving this path unchanged per Linux stability.
+    # macOS: stock /usr/bin/python3 is 3.9.6 on macOS 12 and cannot parse hook
+    # scripts that use PEP 604 union syntax (`X | None`). Point at the venv
+    # python, which setup just built with a 3.10+ interpreter.
+    # Windows: existing venv-python behavior.
     if [ "$IS_WINDOWS" -eq 1 ]; then
         HOOK_PYTHON="$SCRIPT_DIR/.venv/Scripts/python.exe"
+    elif [ "$IS_MACOS" -eq 1 ]; then
+        HOOK_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
     else
         HOOK_PYTHON="python3"
     fi
@@ -615,8 +698,19 @@ PSWRAP
         echo "  PowerShell drone wrapper already in $PS_PROFILE"
     fi
 else
-    # Linux/macOS: write to ~/.bashrc
-    PROFILE="$HOME/.bashrc"
+    # Linux/macOS: write to the user's shell rc.
+    # macOS default shell has been zsh since Catalina (2019) — stock macOS
+    # will not source ~/.bashrc, so exports there are invisible. Pick the
+    # right rc based on $SHELL on Mac; leave Linux behavior as-is (~/.bashrc).
+    if [ "$IS_MACOS" -eq 1 ]; then
+        case "${SHELL:-}" in
+            */zsh) PROFILE="$HOME/.zshrc" ;;
+            */bash) PROFILE="$HOME/.bash_profile" ;;   # Mac bash login shell sources .bash_profile, not .bashrc
+            *) PROFILE="$HOME/.zshrc" ;;               # zsh is the macOS default; sensible fallback
+        esac
+    else
+        PROFILE="$HOME/.bashrc"
+    fi
 
     # AIPASS_HOME
     if ! grep -q "AIPASS_HOME" "$PROFILE" 2>/dev/null; then
@@ -628,6 +722,18 @@ else
         echo "  AIPASS_HOME already in $PROFILE"
     fi
 
+    # Mac: ensure ~/.local/bin is on PATH so the drone symlink resolves.
+    # Linux already symlinks into /usr/local/bin (already on PATH everywhere).
+    if [ "$IS_MACOS" -eq 1 ]; then
+        if ! grep -q '\.local/bin' "$PROFILE" 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE"
+            echo "  ~/.local/bin added to PATH in $PROFILE"
+        else
+            echo "  ~/.local/bin already on PATH in $PROFILE"
+        fi
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+
     export AIPASS_HOME="$SCRIPT_DIR"
 fi
 
@@ -635,6 +741,24 @@ fi
 echo ""
 if [ "$IS_WINDOWS" -eq 1 ]; then
     echo "Windows: drone available via PATH (set above)"
+elif [ "$IS_MACOS" -eq 1 ]; then
+    # Mac: symlink into ~/.local/bin (user-writable, no sudo needed).
+    # PATH export for ~/.local/bin is handled in the profile block above.
+    echo "Creating user symlinks in ~/.local/bin ..."
+    VENV_BIN="$SCRIPT_DIR/.venv/bin"
+    LOCAL_BIN="$HOME/.local/bin"
+    mkdir -p "$LOCAL_BIN"
+
+    for cmd in drone; do
+        if [ -f "$VENV_BIN/$cmd" ]; then
+            if ln -sf "$VENV_BIN/$cmd" "$LOCAL_BIN/$cmd"; then
+                echo "  $LOCAL_BIN/$cmd -> $VENV_BIN/$cmd"
+            else
+                echo "  WARN: Could not create symlink for $cmd"
+                echo "  Manual fix: ln -sf $VENV_BIN/$cmd $LOCAL_BIN/$cmd"
+            fi
+        fi
+    done
 else
     echo "Creating global symlinks ..."
     VENV_BIN="$SCRIPT_DIR/.venv/bin"
@@ -660,6 +784,8 @@ if [ "$FAIL" -eq 0 ]; then
     if [ "$IS_WINDOWS" -eq 1 ]; then
         echo "drone is available in .venv/Scripts/ (or .venv/bin/ for Git Bash)."
         echo "Add the appropriate directory to your PATH (see above)."
+    elif [ "$IS_MACOS" -eq 1 ]; then
+        echo "drone is available via ~/.local/bin symlink (on PATH)."
     else
         echo "drone is available globally via /usr/local/bin symlink."
     fi
