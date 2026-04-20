@@ -324,6 +324,16 @@
       "file": "tests/test_wake.py",
       "standard": "documentation",
       "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
+    },
+    {
+      "file": "tests/test_dispatch_watchdog.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_dispatch_watchdog.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must access _spawn_watchdog directly to verify internal spawn behavior. Module entry-point-only rule does not apply to tests."
     }
   ],
   "notes": {
