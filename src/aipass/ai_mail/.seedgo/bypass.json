@@ -344,6 +344,16 @@
       "file": "tests/test_wake_blocklist.py",
       "standard": "encapsulation",
       "reason": "Unit tests must import wake handlers directly to verify blocklist behavior. Module entry-point-only rule does not apply to tests."
+    },
+    {
+      "file": "tests/test_daemon.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ directory \u2014 not subject to 3-layer app structure rule."
+    },
+    {
+      "file": "tests/test_daemon.py",
+      "standard": "encapsulation",
+      "reason": "Unit tests must import daemon internals directly to verify behavior. Module entry-point-only rule does not apply to tests."
     }
   ],
   "notes": {

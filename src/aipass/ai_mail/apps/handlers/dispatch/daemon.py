@@ -54,6 +54,10 @@ SCHEDULER_CONFIG = _REPO_ROOT / ".aipass" / "scheduler_config.json"
 # Graceful shutdown
 SHUTDOWN = False
 
+# AIPASS-TEST ping token — exact string that marks a test-only email.
+# daemon intercepts these before dispatch scan and auto-acks without spawning.
+TEST_TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
+
 
 def _notify_telegram(message: str) -> bool:
     """Send a notification to Patrick's Telegram via the scheduler bot."""
@@ -517,6 +521,98 @@ def _is_branch_occupied(branch_path: Path) -> bool:
     return False
 
 
+def _has_test_token(body: str) -> bool:
+    """Return True if body contains the AIPASS-TEST token outside a code fence.
+
+    Code-fence-aware: lines between ``` markers are skipped so the token
+    inside a quoted example does not trigger auto-ack. Detection is
+    case-sensitive and line-anchored (strips whitespace before comparing).
+    """
+    in_fence = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and stripped == TEST_TOKEN:
+            return True
+    return False
+
+
+def _auto_ack_test_email(branch_path: Path, branch_email: str, message: Dict[str, Any]) -> bool:
+    """Send an 'ack' reply to a test-token email and close it.
+
+    Runs drone commands with cwd=branch_path so sender identity resolves
+    to the target branch, not @ai_mail.
+
+    Returns True if both reply and close succeed.
+    """
+    msg_id = message.get("id", "")
+    sender = message.get("from_email") or message.get("from", "")
+    subject = message.get("subject", "")
+    if not msg_id or not sender:
+        logger.warning("[daemon] _auto_ack_test_email: missing id or sender in message")
+        return False
+
+    reply_subject = f"Re: {subject}" if subject else "Re: (no subject)"
+    try:
+        result = subprocess.run(
+            ["drone", "@ai_mail", "email", sender, reply_subject, "ack"],
+            cwd=str(branch_path),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("[daemon] _auto_ack_test_email: reply failed for %s: %s", msg_id, result.stderr)
+            return False
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[daemon] _auto_ack_test_email: reply subprocess error: %s", exc)
+        return False
+
+    try:
+        result = subprocess.run(
+            ["drone", "@ai_mail", "close", msg_id],
+            cwd=str(branch_path),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("[daemon] _auto_ack_test_email: close failed for %s: %s", msg_id, result.stderr)
+            return False
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[daemon] _auto_ack_test_email: close subprocess error: %s", exc)
+        return False
+
+    logger.info("[daemon] auto-acked test email %s at %s", msg_id, branch_email)
+    return True
+
+
+def scan_and_ack_test_emails(branch_path: Path, branch_email: str) -> int:
+    """Scan a branch inbox for AIPASS-TEST tokens and auto-ack each one.
+
+    Called at the start of poll_cycle per-branch, before check_inbox_for_dispatch,
+    so test emails are consumed and never reach the dispatch scanner.
+
+    Returns the count of test emails acked.
+    """
+    inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
+    inbox_data = _read_json(inbox_file)
+    if inbox_data is None:
+        return 0
+
+    acked = 0
+    for msg in inbox_data.get("messages", []):
+        if msg.get("status") not in ("new", "opened"):
+            continue
+        body = msg.get("body", "")
+        if _has_test_token(body):
+            if _auto_ack_test_email(branch_path, branch_email, msg):
+                acked += 1
+    return acked
+
+
 def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
     """
     Run one poll cycle across all registered branches.
@@ -550,6 +646,9 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
         if daily_count >= max_daily:
             logger.info(f"SKIP {branch_email}: daily limit reached ({daily_count}/{max_daily})")
             continue
+
+        # Intercept AIPASS-TEST ping emails before dispatch scan
+        scan_and_ack_test_emails(branch_path, branch_email)
 
         # Always check/clean stale locks (even without dispatch emails)
         existing_lock = _check_lock(branch_path)
