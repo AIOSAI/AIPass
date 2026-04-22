@@ -89,6 +89,46 @@
       "file": "tests/test_integrations.py",
       "standard": "architecture",
       "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
+    },
+    {
+      "file": "apps/modules/bridge.py",
+      "standard": "modules",
+      "reason": "Utility module — provides contract registry API (register/resolve/list_contracts), not a drone-routable command module. No handle_command() needed."
+    },
+    {
+      "file": "apps/modules/registry.py",
+      "standard": "modules",
+      "reason": "Utility module — provides driver auto-discovery (load_drivers), not a drone-routable command module. No handle_command() needed."
+    },
+    {
+      "file": "apps/modules/registry.py",
+      "standard": "unused_function",
+      "reason": "reset() is test teardown — called in autouse fixture in tests/test_integrations.py clean_bridge()"
+    },
+    {
+      "file": "apps/modules/integrations_manager.py",
+      "standard": "unused_function",
+      "reason": "fetch_contracts() and call_contract() are the public test API — used directly in tests/test_integrations.py TestFetchContracts and TestCallContract"
+    },
+    {
+      "file": "apps/integrations/broken_driver/driver.py",
+      "standard": "architecture",
+      "reason": "Integration driver test fixture — gitignored private space intentionally outside the 3-layer structure. See DPLAN-0133."
+    },
+    {
+      "file": "apps/integrations/broken_driver/driver.py",
+      "standard": "diagnostics",
+      "reason": "Intentional import error — this driver exists to test that registry.load_drivers() gracefully handles broken imports"
+    },
+    {
+      "file": "apps/integrations/stress_test/driver.py",
+      "standard": "architecture",
+      "reason": "Integration driver test fixture — gitignored private space intentionally outside the 3-layer structure. See DPLAN-0133."
+    },
+    {
+      "file": "apps/integrations/no_register/driver.py",
+      "standard": "architecture",
+      "reason": "Integration driver test fixture — gitignored private space intentionally outside the 3-layer structure. See DPLAN-0133."
     }
   ],
   "notes": {
