@@ -217,6 +217,14 @@ def _spawn_agent(
     # Step 2: Rename any {{BRANCH}} dirs/files that weren't caught by path replacement
     renamed = rename_placeholder_paths(target, folder_name)
 
+    # Step 2b: Set owner field — first agent in the project is the owner
+    passport_path = target / ".trinity" / "passport.json"
+    if passport_path.exists():
+        passport_data = json_handler.read_json(passport_path)
+        if passport_data:
+            passport_data.setdefault("citizenship", {})["owner"] = citizen_number == 1
+            json_handler.write_json(passport_path, passport_data)
+
     # Step 3: Regenerate .template_registry.json with fresh hashes
     regenerate_template_registry(target)
 

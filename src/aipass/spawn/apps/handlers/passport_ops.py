@@ -98,6 +98,14 @@ def grant_passport(
     # Rename any placeholder paths
     _ = rename_placeholder_paths(target, folder_name)
 
+    # Set owner field — first agent in the project is the owner
+    passport_path = target / ".trinity" / "passport.json"
+    if passport_path.exists():
+        passport_data = json_handler.read_json(passport_path)
+        if passport_data:
+            passport_data.setdefault("citizenship", {})["owner"] = citizen_number == 1
+            json_handler.write_json(passport_path, passport_data)
+
     # Regenerate template registry
     regenerate_template_registry(target)
 
