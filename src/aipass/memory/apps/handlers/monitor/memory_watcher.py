@@ -91,10 +91,10 @@ def _get_rollover_threshold(branch_name: str, file_path: Path | None = None) -> 
                 data = json.load(f)
                 metadata = data.get("document_metadata", {})
 
-                # v2 files use entry-count limits, not line limits
+                # v2 files use entry-count limits — return -1 so caller uses detector
                 schema_version = metadata.get("schema_version", "1.0.0")
                 if schema_version.startswith("2"):
-                    return 999999  # Never trigger line-based rollover for v2
+                    return -1
 
                 file_limit = metadata.get("limits", {}).get("max_lines")
                 if file_limit is not None:
@@ -204,8 +204,6 @@ def check_and_rollover() -> Dict[str, Any]:
     lines_synced = 0
     for branch_path in branch_paths:
         branch = Path(branch_path)
-        # Extract branch name from path (last component, uppercase)
-        branch_name = branch.name.upper()
 
         # Find memory files in .trinity/ subdirectory
         trinity_dir = branch / ".trinity"
@@ -214,9 +212,6 @@ def check_and_rollover() -> Dict[str, Any]:
         for pattern in ["local.json", "observations.json"]:
             for memory_file in trinity_dir.glob(pattern):
                 results["files_checked"] += 1
-
-                # Get threshold per file (file metadata > branch config > default)
-                threshold = _get_rollover_threshold(branch_name, memory_file)
 
                 try:
                     line_count = len(memory_file.read_text(encoding="utf-8").splitlines())
@@ -231,14 +226,17 @@ def check_and_rollover() -> Dict[str, Any]:
                             sync_result = update_line_count(memory_file)
                             if sync_result.get("success"):
                                 lines_synced += 1
-                                # Re-read actual line count after metadata update
                                 line_count = len(memory_file.read_text(encoding="utf-8").splitlines())
                     except Exception as e:
                         logger.warning(f"[memory_watcher] Non-critical metadata sync failed for {memory_file}: {e}")
 
-                    if line_count > threshold:
+                    # Use detector for trigger decision (handles both v1 line-based and v2 entry-count)
+                    from aipass.memory.apps.handlers.monitor.detector import _should_rollover
+
+                    triggered, _, _, _, _ = _should_rollover(memory_file)
+                    if triggered:
                         results["files_over_limit"].append(
-                            {"file": str(memory_file), "lines": line_count, "threshold": threshold}
+                            {"file": str(memory_file), "lines": line_count, "threshold": 0}
                         )
                 except Exception as e:
                     logger.warning(f"[memory_watcher] Failed to read memory file {memory_file}: {e}")
