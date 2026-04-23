@@ -200,8 +200,13 @@ def handle_command(command: str, args: List[str]) -> bool:
             positional.append(arg)
 
     if len(positional) >= 1:
-        pack_name = positional[0]
-    if len(positional) >= 2:
+        if positional[0].startswith("@"):
+            pack_name = next(iter(_discover_packs()), "aipass")
+            branch_arg = positional[0]
+            specific_branch = normalize_branch_arg(branch_arg)
+        else:
+            pack_name = positional[0]
+    if pack_name and not specific_branch and len(positional) >= 2:
         branch_arg = positional[1]
         if not branch_arg.startswith("@"):
             error(

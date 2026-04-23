@@ -230,6 +230,24 @@ def test_handle_command_output_capture(capsys):
     _captured = capsys.readouterr()
 
 
+def test_handle_command_at_branch_shorthand(tmp_path, monkeypatch):
+    """audit @branch (no pack) defaults to first discovered pack."""
+    import aipass.seedgo.apps.modules.standards_audit as sa_mod
+
+    handlers_dir = tmp_path / "handlers"
+    handlers_dir.mkdir()
+    pack = handlers_dir / "aipass_standards"
+    pack.mkdir()
+    (pack / "cli_check.py").write_text("# checker", encoding="utf-8")
+
+    fake_file = tmp_path / "modules" / "standards_audit.py"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sa_mod, "__file__", str(fake_file))
+
+    result = sa_mod.handle_command("audit", ["@flow"])
+    assert result is True
+
+
 def test_help_text_at_prefix_consistency():
     """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
 
