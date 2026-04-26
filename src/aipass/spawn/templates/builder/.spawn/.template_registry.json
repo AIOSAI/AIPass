@@ -98,7 +98,7 @@
     "f014": {
       "path": ".trinity/passport.json",
       "name": "passport.json",
-      "content_hash": "9b1d3a691272",
+      "content_hash": "3f5a0c2037d2",
       "has_branch_placeholder": false
     },
     "f016": {
@@ -155,7 +155,7 @@
       "content_hash": "a4cf0a8e3b4f",
       "has_branch_placeholder": false
     },
-    "f015": {
+    "f026": {
       "path": "apps/modules/__init__.py",
       "name": "__init__.py",
       "content_hash": "e3b0c44298fc",
@@ -263,7 +263,7 @@
       "content_hash": "28e9ae373563",
       "has_branch_placeholder": false
     },
-    "f026": {
+    "f015": {
       "path": "apps/plugins/__init__.py",
       "name": "__init__.py",
       "content_hash": "e3b0c44298fc",

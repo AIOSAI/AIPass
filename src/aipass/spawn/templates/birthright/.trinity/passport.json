@@ -14,7 +14,8 @@
     "alias": "",
     "path": "{{CWD}}",
     "module": "{{MODULE}}",
-    "created": "{{DATE}}"
+    "created": "{{DATE}}",
+    "git_branch": "work/{{branchname}}"
   },
   "identity": {
     "citizen_class": "birthright",
