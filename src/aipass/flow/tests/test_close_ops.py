@@ -474,7 +474,7 @@ class TestCloseAllException:
 
 
 class TestFindUnregisteredPlanFile:
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_finds_matching_file(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -487,7 +487,7 @@ class TestFindUnregisteredPlanFile:
         assert result is not None
         assert result.name == "DPLAN-0176_design_topic_2026-05-10.md"
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_backup_directory(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -498,7 +498,7 @@ class TestFindUnregisteredPlanFile:
         result = find_fn("FPLAN", "0099")
         assert result is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_archive_directory(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -509,7 +509,7 @@ class TestFindUnregisteredPlanFile:
         result = find_fn("FPLAN", "0050")
         assert result is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_processed_plans_directory(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -520,7 +520,7 @@ class TestFindUnregisteredPlanFile:
         result = find_fn("FPLAN", "0077")
         assert result is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_returns_none_when_no_match(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -531,7 +531,7 @@ class TestFindUnregisteredPlanFile:
         result = find_fn("FPLAN", "9999")
         assert result is None
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.FLOW_ROOT")
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_git_directory(self, mock_flow_root, tmp_path):
         find_fn = _import_find_unregistered()
         mock_flow_root.parent = tmp_path
@@ -549,8 +549,7 @@ class TestFindUnregisteredPlanFile:
 
 
 class TestSelfHealNoCollision:
-    @patch("aipass.flow.apps.handlers.plan.close_ops.discover_plan_types", create=True)
-    def test_registers_with_original_key(self, _mock_discover, tmp_path):
+    def test_registers_with_original_key(self, tmp_path):
         heal_fn = _import_self_heal()
         plan_file = tmp_path / "DPLAN-0176_design_topic_2026-05-10.md"
         plan_file.write_text("# Plan", encoding="utf-8")
@@ -560,9 +559,8 @@ class TestSelfHealNoCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.plan.close_ops.discover_plan_types",
-            return_value={},
-            create=True,
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+            return_value={"types": {}},
         ):
             actual_key, updated_reg = heal_fn(
                 "DPLAN", "0176", plan_file, registry, "dplan_registry.json", save_fn, load_fn, messages
@@ -575,8 +573,7 @@ class TestSelfHealNoCollision:
         assert updated_reg["next_number"] == 175
         save_fn.assert_called_once_with(registry, registry_file="dplan_registry.json")
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.discover_plan_types", create=True)
-    def test_extracts_subject_from_filename(self, _mock_discover, tmp_path):
+    def test_extracts_subject_from_filename(self, tmp_path):
         heal_fn = _import_self_heal()
         plan_file = tmp_path / "FPLAN-0042_my_great_feature_2026-04-01.md"
         plan_file.write_text("# Plan", encoding="utf-8")
@@ -584,9 +581,8 @@ class TestSelfHealNoCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.plan.close_ops.discover_plan_types",
-            return_value={},
-            create=True,
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+            return_value={"types": {}},
         ):
             actual_key, updated_reg = heal_fn(
                 "FPLAN", "0042", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages
@@ -594,8 +590,7 @@ class TestSelfHealNoCollision:
 
         assert updated_reg["plans"][actual_key]["subject"] == "my great feature"
 
-    @patch("aipass.flow.apps.handlers.plan.close_ops.discover_plan_types", create=True)
-    def test_emits_self_heal_warning_message(self, _mock_discover, tmp_path):
+    def test_emits_self_heal_warning_message(self, tmp_path):
         heal_fn = _import_self_heal()
         plan_file = tmp_path / "FPLAN-0001_test_2026-01-01.md"
         plan_file.write_text("# Plan", encoding="utf-8")
@@ -603,9 +598,8 @@ class TestSelfHealNoCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.plan.close_ops.discover_plan_types",
-            return_value={},
-            create=True,
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+            return_value={"types": {}},
         ):
             heal_fn("FPLAN", "0001", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages)
 
@@ -614,8 +608,7 @@ class TestSelfHealNoCollision:
 
 
 class TestSelfHealSamePrefixCollision:
-    @patch("aipass.flow.apps.handlers.plan.close_ops.discover_plan_types", create=True)
-    def test_bumps_to_next_number(self, _mock_discover, tmp_path):
+    def test_bumps_to_next_number(self, tmp_path):
         heal_fn = _import_self_heal()
         plan_file = tmp_path / "FPLAN-0005_colliding_2026-03-01.md"
         plan_file.write_text("# Plan", encoding="utf-8")
@@ -626,9 +619,8 @@ class TestSelfHealSamePrefixCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.plan.close_ops.discover_plan_types",
-            return_value={},
-            create=True,
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
+            return_value={"types": {}},
         ):
             actual_key, updated_reg = heal_fn(
                 "FPLAN", "0005", plan_file, registry, "fplan_registry.json", MagicMock(), MagicMock(), messages
@@ -653,12 +645,13 @@ class TestSelfHealCrossPrefixCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.plan.close_ops.discover_plan_types",
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
             return_value={
-                "flow_plans": {"prefix": "FPLAN", "registry_file": "fplan_registry.json"},
-                "dev_plans": {"prefix": "DPLAN", "registry_file": "dplan_registry.json"},
+                "types": {
+                    "flow_plans": {"prefix": "FPLAN"},
+                    "dev_plans": {"prefix": "DPLAN"},
+                }
             },
-            create=True,
         ):
             actual_key, updated_reg = heal_fn(
                 "DPLAN", "0013", plan_file, registry, "dplan_registry.json", save_fn, load_fn, messages
@@ -676,9 +669,11 @@ class TestSelfHealCrossPrefixCollision:
         messages = []
 
         with patch(
-            "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
+            "aipass.flow.apps.handlers.plan.close_helpers._load_template_registry",
             return_value={
-                "flow_plans": {"prefix": "FPLAN", "registry_file": "fplan_registry.json"},
+                "types": {
+                    "flow_plans": {"prefix": "FPLAN"},
+                }
             },
         ):
             heal_fn("FPLAN", "0020", plan_file, registry, "fplan_registry.json", MagicMock(), load_fn, messages)

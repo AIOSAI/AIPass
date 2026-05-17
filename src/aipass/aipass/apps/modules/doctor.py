@@ -657,11 +657,15 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != "doctor":
         return False
 
-    if args and args[0] in ("--help", "-h", "help"):
+    if not args:
+        print_introspection()
+        return True
+
+    if args[0] in ("--help", "-h", "help"):
         print_help()
         return True
 
-    if args and args[0] == "--info":
+    if args[0] == "--info":
         print_introspection()
         return True
 
@@ -684,12 +688,3 @@ def handle_command(command: str, args: list[str]) -> bool:
     if error_count > 0:
         raise SystemExit(1)
     return True
-
-
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
-if __name__ == "__main__":
-    logger.info("Prax logger connected to doctor")
-    handle_command("doctor", sys.argv[1:])

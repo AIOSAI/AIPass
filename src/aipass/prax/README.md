@@ -5,7 +5,7 @@
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
 **Version:** 2.0.0
-**Last Updated:** 2026-04-22
+**Last Updated:** 2026-05-16
 
 ---
 
@@ -143,7 +143,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 911 tests across 16 files
+└── tests/                             # 912 tests across 18 files
 ```
 
 ### Design Pattern
@@ -171,27 +171,30 @@ drone @prax monitor run
 
 ## Tests
 
-375 tests across 16 files, covering all major components:
+912 tests across 18 files, covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
+| test_filesystem_handler.py | 172 | Multi-CLI adapters, Codex/Gemini branch detection |
+| test_monitoring_handlers.py | 139 | Branch detector, stream output, event handling |
+| test_operations.py | 99 | Dashboard operations, write-through |
+| test_log_watcher.py | 82 | Log file tailing, agent activity parsing |
+| test_monitor_module.py | 74 | Monitor commands, thread lifecycle |
+| test_logging_handlers.py | 41 | Setup, rotation, introspection, direct logger |
 | test_logger_module.py | 40 | Logger init, routing, lifecycle |
 | test_monitoring_filters.py | 39 | Event filtering rules |
 | test_config.py | 38 | Config loading, path resolution |
 | test_event_queue.py | 35 | Thread-safe event buffering |
-| test_log_watcher.py | 35 | Log file tailing |
 | test_logging.py | 33 | Core logging system |
 | test_discovery.py | 25 | Module scanning |
-| test_operations.py | 24 | Dashboard operations |
 | test_watcher.py | 23 | File watcher behavior |
 | test_registry.py | 22 | Module registry |
 | test_json_handler.py | 18 | JSON auto-creation |
 | test_central.py | 14 | Central reader |
-| test_monitor_module.py | 11 | Monitor commands |
 | test_log_audit.py | 10 | Log audit |
 | test_status.py | 8 | Status commands |
 
-90/136 public functions tested (66%).
+134/136 public functions tested (99%).
 
 ## Integration Points
 
@@ -214,7 +217,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-04-22*
+*Last Updated: 2026-05-16*
 
 ---
 [← Back to AIPass](../../../README.md)

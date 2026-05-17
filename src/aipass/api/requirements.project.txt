@@ -1,0 +1,10 @@
+# Project-specific dependencies for the API branch
+# These are beyond the base AIPass requirements
+# Install with: pip install -r requirements.project.txt
+
+requests
+rich
+google-auth
+google-auth-oauthlib
+google-api-python-client
+openai

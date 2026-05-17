@@ -219,10 +219,11 @@ def handle_command(command: str, args: list[str]) -> bool:
     json_handler.ensure_module_jsons(_MODULE_NAME)
 
     if not args:
-        console.print()
-        console.print("[bold]Usage:[/bold] aipass help [dim]<question>[/dim]")
-        console.print("[bold]Example:[/bold] aipass help what does drone do")
-        console.print()
+        print_introspection()
+        return True
+
+    if args[0] in ("--help", "-h", "help"):
+        print_introspection()
         return True
 
     question = " ".join(args)

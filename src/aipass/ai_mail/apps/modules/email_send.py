@@ -78,6 +78,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not args:
         print_introspection()
         return True
+    if args[0] in ("--help", "-h", "help"):
+        print_introspection()
+        return True
     return handle_send(args)
 
 

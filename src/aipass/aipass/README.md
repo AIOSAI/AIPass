@@ -32,7 +32,7 @@ aipass/
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
 │   │   └── ui/                            # Progress bars, menus, banners
 │   └── plugins/
-├── tests/                                 # 381 passing (12 test files)
+├── tests/                                 # 412 passing
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
 ```
@@ -50,15 +50,25 @@ aipass/
 | `aipass profile` | Show/edit user profile |
 | `aipass --version` | Version |
 
-## Integration
+## Integration Points
 
-**Depends on:** `@drone` (routing), `@seedgo` (audit), `@spawn` (first agent + repair), `@flow` (plan lifecycle), `@ai_mail` (test emails), `@prax` (health signals), `pytest`
+### Depends On
 
-**Provides to:** Humans only. Nothing in AIPass depends on this branch.
+- `@drone` — routing, command dispatch
+- `@seedgo` — standards audit
+- `@spawn` — first agent creation + structural repair
+- `@flow` — plan lifecycle (open/close)
+- `@ai_mail` — test emails
+- `@prax` — health signals, logging
+- `pytest` — test execution
+
+### Provides To
+
+Humans only. Nothing in AIPass depends on this branch.
 
 ## Tests
 
-381 passing — `pytest src/aipass/aipass/tests/`
+412 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 
@@ -66,4 +76,4 @@ aipass/
 
 ## Last Updated
 
-2026-05-16
+Last Updated: 2026-05-16

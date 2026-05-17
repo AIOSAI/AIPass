@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.2.0
-**Last Updated:** 2026-05-02
+**Last Updated:** 2026-05-16
 
 ## Commands
 
@@ -161,7 +161,7 @@ trigger/
 │       │   └── pr_status_sync.py   # PR → prax status sync
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 367 tests across 12 modules
+├── tests/                          # 551 tests across 18 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── trigger_config.json         # Medic state, muted branches
 │   ├── error_registry.json         # All tracked errors
@@ -189,13 +189,13 @@ trigger/
 
 ## Testing
 
-367 tests across 12 test modules, all passing. Coverage: 55/76 public functions (72%).
+551 tests across 18 test modules, all passing. Coverage: 76/76 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`
+Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`
 
 ## Compliance
 
@@ -203,7 +203,7 @@ Seedgo: 100% (34/34 standards). Zero type errors. All categories at 100%.
 
 ---
 
-*Last Updated: 2026-04-22*
+*Last Updated: 2026-05-16*
 
 ---
 [← Back to AIPass](../../../README.md)

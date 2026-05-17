@@ -83,31 +83,6 @@ def _find_caller() -> str:
     raise PermissionError(msg)
 
 
-def verify_caller() -> str:
-    """Verify the calling branch is authorized for devpulse operations.
-
-    Owner-tier commands (commit, dev-pr, merge, etc.) are restricted to
-    ALLOWED_CALLERS. Other branches have read-only access via global tier.
-
-    Returns:
-        The caller's branch name if authorized.
-
-    Raises:
-        PermissionError: If the caller is not in ALLOWED_CALLERS.
-    """
-    name = _find_caller()
-    if name not in ALLOWED_CALLERS:
-        msg = f"Branch '{name}' is not authorized for this operation. Only devpulse can use owner-tier commands."
-        logger.error(msg)
-        raise PermissionError(msg)
-    json_handler.log_operation(
-        "devpulse_auth_verify",
-        {"caller": name, "passport": "verified"},
-    )
-    logger.info("Caller '%s' authorized for devpulse operations", name)
-    return name
-
-
 def verify_git_access(command: str) -> str:
     """Check if the calling branch is authorized for this git command.
 

@@ -1,0 +1,2 @@
+# Project-specific Python dependencies beyond the base AIPass install.
+# Add packages here that memory branch requires but are not in the shared pyproject.toml.

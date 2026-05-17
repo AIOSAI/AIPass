@@ -467,7 +467,7 @@ def test_build_matrix_rows_groups_correctly():
         },
     ]
 
-    from aipass.seedgo.apps.modules.hooks import _build_matrix_rows
+    from aipass.seedgo.apps.modules.hooks_probe import _build_matrix_rows
 
     rows, groups = _build_matrix_rows(entries)
     assert len(rows) == 2
@@ -480,7 +480,7 @@ def test_build_matrix_rows_groups_correctly():
 
 def test_probe_matrix_writes_report(tmp_path):
     """_cmd_probe_matrix creates the markdown report given sample data."""
-    from aipass.seedgo.apps.modules.hooks import _write_matrix_report
+    from aipass.seedgo.apps.modules.hooks_probe import _write_matrix_report
 
     entries = [
         {

@@ -62,22 +62,6 @@
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure. Plugins are an intentional extension point."
     },
     {
-      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
-      "standard": "architecture",
-      "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
-      "standard": "encapsulation",
-      "lines": [28],
-      "reason": "Plugin imports lock_handler directly — it's a drone-internal plugin in the same branch, not a cross-branch import."
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/pr_plugin.py",
-      "standard": "trigger",
-      "reason": "create_system_pr intentionally omits trigger.fire(pr_created) — firing it causes prax to re-sync STATUS.md post-commit, creating a perpetual dirty-working-tree loop. STATUS.md is pre-synced before staging instead."
-    },
-    {
       "file": "apps/handlers/git/pr_handler.py",
       "standard": "handlers",
       "lines": [210],
@@ -190,12 +174,6 @@
       "standard": "unused_function",
       "lines": [108],
       "reason": "create_pr() is deprecated per FPLAN-0210 — pr command blocked at auth tier. Handler kept for backwards compatibility; still tested in test_git_module.py."
-    },
-    {
-      "file": "apps/plugins/devpulse_ops/auth.py",
-      "standard": "unused_function",
-      "lines": [84],
-      "reason": "verify_caller() replaced by verify_git_access() for centralized auth. Still exported as public API and tested directly in test_system_pr.py."
     }
   ],
   "notes": {

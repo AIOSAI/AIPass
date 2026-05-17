@@ -900,11 +900,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         return False
 
     if not args:
-        err = _preflight_check()
-        if err:
-            console.print(f"[red]✗[/red] {err}")
-            sys.exit(1)
-        sys.exit(_handle_init_scaffold([]))
+        print_introspection()
         return True
 
     if args[0] in ("--help", "-h", "help"):

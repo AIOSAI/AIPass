@@ -45,6 +45,7 @@ AUDIT_IGNORE_PATTERNS = [
     "/.backup/",  # Temp backup directories
     "/backups/",  # Actual backup storage (backup/backups/)
     "/artifacts/",  # Build artifacts
+    "/integrations/",  # Private integrations (gitignored content)
     ".temp",  # Temp files
     ".old",  # Old files
     "/deprecated/",  # Deprecated code

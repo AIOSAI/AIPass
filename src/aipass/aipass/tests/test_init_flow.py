@@ -198,13 +198,12 @@ class TestHandleCommand:
         assert handle_command("doctor", []) is False
         assert handle_command("profile", ["set", "name", "X"]) is False
 
-    def test_no_args_runs_scaffold(self, tmp_local_json) -> None:
-        """'init' with no args runs project scaffold."""
-        with patch("aipass.aipass.apps.modules.init_flow._preflight_check", return_value=None):
-            with patch("aipass.aipass.apps.modules.init_flow._handle_init_scaffold", return_value=0):
-                with pytest.raises(SystemExit) as exc_info:
-                    handle_command("init", [])
-        assert exc_info.value.code == 0
+    def test_no_args_shows_introspection(self, tmp_local_json) -> None:
+        """'init' with no args calls print_introspection."""
+        with patch("aipass.aipass.apps.modules.init_flow.print_introspection") as mock_intro:
+            result = handle_command("init", [])
+        assert result is True
+        mock_intro.assert_called_once()
 
     def test_help_flag(self) -> None:
         """--help flag routes to print_help."""

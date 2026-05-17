@@ -12,18 +12,19 @@
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
 
-"""Shared pytest fixtures for spawn tests"""
+"""Shared pytest fixtures for aipass tests."""
 
 import pytest
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Generator
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after"""
+    """Creates temporary directory for testing, cleans up after."""
     test_dir = Path(tempfile.mkdtemp())
     yield test_dir
     if test_dir.exists():
@@ -32,8 +33,25 @@ def temp_test_dir() -> Generator[Path, None, None]:
 
 @pytest.fixture
 def sample_test_data() -> dict:
-    """Provides sample test data
-
-    Customize this fixture for your module's needs
-    """
+    """Provides sample test data."""
     return {"test_key": "test_value", "sample_data": "example"}
+
+
+@pytest.fixture
+def mock_json_handler():
+    """Mock json_handler with functional load_path but stubbed logging.
+
+    Use when tests need real file I/O via load_path but want to
+    suppress log_operation and ensure_module_jsons side effects.
+    """
+    with (
+        patch("aipass.aipass.apps.handlers.json.json_handler.log_operation") as mock_log,
+        patch(
+            "aipass.aipass.apps.handlers.json.json_handler.ensure_module_jsons",
+            return_value=True,
+        ) as mock_ensure,
+    ):
+        mock = MagicMock()
+        mock.log_operation = mock_log
+        mock.ensure_module_jsons = mock_ensure
+        yield mock

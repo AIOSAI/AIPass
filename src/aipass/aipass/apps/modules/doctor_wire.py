@@ -106,7 +106,9 @@ def _auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[s
     """
     actions: List[str] = []
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = json_handler.load_path(manifest_path)
+    if manifest is None:
+        return actions
     claude_section = manifest.get("cli", {}).get("claude", {})
     if not claude_section:
         return actions
@@ -114,7 +116,7 @@ def _auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[s
     # Read existing settings
     settings_path = Path.home() / ".claude" / "settings.json"
     if settings_path.exists():
-        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings = json_handler.load_path(settings_path) or {}
     else:
         settings = {}
 
@@ -216,8 +218,7 @@ def _auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[s
                 actions.append(f"Added ask rule: {rule}")
 
     # Write settings back
-    os.makedirs(settings_path.parent, exist_ok=True)
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    json_handler.save_path(settings_path, settings)
     actions.append("Updated ~/.claude/settings.json")
 
     return actions
@@ -336,6 +337,11 @@ def handle_command(command: str, args: list[str]) -> bool:
         return False
 
     if not args:
+        print_introspection()
+        json_handler.log_operation("doctor_wire_info", {"command": command})
+        return True
+
+    if args[0] in ("--help", "-h", "help"):
         print_introspection()
         json_handler.log_operation("doctor_wire_info", {"command": command})
         return True

@@ -1,0 +1,5 @@
+# Project-specific dependencies for the Flow branch
+# These are beyond the base AIPass requirements
+# Install with: pip install -r requirements.project.txt
+
+rich

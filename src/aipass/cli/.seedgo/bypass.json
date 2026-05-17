@@ -11,6 +11,11 @@
       "reason": "Test file lives in tests/ by pytest convention — not subject to the 3-layer apps/ structure rule."
     },
     {
+      "file": "tests/test_init_provisioning.py",
+      "standard": "architecture",
+      "reason": "Test file lives in tests/ by pytest convention — not subject to the 3-layer apps/ structure rule."
+    },
+    {
       "file": "tests/test_bootstrap.py",
       "standard": "encapsulation",
       "reason": "Tests must import handlers directly to unit-test private functions (_sanitize_name, init_project). Using a module entry point would prevent unit testing."

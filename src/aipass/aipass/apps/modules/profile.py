@@ -39,12 +39,10 @@ USER_FIELDS = ["name", "os", "shell", "preferred_cli", "install_method", "first_
 def _read_local_json() -> dict:
     if not _LOCAL_JSON.exists():
         return {}
-    try:
-        with open(_LOCAL_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("[profile] local.json read error: %s", exc)
+    result = json_handler.load_path(_LOCAL_JSON)
+    if result is None:
         return {}
+    return result
 
 
 def _fire_file_deleted(path: str) -> None:

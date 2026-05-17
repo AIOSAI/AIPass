@@ -96,6 +96,19 @@ def json_file_lock(path: Path):
                 fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
+def read_text_file(path: Path, encoding: str = "utf-8") -> str:
+    """Read a text file safely with encoding specification."""
+    with open(path, "r", encoding=encoding) as f:
+        return f.read()
+
+
+def write_text_file(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text content to a file, creating parent directories as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding=encoding) as f:
+        f.write(content)
+
+
 def print_introspection():
     """Display module introspection info."""
     try:

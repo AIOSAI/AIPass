@@ -16,7 +16,8 @@
       "Write(/home/patrick/Patrick-Personal/**)",
       "Glob(/home/patrick/Patrick-Personal/**)",
       "Grep(/home/patrick/Patrick-Personal/**)",
-      "Bash(*Patrick-Personal*)"
+      "Bash(*Patrick-Personal*)",
+      "Bash(drone @git checkout main)"
     ],
     "defaultMode": "acceptEdits"
   },

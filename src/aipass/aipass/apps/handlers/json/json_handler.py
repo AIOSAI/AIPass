@@ -136,6 +136,36 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
 # =============================================================================
 
 
+def load_path(path: Path) -> Any:
+    """Load JSON from an arbitrary file path with consistent error handling."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("[json_handler] Failed to load %s: %s", path, exc)
+        return None
+
+
+def save_path(path: Path, data: Any) -> bool:
+    """Write JSON data to an arbitrary file path atomically."""
+    os.makedirs(path.parent, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=path.stem)
+    succeeded = False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp_path, str(path))
+        succeeded = True
+        return True
+    except OSError as exc:
+        logger.warning("[json_handler] Failed to save %s: %s", path, exc)
+        return False
+    finally:
+        if not succeeded and Path(tmp_path).exists():
+            os.unlink(tmp_path)
+
+
 def get_json_path(module_name: str, json_type: str) -> Path:
     """Get path for module JSON file."""
     filename = f"{module_name}_{json_type}.json"

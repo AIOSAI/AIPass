@@ -2,19 +2,18 @@
 
 # DevPulse
 
-> Orchestration hub for AIPass. Plans, coordinates, dispatches, and builds its own modules.
+> Orchestration hub for AIPass. The user's primary AI collaborator — designs, plans, debugs, coordinates all 11 branches, and builds its own modules.
 
-DevPulse is the user's primary AI collaborator. It designs, plans, debugs, and coordinates the 12 branches. Builds its own modules directly (watchdog, feedback, json_handler). Ventures into other branches to investigate, debug, and fix small bugs. Delegates heavy multi-file builds to sub-agents via dispatch.
+DevPulse handles the day-to-day: working with the user to plan, design, troubleshoot, and adjust. It builds its own modules directly (watchdog, feedback, json_handler), manages all git operations for the project, dispatches heavy multi-file builds to sub-agents, and ventures into other branches to investigate, debug, and fix small bugs. The only branch with git write access.
 
 ## Start here
 
 | You want to | Read |
 |---|---|
-| Install, update, uninstall, or troubleshoot | [SETUP.md](SETUP.md) |
 | What's happening right now | [STATUS.local.md](STATUS.local.md) |
 | Identity, memory, session history | [`.trinity/`](.trinity/) |
-| Diagnostic scanners | [`tools/`](tools/) |
 | Active plans | `drone @flow list open` |
+| Branch list | `drone systems` |
 
 ## Invoke
 
@@ -23,60 +22,92 @@ cd src/aipass/devpulse
 claude
 ```
 
-Say "hi" and DevPulse picks up where the last session left off.
-
-## Role in one line
-
-The user's primary AI collaborator — designs, orchestrates, and builds own modules. Delegates heavy multi-file builds to sub-agents via dispatch.
+Say "hi" and DevPulse picks up where the last session left off — reads identity, memory, inbox, and git status automatically.
 
 ## Architecture
 
 ```
 src/aipass/devpulse/
-├── .trinity/                    # Identity & memory
-├── .aipass/                     # Branch prompt
-├── .ai_mail.local/              # Mailbox
+├── .trinity/                    # Identity & memory (passport, local, observations)
+├── .aipass/                     # Branch prompt (injected every turn)
+├── .ai_mail.local/              # Mailbox (dispatch, notifications)
 ├── apps/
 │   ├── devpulse.py              # Entry point — auto-discovers modules
 │   ├── modules/
-│   │   ├── feedback.py          # Personal feedback mailbox routing
-│   │   └── watchdog.py          # Directed wake system routing
-│   └── handlers/
-│       ├── feedback/            # Feedback inbox, compose, storage
-│       ├── json/                # JSON operation logging (json_handler)
-│       └── watchdog/            # Agent, timer, schedule, registry handlers
-├── tests/                       # 236 tests (watchdog + feedback + json + devpulse)
-├── docs/                        # Transition notes, research
-├── docs.local/                  # Local-only docs (gitignored)
+│   │   ├── feedback.py          # Feedback mailbox command routing
+│   │   └── watchdog.py          # Directed wake system command routing
+│   ├── handlers/
+│   │   ├── feedback/            # Inbox, compose, storage
+│   │   ├── json/                # JSON operation logging (json_handler)
+│   │   └── watchdog/            # Agent, timer, schedule, registry
+│   └── plugins/                 # Plugin extension point
+├── devpulse_json/               # JSON handler storage (config, data, logs per module)
+├── tests/                       # 252 tests
+├── artifacts/                   # Birth certificate, reports
+├── dropbox/                     # Received files, archived plans, install audit
+├── docs/                        # Transition notes
 └── STATUS.local.md              # Current work beacon
 ```
 
 ## Commands
 
-Devpulse commands are accessed via `drone @devpulse <command>`:
+All commands via `drone @devpulse <command>`:
 
-- `watchdog agent @target` — monitor a dispatched agent until it finishes
-- `watchdog timer <duration>` — wake after duration (5m, 30s, 2h, 1h30m)
-- `watchdog timer start/stop <name>` — named duration tracking
-- `watchdog schedule <HH:MM>` — wait until a specific time
-- `watchdog status` — show active watchdogs
-- `watchdog cancel <id>` — cancel a running watchdog
-- `watchdog list` — list all watchdog entries
-- `feedback` — inbox summary
-- `feedback inbox` — list all feedback messages
-- `feedback view <id>` — read a message
-- `feedback reply <id> "msg"` — reply to sender
-- `feedback send "subject" "body"` — receive feedback from another agent
+### Watchdog — directed wake system
+
+| Command | What it does |
+|---|---|
+| `watchdog agent @target` | Monitor dispatched agent until it finishes |
+| `watchdog timer <duration>` | Wake after duration (5m, 30s, 2h, 1h30m) |
+| `watchdog timer start/stop <name>` | Named duration tracking |
+| `watchdog schedule <HH:MM>` | Wait until a specific time |
+| `watchdog status` | Show active watchdogs |
+| `watchdog cancel <id>` | Cancel a running watchdog |
+| `watchdog list` | List all watchdog entries |
+
+### Feedback — personal cross-branch mailbox
+
+| Command | What it does |
+|---|---|
+| `feedback` | Inbox summary |
+| `feedback inbox` | List all messages |
+| `feedback view <id>` | Read a message |
+| `feedback reply <id> "msg"` | Reply to sender |
+| `feedback send "subject" "body"` | Receive feedback from another agent |
+
+## Git Operations
+
+DevPulse is the only branch with git write access. All git/gh commands are blocked at the project level — drone bypasses via subprocess with a tier system that grants write only to devpulse.
+
+Workflow: work on `dev` branch, PR to `main` when satisfied. Agents build and test, devpulse reviews and commits.
+
+```bash
+drone @git status --all          # Full repo changes
+drone @git commit "msg" --all    # Commit all changes
+drone @git dev-pr "description"  # PR dev→main
+drone @git merge <PR#>           # Merge PR (user requests only)
+drone @git sync                  # Pull latest
+drone @git log                   # Recent commits
+```
 
 ## Integration Points
 
 ### Depends On
-drone (routing), prax (logging), cli (display), ai_mail (dispatch), seedgo (audits), flow (plans)
+
+| Branch | What for |
+|---|---|
+| drone | Command routing, subprocess, @branch resolution |
+| ai_mail | Dispatch (send + wake agents), email delivery |
+| flow | FPLANs (building), DPLANs (planning), APLANs (autonomous) |
+| seedgo | Standards audits, checkers (35 standards) |
+| prax | Monitoring, logs, dashboard |
+| memory | ChromaDB vectors, archival, search |
 
 ### Provides To
-All branches via dispatch orchestration. Watchdog monitoring for any dispatched agent. Feedback channel for cross-project communication.
 
-*Last Updated: 2026-05-15*
+All branches via dispatch orchestration. Watchdog monitoring for any dispatched agent. Feedback channel for cross-branch communication. Git operations (commit, PR, merge) for the entire project.
+
+*Last Updated: 2026-05-16*
 
 ---
 

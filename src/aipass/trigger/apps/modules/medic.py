@@ -72,11 +72,12 @@ def _ensure_service_installed() -> bool:
         return False
 
     aipass_home = _get_aipass_home()
-    template = _TEMPLATE_PATH.read_text()
+    from aipass.trigger.apps.config import read_text_file, write_text_file
+
+    template = read_text_file(_TEMPLATE_PATH)
     rendered = template.replace("{{AIPASS_HOME}}", str(aipass_home))
 
-    _SERVICE_UNIT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _SERVICE_UNIT_PATH.write_text(rendered)
+    write_text_file(_SERVICE_UNIT_PATH, rendered)
     logger.info("[MEDIC] Installed systemd unit to %s", _SERVICE_UNIT_PATH)
 
     _systemctl("daemon-reload")

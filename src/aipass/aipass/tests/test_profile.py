@@ -101,7 +101,7 @@ class TestSaveProfile:
     def test_preserves_other_sections(self, tmp_local_json) -> None:
         """Existing keys outside 'user' are not overwritten."""
         tmp_local_json.write_text(json.dumps({"sessions": [1, 2, 3]}))
-        with patch("aipass.aipass.apps.modules.profile.json_handler"):
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Bob"})
         stored = json.loads(tmp_local_json.read_text())
         assert stored["sessions"] == [1, 2, 3]
@@ -193,7 +193,7 @@ class TestHandleCommand:
 
     def test_set_valid_field(self, tmp_local_json) -> None:
         """'set name Alice' stores value and returns True."""
-        with patch("aipass.aipass.apps.modules.profile.json_handler"):
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             result = handle_command("profile", ["set", "name", "Alice"])
         assert result is True
         stored = json.loads(tmp_local_json.read_text())

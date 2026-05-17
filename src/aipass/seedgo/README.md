@@ -2,7 +2,7 @@
 
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass. Audits all 11 core agents against 34 code standards + diagnostics, manages bypass rules, runs proof certification, owns the hook system, and provides per-file checklist validation consumed by auto-fix hooks.
+**Purpose:** Standards compliance platform for AIPass. Audits all 11 core agents against 35 code standards + diagnostics, manages bypass rules, runs proof certification, owns the hook system, and provides per-file checklist validation consumed by auto-fix hooks.
 **Module:** `aipass.seedgo`
 **Version:** 2.0.0
 **Created:** 2026-03-05
@@ -12,7 +12,7 @@
 ## Overview
 
 ### What I Do
-- Audit all 11 core agents against 34 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, etc.)
+- Audit all 11 core agents against 35 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, etc.)
 - Score files 0-100 per standard and report violations with actionable details
 - Manage bypass rules (`.seedgo/bypass.json`) for deliberate exceptions
 - Run pyright diagnostics across branches for type error detection
@@ -41,7 +41,7 @@ drone @seedgo --help                                   # Full command listing
 drone @seedgo --version                                # Version string
 
 # Audit
-drone @seedgo audit aipass                             # Audit all 11 agents (34 standards + diagnostics)
+drone @seedgo audit aipass                             # Audit all 11 agents (35 standards + diagnostics)
 drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
@@ -136,7 +136,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 29 test files, 1131 tests
+├── tests/                           # 39 test files, 1192 tests
 ├── drone_adapter.py                 # Drone routing bridge
 ├── .trinity/                        # Identity + memory
 ├── .seedgo/                         # Self-bypass rules
@@ -221,7 +221,7 @@ The `bridge` module (`drone @seedgo bridge install`) manages hook installation t
 
 ## Tests
 
-- **29 test files**, **1131 tests**, all passing
+- **39 test files**, **1192 tests**, all passing
 - **200 public functions**, 200 tested (100% coverage)
 - **0 type errors** (pyright)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks (probe, track A/B/E, utility, bridge), proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
@@ -265,7 +265,7 @@ The `bridge` module (`drone @seedgo bridge install`) manages hook installation t
 
 ---
 
-**Last Updated:** 2026-04-26
+**Last Updated:** 2026-05-16
 
 ---
 [<- Back to AIPass](../../../README.md)
