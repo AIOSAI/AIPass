@@ -6,6 +6,7 @@
 [![Give Feedback](https://img.shields.io/badge/Give-Feedback-brightgreen)](https://github.com/AIOSAI/AIPass/issues/new?template=feedback.yml)
 [![codecov](https://codecov.io/gh/AIOSAI/AIPass/graph/badge.svg)](https://codecov.io/gh/AIOSAI/AIPass)
 [![OSS Health](https://oss-health-monitor.vercel.app/api/badge/AIOSAI/AIPass)](https://github.com/volotat/OSS-Health-Monitor)
+[![HVTrust](https://hvtracker.net/badge/aipass.svg)](https://hvtracker.net/agents/aipass)
 
 <p align="center">
   <img src="assets/logo.png" alt="AIPass" width="400" />
