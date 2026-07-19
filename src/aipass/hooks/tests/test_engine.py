@@ -435,10 +435,12 @@ class TestErrorResilience:
             config = find_project_config()
         assert config is None
 
-    def test_log_write_failure_does_not_crash(self, mock_logger):
+    def test_log_write_failure_does_not_crash(self, tmp_path, mock_logger):
+        # A bare-Mock LOG_FILE leaks a real MagicMock/LOG_FILE/ dir into the CWD
+        # via append_jsonl's Path(...).parent.mkdir — use a real tmp path.
+        log_file = tmp_path / "engine.jsonl"
         with patch("builtins.open", side_effect=OSError("disk full")):
-            with patch("aipass.hooks.apps.handlers.config.diagnostics.LOG_FILE") as mock_path:
-                mock_path.parent.mkdir = MagicMock()
+            with patch("aipass.hooks.apps.handlers.config.diagnostics.LOG_FILE", log_file):
                 _log({"event": "Test"})
 
 

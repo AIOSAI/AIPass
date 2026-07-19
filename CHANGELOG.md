@@ -11,6 +11,13 @@ PyPI version — not the changelog header.
 
 ## [2026-07-18]
 
+**fix(tests)** — the immortal `MagicMock/LOG_FILE/` directory is dead: a hooks
+engine test patched `diagnostics.LOG_FILE` with a bare Mock, and prax's
+`append_jsonl` turned the mock's fspath into a real `mkdir` — every test run
+re-minted an empty `MagicMock/LOG_FILE/` in the runner's CWD (found in repo
+root, devpulse, and hooks). Test now patches a real tmp path; 100/100 green,
+clean-CWD run verified to mint nothing.
+
 **docs** — merge playbook gains a site drift-check step (DPLAN-0249 follow-on):
 every merge run now asks whether install commands, onboarding flow, agent count,
 or the platform/CLI story changed — if yes, aipass.ai must be updated the same
