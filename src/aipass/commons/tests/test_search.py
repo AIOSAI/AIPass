@@ -58,10 +58,10 @@ def test_parse_search_args_room_flag():
 
 
 def test_parse_search_args_author_flag():
-    """The --author flag should set the author filter and uppercase it."""
+    """The --author flag should set the author filter and lowercase it."""
     result = _parse_search_args(["test", "--author", "drone"])
     assert result["query"] == "test"
-    assert result["author"] == "DRONE"
+    assert result["author"] == "drone"
 
 
 def test_parse_search_args_type_flag_valid():
@@ -94,7 +94,7 @@ def test_parse_search_args_all_flags():
     )
     assert result["query"] == "registry"
     assert result["room"] == "dev"
-    assert result["author"] == "FLOW"
+    assert result["author"] == "flow"
     assert result["search_type"] == "posts"
 
 

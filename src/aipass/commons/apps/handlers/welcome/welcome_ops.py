@@ -55,7 +55,7 @@ def run_welcome(args: List[str]) -> dict:
         conn = get_db()
 
         if filtered_args:
-            branch_name = filtered_args[0].upper()
+            branch_name = filtered_args[0].lower()
             if dry_run:
                 already = has_been_welcomed(conn, branch_name)
                 close_db(conn)
@@ -114,7 +114,7 @@ def _welcome_specific(conn, branch_name: str) -> dict:
     Returns:
         Dict with success and welcome result
     """
-    agent = conn.execute("SELECT branch_name FROM agents WHERE branch_name = ?", (branch_name,)).fetchone()
+    agent = conn.execute("SELECT branch_name FROM agents WHERE LOWER(branch_name) = ?", (branch_name,)).fetchone()
 
     if not agent:
         return {"success": False, "error": f"Branch '{branch_name}' not found in The Commons."}

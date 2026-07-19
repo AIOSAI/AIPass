@@ -62,7 +62,7 @@ def _parse_search_args(args: List[str]) -> dict:
             result["room"] = remaining[i + 1].lower()
             i += 2
         elif flag == "--author" and i + 1 < len(remaining):
-            result["author"] = remaining[i + 1].upper()
+            result["author"] = remaining[i + 1].lower()
             i += 2
         elif flag == "--type" and i + 1 < len(remaining):
             search_type = remaining[i + 1].lower()
