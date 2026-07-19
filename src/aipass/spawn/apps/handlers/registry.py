@@ -73,8 +73,8 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
                 if branch_dir is None:
                     branch_dir = (rp.parent / entry.get("path", "")).resolve()
                 break
-    except Exception:
-        pass
+    except (OSError, ValueError, KeyError) as exc:
+        logger.info("[is_protected] Registry lookup failed for %s: %s", branch_name, exc)
 
     if branch_dir is not None:
         passport_path = Path(branch_dir) / ".trinity" / "passport.json"
@@ -83,8 +83,8 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
                 passport = json_handler.read_json(passport_path)
                 if passport and passport.get("citizenship", {}).get("registered") is True:
                     return True, "active citizen"
-            except Exception:
-                pass
+            except (OSError, ValueError, KeyError) as exc:
+                logger.info("[is_protected] Passport read failed for %s: %s", branch_name, exc)
 
     return False, ""
 

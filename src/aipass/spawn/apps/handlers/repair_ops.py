@@ -319,6 +319,28 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
 # =============================================================================
 
 
+def _check_nested_pollution(nested_dir, label, project_root, registry_path):
+    """Check if a nested duplicate directory is real pollution.
+
+    Returns an issue dict if pollution, or None if the directory is a
+    protected branch (active passport, registry owner, infrastructure floor).
+    """
+    protected, _reason = is_protected(
+        nested_dir.name,
+        branch_dir=nested_dir,
+        registry_path=registry_path,
+    )
+    if protected:
+        return None
+
+    rel = nested_dir.relative_to(project_root).as_posix()
+    return {
+        "type": "duplicate_nested_dir",
+        "path": rel,
+        "description": f"Duplicate nested directory: {label}/",
+    }
+
+
 def detect_pollution(project_root):
     """Detect init pollution — duplicate nested directories.
 
@@ -343,40 +365,31 @@ def detect_pollution(project_root):
 
     nested = project_root / project_name
     if nested.is_dir():
-        protected, _reason = is_protected(
-            project_name,
-            branch_dir=nested,
-            registry_path=registry_path,
+        issue = _check_nested_pollution(
+            nested,
+            f"{project_name}/{project_name}",
+            project_root,
+            registry_path,
         )
-        if not protected:
-            issues.append(
-                {
-                    "type": "duplicate_nested_dir",
-                    "path": project_name,
-                    "description": f"Duplicate nested directory: {project_name}/{project_name}/",
-                }
-            )
+        if issue:
+            issues.append(issue)
 
     src_dir = project_root / "src"
     if src_dir.is_dir():
         for child in sorted(src_dir.iterdir()):
-            if child.is_dir() and not child.name.startswith(".") and not child.name.startswith("__"):
-                nested_dup = child / child.name
-                if nested_dup.is_dir():
-                    protected, _reason = is_protected(
-                        child.name,
-                        branch_dir=nested_dup,
-                        registry_path=registry_path,
-                    )
-                    if not protected:
-                        rel = nested_dup.relative_to(project_root).as_posix()
-                        issues.append(
-                            {
-                                "type": "duplicate_nested_dir",
-                                "path": rel,
-                                "description": f"Duplicate nested directory: src/{child.name}/{child.name}/",
-                            }
-                        )
+            if not child.is_dir() or child.name.startswith(".") or child.name.startswith("__"):
+                continue
+            nested_dup = child / child.name
+            if not nested_dup.is_dir():
+                continue
+            issue = _check_nested_pollution(
+                nested_dup,
+                f"src/{child.name}/{child.name}",
+                project_root,
+                registry_path,
+            )
+            if issue:
+                issues.append(issue)
 
     return issues
 
