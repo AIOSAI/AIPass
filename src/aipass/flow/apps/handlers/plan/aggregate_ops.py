@@ -17,6 +17,8 @@ Usage:
 """
 
 import json
+import os
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional
@@ -31,6 +33,34 @@ from aipass.flow.apps.handlers.json import json_handler
 # =============================================
 
 MODULE_NAME = "aggregate_central"
+
+_LOCK_RETRIES = 10
+_LOCK_BACKOFF_BASE = 0.05
+
+
+def _acquire_lock(lock_path: Path) -> bool:
+    """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff."""
+    for attempt in range(_LOCK_RETRIES):
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            logger.info("[%s] Lock contention on %s, retry %d", MODULE_NAME, lock_path, attempt + 1)
+            time.sleep(_LOCK_BACKOFF_BASE * (2**attempt))
+        except OSError as exc:
+            logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
+            return False
+    return False
+
+
+def _release_lock(lock_path: Path) -> None:
+    """Remove lockfile, tolerating already-removed."""
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("[%s] Could not release lock %s: %s", MODULE_NAME, lock_path, exc)
 
 
 # =============================================
@@ -101,13 +131,36 @@ def save_branch_registry(registry_path: Path, registry: Dict[str, Any]) -> bool:
     Returns:
         True on success, False on failure
     """
+    lock_path = registry_path.with_suffix(".lock")
     try:
-        registry["last_updated"] = datetime.now(timezone.utc).isoformat()
-        with open(registry_path, "w", encoding="utf-8") as f:
-            json.dump(registry, f, indent=2, ensure_ascii=False)
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not _acquire_lock(lock_path):
+            logger.error(
+                "[%s] Could not acquire lock for %s after %d retries",
+                MODULE_NAME,
+                registry_path,
+                _LOCK_RETRIES,
+            )
+            return False
+
+        try:
+            registry["last_updated"] = datetime.now(timezone.utc).isoformat()
+            tmp_path = registry_path.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(registry, f, indent=2, ensure_ascii=False)
+            os.replace(str(tmp_path), str(registry_path))
+        finally:
+            _release_lock(lock_path)
+
         return True
     except Exception as e:
-        logger.error(f"[{MODULE_NAME}] Failed to save registry {registry_path}: {e}")
+        logger.error(
+            "[%s] Failed to save registry %s: %s",
+            MODULE_NAME,
+            registry_path,
+            e,
+        )
         return False
 
 
@@ -265,10 +318,27 @@ def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, 
     Returns:
         True on success, False on failure
     """
+    lock_path = central_file.with_suffix(".lock")
     try:
         central_dir.mkdir(parents=True, exist_ok=True)
-        with open(central_file, "w", encoding="utf-8") as f:
-            json.dump(central_data, f, indent=2, ensure_ascii=False)
+
+        if not _acquire_lock(lock_path):
+            logger.error(
+                "[%s] Could not acquire lock for %s after %d retries",
+                MODULE_NAME,
+                central_file,
+                _LOCK_RETRIES,
+            )
+            return False
+
+        try:
+            tmp_path = central_file.with_suffix(".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(central_data, f, indent=2, ensure_ascii=False)
+            os.replace(str(tmp_path), str(central_file))
+        finally:
+            _release_lock(lock_path)
+
         return True
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to save {central_file}: {e}")
@@ -392,7 +462,10 @@ def aggregate_central_impl(
         # Save central file
         if save_central(central_file, central_dir, central_data):
             logger.info(
-                f"[{MODULE_NAME}] SUCCESS: Aggregation complete: {len(all_active)} active, {len(recently_closed)} recently closed"
+                "[%s] SUCCESS: Aggregation complete: %d active, %d recently closed",
+                MODULE_NAME,
+                len(all_active),
+                len(recently_closed),
             )
 
             # Fire trigger event

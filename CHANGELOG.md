@@ -33,6 +33,22 @@ Also: `/prep` now checks the cross-project feedback box every run — the S304
 "unread since April" backlog (F46) is processed to zero and can't silently
 rot again.
 
+**fix(aipass)** — `aipass doctor` no longer invents errors on a healthy repo
+(S304 F14-17): `.backup` and spawn `templates` dirs excluded from the agent
+scan, relative registry paths anchored against the project root instead of the
+caller's CWD (running doctor from inside a branch dir showed 5 fake
+missing-branch errors), and info-severity findings now render as warnings
+instead of pass checkmarks. Remaining findings on this repo are genuine.
+
+**fix(flow)** — registry aggregate writes are lock+atomic (S304 F85 residual):
+`save_branch_registry` and `save_central` were bare `open`+`json.dump`; both now
+use the O_EXCL lockfile + temp-file + `os.replace` pattern from the earlier
+`save_registry.py` fix. Proven with a 6-process concurrent-write hammer. Also
+investigated (N1): FPLAN-0313/0314 closed blank because
+`is_template_content()`'s line-count threshold fires before its bracket-marker
+check on default templates — guard fix queued, registry annotation is the
+maintainer's call.
+
 ## [2026-07-18]
 
 **fix(tests)** — the immortal `MagicMock/LOG_FILE/` directory is dead: a hooks
