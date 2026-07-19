@@ -11,6 +11,18 @@ PyPI version — not the changelog header.
 
 ## [2026-07-19]
 
+**feat(ai_mail)** — dispatched agents default to Sonnet 5 (Patrick ruling S326):
+
+- wake.py model resolution passes bare aliases (`sonnet`/`opus`/`haiku`)
+  straight to the Claude CLI, which resolves latest-in-class — the pinned-ID
+  MODEL_MAP is gone and can never go stale again. Default flips opus → sonnet.
+- dispatch_monitor pins `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` on every
+  spawned agent — Sonnet 5 is 1M-context native, and without the pin every
+  dispatched agent would silently inherit a 1M window. E2E-proven: a live
+  dispatched probe reported `claude-sonnet-5` + `WINDOW=200000` from inside.
+- Known gap (daemon-side, next): daemon.py `spawn_agent()` builds its claude
+  command with no `--model` flag, bypassing wake.py resolution entirely.
+
 **fix(spawn, commons, prax, hooks)** — S304 audit fix campaign, Track A
 (DPLAN-0250, four owner dispatches verified + committed by devpulse):
 

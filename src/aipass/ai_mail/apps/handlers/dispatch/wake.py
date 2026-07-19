@@ -63,13 +63,9 @@ MONITOR_SCRIPT = Path(__file__).parent / "dispatch_monitor.py"
 # Default prompt when no custom message provided
 DEFAULT_PROMPT = "Hi. Check inbox, process new emails, update memories when done."
 
-# Model shorthand mapping
-MODEL_MAP = {
-    "sonnet": "claude-sonnet-4-6",
-    "opus": "claude-opus-4-6",
-    "haiku": "claude-haiku-4-5-20251001",
-}
-DEFAULT_MODEL = "opus"
+# Model aliases — passed directly to claude CLI which resolves latest-in-class.
+KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku"})
+DEFAULT_MODEL = "sonnet"
 
 # Branches that cannot be woken manually by cross-branch drone commands.
 # Dispatch-send path (dispatch.py._orchestrate_dispatch_send) bypasses this check.
@@ -591,8 +587,8 @@ def wake_branch(
     config = _load_config()
     max_turns = config.get("max_turns_per_wake", 100)
 
-    # Resolve model: shorthand -> full ID, or pass through if already a full ID
-    resolved_model = MODEL_MAP.get(model or DEFAULT_MODEL, model or MODEL_MAP[DEFAULT_MODEL])
+    # Pass model directly to CLI — aliases resolve latest-in-class automatically
+    resolved_model = model or DEFAULT_MODEL
 
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
     if custom_message:
@@ -781,7 +777,7 @@ if __name__ == "__main__":
         print("  --fresh          Start fresh session (claude -p) instead of resuming (claude -c -p)")
         print("  --auto           Respect autonomous_pause (used by daemon). Manual wake ignores it.")
         print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse)")
-        print("  --model NAME     Model to use: opus (default), sonnet, haiku, or full model ID")
+        print("  --model NAME     Model to use: sonnet (default), opus, haiku, or full model ID")
         print()
         print("Output: Step-by-step status of the dispatch pipeline:")
         print("  ✅ resolve → @branch found at /path/to/branch")

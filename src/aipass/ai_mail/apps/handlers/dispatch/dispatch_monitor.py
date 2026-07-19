@@ -449,6 +449,9 @@ def main():
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
+    # Pin agent context window to 200k (Sonnet 5 is 1M native; without this,
+    # agents inherit 1M which causes cost + runaway risk).
+    spawn_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "200000"
     # Strip caller identity vars to prevent dispatch context leakage.
     spawn_env.pop("AIPASS_CALLER_BRANCH", None)
     spawn_env.pop("AIPASS_CALLER_CWD", None)
