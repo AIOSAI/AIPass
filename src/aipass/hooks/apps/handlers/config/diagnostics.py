@@ -10,19 +10,38 @@
 
 """JSONL diagnostic logging — appends structured entries for hook activity."""
 
+import sys
+import tempfile
 from pathlib import Path
 
 from aipass.prax import append_jsonl
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
+_PROD_LOG_FILE = BRANCH_ROOT / "logs" / "engine.jsonl"
+
+
+def _is_pytest_session() -> bool:
+    """Detect pytest via sys.modules (immune to patch.dict(os.environ, clear=True))."""
+    return "_pytest" in sys.modules
+
+
+def _get_log_file() -> Path:
+    """Resolve log path — temp dir during pytest, prod path otherwise."""
+    if _is_pytest_session():
+        p = Path(tempfile.gettempdir()) / "aipass_test_logs" / "hooks"
+        p.mkdir(parents=True, exist_ok=True)
+        return p / "engine.jsonl"
+    return _PROD_LOG_FILE
+
+
+LOG_FILE = _PROD_LOG_FILE
 
 
 def log_entry(entry: dict) -> None:
     """Append a JSONL log entry for detailed diagnostics."""
     try:
-        append_jsonl(LOG_FILE, entry)
+        append_jsonl(_get_log_file(), entry)
     except OSError as exc:
         logger.error("[HOOKS] log write failed: %s", exc)
 

@@ -9,6 +9,30 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-19]
+
+**fix(spawn, commons, prax, hooks)** — S304 audit fix campaign, Track A
+(DPLAN-0250, four owner dispatches verified + committed by devpulse):
+
+- **spawn** — shared `is_protected()` (infrastructure floor / registry owner /
+  active passport) now guards both pollution repair and branch delete; repair no
+  longer flags the live `src/aipass/aipass` branch, and deleting a protected or
+  actively-passported branch is refused with the reason.
+- **commons** — branch-name resolution lowercased across all five ops sites
+  (trade/artifact/profile/welcome/search) to match identity normalization;
+  gifting and trading work again (guards had never matched since mid-June).
+- **prax** — pytest detection now also checks `_pytest` in `sys.modules`, so
+  `patch.dict(os.environ, clear=True)` in test suites can no longer strip the
+  guard and freeze prod-path log handlers into the setup cache.
+- **hooks** — the two static-path JSONL writers (engine diagnostics, telegram
+  delivery log) resolve their path per-write and route to the tmp test dir
+  under pytest; a full 1154-test suite run now adds zero lines to prod logs
+  (marker-bounded proof).
+
+Also: `/prep` now checks the cross-project feedback box every run — the S304
+"unread since April" backlog (F46) is processed to zero and can't silently
+rot again.
+
 ## [2026-07-18]
 
 **fix(tests)** — the immortal `MagicMock/LOG_FILE/` directory is dead: a hooks

@@ -1532,7 +1532,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
                 ["hello"],
@@ -1552,7 +1552,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "**bold text**",
                 ["**bold text**"],
@@ -1569,7 +1569,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
                 ["hello"],
@@ -1585,7 +1585,7 @@ class TestWriteDeliveryLog:
         from aipass.hooks.apps.handlers.notification.telegram_response import _write_delivery_log
 
         impossible = Path("/dev/null/impossible/log.jsonl")
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", impossible):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=impossible):
             _write_delivery_log("hi", ["hi"], [{"idx": 0, "ok": True, "text": "hi"}], "s")
 
 

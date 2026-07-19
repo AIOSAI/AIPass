@@ -23,6 +23,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -35,7 +37,19 @@ PENDING_DIR = Path.home() / ".aipass" / "telegram_pending"
 MIRROR_DIR = Path.home() / ".aipass" / "telegram_bots"
 PENDING_TTL = 3600
 TELEGRAM_CHAR_LIMIT = 4096
-_DELIVERY_LOG = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "telegram_delivery.jsonl"
+_PROD_DELIVERY_LOG = Path(__file__).resolve().parent.parent.parent.parent / "logs" / "telegram_delivery.jsonl"
+
+
+def _get_delivery_log() -> Path:
+    """Resolve delivery log path — temp dir during pytest, prod path otherwise."""
+    if "_pytest" in sys.modules:
+        p = Path(tempfile.gettempdir()) / "aipass_test_logs" / "hooks"
+        p.mkdir(parents=True, exist_ok=True)
+        return p / "telegram_delivery.jsonl"
+    return _PROD_DELIVERY_LOG
+
+
+_DELIVERY_LOG = _PROD_DELIVERY_LOG
 
 
 def _is_expired(data: dict) -> bool:
@@ -771,6 +785,6 @@ def _write_delivery_log(intended_text: str, chunks: list[str], chunk_results: li
         record["culprit"] = culprit
 
     try:
-        append_jsonl(_DELIVERY_LOG, record)
+        append_jsonl(_get_delivery_log(), record)
     except OSError as e:
         logger.warning("[HOOKS] telegram: delivery log write failed: %s", e)
