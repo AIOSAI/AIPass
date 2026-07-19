@@ -24,6 +24,7 @@ ARCHIVE_EXCLUDE = {".venv", ".git", "__pycache__", ".chroma", "node_modules", ".
 
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
+    is_protected,
     load_registry,
     save_registry,
     branches_as_list,
@@ -322,6 +323,8 @@ def detect_pollution(project_root):
     """Detect init pollution — duplicate nested directories.
 
     Init pollution: project_name/project_name/ exists (e.g., compass/compass/).
+    Skips directories that are protected branches (active passport, registry
+    owner, or infrastructure floor).
 
     Args:
         project_root: Path to the project root directory
@@ -333,15 +336,26 @@ def detect_pollution(project_root):
     issues = []
     project_name = project_root.name
 
+    registry_path = None
+    for f in sorted(project_root.glob("*_REGISTRY.json")):
+        registry_path = f
+        break
+
     nested = project_root / project_name
     if nested.is_dir():
-        issues.append(
-            {
-                "type": "duplicate_nested_dir",
-                "path": project_name,
-                "description": f"Duplicate nested directory: {project_name}/{project_name}/",
-            }
+        protected, _reason = is_protected(
+            project_name,
+            branch_dir=nested,
+            registry_path=registry_path,
         )
+        if not protected:
+            issues.append(
+                {
+                    "type": "duplicate_nested_dir",
+                    "path": project_name,
+                    "description": f"Duplicate nested directory: {project_name}/{project_name}/",
+                }
+            )
 
     src_dir = project_root / "src"
     if src_dir.is_dir():
@@ -349,14 +363,20 @@ def detect_pollution(project_root):
             if child.is_dir() and not child.name.startswith(".") and not child.name.startswith("__"):
                 nested_dup = child / child.name
                 if nested_dup.is_dir():
-                    rel = nested_dup.relative_to(project_root).as_posix()
-                    issues.append(
-                        {
-                            "type": "duplicate_nested_dir",
-                            "path": rel,
-                            "description": f"Duplicate nested directory: src/{child.name}/{child.name}/",
-                        }
+                    protected, _reason = is_protected(
+                        child.name,
+                        branch_dir=nested_dup,
+                        registry_path=registry_path,
                     )
+                    if not protected:
+                        rel = nested_dup.relative_to(project_root).as_posix()
+                        issues.append(
+                            {
+                                "type": "duplicate_nested_dir",
+                                "path": rel,
+                                "description": f"Duplicate nested directory: src/{child.name}/{child.name}/",
+                            }
+                        )
 
     return issues
 

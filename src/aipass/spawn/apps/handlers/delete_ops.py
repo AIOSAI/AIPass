@@ -19,15 +19,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
+    is_protected,
     load_registry,
     save_registry,
     branches_as_list,
 )
 from aipass.spawn.apps.handlers.repair_ops import ARCHIVE_EXCLUDE
 from aipass.spawn.apps.handlers.json import json_handler
-
-# Branches that cannot be deleted (critical infrastructure)
-_PROTECTED_BRANCHES = {"spawn", "devpulse", "drone"}
 
 
 # =============================================================================
@@ -120,14 +118,15 @@ def delete_branch(
     Returns:
         Dict with deletion results.
     """
-    # Safety: check protected branches
-    if branch_name.lower() in _PROTECTED_BRANCHES:
-        msg = f"Cannot delete '{branch_name}' — protected branch ({', '.join(sorted(_PROTECTED_BRANCHES))})"
+    # 1. Resolve registry (needed for protection check and branch resolution)
+    registry_path = find_registry()
+
+    # Safety: check protected branches (hardcoded floor + registry owner + active passport)
+    protected, reason = is_protected(branch_name, registry_path=registry_path)
+    if protected:
+        msg = f"Cannot delete '{branch_name}' — protected ({reason})"
         logger.warning(f"[delete] {msg}")
         return _error_result(branch_name, msg)
-
-    # 1. Resolve branch path from registry
-    registry_path = find_registry()
     project_root = registry_path.parent
     registry = load_registry(registry_path)
     branch_entry, branch_dir = _resolve_branch_dir(branch_name, registry_path, registry)
