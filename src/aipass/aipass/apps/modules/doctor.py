@@ -670,7 +670,7 @@ def _check_structure() -> List[CheckResult]:
     # Registry consistency
     reg_path = _discover_registry(start_path=project_root)
     if reg_path and reg_path.exists():
-        reg_issues = check_registry_consistency(reg_path, agents)
+        reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
         if reg_issues:
             for issue in reg_issues:
                 glyph = GLYPH_FAIL if issue.problem == "missing" else GLYPH_WARN
@@ -686,7 +686,7 @@ def _check_structure() -> List[CheckResult]:
     root_hits = check_root_artifacts(project_root)
     if root_hits:
         for hit in root_hits:
-            glyph = GLYPH_WARN if hit.severity == "warn" else GLYPH_PASS
+            glyph = GLYPH_PASS if hit.severity == "pass" else GLYPH_WARN
             results.append(CheckResult(f"root: {hit.name}", glyph, hit.description, ""))
     else:
         results.append(CheckResult("root artifacts", GLYPH_PASS, "none misplaced", ""))
