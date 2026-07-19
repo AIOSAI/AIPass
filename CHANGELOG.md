@@ -11,6 +11,13 @@ PyPI version — not the changelog header.
 
 ## [2026-07-18]
 
+**docs** — merge playbook gains a site drift-check step (DPLAN-0249 follow-on):
+every merge run now asks whether install commands, onboarding flow, agent count,
+or the platform/CLI story changed — if yes, aipass.ai must be updated the same
+day. Codifies the S323 ruling that the site is a projection of the README, never
+its own source of facts. Template edit by @flow, one checklist line in the
+post-merge section.
+
 **docs** — root README v3 restructure (DPLAN-0249): single-funnel story with
 zero duplicated commands (install, `aipass new`/`init run`, trees, drone
 examples each taught exactly once), hero link line to aipass.ai/PyPI/r/AIPass,

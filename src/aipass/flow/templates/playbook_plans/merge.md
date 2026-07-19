@@ -116,6 +116,7 @@ The PR gate (verified against `.github/workflows/`):
 - [ ] **Stay on `dev`. Do not check out `main`.** Local main being behind is fine — `drone @git sync` from dev covers it.
 - [ ] Never rebase, never reset, never checkout main.
 - [ ] Dependabot / other PRs targeting main: they go green once main has the fix + bots rebase — check after the push
+- [ ] **Site drift check (S323):** does this merge change install commands, onboarding flow, agent count, or the platform/CLI story? If YES → note it here and flag that aipass.ai must be updated same-day (devpulse handles the site edit; the site is a projection of the README, never its own source of facts).
 
 ## 7. Release tag
 
