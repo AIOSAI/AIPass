@@ -20,8 +20,12 @@ PyPI version — not the changelog header.
   spawned agent — Sonnet 5 is 1M-context native, and without the pin every
   dispatched agent would silently inherit a 1M window. E2E-proven: a live
   dispatched probe reported `claude-sonnet-5` + `WINDOW=200000` from inside.
-- Known gap (daemon-side, next): daemon.py `spawn_agent()` builds its claude
-  command with no `--model` flag, bypassing wake.py resolution entirely.
+- Follow-up landed same morning: the "daemon gap" was a name collision —
+  the unpatched `spawn_agent()` was ai_mail's own inbox-poller
+  (`handlers/dispatch/daemon.py`), not the @daemon branch. It now passes
+  `--model DEFAULT_MODEL` (imported from wake.py, single source); the 200k pin
+  was already covered via the shared dispatch_monitor wrapper. @daemon's
+  scheduled wakes import `wake_branch` directly and were covered from the start.
 
 **fix(spawn, commons, prax, hooks)** — S304 audit fix campaign, Track A
 (DPLAN-0250, four owner dispatches verified + committed by devpulse):

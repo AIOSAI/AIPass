@@ -1317,6 +1317,48 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
     assert captured_env.get("AIPASS_SESSION_TYPE") == "daemon"
 
 
+def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
+    """Poller-triggered spawn passes --model DEFAULT_MODEL to the claude invocation."""
+    branch_path = tmp_path / "branch"
+    branch_path.mkdir()
+    (branch_path / "logs").mkdir()
+
+    message = {"from": "@devpulse", "id": "msg1", "subject": "Test task"}
+    config = {"max_turns_per_wake": 50}
+    state = {"daily_counts": {}, "session_cycles": {}}
+
+    captured_args = []
+
+    def capture_popen(*args, **kwargs):
+        captured_args.append(args[0] if args else kwargs.get("args"))
+        mock_proc = MagicMock()
+        mock_proc.pid = 22222
+        return mock_proc
+
+    with (
+        patch(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen",
+            side_effect=capture_popen,
+        ),
+        patch(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
+            return_value=(True, "Lock acquired"),
+        ),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch(
+            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
+            create=True,
+        ),
+    ):
+        result = spawn_agent(branch_path, "@testbranch", message, config, state)
+
+    assert result is True
+    monitor_cmd = captured_args[0]
+    assert "--model" in monitor_cmd
+    model_idx = monitor_cmd.index("--model")
+    assert monitor_cmd[model_idx + 1] == daemon_mod.DEFAULT_MODEL
+
+
 def test_spawn_agent_prompt_includes_reply_id(tmp_path):
     """Prompt includes explicit reply command with the dispatch email ID."""
     branch_path = tmp_path / "branch"

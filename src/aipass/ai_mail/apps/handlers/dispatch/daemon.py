@@ -34,6 +34,7 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch.test_token import scan_and_ack_test_emails
+from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL
 
 
 # Infrastructure paths
@@ -408,6 +409,8 @@ def spawn_agent(
         "-c",
         "-p",
         prompt,
+        "--model",
+        DEFAULT_MODEL,
         "--max-turns",
         str(max_turns),
         "--permission-mode",
