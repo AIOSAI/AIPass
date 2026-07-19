@@ -31,6 +31,7 @@ import inspect
 import json
 import logging
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -60,6 +61,11 @@ def _find_repo_root() -> Path:
     return Path.cwd()
 
 
+def _is_pytest_session() -> bool:
+    """Detect pytest session via sys.modules (immune to patch.dict(os.environ, clear=True))."""
+    return "_pytest" in sys.modules
+
+
 # Lazy SYSTEM_LOGS_DIR — resolved on first access, not at import time.
 # Callers should use get_system_logs_dir() for guaranteed initialization.
 _system_logs_dir_cache: Path | None = None
@@ -76,7 +82,7 @@ def get_system_logs_dir() -> Path:
         p = Path(test_log_dir) / "system"
         p.mkdir(parents=True, exist_ok=True)
         return p
-    if os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("PYTEST_CURRENT_TEST") or _is_pytest_session():
         p = Path(tempfile.gettempdir()) / "aipass_test_logs" / "system"
         p.mkdir(parents=True, exist_ok=True)
         return p
@@ -138,7 +144,7 @@ def get_module_logs_dir(module_name: Optional[str] = None) -> Path:
         p = Path(test_log_dir) / module_name
         p.mkdir(parents=True, exist_ok=True)
         return p
-    if os.environ.get("PYTEST_CURRENT_TEST"):
+    if os.environ.get("PYTEST_CURRENT_TEST") or _is_pytest_session():
         p = Path(tempfile.gettempdir()) / "aipass_test_logs" / module_name
         p.mkdir(parents=True, exist_ok=True)
         return p
