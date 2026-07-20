@@ -17,11 +17,12 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     _hash_file,
     bootstrap,
     enroll,
+    is_hash_mismatch,
     is_trusted,
     read_registry,
     revoke,
 )
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import find_project_config, trust_break_banner
 
 
 class TestRegistryHelpers:
@@ -149,6 +150,110 @@ class TestIsTrusted:
             enroll(str(project))
             hooks_file.write_text('{"hooks_enabled": true, "tampered": true}')
             assert is_trusted(str(project)) is False
+
+
+class TestIsHashMismatch:
+    """Unit tests for is_hash_mismatch() — distinguishes a break from never-enrolled."""
+
+    def test_never_enrolled_is_not_a_mismatch(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            assert is_hash_mismatch("/not/registered") is False
+
+    def test_enrolled_matching_hash_is_not_a_mismatch(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "myproject"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+            assert is_hash_mismatch(str(project)) is False
+
+    def test_enrolled_changed_hash_is_a_mismatch(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "myproject"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+            hooks_file.write_text('{"hooks_enabled": true, "tampered": true}')
+            assert is_hash_mismatch(str(project)) is True
+
+    def test_enrolled_but_config_deleted_is_not_a_mismatch(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "myproject"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+            hooks_file.unlink()
+            assert is_hash_mismatch(str(project)) is False
+
+
+class TestTrustBreakBanner:
+    """Tests for loader.trust_break_banner() — the loud, config-independent signal."""
+
+    def test_no_hooks_json_anywhere_is_none(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        empty_dir = temp_test_dir / "no_project"
+        empty_dir.mkdir()
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=empty_dir),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.home", return_value=temp_test_dir),
+        ):
+            assert trust_break_banner() is None
+
+    def test_trusted_project_is_none(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "trusted_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            assert trust_break_banner() is None
+
+    def test_never_enrolled_is_none_not_a_break(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "fresh_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            assert trust_break_banner() is None
+
+    def test_hash_mismatch_returns_loud_banner(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "tampered_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        hooks_file.write_text('{"hooks_enabled": true, "tampered": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            banner = trust_break_banner()
+        assert banner is not None
+        assert "TRUST BREAK" in banner
+        assert "trust enroll" in banner
 
 
 class TestBootstrap:

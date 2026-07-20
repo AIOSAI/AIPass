@@ -56,3 +56,37 @@ def find_project_config() -> dict | None:
                 return None
         search = search.parent
     return None
+
+
+def trust_break_banner() -> str | None:
+    """Loud, config-independent check for a stale trust enrollment.
+
+    find_project_config() goes silent on a hash mismatch (logs one WARNING,
+    returns None) — the fallback config downstream then has no event_type
+    keys at all, so every hook including this one's own dispatch path goes
+    dark. This check does its own walk-up and hash comparison, never touches
+    hooks.json content, and does not depend on the project being trusted —
+    so it still works precisely when trust is broken. Returns None when
+    nothing is broken, or when the project was simply never enrolled (normal
+    first-run state, not a break).
+    """
+    from aipass.hooks.apps.handlers.config.trust_registry import is_hash_mismatch
+
+    search = Path.cwd()
+    home = Path.home()
+    while search != home and search.parent != search:
+        config_file = search / ".aipass" / "hooks.json"
+        if config_file.exists():
+            if is_hash_mismatch(str(search)):
+                return (
+                    "# TRUST BREAK — ALL AIPASS HOOKS DISABLED\n\n"
+                    f"{search}/.aipass/hooks.json no longer matches its enrolled hash. "
+                    "Every hook for this project (including this warning's own delivery "
+                    "path) is silently skipped until a human re-enrolls.\n\n"
+                    "Fix: drone @hooks trust enroll (or: aipass init update)\n"
+                    "This does not auto-heal — re-enrollment is a deliberate human "
+                    "checkpoint, not a bug."
+                )
+            return None
+        search = search.parent
+    return None

@@ -11,13 +11,16 @@
 """Injects advisory banners for active alerts from .aipass/alerts.json."""
 
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-_announced: set[str] = set()
+_GUARD_DIR = Path(tempfile.gettempdir())
+_MAX_ALERTS_SHOWN = 10
 
 
 def _find_aipass_dir() -> Path | None:
@@ -77,10 +80,33 @@ def _load_and_clean(alerts_path: Path) -> list[dict]:
     return active
 
 
+def _guard_path(session_id: str, alert_id: str) -> Path | None:
+    if not session_id:
+        return None
+    return _GUARD_DIR / f"aipass-persistent-alert-{session_id}-{alert_id}"
+
+
+def _already_announced(session_id: str, alert_id: str) -> bool:
+    path = _guard_path(session_id, alert_id)
+    return path is not None and path.exists()
+
+
+def _mark_announced(session_id: str, alert_id: str) -> None:
+    path = _guard_path(session_id, alert_id)
+    if path is not None:
+        try:
+            path.touch()
+        except OSError as exc:
+            logger.info("[HOOKS] persistent_alert: guard write failed: %s", exc)
+
+
 def _format_banner(alerts: list[dict]) -> str:
-    """Format alert banners for prompt injection."""
+    """Format alert banners for prompt injection, capped at _MAX_ALERTS_SHOWN."""
+    shown = alerts[:_MAX_ALERTS_SHOWN]
+    hidden = len(alerts) - len(shown)
+
     lines = []
-    for alert in alerts:
+    for alert in shown:
         severity = alert.get("severity", "warning").upper()
         title = alert.get("title", "Untitled alert")
         body = alert.get("body", "")
@@ -89,6 +115,8 @@ def _format_banner(alerts: list[dict]) -> str:
         lines.append(f"[{severity}] {title} (from @{source}, id: {alert_id})")
         if body:
             lines.append(f"  {body}")
+    if hidden > 0:
+        lines.append(f"...and {hidden} more (dismiss some to see the rest)")
     header = "# Active Alerts"
     dismiss_hint = "Dismiss with: drone @hooks dismiss <alert-id>"
     return "\n".join([header, ""] + lines + ["", dismiss_hint])
@@ -117,10 +145,12 @@ def handle(hook_data: dict) -> dict:
 
     banner = _format_banner(alerts)
 
-    new_ids = [a["id"] for a in alerts if a.get("id") and a["id"] not in _announced]
+    session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    new_ids = [a["id"] for a in alerts if a.get("id") and not _already_announced(session_id, a["id"])]
     sound = ""
     if new_ids:
-        _announced.update(new_ids)
+        for alert_id in new_ids:
+            _mark_announced(session_id, alert_id)
         count = len(alerts)
         plural = "s" if count != 1 else ""
         sound = f"alert: {count} active alert{plural}"

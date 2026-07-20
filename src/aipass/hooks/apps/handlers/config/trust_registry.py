@@ -100,6 +100,25 @@ def is_trusted(project_dir: str) -> bool:
     return current_hash == entry.get("config_hash", "")
 
 
+def is_hash_mismatch(project_dir: str) -> bool:
+    """True only when a project WAS enrolled but its hooks.json hash has since changed.
+
+    Distinct from is_trusted()==False for a never-enrolled project (normal
+    first-run state, not a break). This flags a genuine trust break — an
+    existing enrollment gone stale — so callers can warn loudly instead of
+    treating it the same as "not set up yet".
+    """
+    project_path = str(Path(project_dir).resolve())
+    registry = read_registry()
+    entry = registry["projects"].get(project_path)
+    if entry is None:
+        return False
+    config_path = Path(project_dir).resolve() / ".aipass" / "hooks.json"
+    if not config_path.exists():
+        return False
+    return _hash_file(config_path) != entry.get("config_hash", "")
+
+
 def bootstrap() -> bool:
     """Bootstrap the registry with ONLY the AIPass install. Returns True on success.
 

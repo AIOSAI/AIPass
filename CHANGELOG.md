@@ -11,6 +11,30 @@ PyPI version — not the changelog header.
 
 ## [2026-07-20]
 
+**fix(hooks)** — persistent_alert dedup + loud trust-break banner (5-agent
+trace round follow-ups, DPLAN-0253 tail):
+
+- persistent_alert's once-per-session sound dedup lived in a module-global set,
+  but every bridge call is a fresh process — TTS would have announced on every
+  prompt while any alert was active. Replaced with session+alert-keyed tempdir
+  guard files (context_gauge idiom); banner capped at 10 alerts with an
+  "...and N more" note.
+- Trust-registry breaks are now LOUD: any `.aipass/hooks.json` change breaks
+  the enrolled hash and silently disabled the entire hook layer (bit us live
+  for 2+ hours — tier prompts, security gates, everything dark, one log-file
+  WARNING as the only signal). New `is_hash_mismatch()` distinguishes a
+  genuine break from never-enrolled; `trust_break_banner()` does a
+  config-independent walk+hash check; the engine emits a full-width banner
+  once per prompt via the presence_gate bridge call. No auto-heal —
+  re-enrollment stays a deliberate human checkpoint. Live-fired: hash broken →
+  banner; restored → healthy. 16 new tests, suite 1206 green, seedgo 100%.
+- Go-live day for the whole handler roster: 11/12 manifest entries wired into
+  provider settings by devpulse with Patrick accepting (user_message_relay
+  held: synchronous Telegram call + full prompt text off-machine — needs a
+  background send and an explicit call first). @hooks branch prompt corrected
+  and hardened: two-wires checklist + mandatory provider-wire flag in every
+  build reply.
+
 **feat(hooks)** — auto-compact prep: context gauge + mechanical snapshot
 (DPLAN-0253, built by @hooks, two rounds):
 

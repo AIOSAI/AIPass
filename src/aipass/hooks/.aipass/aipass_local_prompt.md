@@ -9,7 +9,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ## What I Do
 
 - Own the hook engine -- receives events from platform bridges, routes to handlers, logs everything
-- Maintain 14 native handlers across 4 categories (prompt, security, lifecycle, notification)
+- Maintain 26 native handlers across 4 categories (prompt, security, lifecycle, notification)
 - Bridge platforms -- thin normalization layer per provider (Claude today, Codex planned)
 - Per-project config -- `.aipass/hooks.json` controls what fires per project
 - Log everything -- prax integration + JSONL diagnostics for every hook execution
@@ -40,41 +40,54 @@ apps/
   handlers/
     bridges/
       claude.py            # Claude Code bridge (provider settings entry point)
-    prompt/                # Prompt injection hooks
+      codex.py              #   Codex bridge (planned)
+    prompt/                # Prompt injection hooks (UserPromptSubmit)
       branch_loader.py     #   Injects aipass_local_prompt.md
       tier0_kernel.py      #   Injects tier0 kernel prompt (every turn)
       navmap.py            #   Injects tier1 navmap prompt (periodic)
       identity.py          #   Injects passport identity block
+      compass_recall.py     #   Governance recall injection
+      feedback_pulse.py     #   10-turn cadence feedback nudge (disabled default)
+      context_gauge.py      #   Live transcript-fill nudge toward /prep
+      persistent_alert.py   #   Advisory banners for .aipass/alerts.json
     security/              # Enforcement hooks
+      presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
       edit_gate.py         #   Blocks edits while type errors exist
       git_gate.py          #   Enforces git access tiers
+      rm_gate.py           #   Guards destructive rm commands
+      registry_gate.py     #   Guards registry-modifying commands
       subagent_gate.py     #   Blocks sub-agent stop until clean
     lifecycle/             # Session management hooks
       auto_fix.py          #   Post-edit diagnostics (ruff, pyright, py_compile)
       auto_watchdog.py     #   Watchdog arming after dispatch
+      auto_process.py      #   Scheduled inbox/task processing
       compact.py           #   Pre-compact memory archival
       rollover.py          #   Pre-compact memory rollover
+      pre_compact_prep.py  #   Pre-compact snapshot stamp (context/dispatch/plans)
+      session_start.py     #   SessionStart cadence reset
     notification/          # Alert hooks
       announce.py          #   Inbox banner on prompt
       email.py             #   Email notification
       stop_sound.py        #   Sound on session stop
       tool_sound.py        #   Sound on tool use
+      telegram_response.py #   Telegram reply delivery on Stop
   config/
-    loader.py              # hooks.json discovery + validation
-    diagnostics.py         # Diagnostics config
+    loader.py              # hooks.json discovery + validation, config-independent trust checks
+    trust_registry.py      # Trusted-project registry (enroll/revoke/hash checks)
+    diagnostics.py         # JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics (every hook execution)
-tests/                     # 15 test files, 244 tests
+tests/                     # 42 test files, 1206 tests
 ```
 
 ## Handler Categories
 
 | Category | Count | Handlers |
 |----------|-------|----------|
-| prompt | 4 | branch_loader, tier0_kernel, navmap, identity |
-| security | 3 | edit_gate, git_gate, subagent_gate |
-| lifecycle | 4 | auto_fix, auto_watchdog, compact, rollover |
-| notification | 4 | announce, email, stop_sound, tool_sound |
+| prompt | 8 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, persistent_alert |
+| security | 6 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate |
+| lifecycle | 7 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, session_start |
+| notification | 5 | announce, email, stop_sound, tool_sound, telegram_response |
 
 ## How It Works
 
@@ -89,6 +102,8 @@ tests/                     # 15 test files, 244 tests
 ## New handler? Check the provider wire
 
 hooks.json alone is not live: UserPromptSubmit + PreCompact are invoked per-handler (`claude.py Event:name`) -- handlers on those events ALSO need a command entry in `.claude/provider_manifest.json` (PreCompact: manual + auto pair). Verify with firing evidence in engine.jsonl, not just the suite.
+
+EVERY reply that adds/renames/moves a handler MUST state either "provider settings update needed: <exact entries>" or "no provider wire needed" -- never silent. Devpulse + Patrick apply live-settings changes; flag it every time, even if the manifest is already updated.
 
 ## Integration
 

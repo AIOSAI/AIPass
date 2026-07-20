@@ -167,6 +167,16 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         return "", 0
 
     event_hooks = config.get(event_type, {})
+
+    if event_type == "UserPromptSubmit" and "presence_gate" in event_hooks:
+        from aipass.hooks.apps.handlers.config.loader import trust_break_banner
+
+        banner = trust_break_banner()
+        if banner:
+            logger.error("[HOOKS] trust break detected — emitting loud banner")
+            _log({"ts": time.time(), "event": event_type, "action": "trust_break_banner"})
+            return banner, 0
+
     if not event_hooks:
         _log({"ts": time.time(), "event": event_type, "action": "no_hooks_configured"})
         return "", 0

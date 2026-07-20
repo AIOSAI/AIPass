@@ -272,6 +272,54 @@ class TestDispatch:
         assert "ok" in result[0]
         assert result[1] == 0
 
+    def test_trust_break_banner_short_circuits_presence_gate_dispatch(self, mock_logger):
+        """A hash-mismatch banner must reach the user even though presence_gate's own hook_def is empty."""
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch(
+                "aipass.hooks.apps.handlers.config.loader.trust_break_banner",
+                return_value="# TRUST BREAK — ALL AIPASS HOOKS DISABLED",
+            ),
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            result = dispatch("UserPromptSubmit", "{}", config)
+        mock_run.assert_not_called()
+        assert result == ("# TRUST BREAK — ALL AIPASS HOOKS DISABLED", 0)
+
+    def test_no_trust_break_falls_through_to_normal_dispatch(self, mock_logger):
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+        ):
+            result = dispatch("UserPromptSubmit", "{}", config)
+        assert result == ("", 0)
+
+    def test_trust_break_check_skipped_when_presence_gate_not_dispatched(self, mock_logger):
+        """The check is scoped to the presence_gate-filtered bridge call, not every UserPromptSubmit dispatch."""
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {"other_hook": {"enabled": True, "command": "echo hi", "matcher": ""}},
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner") as mock_banner,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "hi", "stderr": "", "elapsed_ms": 5}
+            dispatch("UserPromptSubmit", "{}", config)
+        mock_banner.assert_not_called()
+
+    def test_trust_break_check_skipped_for_non_prompt_events(self, mock_logger):
+        config = {"hooks_enabled": True, "PreToolUse": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner") as mock_banner,
+        ):
+            dispatch("PreToolUse", "{}", config)
+        mock_banner.assert_not_called()
+
 
 class TestFindProjectConfig:
     """Tests for find_project_config() CWD walk."""
