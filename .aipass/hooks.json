@@ -55,6 +55,12 @@
       "matcher": "",
       "timeout": 120
     },
+    "context_gauge": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.prompt.context_gauge.handle",
+      "matcher": "",
+      "timeout": 30
+    },
     "user_message_relay": {
       "enabled": true,
       "handler": "aipass.skills.lib.telegram.apps.handlers.user_message_relay.handle",
@@ -158,6 +164,12 @@
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_process.handle",
       "matcher": "",
       "timeout": 120
+    },
+    "pre_compact_prep": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep.handle",
+      "matcher": "",
+      "timeout": 30
     }
   },
 

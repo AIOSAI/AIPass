@@ -16,7 +16,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 
 ## What I Don't Do
 
-- Touch provider settings directly -- setup.sh/doctor handles platform config installation
+- Touch `~/.claude/settings.json` -- personal file, doctor/init syncs it. The manifest (`.claude/provider_manifest.json`) IS mine to maintain
 - Manage other branches -- I'm a builder, not an orchestrator
 - Own handler business logic -- handlers are self-contained, engine just dispatches
 
@@ -78,13 +78,17 @@ tests/                     # 15 test files, 244 tests
 
 ## How It Works
 
-1. Provider settings point ONE bridge entry per event type (e.g., `claude.py UserPromptSubmit`)
+1. Provider settings invoke the bridge two ways: `claude.py EventType` (all enabled handlers -- tool events) or `claude.py EventType:handler_name` (one handler per entry -- UserPromptSubmit, PreCompact)
 2. Bridge calls `engine.dispatch(event_type, stdin_data, config)`
 3. Engine reads `.aipass/hooks.json` (walks up from CWD)
 4. Engine runs matching hooks sequentially, logs each to JSONL
 5. `{"decision": "block"}` with exit code 2 = block the action
 6. Exit code 2 without JSON = crash (log error, continue to next hook)
 7. All hook stdout concatenated and returned to platform
+
+## New handler? Check the provider wire
+
+hooks.json alone is not live: UserPromptSubmit + PreCompact are invoked per-handler (`claude.py Event:name`) -- handlers on those events ALSO need a command entry in `.claude/provider_manifest.json` (PreCompact: manual + auto pair). Verify with firing evidence in engine.jsonl, not just the suite.
 
 ## Integration
 
@@ -105,4 +109,4 @@ tests/                     # 15 test files, 244 tests
 
 - Exit code 2 has dual meaning: intentional block (with JSON) vs crash (without JSON). Engine distinguishes by checking stdout.
 - JSONL log lives at `logs/engine.jsonl` -- not in prax. Prax gets a copy via system_logger, but JSONL is the source of truth for hook diagnostics.
-- Bridge must be the ONLY entry in provider settings per event type. Multiple entries per event = platform calls them all independently, bypassing engine sequencing.
+- Provider settings carry multiple named bridge entries per event for UserPromptSubmit and PreCompact -- deliberate (per-handler output + timeout). New handlers on those events need their own provider entry.

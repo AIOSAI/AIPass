@@ -9,6 +9,31 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-20]
+
+**feat(hooks)** — auto-compact prep: context gauge + mechanical snapshot
+(DPLAN-0253, built by @hooks, two rounds):
+
+- `context_gauge` (UserPromptSubmit) — reads live context fill from the session
+  transcript every prompt (cheap 50KB tail), resolves the branch's compact
+  window (env > branch `settings.local.json` `autoCompactWindow` > 200k), and
+  injects a "run /prep NOW" nudge at 80% of the compact trigger, escalating at
+  95% — once per threshold per session. Memory prep happens before auto-compact
+  takes the choice away, on every branch including dispatched agents.
+- `pre_compact_prep` (PreCompact) — stamps a mechanical AUTO-COMPACT SNAPSHOT
+  session entry into the compacting branch's `.trinity/local.json`: context
+  fill %, active dispatch locks, open plans, git state, inbox unread. Templated
+  from live state, defensive (malformed memory = log + skip, never raises).
+- Shared `context_window` module: bounded transcript tail reader + per-branch
+  window resolver. 36 new tests; suite 1190 green; seedgo 100%.
+- Round 2 root-cause fix: handlers wired only in `.aipass/hooks.json` never
+  fire on name-scoped events — UserPromptSubmit and PreCompact invoke the
+  bridge per-handler from provider settings. Both handlers now have
+  `provider_manifest.json` entries; @hooks' branch prompt corrected (it taught
+  the old one-entry-per-event model) with a "new handler? check the provider
+  wire" reminder. Go-live needs the user's `~/.claude/settings.json` synced
+  from the manifest + fresh sessions.
+
 ## [2026-07-19]
 
 **feat(ai_mail)** — dispatched agents default to Sonnet 5 (Patrick ruling S326):
