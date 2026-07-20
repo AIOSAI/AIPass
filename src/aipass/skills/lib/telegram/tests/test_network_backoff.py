@@ -14,8 +14,9 @@ Tests cover:
   - _is_routine_read_timeout classification
 """
 
+from http.client import HTTPMessage
 from unittest.mock import patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -205,6 +206,33 @@ class TestPollUpdatesErrorClassification:
         assert result == []
         mock_logger.error.assert_called_once()
         assert "Poll error" in str(mock_logger.error.call_args)
+
+    def test_http_502_raises_network_poll_error(self, tmp_path, _patch_base_bot_deps):
+        """HTTP 502 Bad Gateway should trigger network backoff, not rapid-fire retry."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        exc = HTTPError("https://api.telegram.org/...", 502, "Bad Gateway", HTTPMessage(), None)
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc):
+            with pytest.raises(_NetworkPollError):
+                bot.poll_updates(0)
+
+    def test_http_503_raises_network_poll_error(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        exc = HTTPError("https://api.telegram.org/...", 503, "Service Unavailable", HTTPMessage(), None)
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc):
+            with pytest.raises(_NetworkPollError):
+                bot.poll_updates(0)
+
+    def test_http_429_not_network_error(self, tmp_path, _patch_base_bot_deps):
+        """Client-side HTTP errors (4xx) should NOT trigger network backoff."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        exc = HTTPError("https://api.telegram.org/...", 429, "Too Many Requests", HTTPMessage(), None)
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            result = bot.poll_updates(0)
+        assert result == []
+        mock_logger.error.assert_called_once()
 
     def test_unexpected_exception_logs_error(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)

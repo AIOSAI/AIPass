@@ -27,6 +27,11 @@ PyPI version — not the changelog header.
   was already covered via the shared dispatch_monitor wrapper. @daemon's
   scheduled wakes import `wake_branch` directly and were covered from the start.
 
+**fix(skills)** — Telegram poll 5xx now triggers network backoff (medic loop,
+autonomous @skills fix): `HTTPError` ≥500 in `poll_updates` raises
+`_NetworkPollError` instead of falling through to rapid-fire retry; 4xx still
+logs and returns. Three new tests (502/503 backoff, 429 stays out).
+
 **fix(spawn, commons, prax, hooks)** — S304 audit fix campaign, Track A
 (DPLAN-0250, four owner dispatches verified + committed by devpulse):
 

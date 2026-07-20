@@ -468,6 +468,8 @@ class BaseBot:
                 return []
             if _is_network_error(e):
                 raise _NetworkPollError(str(e)) from e
+            if isinstance(e, HTTPError) and e.code >= 500:
+                raise _NetworkPollError(str(e)) from e
             logger.error("Poll error: %s", e)
             return []
         except (ConnectionError, OSError) as e:
