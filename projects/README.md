@@ -26,6 +26,7 @@ Projects from the AIPass family that chose to go public:
 | Project | What it is | Repo |
 |---|---|---|
 | **Earmark** | Read code and docs aloud in VS Code with local Piper TTS — pause, resume, pick up where you left off. Ear + bookmark: the plan is notes anchored to where you paused. First public AIPass project. | [AIOSAI/earmark](https://github.com/AIOSAI/earmark) |
+| **aipass-site** | The [aipass.ai](https://aipass.ai) website — AIPass's front door on the web. | [AIOSAI/aipass-site](https://github.com/AIOSAI/aipass-site) |
 
 ## Creating one
 
