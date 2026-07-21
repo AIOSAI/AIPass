@@ -11,6 +11,14 @@ PyPI version — not the changelog header.
 
 ## [2026-07-20]
 
+**docs(projects)** — `projects/README.md`: the projects section now ships in
+the repo (the `!projects/README.md` gitignore whitelist existed since the
+aipass-new design but the file was never written). Explains the satellite-
+project model (own git repo, own GitHub home, sealed registry, resident agent)
+and opens the roster with **Earmark** ([AIOSAI/earmark](https://github.com/AIOSAI/earmark)),
+the first public AIPass project — a VS Code read-aloud extension with local
+Piper TTS and true pause/resume, born, built, and published 2026-07-20.
+
 **fix(hooks)** — persistent_alert dedup + loud trust-break banner (5-agent
 trace round follow-ups, DPLAN-0253 tail):
 
