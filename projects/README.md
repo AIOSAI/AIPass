@@ -2,22 +2,26 @@
 
 # Projects
 
-> Public satellite projects of AIPass — tools with their own life, born from this ecosystem.
+> Your projects, built with AIPass. **Private by default** — published only if and when you choose.
 
-This folder is where AIPass projects live on a development machine. Each project is created with `aipass new <name>` and is **its own git repository with its own GitHub home** — that's why you see only this README in the AIPass repo: the projects' contents are deliberately not tracked here, and the roster below points at the real repos.
+This folder is where your own projects live. Create one with `aipass new <name>` and build whatever you want here — a tool, an app, an experiment, something nobody else will ever see. Each project is **its own separate git repository**, and the AIPass repo ignores everything in this folder (only this README ships). Nothing you build here can leak into the AIPass repo, appear in its history, or end up in anyone's pull request.
 
 ## What a project is
 
-Every project is born deployable:
+Every project is born complete:
 
-- **Own git repo** — initialized at creation, published to its own GitHub repository.
+- **Own git repo** — initialized locally at creation. Local means local: no remote, no publishing, nothing leaves your machine.
 - **Own registry** — a sealed `*_REGISTRY.json` seating the project's owner.
 - **Resident agent** — a full AIPass citizen living at `src/<name>/<name>/`, with identity, memory, and a mailbox, ready to work the project.
 - **AIPass scaffold** — the same `.aipass/` prompt structure and conventions as the main ecosystem, so any agent (or human) knows their way around immediately.
 
-Projects use AIPass; they don't live inside its repo. The ecosystem is the workshop, these are the things it ships.
+Projects use AIPass; they don't live inside its repo. The ecosystem is the workshop — what you build in it is yours.
 
-## The roster
+## Going public — optional, deliberate
+
+If a project is ready for the world, publishing is an explicit choice: create a GitHub repository for it and push. Until you do that, it exists only on your machine.
+
+Projects from the AIPass family that chose to go public:
 
 | Project | What it is | Repo |
 |---|---|---|
@@ -31,7 +35,7 @@ aipass new <name> --template python
 aipass new <name> --no-agent
 ```
 
-The project lands in `projects/<name>`, git-initialized, registry sealed, agent seated. From there it grows into whatever it needs to be — and when it's ready for the world, it gets its own public repository like the ones above.
+The project lands in `projects/<name>`, git-initialized, registry sealed, agent seated — and private until you decide otherwise.
 
 ---
 
