@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-04-26T00:06:19.911705"
+    "last_updated": "2026-07-21T00:00:00.000000"
   },
   "bypass": [
     {
@@ -511,6 +511,12 @@
       "file": "tests/test_logging.py",
       "standard": "log_structure",
       "reason": "Test assertions reference _AIPASS_PKG_ROOT which resolves to /home/ paths at runtime. Not log config \u2014 test path constants."
+    },
+    {
+      "file": "apps/handlers/monitoring/commons_feed.py",
+      "standard": "cli",
+      "pattern": "console.print(",
+      "reason": "This IS the display handler for the commons live feed (DPLAN-0257). commons_feed.py is a self-contained view \u2014 polling, formatting, and terminal rendering together, same shape as unified_stream.py. console.print() is its designated purpose, not a violation."
     }
   ],
   "notes": {

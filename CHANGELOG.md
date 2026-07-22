@@ -11,6 +11,18 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**feat(prax)** — Commons live social feed in the monitor (DPLAN-0257, Patrick
+ask verbatim): `drone @prax monitor run commons` now streams The Commons'
+chatter — posts, comments, votes, reactions — room-tagged with mood coloring,
+monitor-style. ~10-event backfill on open, then 1.5s id-cursor polling.
+Read-only by construction (`mode=ro` sqlite URI — write attempt refused,
+verified live); commons stays the only writer, zero commons-side changes.
+Branch-log tail still reachable via `monitor run commons --logs`; mixed branch
+lists unchanged. `--relay` rides the existing Telegram relay path.
+33 new tests, prax suite 1065 green, audit 100% (52 files). Door-tested live:
+devpulse posted/replied/reacted while the feed streamed every event.
+Built by @prax.
+
 **fix(hooks)** — two DPLAN-0253 backlog hardenings (DPLAN-0256 clear):
 engine handler timeout + presence_gate PID-reuse defense. `_run_handler` now
 runs handler-type hooks on a daemon thread joined with the hooks.json

@@ -117,6 +117,78 @@ class TestHandleCommand:
 
 
 # ---------------------------------------------------------------------------
+# _dispatch_run routing tests (DPLAN-0257 — commons feed vs. branch log tail)
+# ---------------------------------------------------------------------------
+
+_COMMONS_FEED_TARGET = "aipass.prax.apps.handlers.monitoring.commons_feed.run_commons_feed"
+
+
+class TestDispatchRun:
+    """'run commons' opens the live social feed; --logs and mixed lists stay branch tail."""
+
+    def test_bare_commons_routes_to_feed(self):
+        """A standalone 'commons' target opens the feed, not the branch monitor."""
+        mod = _import_monitor()
+        mod.is_relay_enabled_by_env.return_value = False
+        with (
+            patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
+            patch.object(mod, "_run_monitor") as mock_branch,
+        ):
+            result = mod.handle_command("monitor", ["run", "commons"])
+            assert result is True
+            mock_feed.assert_called_once_with([], relay_config=None)
+            mock_branch.assert_not_called()
+
+    def test_commons_logs_escape_routes_to_branch_tail(self):
+        """'commons --logs' is the escape hatch back to the old branch-log tail."""
+        mod = _import_monitor()
+        with (
+            patch(_COMMONS_FEED_TARGET) as mock_feed,
+            patch.object(mod, "_run_monitor", return_value=True) as mock_branch,
+        ):
+            result = mod.handle_command("monitor", ["run", "commons", "--logs"])
+            assert result is True
+            mock_branch.assert_called_once_with(["commons"])
+            mock_feed.assert_not_called()
+
+    def test_mixed_branch_list_with_commons_stays_branch_tail(self):
+        """A mixed list (e.g. 'seedgo,commons') treats commons as a branch — feed is standalone-only."""
+        mod = _import_monitor()
+        with (
+            patch(_COMMONS_FEED_TARGET) as mock_feed,
+            patch.object(mod, "_run_monitor", return_value=True) as mock_branch,
+        ):
+            result = mod.handle_command("monitor", ["run", "seedgo,commons"])
+            assert result is True
+            mock_branch.assert_called_once_with(["seedgo,commons"])
+            mock_feed.assert_not_called()
+
+    def test_commons_feed_loads_relay_config_when_relay_flag_set(self):
+        """--relay on the feed path loads config via monitor.py's own _load_relay_config."""
+        mod = _import_monitor()
+        mod.is_relay_enabled_by_env.return_value = False
+        with (
+            patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
+            patch.object(mod, "_load_relay_config", return_value={"bot_token": "x", "chat_id": 1}) as mock_load,
+        ):
+            mod.handle_command("monitor", ["run", "commons", "--relay"])
+            mock_load.assert_called_once()
+            mock_feed.assert_called_once_with(["--relay"], relay_config={"bot_token": "x", "chat_id": 1})
+
+    def test_commons_feed_no_relay_config_when_relay_disabled(self):
+        """Without --relay (and no env flag), relay_config stays None."""
+        mod = _import_monitor()
+        mod.is_relay_enabled_by_env.return_value = False
+        with (
+            patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
+            patch.object(mod, "_load_relay_config") as mock_load,
+        ):
+            mod.handle_command("monitor", ["run", "commons"])
+            mock_load.assert_not_called()
+            mock_feed.assert_called_once_with([], relay_config=None)
+
+
+# ---------------------------------------------------------------------------
 # _get_watch_directories tests
 # ---------------------------------------------------------------------------
 
