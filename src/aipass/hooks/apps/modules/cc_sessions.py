@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.0.0
+# Version: 3.1.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-07-14
+# Modified: 2026-07-21
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -66,6 +66,50 @@ def _pid_alive_windows(pid: int) -> bool:
         return exit_code.value == STILL_ACTIVE
     finally:
         kernel32.CloseHandle(handle)
+
+
+def _proc_start_ticks(pid: int) -> str | None:
+    """Read a live process's start time (field 22 of /proc/<pid>/stat), in
+    clock ticks since boot. Linux only — returns None elsewhere or on any
+    read failure, so callers can fall back to liveness-only checking.
+
+    This is the identity half of the occupant check: os.kill(pid, 0) proves
+    *a* process holds this PID right now, not that it's the *same* process
+    that wrote the session file. A PID recycled by the kernel after the
+    original session died would otherwise pass silently.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        # comm (field 2) is parenthesized and may itself contain ')' or
+        # whitespace — split on the LAST ')' to get past it safely.
+        fields_after_comm = raw.rsplit(")", 1)[1].split()
+        return fields_after_comm[19]  # field 22 overall, starttime
+    except (OSError, IndexError) as exc:
+        logger.info("[CC_SESSIONS] Cannot read /proc/%d/stat: %s", pid, exc)
+        return None
+
+
+def _session_pid_matches(session: dict) -> bool:
+    """Verify the live PID is still the same process that wrote this session
+    file — not an unrelated process that later reused the same PID number.
+
+    Compares the session's recorded procStart (written by CC at session
+    start) against the live process's current start time. Sessions without
+    a recorded procStart (older/malformed files) or non-Linux hosts can't be
+    checked — falls back to liveness-only, the pre-hardening behavior.
+    """
+    recorded = session.get("procStart")
+    if not recorded:
+        return True
+    pid = session.get("pid")
+    if not isinstance(pid, int):
+        return True
+    live_start = _proc_start_ticks(pid)
+    if live_start is None:
+        return True
+    return str(live_start) == str(recorded)
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -146,7 +190,9 @@ def find_live_for_cwd(cwd: str) -> list[dict]:
     """Find all live CC sessions whose cwd matches the given directory.
 
     Compares resolved paths for robustness (symlinks, trailing slashes).
-    Only returns sessions whose PID is still alive.
+    Only returns sessions whose PID is both alive and identity-checked
+    against procStart, so a PID recycled after the original session died
+    is never mistaken for a live occupant.
     """
     target = str(Path(cwd).resolve())
     live = []
@@ -157,14 +203,21 @@ def find_live_for_cwd(cwd: str) -> list[dict]:
         if str(Path(session_cwd).resolve()) != target:
             continue
         pid = session.get("pid")
-        if pid and _is_pid_alive(pid):
-            live.append(session)
-        else:
+        if not pid or not _is_pid_alive(pid):
             logger.info(
                 "[CC_SESSIONS] Stale session file for PID %s at %s",
                 pid,
                 session_cwd,
             )
+            continue
+        if not _session_pid_matches(session):
+            logger.warning(
+                "[CC_SESSIONS] PID %s reused (procStart mismatch) — treating stale session as dead at %s",
+                pid,
+                session_cwd,
+            )
+            continue
+        live.append(session)
     return live
 
 

@@ -937,6 +937,199 @@ class TestLayerATrustEnforcement:
         assert "ok" in result[0]
 
 
+class TestRunHandlerTimeout:
+    """DPLAN-0256 backlog #1: handler-type hooks had no engine-side timeout — a hung
+    handler could stall the whole event. _run_handler now runs the handler on a
+    daemon thread and joins with a timeout instead of calling it inline."""
+
+    def test_handler_completes_within_timeout(self, mock_logger):
+        from aipass.hooks.apps.modules.engine import _run_handler
+
+        mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
+        mock_module = MagicMock()
+        mock_module.handle = mock_handler
+        with patch("importlib.import_module", return_value=mock_module):
+            result = _run_handler("aipass.hooks.apps.handlers.notification.stop_sound.handle", {}, timeout_s=1)
+        assert result["exit_code"] == 0
+        assert result["stdout"] == "ok"
+
+    def test_handler_exceeding_timeout_returns_timeout_marker(self, mock_logger):
+        import time as time_module
+
+        from aipass.hooks.apps.modules.engine import _run_handler
+
+        def _slow_handler(_data):
+            time_module.sleep(1.3)
+            return {"exit_code": 0, "stdout": "too late"}
+
+        mock_module = MagicMock()
+        mock_module.handle = _slow_handler
+        with patch("importlib.import_module", return_value=mock_module):
+            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
+        assert result["exit_code"] == -1
+        assert result["stderr"] == "TIMEOUT"
+
+    def test_handler_timeout_does_not_block_caller(self, mock_logger):
+        """Regression: the caller must return promptly even if the handler thread never finishes."""
+        import time as time_module
+
+        from aipass.hooks.apps.modules.engine import _run_handler
+
+        def _hangs_much_longer_than_timeout(_data):
+            time_module.sleep(3)
+            return {"exit_code": 0, "stdout": "should never see this"}
+
+        mock_module = MagicMock()
+        mock_module.handle = _hangs_much_longer_than_timeout
+        with patch("importlib.import_module", return_value=mock_module):
+            start = time_module.monotonic()
+            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
+            elapsed = time_module.monotonic() - start
+        assert elapsed < 2.0
+        assert result["stderr"] == "TIMEOUT"
+
+    def test_default_handler_timeout_is_30(self):
+        import inspect
+
+        from aipass.hooks.apps.modules.engine import _run_handler
+
+        sig = inspect.signature(_run_handler)
+        assert sig.parameters["timeout_s"].default == 30
+
+    def test_handler_exception_still_surfaces_as_error_not_timeout(self, mock_logger):
+        from aipass.hooks.apps.modules.engine import _run_handler
+
+        def _boom(_data):
+            raise RuntimeError("handler blew up")
+
+        mock_module = MagicMock()
+        mock_module.handle = _boom
+        with patch("importlib.import_module", return_value=mock_module):
+            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
+        assert result["exit_code"] == -1
+        assert "handler blew up" in result["stderr"]
+        assert result["stderr"] != "TIMEOUT"
+
+
+class TestDispatchHandlerTimeout:
+    """Dispatch-level wiring for DPLAN-0256 backlog #1 — hooks.json timeout fields
+    are honored for handler-type hooks, a sane default applies when absent, and a
+    timeout fails loud (log + sound) without ever silently swallowing or stalling
+    the rest of the event."""
+
+    def test_handler_timeout_propagates_hook_def_value(self, mock_logger):
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {
+                "slow_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake.handle",
+                    "matcher": "",
+                    "timeout": 5,
+                }
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
+            dispatch("UserPromptSubmit", "{}", config)
+        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=5)
+
+    def test_handler_default_timeout_is_30_when_unset(self, mock_logger):
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {
+                "no_timeout_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake.handle",
+                    "matcher": "",
+                }
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
+            dispatch("UserPromptSubmit", "{}", config)
+        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=30)
+
+    def test_timeout_logs_speaks_and_lets_dispatch_continue(self, mock_logger):
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {
+                "hung_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake.handle",
+                    "matcher": "",
+                },
+                "next_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake2.handle",
+                    "matcher": "",
+                },
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+            patch("aipass.hooks.apps.sound.speak") as mock_speak,
+        ):
+            mock_run.side_effect = [
+                {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000},
+                {"exit_code": 0, "stdout": "survived", "stderr": "", "elapsed_ms": 5},
+            ]
+            result = dispatch("UserPromptSubmit", "{}", config)
+        assert "survived" in result[0]
+        assert result[1] == 0
+        mock_speak.assert_called_once()
+        log_calls = [c[0][0] for c in mock_log.call_args_list]
+        assert any(e.get("action") == "timeout" for e in log_calls if isinstance(e, dict))
+
+    def test_timed_out_handler_produces_no_output(self, mock_logger):
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {
+                "hung_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake.handle",
+                    "matcher": "",
+                },
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+            patch("aipass.hooks.apps.sound.speak"),
+        ):
+            mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
+            result = dispatch("UserPromptSubmit", "{}", config)
+        assert result == ("", 0)
+
+    def test_command_type_timeout_also_fails_loud(self, mock_logger):
+        """The fail-loud path is shared by both hook types — command-type timeouts already
+        existed (subprocess timeout=), but were silent past the generic per-hook log line."""
+        config = {
+            "hooks_enabled": True,
+            "PreToolUse": {
+                "slow_cmd": {"enabled": True, "command": "sleep 999", "matcher": ""},
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+            patch("aipass.hooks.apps.sound.speak") as mock_speak,
+        ):
+            mock_run.return_value = {"exit_code": -1, "stdout": "", "stderr": "TIMEOUT", "elapsed_ms": 30000}
+            result = dispatch("PreToolUse", '{"tool_name":"Edit"}', config)
+        assert result == ("", 0)
+        mock_speak.assert_called_once()
+        log_calls = [c[0][0] for c in mock_log.call_args_list]
+        assert any(e.get("action") == "timeout" for e in log_calls if isinstance(e, dict))
+
+
 class TestJsonHandlerNotApplicable:
     """Hooks uses JSONL logging, not json_handler. These verify the log equivalent."""
 

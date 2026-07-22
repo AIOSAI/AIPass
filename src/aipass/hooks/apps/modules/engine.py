@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -61,8 +62,14 @@ def _run_hook(hook_cmd: str, stdin_data: str, timeout_s: int = 30) -> dict:
         return {"exit_code": -1, "stdout": "", "stderr": str(exc), "elapsed_ms": round(elapsed_ms, 1)}
 
 
-def _run_handler(handler_path: str, hook_data: dict) -> dict:
-    """Call a handler function directly (no subprocess). Module imports handler."""
+def _run_handler(handler_path: str, hook_data: dict, timeout_s: int = 30) -> dict:
+    """Call a handler function directly (no subprocess). Module imports handler.
+
+    Runs the handler on a daemon thread and joins with a timeout so a hung
+    handler can never stall the event — the calling thread returns control
+    on expiry instead of blocking forever. The orphaned thread (if any) is
+    left to die with the process; it never blocks interpreter exit.
+    """
     start = time.monotonic()
     try:
         module_path, func_name = handler_path.rsplit(".", 1)
@@ -80,7 +87,34 @@ def _run_handler(handler_path: str, hook_data: dict) -> dict:
             }
         module = importlib.import_module(module_path)
         handler_func = getattr(module, func_name)
-        result = handler_func(hook_data)
+
+        outcome = {}
+
+        def _call():
+            try:
+                outcome["result"] = handler_func(hook_data)
+            except Exception as exc:
+                logger.info("[HOOKS] handler %s raised on worker thread: %s", handler_path, exc)
+                outcome["error"] = exc  # re-raised on the calling thread below
+
+        worker = threading.Thread(target=_call, daemon=True)
+        worker.start()
+        worker.join(timeout_s)
+
+        if worker.is_alive():
+            elapsed_ms = (time.monotonic() - start) * 1000
+            logger.error("[HOOKS] handler timeout after %ds: %s", timeout_s, handler_path)
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "TIMEOUT",
+                "elapsed_ms": round(elapsed_ms, 1),
+            }
+
+        if "error" in outcome:
+            raise outcome["error"]
+
+        result = outcome["result"]
         elapsed_ms = (time.monotonic() - start) * 1000
         return {
             "exit_code": result.get("exit_code", 0),
@@ -257,11 +291,36 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 )
                 continue
 
+        hook_timeout = hook_def.get("timeout", 30)
         if handler:
-            result = _run_handler(handler, parsed)
+            result = _run_handler(handler, parsed, timeout_s=hook_timeout)
         else:
-            hook_timeout = hook_def.get("timeout", 30)
             result = _run_hook(command, stdin_data, timeout_s=hook_timeout)
+
+        if result.get("stderr") == "TIMEOUT":
+            logger.error(
+                "[HOOKS] %s.%s TIMED OUT after %ds — never silently swallowed",
+                event_type,
+                hook_name,
+                hook_timeout,
+            )
+            _log(
+                {
+                    "ts": time.time(),
+                    "event": event_type,
+                    "hook": hook_name,
+                    "action": "timeout",
+                    "timeout_s": hook_timeout,
+                    "elapsed_ms": result["elapsed_ms"],
+                }
+            )
+            try:
+                from aipass.hooks.apps.sound import speak
+
+                speak(f"{hook_name.replace('_', ' ')} timed out")
+            except Exception as exc:
+                logger.info("[HOOKS] sound playback failed for timeout %s.%s: %s", event_type, hook_name, exc)
+            continue
 
         logger.info(
             "[HOOKS] %s.%s agent=%s exit=%d out=%db %dms",

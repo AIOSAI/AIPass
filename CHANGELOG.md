@@ -11,6 +11,19 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**fix(hooks)** — two DPLAN-0253 backlog hardenings (DPLAN-0256 clear):
+engine handler timeout + presence_gate PID-reuse defense. `_run_handler` now
+runs handler-type hooks on a daemon thread joined with the hooks.json
+`timeout` field (default 30s) — a hung handler returns TIMEOUT loud
+(engine.jsonl + sound) and the event moves on; daemon thread chosen over
+ThreadPoolExecutor so a stuck orphan can never hang interpreter exit.
+presence_gate occupancy no longer trusts `os.kill(pid, 0)` alone:
+`procStart` (CC session file) is matched against `/proc/<pid>/stat` field 22
+so a kernel-recycled PID can't impersonate a dead session — closes the gap
+before observe-only ever flips to enforcement. Missing procStart / non-Linux
+falls back to liveness-only, logged. 15 new tests, suite 1272 green,
+seedgo 31/31 both files. Built by @hooks.
+
 **fix(trigger)** — runaway-log alerts get the 24h TTL every other mute already
 had (DPLAN-0256 backlog clear): `_write_alert()` hardcoded `expires_at: None`,
 so alerts.json entries nagged forever while medic branch mutes self-expired.
