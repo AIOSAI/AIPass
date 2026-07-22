@@ -599,7 +599,7 @@ def handle(hook_data: dict) -> dict:
     else:
         logger.error("[HOOKS] telegram: delivery failed — keeping pending for retry")
 
-    return {"stdout": "", "exit_code": 0}
+    return {"stdout": "", "exit_code": 0, "sound": "telegram response"}
 
 
 def _extract_response(hook_data: dict, transcript_path: str, pending_data: dict) -> str | None:

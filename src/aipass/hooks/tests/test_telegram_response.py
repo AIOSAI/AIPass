@@ -857,7 +857,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert updated["delivered"] is True
@@ -902,7 +902,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert "delivered" not in updated
@@ -996,7 +996,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert extract_call_count >= 2
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
@@ -1035,7 +1035,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert not pending_file.exists()
 
     def test_already_delivered_skips_fallback(self, tmp_path):
@@ -1989,7 +1989,7 @@ class TestHandleMirrorIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert len(sent_texts) == 1
         assert "You: What is this?" in sent_texts[0]
         assert "This is the answer." in sent_texts[0]

@@ -67,7 +67,7 @@ def handle(hook_data: dict) -> dict:
             logger.info("[HOOKS] auto_process: no-op (nothing to process)")
 
         _mark_session_ran()
-        return {"stdout": "", "exit_code": 0}
+        return {"stdout": "", "exit_code": 0, "sound": "auto process"}
 
     except Exception as exc:
         logger.error("[HOOKS] auto_process: error: %s", exc)

@@ -61,6 +61,11 @@
       "matcher": "",
       "timeout": 30
     },
+    "temporal": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.prompt.temporal.handle",
+      "matcher": ""
+    },
     "user_message_relay": {
       "enabled": true,
       "handler": "aipass.skills.lib.telegram.apps.handlers.user_message_relay.handle",

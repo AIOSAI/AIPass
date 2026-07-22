@@ -40,6 +40,7 @@ class TestHandle:
 
         assert result["exit_code"] == 0
         assert "AUTO-COMPACT SNAPSHOT" in result["stdout"]
+        assert result["sound"] == "pre compact prep"
 
         data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
         assert len(data["sessions"]) == 2

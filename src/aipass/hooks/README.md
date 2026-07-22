@@ -88,6 +88,7 @@ src/aipass/hooks/
 │   │   │   ├── identity.py      #   Injects passport identity block
 │   │   │   ├── feedback_pulse.py #  Periodic feedback ask (~10 turns, toggleable)
 │   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact fires (80%/95% of window)
+│   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn
 │   │   │   └── persistent_alert.py # Injects advisory banners from .aipass/alerts.json
 │   │   ├── security/            # Enforcement hooks
 │   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-branch, inbox, diagnostics)
@@ -114,7 +115,7 @@ src/aipass/hooks/
 │       └── diagnostics.py       # JSONL logging for hook execution
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1206 tests across 42 test files
+└── tests/                       # 1249 tests across 43 test files
 ```
 
 ## How It Works
@@ -135,7 +136,7 @@ Handlers are called **dynamically at runtime** — the engine uses `importlib.im
 
 | Event | Hooks | Description |
 |---|---|---|
-| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, feedback_pulse, context_gauge, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + feedback + context gauge + auto-process + TG mirror |
+| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + feedback + context gauge + temporal + auto-process + TG mirror |
 | PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, registry_gate | Security gates + guardrails + sound |
 | PostToolUse | auto_fix, auto_watchdog | Diagnostics + watchdog |
 | SubagentStop | subagent_gate | Seedgo validation |

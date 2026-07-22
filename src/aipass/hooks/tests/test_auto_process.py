@@ -43,6 +43,7 @@ class TestAutoProcessHandler:
 
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
+        assert result["sound"] == "auto process"
 
     def test_calls_memory_auto_process_module(self):
         from aipass.hooks.apps.handlers.lifecycle.auto_process import handle
@@ -168,6 +169,7 @@ class TestAutoProcessHandler:
                     result = handle({"tool_name": "Bash", "cwd": "/tmp"})
 
         assert result["exit_code"] == 0
+        assert result["sound"] == "auto process"
 
 
 class TestSessionGuard:

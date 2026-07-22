@@ -11,6 +11,14 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**feat(hooks)** — hook sound layer + temporal grounding. Sounds now mirror
+the log across the hook fleet (prompt, lifecycle, notification, security
+handlers) — audible liveness for the whole layer, verified live (2465 green,
+audit 100). New `prompt/temporal.py`: tiny always-on UserPromptSubmit handler
+injecting one line of local date/time/weekday/part-of-day every turn — live
+clock each fire, host timezone via `astimezone()` (clones see their own local
+time). Wired on both wires (`.aipass/hooks.json` + provider manifest).
+
 **feat(aipass)** — `aipass adopt` + shared scaffold refactor: adopt turns an
 existing `projects/` directory into a full AIPass project (registry, resident
 agent, `.aipass`/`.claude` scaffold) — every write additive, nothing existing

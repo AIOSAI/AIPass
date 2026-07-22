@@ -110,7 +110,7 @@ def handle(hook_data: dict) -> dict:
         mark_surfaced([c["id"] for c in approved])
         json_handler.log_operation("compass_recall", {"count": len(approved)})
 
-        return {"stdout": "\n".join(lines), "exit_code": 0}
+        return {"stdout": "\n".join(lines), "exit_code": 0, "sound": "compass recall"}
 
     except Exception as exc:
         logger.info("[HOOKS] compass_recall_unreachable: %s", exc)

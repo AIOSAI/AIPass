@@ -9,7 +9,7 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ## What I Do
 
 - Own the hook engine -- receives events from platform bridges, routes to handlers, logs everything
-- Maintain 26 native handlers across 4 categories (prompt, security, lifecycle, notification)
+- Maintain 27 native handlers across 4 categories (prompt, security, lifecycle, notification)
 - Bridge platforms -- thin normalization layer per provider (Claude today, Codex planned)
 - Per-project config -- `.aipass/hooks.json` controls what fires per project
 - Log everything -- prax integration + JSONL diagnostics for every hook execution
@@ -49,6 +49,7 @@ apps/
       compass_recall.py     #   Governance recall injection
       feedback_pulse.py     #   10-turn cadence feedback nudge (disabled default)
       context_gauge.py      #   Live transcript-fill nudge toward /prep
+      temporal.py            #   Weekday/date/time/tz/part-of-day, every turn
       persistent_alert.py   #   Advisory banners for .aipass/alerts.json
     security/              # Enforcement hooks
       presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
@@ -77,14 +78,14 @@ apps/
     diagnostics.py         # JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics (every hook execution)
-tests/                     # 42 test files, 1206 tests
+tests/                     # 43 test files, 1249 tests
 ```
 
 ## Handler Categories
 
 | Category | Count | Handlers |
 |----------|-------|----------|
-| prompt | 8 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, persistent_alert |
+| prompt | 9 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, temporal, persistent_alert |
 | security | 6 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate |
 | lifecycle | 7 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, session_start |
 | notification | 5 | announce, email, stop_sound, tool_sound, telegram_response |

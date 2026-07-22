@@ -239,7 +239,7 @@ def handle(hook_data: dict) -> dict:
         stamped = _stamp_session_entry(branch_dir, snapshot, cap)
         logger.info("[HOOKS] pre_compact_prep: snapshot stamped=%s branch=%s", stamped, branch_dir.name)
 
-        return {"stdout": snapshot, "exit_code": 0}
+        return {"stdout": snapshot, "exit_code": 0, "sound": "pre compact prep"}
 
     except Exception as exc:
         logger.info("[HOOKS] pre_compact_prep: unexpected error: %s", exc)

@@ -84,6 +84,7 @@ def handle(hook_data: dict) -> dict:
                     "AND wrap up the current work item. Auto-compact is imminent."
                 ),
                 "exit_code": 0,
+                "sound": "context gauge",
             }
 
         if pct >= _NUDGE_THRESHOLD_PCT and not _already_fired(session_id, "80"):
@@ -95,6 +96,7 @@ def handle(hook_data: dict) -> dict:
                     "before auto-compact takes the choice away."
                 ),
                 "exit_code": 0,
+                "sound": "context gauge",
             }
 
         return {"stdout": "", "exit_code": 0}

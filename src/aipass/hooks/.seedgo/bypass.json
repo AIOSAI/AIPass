@@ -132,6 +132,11 @@
       "reason": "No JSON operations - reads markdown file (.aipass/tier1_navmap.md) and outputs text."
     },
     {
+      "file": "apps/handlers/prompt/temporal.py",
+      "standard": "json_structure",
+      "reason": "No JSON operations - reads the system clock and outputs text. Wired in UserPromptSubmit.temporal (FPLAN-0348)."
+    },
+    {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.edit_gate.handle' — not statically imported by design. Verified wired in PreToolUse.pre_edit_gate + fires in engine.jsonl."
@@ -1263,11 +1268,22 @@
       "file": "apps/handlers/prompt/context_gauge.py",
       "standard": "json_structure",
       "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
+    },
+    {
+      "file": "apps/handlers/lifecycle/pre_compact_prep.py",
+      "standard": "handlers",
+      "reason": "Line 75: lazy cross-branch import of aipass.flow.apps.handlers.plan.get_open_plans — needed for the open-plan count in the AUTO-COMPACT SNAPSHOT. No module-layer equivalent exists to switch to: flow's own modules (close_plan.py) import this same handler directly rather than re-exporting it, and list_plans.py's module is a CLI display orchestrator, not a programmatic data source. Read-only cross-branch primitive read, same authorized pattern as ai_mail's dispatch_monitor.py broker-client import. Call is wrapped in try/except and degrades to None on any failure — never corrupts the snapshot."
+    },
+    {
+      "file": "apps/handlers/prompt/compass_recall.py",
+      "standard": "handlers",
+      "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job — not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."
     }
   ],
   "notes": {
     "removed_2026-05-19": "Stripped 4 illegitimate bypasses — hooks.py/cli, hooks.py/cli_flags, engine.py/modules, engine.py/introspection. Code fixed to meet standards instead.",
     "dplan_0191_2026-05-28": "Added dead_code + unused_function bypasses for all 15 dynamically-dispatched handlers after verifying each is wired in .aipass/hooks.json AND fires in engine.jsonl. Root cause: engine._run_handler (engine.py:60-66) uses importlib.import_module + getattr on hooks.json handler strings — handlers are never statically imported. Follow-up for @seedgo: teach dead_code/unused_function about dynamic importlib dispatch patterns.",
-    "dplan_0253_2026-07-20": "Added json_structure bypasses for context_window.py, pre_compact_prep.py, context_gauge.py — same external-state-read profile as existing compact.py/cc_sessions.py/session_start.py bypasses."
+    "dplan_0253_2026-07-20": "Added json_structure bypasses for context_window.py, pre_compact_prep.py, context_gauge.py — same external-state-read profile as existing compact.py/cc_sessions.py/session_start.py bypasses.",
+    "dplan_0253_audit_catch_2026-07-21": "Seedgo's handlers checker went AST-based and caught two lazy cross-branch imports missed by the old text-matching version: pre_compact_prep.py (flow.get_open_plans) and compass_recall.py (memory.governance, devpulse.compass). Both bypassed rather than restructured — no clean module-layer alternative exists for the former, and the latter's whole purpose is surfacing cross-branch data at prompt time. Same authorized-primitive precedent as ai_mail dispatch_monitor.py."
   }
 }

@@ -63,6 +63,7 @@ class TestContextGaugeHandle:
         assert "CONTEXT GAUGE" in result["stdout"]
         assert "run /prep NOW" in result["stdout"]
         assert "wrap up the current work item" not in result["stdout"]
+        assert result["sound"] == "context gauge"
 
     def test_fires_escalate_at_95_percent_of_trigger(self, tmp_path, monkeypatch):
         from aipass.hooks.apps.handlers.prompt.context_gauge import handle
@@ -77,6 +78,7 @@ class TestContextGaugeHandle:
         assert result["exit_code"] == 0
         assert "CONTEXT GAUGE" in result["stdout"]
         assert "wrap up the current work item" in result["stdout"]
+        assert result["sound"] == "context gauge"
 
     def test_fires_once_per_threshold_per_session(self, tmp_path, monkeypatch):
         from aipass.hooks.apps.handlers.prompt.context_gauge import handle

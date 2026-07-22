@@ -131,7 +131,7 @@ def handle(hook_data: dict) -> dict:
 
         if _OBSERVE_ONLY:
             logger.warning("[presence_gate] OBSERVE-ONLY would-block: %s", reason)
-            return _ALLOW
+            return {**_ALLOW, "sound": "presence gate"}
 
         logger.warning("[presence_gate] BLOCKED: %s", reason)
         return {
