@@ -312,7 +312,7 @@ def test_stalltracker_inflight_tool_prevents_stall(monkeypatch, capsys):
     monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: True)
     t = agent_handler.StallTracker("@x", Path("/nope"), {}, now=0.0, pid=123)
 
-    for now in (60.0, 120.0, 180.0, 240.0):
+    for now in (120.0, 240.0, 360.0, 480.0):
         t.observe(now=now)
 
     out = capsys.readouterr().out
@@ -391,7 +391,8 @@ def test_watch_agent_surfaces_stall_to_stdout(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
     monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: False)
-    _fake_clock_sleep(agent_handler, monkeypatch, lock_file)
+    # Lock must outlive STALL_THRESHOLD (300s) or the watch completes stall-free.
+    _fake_clock_sleep(agent_handler, monkeypatch, lock_file, unlink_at=400.0)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=100000, poll_interval=0.01)
     out = capsys.readouterr().out

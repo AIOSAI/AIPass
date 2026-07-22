@@ -11,6 +11,13 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**fix(devpulse)** — watchdog stall threshold 120s → 300s: the 120s
+no-JSONL-activity heuristic fired `[watchdog.stall]` on healthy agents doing
+long tool calls; 300s matches observed real-stall behavior (verified live
+S330). Branch `.claude/settings.local.json` carries the devpulse
+`autoCompactWindow: 350000` dial (Patrick ruling S326 — devpulse compacts
+~292k, dispatched agents stay pinned at 200k).
+
 **fix(seedgo)** — checker accuracy arc (S330): AST-based import analysis
 lands in the checkers (dead_code, encapsulation, handlers, readme,
 test_quality, unused_function) — 13 false positives eliminated fleet-wide,
