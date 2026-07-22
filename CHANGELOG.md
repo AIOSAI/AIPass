@@ -11,6 +11,14 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**fix(trigger)** — runaway-log alerts get the 24h TTL every other mute already
+had (DPLAN-0256 backlog clear): `_write_alert()` hardcoded `expires_at: None`,
+so alerts.json entries nagged forever while medic branch mutes self-expired.
+New `DEFAULT_ALERT_TTL_SECONDS = 86400` (matches medic_state's
+`DEFAULT_MUTE_SECONDS`) with a `forever` escape hatch threaded through
+`handle_runaway_log_detected()`. 2 new tests, trigger suite 621 green,
+audit 100%. Built by @trigger.
+
 **feat(drone)** — joint-decision gate on `drone @git merge` (DPLAN-0256,
 Patrick ruling S330: merges are always done together, never accidental).
 The gate sits in `_handle_merge` before the plugin import — `merge_pr()` is
