@@ -145,3 +145,7 @@ README_ORIGINAL_DISABLED.md
 *.bak
 test/
 sandbox_test/
+
+# SQLite WAL sidecars (runtime artifacts — commons.db ro-feed etc.)
+*.db-wal
+*.db-shm
