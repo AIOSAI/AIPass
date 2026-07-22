@@ -1,17 +1,20 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
-# Description: Template content generators for aipass init scaffold
+# Description: Shared template content generators for project scaffolding
 # Version: 1.0.0
 # Created: 2026-04-22
-# Modified: 2026-04-22
+# Modified: 2026-07-21
 # =============================================
 
 """
-Scaffold Content — template generators for `aipass init`
+Scaffold Content — template generators for `aipass init`, `aipass new`, `aipass adopt`
 
 Pure string-returning functions that produce the content for each scaffold
-file (CLAUDE.md, AGENTS.md, etc.). Extracted from bootstrap.py to keep
-the handler under 700 lines.
+file (CLAUDE.md, AGENTS.md, .gitignore, etc.). Shared across every command
+that mints AIPass project files, so there is exactly one source of truth
+per template — no per-command copies to drift apart.
+
+Dependency-free: uses only stdlib. Importable before drone/prax exist.
 
 RULES:
   - Pure Python only (no module/prax/cli imports)
@@ -251,7 +254,7 @@ def gitignore() -> str:
         "*.egg-info/\n"
         "dist/\n"
         "build/\n"
-        ".venv/\n"
+        ".venv\n"
         "venv/\n"
         "\n"
         "# IDE\n"
@@ -267,6 +270,9 @@ def gitignore() -> str:
         "\n"
         "# Disabled files\n"
         "*(disabled)*\n"
+        "\n"
+        "# Registry lock\n"
+        ".*_REGISTRY.lock\n"
     )
 
 

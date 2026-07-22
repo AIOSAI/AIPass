@@ -9,6 +9,19 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-21]
+
+**feat(aipass)** — `aipass adopt` + shared scaffold refactor: adopt turns an
+existing `projects/` directory into a full AIPass project (registry, resident
+agent, `.aipass`/`.claude` scaffold) — every write additive, nothing existing
+overwritten; unlike `aipass new` it starts from a directory with its own
+content and git history. New `shared/` package (`project_home.py`,
+`scaffold_content.py`) gives init/new/adopt one source of truth per helper —
+`handlers/init/scaffold_content.py` moved there, no per-command copies to
+drift. Proven live adopting aipass-site (doctor 31/0). Spawn template registry
+synced (template bug chain me→spawn→aipass, fixed S329). 786 tests green,
+audit-clean.
+
 ## [2026-07-20]
 
 **docs(projects)** — `projects/README.md`: the projects section now ships in

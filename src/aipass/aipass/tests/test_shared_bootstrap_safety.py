@@ -24,7 +24,9 @@ import sys
 
 import aipass.aipass.shared.json_handler
 import aipass.aipass.shared.json_ops
+import aipass.aipass.shared.project_home
 import aipass.aipass.shared.registry_discovery
+import aipass.aipass.shared.scaffold_content
 
 bad = []
 for name in sorted(sys.modules):

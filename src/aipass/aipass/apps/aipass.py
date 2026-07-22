@@ -43,6 +43,7 @@ from aipass.prax import logger
 # =============================================================================
 
 _PUBLIC_COMMANDS = {
+    "adopt": "Turn an existing projects/ directory into a full project",
     "doctor": "System health — structure, registry, hooks, tests",
     "help": "README-backed Q&A — ask about any branch",
     "init": "Guided setup for new users (10 stages, resumable)",
@@ -148,6 +149,10 @@ def print_help(modules: List[Any] | None = None) -> None:
         "  [green]install[/green]                      [dim]One-command bootstrap — clone + setup.sh + hooks[/dim]"
     )
     console.print("  [green]new <name>[/green]                   [dim]Create a project inside AIPass[/dim]")
+    console.print(
+        "  [green]adopt <name>[/green]                 "
+        "[dim]Turn an existing projects/ directory into a full project[/dim]"
+    )
     console.print("  [green]profile[/green]                      [dim]Show/edit user profile[/dim]")
     console.print(
         "  [green]trust[/green] [dim][path][/dim]                [dim]Trust registry — enroll/revoke projects[/dim]"
@@ -159,6 +164,7 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print("  [green]aipass doctor[/green]                       [dim]Check system health[/dim]")
     console.print("  [green]aipass help what does drone do[/green]      [dim]Search documentation[/dim]")
     console.print("  [green]aipass new myapp --template python[/green]  [dim]Create a Python project[/dim]")
+    console.print("  [green]aipass adopt myapp --dry-run[/green]        [dim]Preview adopting projects/myapp[/dim]")
     console.print("  [green]aipass init[/green]                         [dim]Start guided setup[/dim]")
     console.print()
 

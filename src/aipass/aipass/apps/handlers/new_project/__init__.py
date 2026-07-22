@@ -29,6 +29,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 
+from aipass.aipass.shared import scaffold_content as sc
 from aipass.prax import logger
 from aipass.spawn import spawn_agent
 
@@ -117,10 +118,7 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
     )
     created.append("README.md")
 
-    (target / ".gitignore").write_text(
-        "__pycache__/\n*.pyc\n.venv\n.trinity/\n.ai_mail.local/\n*.local.json\n*.local/\nlogs/\n.*_REGISTRY.lock\n",
-        encoding="utf-8",
-    )
+    (target / ".gitignore").write_text(sc.gitignore(), encoding="utf-8")
     created.append(".gitignore")
 
     if template == "python":
@@ -158,12 +156,13 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
 
 def _scaffold_aipass(target: Path, name: str) -> list[str]:
     """Write AIPass scaffold files (tiers, hooks, CLAUDE.md, settings, .venv)."""
-    from aipass.aipass.apps.handlers.init.bootstrap import (
+    from aipass.aipass.shared.project_home import (
+        _claude_local_settings,
         _claude_settings,
         _detect_aipass_home,
         _enroll_project,
+        is_throwaway_path,
     )
-    from aipass.aipass.apps.handlers.init import scaffold_content as sc
 
     created: list[str] = []
     aipass_home = _detect_aipass_home()
@@ -206,14 +205,22 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             dest.write_text(sc.agents_md(reg), encoding="utf-8")
             created.append(md_name)
 
-    # .claude/settings.json
+    # .claude/settings.json — tracked, permissions only (no machine-local paths)
     claude_dir = target / ".claude"
     claude_dir.mkdir(exist_ok=True)
     (claude_dir / "settings.json").write_text(
-        _claude_settings(aipass_home),
+        _claude_settings(),
         encoding="utf-8",
     )
     created.append(".claude/settings.json")
+
+    # .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
+    if aipass_home and not is_throwaway_path(aipass_home):
+        (claude_dir / "settings.local.json").write_text(
+            _claude_local_settings(aipass_home),
+            encoding="utf-8",
+        )
+        created.append(".claude/settings.local.json")
 
     # .claude/commands/prep.md
     commands_dir = claude_dir / "commands"

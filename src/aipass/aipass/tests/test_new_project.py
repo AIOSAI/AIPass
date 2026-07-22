@@ -183,11 +183,11 @@ def test_create_project_empty_template(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._enroll_project",
+            "aipass.aipass.shared.project_home._enroll_project",
         ),
     ):
         result = create_project("testproj", template="empty", no_agent=True)
@@ -208,11 +208,11 @@ def test_create_project_python_template(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._enroll_project",
+            "aipass.aipass.shared.project_home._enroll_project",
         ),
     ):
         result = create_project("pyapp", template="python", no_agent=True)
@@ -261,10 +261,10 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_fail_git),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         pytest.raises(RuntimeError, match="simulated failure"),
     ):
         create_project("failproj", no_agent=True)
@@ -299,10 +299,10 @@ def test_create_project_registry_before_scaffold(host_env, monkeypatch):
             side_effect=track_template,
         ),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         create_project("ordertest", no_agent=True)
 
@@ -399,10 +399,10 @@ def test_create_project_with_agent(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -426,10 +426,10 @@ def test_create_project_spawn_failure_cleans_up(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value={"success": False, "error": "template missing"},
@@ -449,10 +449,10 @@ def test_create_project_no_agent_next_steps(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.modules.new_project.console") as mock_con,
     ):
         handle_command("new", ["cosmtest", "--template", "empty", "--no-agent"])
@@ -466,10 +466,10 @@ def test_create_project_no_agent_flag(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
     ):
         result = create_project("noagent", template="empty", no_agent=True)
 
@@ -645,10 +645,10 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch("builtins.input", return_value=""),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -680,10 +680,10 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch):
         patch("subprocess.run", side_effect=_mock_git_run),
         patch("builtins.input", return_value=""),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch(
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
@@ -708,10 +708,10 @@ def test_no_agent_skips_auto_launch(host_env, monkeypatch):
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
-            "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+            "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
         ),
-        patch("aipass.aipass.apps.handlers.init.bootstrap._enroll_project"),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
         patch("aipass.aipass.apps.modules.new_project.console"),
         patch("aipass.aipass.apps.modules.new_project.sys") as mock_sys,
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
