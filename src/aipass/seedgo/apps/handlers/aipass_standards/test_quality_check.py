@@ -30,6 +30,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 AUDIT_SCOPE = "branch_level"
 
@@ -180,7 +181,7 @@ def _should_skip_file(name: str) -> bool:
     return is_disabled_file(name)
 
 
-def _find_test_files_broad(branch_path: Path) -> list[Path]:
+def _find_test_files_broad(branch_path: Path, ignore_entries: list) -> list[Path]:
     """Find all test files for module coverage analysis.
 
     Broader than _find_all_test_files — also finds scattered test files
@@ -197,6 +198,8 @@ def _find_test_files_broad(branch_path: Path) -> list[Path]:
                 continue
             if any(_should_skip_dir(part) for part in py_file.relative_to(tests_dir).parts):
                 continue
+            if is_seedgo_ignored(str(py_file), branch_path, ignore_entries):
+                continue
             resolved = py_file.resolve()
             if resolved not in seen:
                 seen.add(resolved)
@@ -207,6 +210,8 @@ def _find_test_files_broad(branch_path: Path) -> list[Path]:
         if any(_should_skip_dir(part) for part in py_file.relative_to(branch_path).parts):
             continue
         if py_file.name in ("__init__.py", "conftest.py") or _should_skip_file(py_file.name):
+            continue
+        if is_seedgo_ignored(str(py_file), branch_path, ignore_entries):
             continue
         if py_file.name.startswith("test_") or py_file.name.endswith("_test.py"):
             resolved = py_file.resolve()
@@ -234,7 +239,7 @@ def _analyze_test_file_imports(source: str) -> set[str]:
     return tested_modules
 
 
-def _collect_testable_modules(branch_path: Path) -> set[str]:
+def _collect_testable_modules(branch_path: Path, ignore_entries: list) -> set[str]:
     """Collect module names from apps/modules/ and apps/handlers/.
 
     Returns set of module names:
@@ -255,17 +260,21 @@ def _collect_testable_modules(branch_path: Path) -> set[str]:
                 and item.suffix == ".py"
                 and item.name != "__init__.py"
                 and not _should_skip_file(item.name)
+                and not is_seedgo_ignored(str(item), branch_path, ignore_entries)
             ):
                 modules.add(item.stem)
 
     handlers_dir = apps_dir / "handlers"
     if handlers_dir.is_dir():
         for item in sorted(handlers_dir.iterdir()):
-            if _should_skip_dir(item.name):
+            if _should_skip_dir(item.name) or is_seedgo_ignored(str(item), branch_path, ignore_entries):
                 continue
             if item.is_dir() and item.name != "__pycache__":
                 has_py = any(
-                    f.suffix == ".py" and f.name != "__init__.py" and not _should_skip_file(f.name)
+                    f.suffix == ".py"
+                    and f.name != "__init__.py"
+                    and not _should_skip_file(f.name)
+                    and not is_seedgo_ignored(str(f), branch_path, ignore_entries)
                     for f in item.iterdir()
                     if f.is_file()
                 )
@@ -282,7 +291,7 @@ def _collect_testable_modules(branch_path: Path) -> set[str]:
     return modules
 
 
-def _find_all_test_files(branch_path: Path) -> list[Path]:
+def _find_all_test_files(branch_path: Path, ignore_entries: list) -> list[Path]:
     """Find all test files and conftest.py in the branch's tests/ directory.
 
     Scans for any test_*.py file plus conftest.py -- no naming requirements.
@@ -294,6 +303,8 @@ def _find_all_test_files(branch_path: Path) -> list[Path]:
     results: list[Path] = []
     for p in sorted(tests_dir.iterdir()):
         if not p.is_file() or p.suffix != ".py":
+            continue
+        if is_seedgo_ignored(str(p), branch_path, ignore_entries):
             continue
         if p.name.startswith("test_") or p.name == "conftest.py":
             results.append(p)
@@ -395,7 +406,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         }
 
     # Phase 1: Find all test files
-    test_files = _find_all_test_files(bp)
+    ignore_entries = load_ignore_entries(bp)
+    test_files = _find_all_test_files(bp, ignore_entries)
 
     if not test_files:
         checks.append(
@@ -470,7 +482,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     # Phase 4: Module coverage (category 11 — from test_coverage_check.py)
     # Uses broader file discovery + import-based module mapping
-    broad_test_files = _find_test_files_broad(bp)
+    broad_test_files = _find_test_files_broad(bp, ignore_entries)
     total_tests = 0
     tested_modules: set[str] = set()
     for tf in broad_test_files:
@@ -483,7 +495,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     if total_tests == 0:
         tested_modules = set()
 
-    all_modules = _collect_testable_modules(bp)
+    all_modules = _collect_testable_modules(bp, ignore_entries)
     total_modules = len(all_modules)
 
     # 3 module coverage items

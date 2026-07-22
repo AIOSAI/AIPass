@@ -132,6 +132,45 @@ def test_handler_independence_same_package(tmp_path):
     assert result["passed"] is True
 
 
+def test_handler_independence_fstring_guard_text_not_flagged(tmp_path):
+    """An f-string that mentions apps.handlers as help text is not a real import."""
+    content = (
+        "def guard():\n"
+        "    raise ImportError(\n"
+        '        f"    from aipass.seedgo.apps.handlers.error import error_handler\\n"\n'
+        "    )\n"
+    )
+    handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "guard.py")
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is True
+
+
+def test_handler_independence_flags_real_import_alongside_guard_text(tmp_path):
+    """A real cross-handler import is still caught even when guard text sits nearby."""
+    content = (
+        "from aipass.seedgo.apps.handlers.error import error_handler\n"
+        "\n"
+        "def guard():\n"
+        "    raise ImportError(\n"
+        '        f"    from aipass.seedgo.apps.handlers.error import error_handler\\n"\n'
+        "    )\n"
+    )
+    handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "mixed.py")
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is False
+    assert "line 1" in result["message"]
+
+
 # ===========================================================================
 # 2. handlers_check -- check_auto_detection
 # ===========================================================================
@@ -236,6 +275,51 @@ def test_no_orchestration_in_docstring():
     result = check_no_orchestration(content, _lines(content))
     assert result is not None
     assert result["passed"] is True
+
+
+def test_no_orchestration_fstring_guard_text_not_flagged():
+    """An import-guard error message built from an f-string is not a real import.
+
+    Regression test: apps/handlers/__init__.py raises ImportError with help text
+    like `f"    from {MY_BRANCH}.apps.modules.<module> import <function>\\n"` —
+    the old text-matching check flagged this guard text as orchestration.
+    """
+    content = (
+        "MY_BRANCH = 'aipass.seedgo'\n"
+        "def guard():\n"
+        "    raise ImportError(\n"
+        '        f"    from {MY_BRANCH}.apps.modules.<module> import <function>\\n"\n'
+        "    )\n"
+    )
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_no_orchestration,
+    )
+
+    result = check_no_orchestration(content, _lines(content))
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_no_orchestration_flags_real_import_alongside_guard_text():
+    """A real module import is still caught even when guard text sits nearby."""
+    content = (
+        "from aipass.seedgo.apps.modules.scanner import scan_all\n"
+        "\n"
+        "def guard():\n"
+        "    raise ImportError(\n"
+        '        f"    from aipass.seedgo.apps.modules.<module> import <function>\\n"\n'
+        "    )\n"
+    )
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_no_orchestration,
+    )
+
+    result = check_no_orchestration(content, _lines(content))
+    assert result is not None
+    assert result["passed"] is False
+    assert "line 1" in result["message"]
 
 
 # ===========================================================================

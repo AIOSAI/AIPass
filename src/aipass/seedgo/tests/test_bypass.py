@@ -222,6 +222,111 @@ def test_get_deprecated_patterns_returns_dict():
 
 
 # ---------------------------------------------------------------------------
+# Tests -- .seedgoignore engine (load_ignore_entries / is_seedgo_ignored)
+# ---------------------------------------------------------------------------
+
+
+def test_global_default_ignores_tools_dir_with_no_dotfile(tmp_path):
+    """Global default (tools/) applies branch-wide even with zero .seedgoignore files."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+    tools_file = tmp_path / "apps" / "tools" / "scratch.py"
+    tools_file.parent.mkdir(parents=True)
+    tools_file.write_text("pass", encoding="utf-8")
+    normal_file = tmp_path / "apps" / "modules" / "real.py"
+    normal_file.parent.mkdir(parents=True)
+    normal_file.write_text("pass", encoding="utf-8")
+
+    assert is_seedgo_ignored(str(tools_file), tmp_path) is True
+    assert is_seedgo_ignored(str(normal_file), tmp_path) is False
+
+
+def test_seedgo_ignore_dotfile_scoped_to_its_own_directory(tmp_path):
+    """A .seedgoignore dropped in a subdir only affects that subdir's subtree, not siblings."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+    scratch_dir = tmp_path / "apps" / "handlers" / "experiment"
+    scratch_dir.mkdir(parents=True)
+    (scratch_dir / ".seedgoignore").write_text("*.draft.py\n", encoding="utf-8")
+    (scratch_dir / "wip.draft.py").write_text("pass", encoding="utf-8")
+
+    sibling_dir = tmp_path / "apps" / "handlers" / "other"
+    sibling_dir.mkdir(parents=True)
+    (sibling_dir / "wip.draft.py").write_text("pass", encoding="utf-8")
+
+    assert is_seedgo_ignored(str(scratch_dir / "wip.draft.py"), tmp_path) is True
+    assert is_seedgo_ignored(str(sibling_dir / "wip.draft.py"), tmp_path) is False
+
+
+def test_seedgo_ignore_supports_gitignore_style_patterns(tmp_path):
+    """Comments, blank lines, and negation follow standard gitignore semantics."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+    (tmp_path / ".seedgoignore").write_text(
+        "\n".join(["# comment", "", "scratch/", "!scratch/keep_me.py"]),
+        encoding="utf-8",
+    )
+    scratch_dir = tmp_path / "scratch"
+    scratch_dir.mkdir()
+    (scratch_dir / "throwaway.py").write_text("pass", encoding="utf-8")
+    (scratch_dir / "keep_me.py").write_text("pass", encoding="utf-8")
+
+    assert is_seedgo_ignored(str(scratch_dir / "throwaway.py"), tmp_path) is True
+    assert is_seedgo_ignored(str(scratch_dir / "keep_me.py"), tmp_path) is False
+
+
+def test_seedgo_ignore_nested_scopes_both_apply(tmp_path):
+    """A nested .seedgoignore adds to (not replaces) any ancestor .seedgoignore scopes."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+    (tmp_path / ".seedgoignore").write_text("*.rootskip\n", encoding="utf-8")
+    child_dir = tmp_path / "apps" / "child"
+    child_dir.mkdir(parents=True)
+    (child_dir / ".seedgoignore").write_text("*.childskip\n", encoding="utf-8")
+    (child_dir / "a.rootskip").write_text("pass", encoding="utf-8")
+    (child_dir / "b.childskip").write_text("pass", encoding="utf-8")
+    (child_dir / "c.py").write_text("pass", encoding="utf-8")
+
+    assert is_seedgo_ignored(str(child_dir / "a.rootskip"), tmp_path) is True
+    assert is_seedgo_ignored(str(child_dir / "b.childskip"), tmp_path) is True
+    assert is_seedgo_ignored(str(child_dir / "c.py"), tmp_path) is False
+
+
+def test_is_seedgo_ignored_path_outside_branch_root_returns_false(tmp_path):
+    """A file outside branch_root cannot be resolved to a relative path — treated as not ignored."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
+    branch_root = tmp_path / "branch"
+    branch_root.mkdir()
+    outside_file = tmp_path / "elsewhere" / "file.py"
+    outside_file.parent.mkdir()
+    outside_file.write_text("pass", encoding="utf-8")
+
+    assert is_seedgo_ignored(str(outside_file), branch_root) is False
+
+
+def test_load_ignore_entries_default_only_when_no_dotfiles(tmp_path):
+    """With no .seedgoignore files present, only the global default scope is returned."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import load_ignore_entries
+
+    entries = load_ignore_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0][0] == ""
+
+
+def test_is_seedgo_ignored_accepts_precomputed_entries(tmp_path):
+    """Passing pre-loaded entries skips the internal reload — same result as omitting it."""
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
+
+    tools_file = tmp_path / "tools" / "scratch.py"
+    tools_file.parent.mkdir(parents=True)
+    tools_file.write_text("pass", encoding="utf-8")
+
+    entries = load_ignore_entries(tmp_path)
+    assert is_seedgo_ignored(str(tools_file), tmp_path, entries) is True
+
+
+# ---------------------------------------------------------------------------
 # Tests -- utils.is_bypassed name-scoped bypass
 # ---------------------------------------------------------------------------
 

@@ -48,6 +48,10 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
 
     from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+        is_seedgo_ignored as real_is_seedgo_ignored,
+        load_ignore_entries as real_load_ignore_entries,
+    )
 
     bypass_pkg = MagicMock()
     bypass_utils = MagicMock()
@@ -55,6 +59,8 @@ def _mock_infrastructure(monkeypatch):
     bypass_pkg.utils = bypass_utils
     bypass_ignore = MagicMock()
     bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
+    bypass_ignore.is_seedgo_ignored = real_is_seedgo_ignored
+    bypass_ignore.load_ignore_entries = real_load_ignore_entries
     bypass_pkg.ignore_handler = bypass_ignore
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)

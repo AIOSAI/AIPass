@@ -22,6 +22,11 @@ def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure imports for checklist."""
     import sys
 
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+        is_seedgo_ignored as real_is_seedgo_ignored,
+        load_ignore_entries as real_load_ignore_entries,
+    )
+
     mock_logger = MagicMock()
     mock_console = MagicMock()
     mock_error = MagicMock()
@@ -66,6 +71,12 @@ def _mock_infrastructure(monkeypatch):
     bypass_mod.get_branch_from_path = MagicMock(return_value=None)
     bypass_mod.load_bypass_rules = MagicMock(return_value=[])
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", bypass_mod)
+
+    ignore_mod = MagicMock()
+    ignore_mod.is_seedgo_ignored = real_is_seedgo_ignored
+    ignore_mod.load_ignore_entries = real_load_ignore_entries
+    bypass_pkg.ignore_handler = ignore_mod
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", ignore_mod)
 
     # Force re-import
     monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
@@ -220,6 +231,31 @@ def test_run_checklist_prototype_marker_skips(tmp_path, monkeypatch):
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert "prototype" in results[0]["detail"].lower()
+
+
+def test_run_checklist_seedgo_ignore_skips(tmp_path, monkeypatch):
+    """A file under apps/tools/ is skipped via the global .seedgoignore default."""
+    import sys
+
+    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+
+    branch_mod = MagicMock()
+    branch_mod.get_branch_from_path = MagicMock(return_value={"path": str(tmp_path)})
+    branch_mod.load_bypass_rules = MagicMock(return_value=[])
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", branch_mod)
+
+    from aipass.seedgo.apps.modules.checklist import run_checklist
+
+    tools_dir = tmp_path / "apps" / "tools"
+    tools_dir.mkdir(parents=True)
+    f = tools_dir / "scratch.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    results = run_checklist(str(f))
+    assert len(results) == 1
+    assert results[0]["passed"] is True
+    assert "seedgoignore" in results[0]["detail"].lower()
 
 
 def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):

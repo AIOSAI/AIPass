@@ -28,6 +28,11 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
 
+# Cross-branch/cross-package handler imports are import-statement checks, so a
+# violation hiding in a package marker file must not be invisible to the audit
+# the way it would be for content checkers (dead code, naming, etc.).
+INCLUDE_INIT_FILES = True
+
 
 def _find_registry() -> Path:
     """Find AIPASS_REGISTRY.json by walking up from this file's location."""

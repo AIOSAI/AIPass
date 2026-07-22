@@ -11,6 +11,14 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**fix(seedgo)** — checker accuracy arc (S330): AST-based import analysis
+lands in the checkers (dead_code, encapsulation, handlers, readme,
+test_quality, unused_function) — 13 false positives eliminated fleet-wide,
+2 real hooks imports that legitimately bypass the pattern documented instead
+of suppressed. branch_audit, checklist and ignore_handler aligned; provider
+hooks snapshot fixture refreshed; stale bypass entries for deleted tools
+purged across branches (devpulse, memory, seedgo, hooks). Fleet audit 100%.
+
 **feat(hooks)** — hook sound layer + temporal grounding. Sounds now mirror
 the log across the hook fleet (prompt, lifecycle, notification, security
 handlers) — audible liveness for the whole layer, verified live (2465 green,
