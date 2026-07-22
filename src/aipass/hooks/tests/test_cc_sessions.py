@@ -2,7 +2,10 @@
 
 import json
 import os
+import sys
 from unittest.mock import patch
+
+import pytest
 
 from aipass.hooks.apps.modules import cc_sessions
 
@@ -30,15 +33,15 @@ class TestIsPidAlive:
 
 
 class TestProcStartTicks:
+    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
     def test_current_process_returns_value_on_linux(self):
-        with patch("sys.platform", "linux"):
-            result = cc_sessions._proc_start_ticks(os.getpid())
+        result = cc_sessions._proc_start_ticks(os.getpid())
         assert result is not None
         assert result.isdigit()
 
+    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
     def test_matches_raw_proc_stat_field(self):
-        with patch("sys.platform", "linux"):
-            result = cc_sessions._proc_start_ticks(os.getpid())
+        result = cc_sessions._proc_start_ticks(os.getpid())
         from pathlib import Path
 
         raw = Path(f"/proc/{os.getpid()}/stat").read_text(encoding="utf-8")
