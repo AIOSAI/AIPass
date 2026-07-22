@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from aipass.prax import logger
@@ -302,10 +303,47 @@ def _handle_close_pr(args: list[str]) -> dict:
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
 
+def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
+    """Joint-decision gate: merges must never happen accidentally (DPLAN-0256).
+
+    Returns None when the merge may proceed, or a refusal/abort result dict.
+    Order matters: an explicit --confirm always passes; otherwise a real
+    terminal gets an interactive y/N prompt; headless callers are refused.
+    """
+    if confirmed:
+        json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
+        return None
+
+    if sys.stdin.isatty():
+        answer = input(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+        if answer.strip().lower() in ("y", "yes"):
+            json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-yes"})
+            return None
+        json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-abort"})
+        return {"stdout": "", "stderr": f"Merge of PR #{pr_number} aborted at prompt.", "exit_code": 1}
+
+    json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "headless-refused"})
+    logger.info("merge gate: refused headless merge of PR #%s by %s (no --confirm)", pr_number, caller)
+    return {
+        "stdout": "",
+        "stderr": (
+            f"Merge of PR #{pr_number} requires explicit confirmation — merges are a joint decision.\n"
+            f"Re-run once agreed: drone @git merge {pr_number} --confirm"
+        ),
+        "exit_code": 1,
+    }
+
+
 def _handle_merge(args: list[str], caller: str) -> dict:
     """Handle the merge subcommand (owner-tier, auth pre-checked)."""
-    if not args:
-        return {"stdout": "", "stderr": "Usage: drone @git merge <PR#>", "exit_code": 1}
+    confirmed = "--confirm" in args
+    pr_args = [a for a in args if not a.startswith("--")]
+    if not pr_args:
+        return {"stdout": "", "stderr": "Usage: drone @git merge <PR#> [--confirm]", "exit_code": 1}
+
+    refusal = _confirm_merge(pr_args[0], caller, confirmed)
+    if refusal is not None:
+        return refusal
 
     try:
         from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
@@ -313,7 +351,7 @@ def _handle_merge(args: list[str], caller: str) -> dict:
         logger.error("Failed to import devpulse_ops merge plugin: %s", exc)
         return {"stdout": "", "stderr": f"devpulse_ops plugin not available: {exc}", "exit_code": 1}
 
-    result = merge_pr(args[0], caller)
+    result = merge_pr(pr_args[0], caller)
     if result["success"]:
         return {"stdout": result["message"], "stderr": "", "exit_code": 0}
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
@@ -637,8 +675,10 @@ def get_help(command: str | None = None) -> str:
         return "git unlock --force — Force-release the PR lock [owner]\n"
     if command == "merge":
         return (
-            "git merge <PR#> — Merge a PR and sync local main [owner]\n"
+            "git merge <PR#> [--confirm] — Merge a PR and sync local main [owner]\n"
             "  Runs gh pr merge --merge --delete-branch, then git pull --rebase.\n"
+            "  Joint-decision gate: terminal sessions get a y/N prompt; headless\n"
+            "  callers must pass --confirm or the merge is refused.\n"
         )
     if command == "smart-sync":
         return "git smart-sync — Fetch origin and rebase if behind [owner]\n"
@@ -686,7 +726,7 @@ def get_help(command: str | None = None) -> str:
         "  dev-pr <desc>          Push dev and create PR to main\n"
         "  delete-branch <name>   Delete a remote branch\n"
         "  close-pr <number>      Close a PR\n"
-        "  merge <PR#>            Merge a PR\n"
+        "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
         "  smart-sync             Fetch + rebase if behind\n"
         "  unlock --force         Force-release the PR lock\n"

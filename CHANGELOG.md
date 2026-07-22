@@ -11,6 +11,15 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**feat(drone)** — joint-decision gate on `drone @git merge` (DPLAN-0256,
+Patrick ruling S330: merges are always done together, never accidental).
+The gate sits in `_handle_merge` before the plugin import — `merge_pr()` is
+unreachable without confirmation. A real terminal gets an interactive y/N
+prompt; headless callers (agent Bash) are refused unless `--confirm` is
+passed explicitly. Every gate decision (confirm / tty-yes / tty-abort /
+headless-refused) is logged via json_handler. 6 new tests (86 green),
+live-fired refusal verified, seedgo 31/31.
+
 **feat(skills)** — telegram user_message_relay joins the sound layer: relay
 events now carry their own sound key so an inbound user message is audible
 like every other hook event (59/59 + 252 green).

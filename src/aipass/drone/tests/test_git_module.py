@@ -1471,3 +1471,91 @@ class TestScopeFooter:
                     result = handle_command("diff", ["--all"])
 
         assert "showing drone scope" not in result["stdout"]
+
+
+# ===========================================================================
+# Merge joint-decision gate (DPLAN-0256)
+# ===========================================================================
+
+_MERGE_PR = "aipass.drone.apps.plugins.devpulse_ops.merge_plugin.merge_pr"
+_MERGE_OK = {
+    "success": True,
+    "pr_number": "123",
+    "title": "t",
+    "merge_commit": "abc123",
+    "message": "PR #123 merged: t (abc123)",
+}
+
+
+class TestMergeGate:
+    """merge must never run without explicit confirmation."""
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_headless_without_confirm_refused(self, _mock_auth: MagicMock) -> None:
+        """Non-TTY caller without --confirm is refused before the plugin loads."""
+        with patch(_MERGE_PR) as mock_merge:
+            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                result = handle_command("merge", ["123"])
+
+        assert result["exit_code"] == 1
+        assert "requires explicit confirmation" in result["stderr"]
+        assert "--confirm" in result["stderr"]
+        mock_merge.assert_not_called()
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_confirm_flag_proceeds(self, _mock_auth: MagicMock) -> None:
+        """--confirm merges without prompting, even headless."""
+        with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
+            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                result = handle_command("merge", ["123", "--confirm"])
+
+        assert result["exit_code"] == 0
+        mock_merge.assert_called_once_with("123", "devpulse")
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_confirm_flag_position_agnostic(self, _mock_auth: MagicMock) -> None:
+        """--confirm before the PR number still resolves the right PR."""
+        with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
+            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = False
+                result = handle_command("merge", ["--confirm", "123"])
+
+        assert result["exit_code"] == 0
+        mock_merge.assert_called_once_with("123", "devpulse")
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_tty_yes_proceeds(self, _mock_auth: MagicMock) -> None:
+        """Interactive terminal answering y merges."""
+        with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
+            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = True
+                with patch("builtins.input", return_value="y"):
+                    result = handle_command("merge", ["123"])
+
+        assert result["exit_code"] == 0
+        mock_merge.assert_called_once_with("123", "devpulse")
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_tty_default_aborts(self, _mock_auth: MagicMock) -> None:
+        """Interactive terminal hitting enter (default N) aborts."""
+        with patch(_MERGE_PR) as mock_merge:
+            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
+                mock_stdin.isatty.return_value = True
+                with patch("builtins.input", return_value=""):
+                    result = handle_command("merge", ["123"])
+
+        assert result["exit_code"] == 1
+        assert "aborted" in result["stderr"]
+        mock_merge.assert_not_called()
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_confirm_without_pr_number_is_usage_error(self, _mock_auth: MagicMock) -> None:
+        """--confirm alone (no PR number) is a usage error, not a merge."""
+        with patch(_MERGE_PR) as mock_merge:
+            result = handle_command("merge", ["--confirm"])
+
+        assert result["exit_code"] == 1
+        assert "Usage" in result["stderr"]
+        mock_merge.assert_not_called()
