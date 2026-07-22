@@ -552,7 +552,9 @@ class TestGitModuleRouting:
         proc.stdout = "ok\n"
         mock_run.return_value = proc
 
-        result = handle_command("merge", ["42"])
+        # --confirm satisfies the joint-decision gate (DPLAN-0256); headless
+        # merge without it is refused before routing reaches merge_pr.
+        result = handle_command("merge", ["42", "--confirm"])
         assert result["exit_code"] == 0
 
     @patch(
