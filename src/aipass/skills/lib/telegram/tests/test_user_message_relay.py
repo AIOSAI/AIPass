@@ -271,6 +271,24 @@ class TestHandle:
         assert result["exit_code"] == 0
         mock_send.assert_called_once_with("123:FAKETOKEN", 42, "hello world")
 
+    def test_happy_path_has_sound_key(self, bot_dirs):
+        with patch.object(relay_mod, "send_user_message", return_value=True):
+            result = handle({"prompt": "hello world", "cwd": str(bot_dirs["work"])})
+        assert result["sound"] == "user message relay"
+
+    def test_send_failure_no_sound_key(self, bot_dirs):
+        with patch.object(relay_mod, "send_user_message", return_value=False):
+            result = handle({"prompt": "hello world", "cwd": str(bot_dirs["work"])})
+        assert "sound" not in result
+
+    def test_skips_no_bot_found_no_sound_key(self, tmp_path):
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", tmp_path / "nope1"),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "nope2"),
+        ):
+            result = handle({"prompt": "hello", "cwd": "/tmp/nowhere"})
+        assert "sound" not in result
+
     def test_updates_dedup_hash_on_success(self, bot_dirs):
         with patch.object(relay_mod, "send_user_message", return_value=True):
             handle({"prompt": "hello", "cwd": str(bot_dirs["work"])})

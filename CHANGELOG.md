@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [2026-07-21]
 
+**feat(skills)** — telegram user_message_relay joins the sound layer: relay
+events now carry their own sound key so an inbound user message is audible
+like every other hook event (59/59 + 252 green).
+
 **fix(devpulse)** — watchdog stall threshold 120s → 300s: the 120s
 no-JSONL-activity heuristic fired `[watchdog.stall]` on healthy agents doing
 long tool calls; 300s matches observed real-stall behavior (verified live
