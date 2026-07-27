@@ -13,10 +13,9 @@ class-aware update, and backward compatibility.
 """
 
 import json
-
-import pytest
 from pathlib import Path
 
+import pytest
 
 # =============================================================================
 # CLASS REGISTRY TESTS
@@ -172,6 +171,7 @@ class TestClassAwareUpdate:
     def test_update_cli_accepts_class_with_all(self):
         """update aipass_framework --all should parse correctly and call update_all with class filter."""
         from unittest.mock import patch
+
         from aipass.spawn.apps.modules.update import handle_update
 
         # Mock update_all to isolate from real branch state
