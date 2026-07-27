@@ -220,6 +220,16 @@ class TestTemplateStructure:
         passport = json.loads((tpl / ".trinity" / "passport.json").read_text())
         assert passport["identity"]["citizen_class"] == "{{CITIZEN_CLASS}}"
 
+    @pytest.mark.parametrize("class_name", ["aipass_framework", "project_agent"])
+    def test_template_passport_has_traits_and_email_placeholders(self, class_name):
+        """Agent template passports reference TRAITS and EMAIL — unreferenced, both are built and discarded."""
+        from aipass.spawn.apps.handlers.class_registry import get_template_dir
+
+        tpl = get_template_dir(class_name)
+        passport = json.loads((tpl / ".trinity" / "passport.json").read_text())
+        assert passport["identity"]["traits"] == "{{TRAITS}}"
+        assert passport["branch_info"]["email"] == "{{EMAIL}}"
+
     def test_no_agent_template_dir(self):
         """Old agent.template directory should not exist."""
         spawn_root = Path(__file__).parents[1]
@@ -285,6 +295,36 @@ class TestAgentScaffoldContent:
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text())
         assert passport["identity"]["role"] == "Data Analyst"
+
+    def test_created_agent_passport_has_traits(self, tmp_path):
+        """Passport should include the agent's traits if provided."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "traits_test"
+        _spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        assert passport["identity"]["traits"] == "curious, terse"
+
+    def test_created_agent_passport_traits_empty_without_flag(self, tmp_path):
+        """Omitting traits leaves an empty string — the identity hook skips the line when falsy."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "no_traits_test"
+        _spawn_agent(str(target), purpose="Testing default")
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        assert passport["identity"]["traits"] == ""
+
+    def test_created_agent_passport_has_email(self, tmp_path):
+        """Passport carries the branch address, so identity does not render 'Email: unknown'."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "email_test"
+        _spawn_agent(str(target), purpose="Testing email")
+
+        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        assert passport["branch_info"]["email"] == "@email_test"
 
 
 # =============================================================================
