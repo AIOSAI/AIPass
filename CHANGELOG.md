@@ -11,6 +11,15 @@ PyPI version — not the changelog header.
 
 ## [2026-07-28]
 
+**fix(api)** — Google credential refresh adopts the transient-vs-structural
+log split (error 78cd43aa, 324 occurrences): `TransportError` (network/DNS
+blips) now logs WARNING; genuine credential failures (invalid_grant,
+revoked token) stay ERROR for the medic pipeline — same convention as the
+backup Drive-sync fix. Plus a README Known Issues note: extras added after
+a venv was built need a setup.sh re-run to appear. openai stays in `[llm]`
+(api's core-vs-extra call — plumbing not product). 516 tests green,
+pyright 0, seedgo 100%. Built by @api, devpulse-verified.
+
 **fix(backup+setup)** — Drive sync outage root-caused + made medic-visible
 (Patrick escalation from the MacBook): Drive sync died 2026-07-17 when a
 setup.sh run wiped the venv — the google libraries
