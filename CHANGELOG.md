@@ -9,7 +9,251 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-27]
+
+**feat(spawn)** — passport templates now populate `traits` and `email`
+(PR #710, first external contribution — thanks @slaguru666): `--traits` and
+the branch address were computed by spawn's placeholder builder and silently
+discarded because no template referenced `{{TRAITS}}`/`{{EMAIL}}`; every
+agent's identity hook rendered `Email: unknown`. Two lines per template
+(`aipass_framework` + `project_agent`), registry regenerated (also drops
+seven stale `.pytest_cache` entries), 5 regression tests. Verified
+clean-room + Docker (Ubuntu 24.04): spawn suite 363 green both, all five
+new tests confirmed red pre-fix. No-flag agents render exactly as before.
+
+**fix(skills)** — Telegram 409 conflict fix v1.4.1: base bot session-conflict
+handling + scheduler bot hardening (base_bot, scheduler_bot), closing the
+live outage where a stale Telegram session held getUpdates and locked
+users out. Skills suite 1090 green.
+
+**feat(ai_mail)** — wake v2 (DPLAN-0261 groundwork): daemon self-wake support —
+the step-3 manager gate now recognizes `.daemon/schedule.json` as
+self-authored consent, so a branch's own scheduled job may wake a manager
+while dispatch/manual manager wakes stay blocked. Test + live-verified;
+ai_mail suite 780 green.
+
+**docs** — CONTRIBUTING.md: external PRs target `dev` (main only receives
+tested release trains — gap surfaced by PR #710); template-registry
+regeneration note. CROSS_OS_TESTING.md touch-up. devpulse `.daemon/`
+schedule tracked (disabled), consistent with other branches.
+
+## [2026-07-21]
+
+**feat(prax)** — Commons live social feed in the monitor (DPLAN-0257, Patrick
+ask verbatim): `drone @prax monitor run commons` now streams The Commons'
+chatter — posts, comments, votes, reactions — room-tagged with mood coloring,
+monitor-style. ~10-event backfill on open, then 1.5s id-cursor polling.
+Read-only by construction (`mode=ro` sqlite URI — write attempt refused,
+verified live); commons stays the only writer, zero commons-side changes.
+Branch-log tail still reachable via `monitor run commons --logs`; mixed branch
+lists unchanged. `--relay` rides the existing Telegram relay path.
+33 new tests, prax suite 1065 green, audit 100% (52 files). Door-tested live:
+devpulse posted/replied/reacted while the feed streamed every event.
+Built by @prax.
+
+**fix(hooks)** — two DPLAN-0253 backlog hardenings (DPLAN-0256 clear):
+engine handler timeout + presence_gate PID-reuse defense. `_run_handler` now
+runs handler-type hooks on a daemon thread joined with the hooks.json
+`timeout` field (default 30s) — a hung handler returns TIMEOUT loud
+(engine.jsonl + sound) and the event moves on; daemon thread chosen over
+ThreadPoolExecutor so a stuck orphan can never hang interpreter exit.
+presence_gate occupancy no longer trusts `os.kill(pid, 0)` alone:
+`procStart` (CC session file) is matched against `/proc/<pid>/stat` field 22
+so a kernel-recycled PID can't impersonate a dead session — closes the gap
+before observe-only ever flips to enforcement. Missing procStart / non-Linux
+falls back to liveness-only, logged. 15 new tests, suite 1272 green,
+seedgo 31/31 both files. Built by @hooks.
+
+**fix(trigger)** — runaway-log alerts get the 24h TTL every other mute already
+had (DPLAN-0256 backlog clear): `_write_alert()` hardcoded `expires_at: None`,
+so alerts.json entries nagged forever while medic branch mutes self-expired.
+New `DEFAULT_ALERT_TTL_SECONDS = 86400` (matches medic_state's
+`DEFAULT_MUTE_SECONDS`) with a `forever` escape hatch threaded through
+`handle_runaway_log_detected()`. 2 new tests, trigger suite 621 green,
+audit 100%. Built by @trigger.
+
+**feat(drone)** — joint-decision gate on `drone @git merge` (DPLAN-0256,
+Patrick ruling S330: merges are always done together, never accidental).
+The gate sits in `_handle_merge` before the plugin import — `merge_pr()` is
+unreachable without confirmation. A real terminal gets an interactive y/N
+prompt; headless callers (agent Bash) are refused unless `--confirm` is
+passed explicitly. Every gate decision (confirm / tty-yes / tty-abort /
+headless-refused) is logged via json_handler. 6 new tests (86 green),
+live-fired refusal verified, seedgo 31/31.
+
+**feat(skills)** — telegram user_message_relay joins the sound layer: relay
+events now carry their own sound key so an inbound user message is audible
+like every other hook event (59/59 + 252 green).
+
+**fix(devpulse)** — watchdog stall threshold 120s → 300s: the 120s
+no-JSONL-activity heuristic fired `[watchdog.stall]` on healthy agents doing
+long tool calls; 300s matches observed real-stall behavior (verified live
+S330). Branch `.claude/settings.local.json` carries the devpulse
+`autoCompactWindow: 350000` dial (Patrick ruling S326 — devpulse compacts
+~292k, dispatched agents stay pinned at 200k).
+
+**fix(seedgo)** — checker accuracy arc (S330): AST-based import analysis
+lands in the checkers (dead_code, encapsulation, handlers, readme,
+test_quality, unused_function) — 13 false positives eliminated fleet-wide,
+2 real hooks imports that legitimately bypass the pattern documented instead
+of suppressed. branch_audit, checklist and ignore_handler aligned; provider
+hooks snapshot fixture refreshed; stale bypass entries for deleted tools
+purged across branches (devpulse, memory, seedgo, hooks). Fleet audit 100%.
+
+**feat(hooks)** — hook sound layer + temporal grounding. Sounds now mirror
+the log across the hook fleet (prompt, lifecycle, notification, security
+handlers) — audible liveness for the whole layer, verified live (2465 green,
+audit 100). New `prompt/temporal.py`: tiny always-on UserPromptSubmit handler
+injecting one line of local date/time/weekday/part-of-day every turn — live
+clock each fire, host timezone via `astimezone()` (clones see their own local
+time). Wired on both wires (`.aipass/hooks.json` + provider manifest).
+
+**feat(aipass)** — `aipass adopt` + shared scaffold refactor: adopt turns an
+existing `projects/` directory into a full AIPass project (registry, resident
+agent, `.aipass`/`.claude` scaffold) — every write additive, nothing existing
+overwritten; unlike `aipass new` it starts from a directory with its own
+content and git history. New `shared/` package (`project_home.py`,
+`scaffold_content.py`) gives init/new/adopt one source of truth per helper —
+`handlers/init/scaffold_content.py` moved there, no per-command copies to
+drift. Proven live adopting aipass-site (doctor 31/0). Spawn template registry
+synced (template bug chain me→spawn→aipass, fixed S329). 786 tests green,
+audit-clean.
+
+## [2026-07-20]
+
+**docs(projects)** — `projects/README.md`: the projects section now ships in
+the repo (the `!projects/README.md` gitignore whitelist existed since the
+aipass-new design but the file was never written). Explains the project model:
+**private by default** — each project is its own local git repo, fully ignored
+by the AIPass repo, and publishing is an explicit opt-in step (Patrick ruling
+2026-07-20). Opens the public roster with **Earmark**
+([AIOSAI/earmark](https://github.com/AIOSAI/earmark)), the first public AIPass
+project — a VS Code read-aloud extension with local Piper TTS and true
+pause/resume, born, built, and published 2026-07-20.
+
+**fix(hooks)** — persistent_alert dedup + loud trust-break banner (5-agent
+trace round follow-ups, DPLAN-0253 tail):
+
+- persistent_alert's once-per-session sound dedup lived in a module-global set,
+  but every bridge call is a fresh process — TTS would have announced on every
+  prompt while any alert was active. Replaced with session+alert-keyed tempdir
+  guard files (context_gauge idiom); banner capped at 10 alerts with an
+  "...and N more" note.
+- Trust-registry breaks are now LOUD: any `.aipass/hooks.json` change breaks
+  the enrolled hash and silently disabled the entire hook layer (bit us live
+  for 2+ hours — tier prompts, security gates, everything dark, one log-file
+  WARNING as the only signal). New `is_hash_mismatch()` distinguishes a
+  genuine break from never-enrolled; `trust_break_banner()` does a
+  config-independent walk+hash check; the engine emits a full-width banner
+  once per prompt via the presence_gate bridge call. No auto-heal —
+  re-enrollment stays a deliberate human checkpoint. Live-fired: hash broken →
+  banner; restored → healthy. 16 new tests, suite 1206 green, seedgo 100%.
+- Go-live day for the whole handler roster: 11/12 manifest entries wired into
+  provider settings by devpulse with Patrick accepting (user_message_relay
+  held: synchronous Telegram call + full prompt text off-machine — needs a
+  background send and an explicit call first). @hooks branch prompt corrected
+  and hardened: two-wires checklist + mandatory provider-wire flag in every
+  build reply.
+
+**feat(hooks)** — auto-compact prep: context gauge + mechanical snapshot
+(DPLAN-0253, built by @hooks, two rounds):
+
+- `context_gauge` (UserPromptSubmit) — reads live context fill from the session
+  transcript every prompt (cheap 50KB tail), resolves the branch's compact
+  window (env > branch `settings.local.json` `autoCompactWindow` > 200k), and
+  injects a "run /prep NOW" nudge at 80% of the compact trigger, escalating at
+  95% — once per threshold per session. Memory prep happens before auto-compact
+  takes the choice away, on every branch including dispatched agents.
+- `pre_compact_prep` (PreCompact) — stamps a mechanical AUTO-COMPACT SNAPSHOT
+  session entry into the compacting branch's `.trinity/local.json`: context
+  fill %, active dispatch locks, open plans, git state, inbox unread. Templated
+  from live state, defensive (malformed memory = log + skip, never raises).
+- Shared `context_window` module: bounded transcript tail reader + per-branch
+  window resolver. 36 new tests; suite 1190 green; seedgo 100%.
+- Round 2 root-cause fix: handlers wired only in `.aipass/hooks.json` never
+  fire on name-scoped events — UserPromptSubmit and PreCompact invoke the
+  bridge per-handler from provider settings. Both handlers now have
+  `provider_manifest.json` entries; @hooks' branch prompt corrected (it taught
+  the old one-entry-per-event model) with a "new handler? check the provider
+  wire" reminder. Go-live needs the user's `~/.claude/settings.json` synced
+  from the manifest + fresh sessions.
+
+## [2026-07-19]
+
+**feat(ai_mail)** — dispatched agents default to Sonnet 5 (Patrick ruling S326):
+
+- wake.py model resolution passes bare aliases (`sonnet`/`opus`/`haiku`)
+  straight to the Claude CLI, which resolves latest-in-class — the pinned-ID
+  MODEL_MAP is gone and can never go stale again. Default flips opus → sonnet.
+- dispatch_monitor pins `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` on every
+  spawned agent — Sonnet 5 is 1M-context native, and without the pin every
+  dispatched agent would silently inherit a 1M window. E2E-proven: a live
+  dispatched probe reported `claude-sonnet-5` + `WINDOW=200000` from inside.
+- Follow-up landed same morning: the "daemon gap" was a name collision —
+  the unpatched `spawn_agent()` was ai_mail's own inbox-poller
+  (`handlers/dispatch/daemon.py`), not the @daemon branch. It now passes
+  `--model DEFAULT_MODEL` (imported from wake.py, single source); the 200k pin
+  was already covered via the shared dispatch_monitor wrapper. @daemon's
+  scheduled wakes import `wake_branch` directly and were covered from the start.
+
+**fix(skills)** — Telegram poll 5xx now triggers network backoff (medic loop,
+autonomous @skills fix): `HTTPError` ≥500 in `poll_updates` raises
+`_NetworkPollError` instead of falling through to rapid-fire retry; 4xx still
+logs and returns. Three new tests (502/503 backoff, 429 stays out).
+
+**fix(spawn, commons, prax, hooks)** — S304 audit fix campaign, Track A
+(DPLAN-0250, four owner dispatches verified + committed by devpulse):
+
+- **spawn** — shared `is_protected()` (infrastructure floor / registry owner /
+  active passport) now guards both pollution repair and branch delete; repair no
+  longer flags the live `src/aipass/aipass` branch, and deleting a protected or
+  actively-passported branch is refused with the reason.
+- **commons** — branch-name resolution lowercased across all five ops sites
+  (trade/artifact/profile/welcome/search) to match identity normalization;
+  gifting and trading work again (guards had never matched since mid-June).
+- **prax** — pytest detection now also checks `_pytest` in `sys.modules`, so
+  `patch.dict(os.environ, clear=True)` in test suites can no longer strip the
+  guard and freeze prod-path log handlers into the setup cache.
+- **hooks** — the two static-path JSONL writers (engine diagnostics, telegram
+  delivery log) resolve their path per-write and route to the tmp test dir
+  under pytest; a full 1154-test suite run now adds zero lines to prod logs
+  (marker-bounded proof).
+
+Also: `/prep` now checks the cross-project feedback box every run — the S304
+"unread since April" backlog (F46) is processed to zero and can't silently
+rot again.
+
+**fix(aipass)** — `aipass doctor` no longer invents errors on a healthy repo
+(S304 F14-17): `.backup` and spawn `templates` dirs excluded from the agent
+scan, relative registry paths anchored against the project root instead of the
+caller's CWD (running doctor from inside a branch dir showed 5 fake
+missing-branch errors), and info-severity findings now render as warnings
+instead of pass checkmarks. Remaining findings on this repo are genuine.
+
+**fix(flow)** — registry aggregate writes are lock+atomic (S304 F85 residual):
+`save_branch_registry` and `save_central` were bare `open`+`json.dump`; both now
+use the O_EXCL lockfile + temp-file + `os.replace` pattern from the earlier
+`save_registry.py` fix. Proven with a 6-process concurrent-write hammer. Also
+investigated (N1): FPLAN-0313/0314 closed blank because
+`is_template_content()`'s line-count threshold fires before its bracket-marker
+check on default templates — guard fix queued, registry annotation is the
+maintainer's call.
+
 ## [2026-07-18]
+
+**fix(tests)** — the immortal `MagicMock/LOG_FILE/` directory is dead: a hooks
+engine test patched `diagnostics.LOG_FILE` with a bare Mock, and prax's
+`append_jsonl` turned the mock's fspath into a real `mkdir` — every test run
+re-minted an empty `MagicMock/LOG_FILE/` in the runner's CWD (found in repo
+root, devpulse, and hooks). Test now patches a real tmp path; 100/100 green,
+clean-CWD run verified to mint nothing.
+
+**docs** — merge playbook gains a site drift-check step (DPLAN-0249 follow-on):
+every merge run now asks whether install commands, onboarding flow, agent count,
+or the platform/CLI story changed — if yes, aipass.ai must be updated the same
+day. Codifies the S323 ruling that the site is a projection of the README, never
+its own source of facts. Template edit by @flow, one checklist line in the
+post-merge section.
 
 **docs** — root README v3 restructure (DPLAN-0249): single-funnel story with
 zero duplicated commands (install, `aipass new`/`init run`, trees, drone

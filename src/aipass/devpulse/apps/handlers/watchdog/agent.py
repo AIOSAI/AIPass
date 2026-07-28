@@ -423,7 +423,12 @@ class StallTracker:
     (#634 part 2). The verbose trail stays on ``_stderr`` + logger.
     """
 
-    STALL_THRESHOLD = 120.0
+    # Quiet spans with zero JSONL output are routine, not stalls: a model composing
+    # a long response writes nothing until the turn completes, and compaction is one
+    # multi-minute silent API call. 120s false-fired on every stall of S329 (8/8);
+    # 300s clears normal turns and most compactions while a wedged agent still
+    # surfaces well inside a long watch.
+    STALL_THRESHOLD = 300.0
     # A single tool call held in-flight this long is surfaced as a soft advisory
     # (heavy op or a hung tool). Below the 600s default timeout so long watches
     # get a mid-flight heads-up instead of waiting on the timeout.
@@ -516,7 +521,7 @@ def watch_agent(
         poll_interval: Seconds between checks. Default 5.0 — the per-tick work (lock
             stat, PID liveness, one-dir JSONL size scan) is cheap, so a tight cadence
             just burns CPU. 5s keeps completion latency invisible on multi-minute
-            dispatches while the 120s stall threshold has ample resolution.
+            dispatches while the 300s stall threshold has ample resolution.
 
     Returns:
         dict with keys: woke, reason, elapsed, agent_state, exit_code, agent_id.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scheduler_bot.py
 # Description: Dedicated Telegram bot for the daemon's job queue — announce/query only
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-07-23
 # =============================================
 
 """
@@ -180,9 +180,15 @@ class SchedulerBot(BaseBot):
             return
 
         text = f"Hourly Queue Digest\n{'=' * 20}\n\n{self._format_queue(queue_data)}"
+        delivered = True
         for chunk in self.chunk_text(text):
-            self.send_message(self._scheduler_chat_id, chunk)
-        logger.info("Hourly digest posted")
+            if self.send_message(self._scheduler_chat_id, chunk) is None:
+                delivered = False
+
+        if delivered:
+            logger.info("Hourly digest posted")
+        else:
+            logger.warning("Hourly digest posting failed for one or more chunks")
 
     # =============================================
     # LIFECYCLE

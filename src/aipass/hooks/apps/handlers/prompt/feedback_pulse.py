@@ -87,6 +87,7 @@ def handle(hook_data: dict) -> dict:
 
         cwd = hook_data.get("cwd", "")
         if _is_disabled(cwd or None):
+            logger.info("[HOOKS] feedback_pulse: skipped (disabled via .aipass/feedback_off sentinel)")
             return {"stdout": "", "exit_code": 0}
 
         json_handler.log_operation("feedback_pulse", {"turn": turn})

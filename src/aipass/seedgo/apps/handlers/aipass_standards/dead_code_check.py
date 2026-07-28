@@ -24,6 +24,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 
 AUDIT_SCOPE = "branch_level"
@@ -42,12 +43,17 @@ _SKIP_DIRS = SOURCE_SKIP_DIRS | {"tests", "json_templates"}
 # =============================================
 
 
-def _should_skip(path: Path) -> bool:
-    """Check whether any parent directory component is in the skip set or file is disabled."""
-    return any(part in _SKIP_DIRS for part in path.parts) or is_disabled_file(path.name)
+def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
+    """Check whether any parent directory component is in the skip set, file is
+    disabled, or the path is excluded via .seedgoignore / the global default."""
+    return (
+        any(part in _SKIP_DIRS for part in path.parts)
+        or is_disabled_file(path.name)
+        or is_seedgo_ignored(str(path), branch_root, ignore_entries)
+    )
 
 
-def _collect_scannable_files(apps_dir: Path) -> list[Path]:
+def _collect_scannable_files(apps_dir: Path, branch_root: Path, ignore_entries: list) -> list[Path]:
     """
     Collect .py files from apps/modules/ and apps/handlers/ that should be
     checked for usage.  Skips __init__.py, __pycache__, .archive, etc.
@@ -60,20 +66,20 @@ def _collect_scannable_files(apps_dir: Path) -> list[Path]:
         for py_file in subdir.rglob("*.py"):
             if py_file.name == "__init__.py":
                 continue
-            if _should_skip(py_file):
+            if _should_skip(py_file, branch_root, ignore_entries):
                 continue
             targets.append(py_file)
     return sorted(targets)
 
 
-def _collect_source_text(apps_dir: Path) -> str:
+def _collect_source_text(apps_dir: Path, branch_root: Path, ignore_entries: list) -> str:
     """
     Read ALL .py files under apps/ into a single string for searching.
     This is the corpus we search for references.
     """
     parts: list[str] = []
     for py_file in apps_dir.rglob("*.py"):
-        if _should_skip(py_file):
+        if _should_skip(py_file, branch_root, ignore_entries):
             continue
         try:
             parts.append(py_file.read_text(encoding="utf-8", errors="ignore"))
@@ -266,7 +272,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     entry_point_name = branch_name
 
     # Collect scannable files
-    targets = _collect_scannable_files(apps_dir)
+    ignore_entries = load_ignore_entries(bp)
+    targets = _collect_scannable_files(apps_dir, bp, ignore_entries)
     if not targets:
         result = {
             "passed": True,
@@ -287,7 +294,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         return result
 
     # Build the source corpus (all .py content from apps/)
-    source_text = _collect_source_text(apps_dir)
+    source_text = _collect_source_text(apps_dir, bp, ignore_entries)
 
     # Check each target for references
     total_files = len(targets)

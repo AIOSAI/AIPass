@@ -99,6 +99,7 @@ class TestCompassRecallHandler:
             assert result["exit_code"] == 0
             assert "[GOOD] #56:" in result["stdout"]
             assert "Never hardcode config in prompts" in result["stdout"]
+            assert result["sound"] == "compass recall"
             mock_mark.assert_called_once_with([56])
 
     def test_formats_bad_rating(self, tmp_path):

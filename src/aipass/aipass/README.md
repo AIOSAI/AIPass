@@ -9,6 +9,7 @@ aipass                              # Show available commands
 aipass doctor                       # Check system health
 aipass help what does drone do      # Search branch documentation
 aipass new myapp --template python  # Create a new project
+aipass adopt myapp --dry-run        # Preview adopting an existing projects/ dir
 aipass init                         # Guided setup (10 stages, resumable)
 ```
 
@@ -34,6 +35,7 @@ aipass/
 │   │   ├── init_flow.py                   # 10-stage guided setup
 │   │   ├── install.py                     # aipass install — one-command bootstrap (clone + setup + init)
 │   │   ├── new_project.py                 # aipass new — create projects inside the installation
+│   │   ├── adopt.py                       # aipass adopt — bring an existing projects/ dir into AIPass
 │   │   ├── profile.py                     # User profile read/write
 │   │   ├── trust.py                       # Trust registry — aipass trust / aipass revoke
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
@@ -42,6 +44,7 @@ aipass/
 │   │   ├── handoff_platform/              # Platform-specific handoff detection
 │   │   ├── init/                          # bootstrap.py, scaffold_content.py
 │   │   ├── new_project/                   # Project creation logic (registry, template, scaffold, git init)
+│   │   │   └── adopt.py                   # Project adoption logic (additive scaffold onto an existing dir)
 │   │   ├── json/                          # JSON read/write utilities
 │   │   ├── ping_sweep/                    # Branch reachability verification
 │   │   ├── provider_reconcile.py          # Stale deny-rule detection + fix
@@ -50,7 +53,7 @@ aipass/
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
 │   │   └── ui/                            # Progress bars, menus, banners
 │   └── plugins/
-├── tests/                                 # 756 passing
+├── tests/                                 # 785 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -74,6 +77,9 @@ aipass/
 | `aipass new <name>` | Create a project in projects/ — own git repo, AIPass scaffold, resident agent |
 | `aipass new <name> --template python` | Create with Python template (pyproject + src/) |
 | `aipass new <name> --no-agent` | Create without resident agent |
+| `aipass adopt <name>` | Turn an existing `projects/<name>` directory into a full project — additive scaffold only |
+| `aipass adopt <name> --no-agent` | Adopt without a resident agent |
+| `aipass adopt <name> --dry-run` | Preview what adoption would do, writes nothing |
 | `aipass trust [path]` | Show enrolled projects or enroll a project in the trust registry |
 | `aipass revoke <path>` | Remove a project from the trust registry |
 | `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks) |

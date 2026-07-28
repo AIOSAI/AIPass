@@ -158,6 +158,42 @@ from aipass.seedgo.apps.modules.scanner import scan_all
         result = check_handlers(fp, bypass_rules=bypass)
         assert result["score"] == 100
 
+    def test_handlers_reports_all_forbidden_imports(self, tmp_path: Path) -> None:
+        """A file with two cross-handler imports must report both, not just the first."""
+        handler_dir = tmp_path / "apps" / "handlers" / "mypack"
+        handler_dir.mkdir(parents=True)
+        code = """\
+from aipass.seedgo.apps.handlers.error import error_handler
+from aipass.seedgo.apps.handlers.file import file_handler
+
+def do_stuff():
+    return True
+"""
+        fp = str(handler_dir / "double_violation.py")
+        Path(fp).write_text(code, encoding="utf-8")
+        result = check_handlers(fp)
+        independence = next(c for c in result["checks"] if c["name"] == "Handler independence")
+        assert "line 1" in independence["message"]
+        assert "line 2" in independence["message"]
+
+    def test_handlers_reports_all_orchestration_imports(self, tmp_path: Path) -> None:
+        """A file with two module (orchestration) imports must report both, not just the first."""
+        handler_dir = tmp_path / "apps" / "handlers" / "mypack"
+        handler_dir.mkdir(parents=True)
+        code = """\
+from aipass.seedgo.apps.modules.scanner import scan_all
+from aipass.seedgo.apps.modules.reporter import report_all
+
+def do_stuff():
+    return scan_all()
+"""
+        fp = str(handler_dir / "double_orchestration.py")
+        Path(fp).write_text(code, encoding="utf-8")
+        result = check_handlers(fp)
+        orchestration = next(c for c in result["checks"] if c["name"] == "No orchestration")
+        assert "line 1" in orchestration["message"]
+        assert "line 2" in orchestration["message"]
+
 
 # ===================================================================
 # 3. hardcoded_key_check

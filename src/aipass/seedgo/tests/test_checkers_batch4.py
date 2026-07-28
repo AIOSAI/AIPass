@@ -238,6 +238,21 @@ class TestDeadCodeCheck:
         assert result["score"] == 100
         assert result["passed"] is True
 
+    def test_dead_code_ignores_tools_dir_by_default(self, mock_json, tmp_path: Path) -> None:
+        """Orphan modules under apps/tools/ are skipped via the global .seedgoignore default."""
+        branch = _make_branch(tmp_path)
+        _write_file(
+            branch / "apps" / "tools" / "scratch.py",
+            "def lonely_function():\n    return None\n",
+        )
+        _write_file(
+            branch / "apps" / (branch.name + ".py"),
+            "def handle_command(): pass\n",
+        )
+        result = dead_code_check_branch(str(branch))
+        assert result["score"] == 100
+        assert result["passed"] is True
+
 
 # =============================================
 # 5. test_quality_check (check_branch)
@@ -464,5 +479,18 @@ class TestUnusedFunctionCheck:
         )
         bypass = [{"standard": "unused_function"}]
         result = unused_function_check_branch(str(branch), bypass_rules=bypass)
+        assert result["score"] == 100
+        assert result["passed"] is True
+
+    def test_unused_function_respects_seedgo_ignore_dotfile(self, mock_json, tmp_path: Path) -> None:
+        """A .seedgoignore dropped alongside an unused function's file suppresses the flag."""
+        branch = _make_branch(tmp_path)
+        experiment_dir = branch / "apps" / "handlers" / "experiment"
+        _write_file(experiment_dir / ".seedgoignore", "*\n")
+        _write_file(
+            experiment_dir / "scratch.py",
+            "def never_called():\n    pass\n",
+        )
+        result = unused_function_check_branch(str(branch))
         assert result["score"] == 100
         assert result["passed"] is True

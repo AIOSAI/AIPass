@@ -857,7 +857,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert updated["delivered"] is True
@@ -902,7 +902,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
         assert "delivered" not in updated
@@ -996,7 +996,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert extract_call_count >= 2
         assert pending_file.exists()
         updated = json.loads(pending_file.read_text(encoding="utf-8"))
@@ -1035,7 +1035,7 @@ class TestHandleIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert not pending_file.exists()
 
     def test_already_delivered_skips_fallback(self, tmp_path):
@@ -1532,7 +1532,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
                 ["hello"],
@@ -1552,7 +1552,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "**bold text**",
                 ["**bold text**"],
@@ -1569,7 +1569,7 @@ class TestWriteDeliveryLog:
 
         log_path = tmp_path / "delivery.jsonl"
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", log_path):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=log_path):
             _write_delivery_log(
                 "hello",
                 ["hello"],
@@ -1585,7 +1585,7 @@ class TestWriteDeliveryLog:
         from aipass.hooks.apps.handlers.notification.telegram_response import _write_delivery_log
 
         impossible = Path("/dev/null/impossible/log.jsonl")
-        with patch(LOGGER_PATCH), patch(f"{MOD}._DELIVERY_LOG", impossible):
+        with patch(LOGGER_PATCH), patch(f"{MOD}._get_delivery_log", return_value=impossible):
             _write_delivery_log("hi", ["hi"], [{"idx": 0, "ok": True, "text": "hi"}], "s")
 
 
@@ -1989,7 +1989,7 @@ class TestHandleMirrorIntegration:
                 }
             )
 
-        assert result == {"stdout": "", "exit_code": 0}
+        assert result == {"stdout": "", "exit_code": 0, "sound": "telegram response"}
         assert len(sent_texts) == 1
         assert "You: What is this?" in sent_texts[0]
         assert "This is the answer." in sent_texts[0]

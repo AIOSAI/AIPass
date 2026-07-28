@@ -196,11 +196,6 @@
       "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
     },
     {
-      "file": "tools/triplet_scanner.py",
-      "standard": "deep_nesting",
-      "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
-    },
-    {
       "file": "apps/handlers/aipass_standards/introspection_check.py",
       "standard": "deep_nesting",
       "reason": "3 functions (_find_name_main_block depth 5, _is_no_args_check depth 7, check_content_references depth 5) — deep AST traversal with isinstance chains inherent to pattern detection"

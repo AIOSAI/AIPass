@@ -3,7 +3,7 @@
 # Description: Runaway log event handler with per-file cooldown gating
 # Version: 1.0.0
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-07-21
 # =============================================
 
 """
@@ -24,12 +24,16 @@ Gating:
     - Per-file cooldown (30min default) — independent of medic circuit breaker
     - Branch mute check (reuses TTL mute infrastructure from trigger_config.json)
     - UNKNOWN/missing branch → dispatch to @prax as fallback
+
+Alerts written to .aipass/alerts.json expire after 24h by default (same TTL
+convention as medic_state.py's DEFAULT_MUTE_SECONDS) — pass forever=True to
+skip expiry.
 """
 
 import json
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -71,6 +75,7 @@ _send_email: Optional[Callable[..., bool]] = None
 
 _file_cooldowns: dict[str, float] = {}
 COOLDOWN_SECONDS = 1800
+DEFAULT_ALERT_TTL_SECONDS = 86400  # 24 hours — matches medic_state.py DEFAULT_MUTE_SECONDS
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
@@ -163,7 +168,9 @@ def _write_suppression_log(reason: str, file_path: str, branch: str) -> None:
         _log_warning(f"suppression log write failed ({reason}): {exc}")
 
 
-def _write_alert(file_path: str, severity: str, branch: str, rate: float, duration: float) -> None:
+def _write_alert(
+    file_path: str, severity: str, branch: str, rate: float, duration: float, forever: bool = False
+) -> None:
     """Write an alert entry to .aipass/alerts.json.
 
     Args:
@@ -172,8 +179,10 @@ def _write_alert(file_path: str, severity: str, branch: str, rate: float, durati
         branch: Responsible branch name
         rate: Lines per minute
         duration: Sustained duration in seconds
+        forever: If True, alert never auto-expires (default: 24h TTL)
     """
     try:
+        expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
         alert = {
             "id": str(uuid.uuid4()),
             "source": "prax",
@@ -183,7 +192,7 @@ def _write_alert(file_path: str, severity: str, branch: str, rate: float, durati
                 f"Log file {file_path} producing {rate:.0f} lines/min sustained {duration:.0f}s. Branch: {branch}."
             ),
             "created_at": datetime.now().isoformat(),
-            "expires_at": None,
+            "expires_at": expires_at,
         }
         ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with json_file_lock(ALERTS_FILE):
@@ -204,6 +213,7 @@ def handle_runaway_log_detected(
     sustained_duration_sec: float = 0,
     severity: str = "warning",
     branch: str | None = None,
+    forever: bool = False,
     **kwargs: Any,
 ) -> None:
     """Handle runaway_log_detected event — dispatch to responsible branch.
@@ -217,6 +227,7 @@ def handle_runaway_log_detected(
         sustained_duration_sec: How long the rate has been sustained
         severity: "warning" or "critical"
         branch: Responsible branch name (None/UNKNOWN → dispatch to @prax)
+        forever: If True, the resulting alert never auto-expires (default: 24h TTL)
         **kwargs: Additional event data (ignored)
     """
     try:
@@ -276,7 +287,7 @@ def handle_runaway_log_detected(
         except Exception:
             pass  # Email in inbox as fallback
 
-        _write_alert(file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec)
+        _write_alert(file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever)
         _record_file_dispatch(file_path)
         json_handler.log_operation("runaway_dispatch_sent", {"recipient": recipient, "file": file_path})
 

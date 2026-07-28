@@ -66,6 +66,7 @@ src/aipass/hooks/
 │   ├── sound.py                 # Shared sound utilities (speak, play, mute)
 │   ├── modules/
 │   │   ├── cadence.py           # Prompt injection cadence (every-Nth-turn gating)
+│   │   ├── context_window.py    # Transcript usage reader + per-branch compact-window resolver
 │   │   ├── hook_test.py         # Portable test runner (drone @hooks test)
 │   │   ├── cc_sessions.py       # CC-native session file reader (~/.claude/sessions/<pid>.json)
 │   │   ├── engine.py            # Core dispatch — routes events to handlers
@@ -86,6 +87,8 @@ src/aipass/hooks/
 │   │   │   ├── navmap.py        #   Injects tier1 navmap prompt (periodic)
 │   │   │   ├── identity.py      #   Injects passport identity block
 │   │   │   ├── feedback_pulse.py #  Periodic feedback ask (~10 turns, toggleable)
+│   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact fires (80%/95% of window)
+│   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn
 │   │   │   └── persistent_alert.py # Injects advisory banners from .aipass/alerts.json
 │   │   ├── security/            # Enforcement hooks
 │   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-branch, inbox, diagnostics)
@@ -98,6 +101,7 @@ src/aipass/hooks/
 │   │   │   ├── auto_fix.py      #   Post-edit diagnostics (ruff, pyright, py_compile)
 │   │   │   ├── auto_watchdog.py #   Watchdog arming after dispatch
 │   │   │   ├── compact.py       #   Pre-compact memory archival
+│   │   │   ├── pre_compact_prep.py # Mechanical AUTO-COMPACT SNAPSHOT stamp (fill %, git, locks, plans)
 │   │   │   ├── rollover.py      #   Pre-compact memory rollover
 │   │   │   └── session_start.py #   Cadence reset on new chat / clear (SessionStart)
 │   │   └── notification/        # Sound/alert hooks
@@ -111,7 +115,7 @@ src/aipass/hooks/
 │       └── diagnostics.py       # JSONL logging for hook execution
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1071 tests across 29 test files
+└── tests/                       # 1249 tests across 43 test files
 ```
 
 ## How It Works
@@ -132,13 +136,13 @@ Handlers are called **dynamically at runtime** — the engine uses `importlib.im
 
 | Event | Hooks | Description |
 |---|---|---|
-| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, feedback_pulse, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + feedback + auto-process + TG mirror |
+| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + feedback + context gauge + temporal + auto-process + TG mirror |
 | PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, registry_gate | Security gates + guardrails + sound |
 | PostToolUse | auto_fix, auto_watchdog | Diagnostics + watchdog |
 | SubagentStop | subagent_gate | Seedgo validation |
 | Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
 | Notification | announce | Announcement tone |
-| PreCompact | compact, rollover | Memory archival + rollover |
+| PreCompact | compact, rollover, pre_compact_prep | Memory archival + rollover + mechanical snapshot stamp |
 
 ## Git Gate
 

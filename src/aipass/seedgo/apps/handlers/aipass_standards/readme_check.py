@@ -31,6 +31,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 # Audit scope: entry points only (apps/{name}.py)
 AUDIT_SCOPE = "entry_point"
@@ -503,11 +504,15 @@ def _extract_test_counts(content: str) -> List[int]:
 def _count_test_functions(tests_dir: Path) -> int:
     """Count `def test_` functions in all test_*.py files under tests/."""
     count = 0
+    branch_root = tests_dir.parent
+    ignore_entries = load_ignore_entries(branch_root)
     test_func_pattern = re.compile(r"^\s*def\s+test_", re.MULTILINE)
     for test_file in tests_dir.rglob("test_*.py"):
         if any(part in SOURCE_SKIP_DIRS for part in test_file.relative_to(tests_dir).parts):
             continue
         if is_disabled_file(test_file.name):
+            continue
+        if is_seedgo_ignored(str(test_file), branch_root, ignore_entries):
             continue
         try:
             source = test_file.read_text(encoding="utf-8")

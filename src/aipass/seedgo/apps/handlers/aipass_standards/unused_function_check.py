@@ -32,6 +32,7 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 
 AUDIT_SCOPE = "branch_level"
@@ -60,18 +61,23 @@ _MAIN_BLOCK_RE = re.compile(
 # -- File collection ----------------------------------------------------------
 
 
-def _should_skip(path: Path) -> bool:
-    """Return True if any path component is in the skip set or file is disabled."""
-    return any(part in SKIP_DIRS for part in path.parts) or is_disabled_file(path.name)
+def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
+    """Return True if any path component is in the skip set, file is disabled,
+    or the path is excluded via .seedgoignore / the global default."""
+    return (
+        any(part in SKIP_DIRS for part in path.parts)
+        or is_disabled_file(path.name)
+        or is_seedgo_ignored(str(path), branch_root, ignore_entries)
+    )
 
 
-def _collect_python_files(branch_path: Path) -> list[Path]:
+def _collect_python_files(branch_path: Path, ignore_entries: list) -> list[Path]:
     """Collect all .py files in the branch, skipping irrelevant dirs."""
     files: list[Path] = []
     if not branch_path.is_dir():
         return files
     for py_file in branch_path.rglob("*.py"):
-        if _should_skip(py_file):
+        if _should_skip(py_file, branch_path, ignore_entries):
             continue
         files.append(py_file)
     return sorted(files)
@@ -216,7 +222,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         }
 
     # Phase 1: Collect all .py files
-    py_files = _collect_python_files(branch)
+    ignore_entries = load_ignore_entries(branch)
+    py_files = _collect_python_files(branch, ignore_entries)
     if not py_files:
         json_handler.log_operation(
             "check_completed",

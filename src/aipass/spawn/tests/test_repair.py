@@ -474,6 +474,223 @@ class TestChromaRelocation:
 
 
 # ---------------------------------------------------------------------------
+# is_protected shared helper
+# ---------------------------------------------------------------------------
+
+
+class TestIsProtected:
+    """Tests for is_protected() — shared protection helper across repair and delete."""
+
+    def test_hardcoded_floor_spawn(self, tmp_path):
+        """spawn is protected by the hardcoded floor."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        protected, reason = is_protected("spawn")
+        assert protected is True
+        assert "infrastructure" in reason
+
+    def test_hardcoded_floor_case_insensitive(self, tmp_path):
+        """Floor check is case-insensitive."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        protected, _reason = is_protected("DEVPULSE")
+        assert protected is True
+
+    def test_registry_owner_protected(self, tmp_path):
+        """Branch with owner:true in registry is protected."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "MYOWNER", "path": "myowner"}])
+        reg_data = json.loads(reg.read_text())
+        reg_data["branches"][0]["owner"] = True
+        reg.write_text(json.dumps(reg_data))
+
+        protected, reason = is_protected("myowner", registry_path=reg)
+        assert protected is True
+        assert "owner" in reason
+
+    def test_active_passport_protected(self, tmp_path):
+        """Branch with citizenship.registered=True passport is protected."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "CITIZEN", "path": "citizen"}])
+        protected, reason = is_protected("citizen", registry_path=reg)
+        assert protected is True
+        assert "citizen" in reason
+
+    def test_no_passport_not_protected(self, tmp_path):
+        """Branch without passport (no citizenship.registered) is not protected."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        branch = project / "ephemeral"
+        branch.mkdir()
+
+        reg = project / "TEST_REGISTRY.json"
+        reg.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
+                    "branches": [{"name": "EPHEMERAL", "path": "ephemeral", "status": "active"}],
+                }
+            )
+        )
+
+        protected, _reason = is_protected("ephemeral", registry_path=reg)
+        assert protected is False
+
+    def test_minimal_passport_not_protected(self, tmp_path):
+        """Passport without citizenship.registered is not protected."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        branch = tmp_path / "minimal"
+        branch.mkdir()
+        (branch / ".trinity").mkdir()
+        (branch / ".trinity" / "passport.json").write_text(json.dumps({"name": "MINIMAL", "role": "test"}))
+
+        protected, _reason = is_protected("minimal", branch_dir=branch)
+        assert protected is False
+
+    def test_unknown_branch_not_protected(self):
+        """Completely unknown branch is not protected."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        protected, _reason = is_protected("nonexistent", branch_dir=None, registry_path=None)
+        assert protected is False
+
+
+# ---------------------------------------------------------------------------
+# detect_pollution skips protected branches
+# ---------------------------------------------------------------------------
+
+
+class TestDetectPollutionProtection:
+    """Tests for detect_pollution skipping protected branches."""
+
+    def test_skips_branch_with_active_passport(self, tmp_path):
+        """src/pkg/pkg/ with active passport is NOT flagged as pollution."""
+        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
+
+        project = tmp_path / "myproj"
+        project.mkdir()
+        src_pkg = project / "src" / "mypkg" / "mypkg"
+        src_pkg.mkdir(parents=True)
+
+        trinity = src_pkg / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "mypkg"},
+                    "identity": {"citizen_class": "aipass_framework"},
+                    "citizenship": {"registered": True},
+                }
+            )
+        )
+
+        reg = project / "MYPROJ_REGISTRY.json"
+        reg.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
+                    "branches": [{"name": "MYPKG", "path": "src/mypkg/mypkg", "status": "active"}],
+                }
+            )
+        )
+
+        issues = detect_pollution(project)
+        assert len(issues) == 0
+
+    def test_still_flags_real_pollution(self, tmp_path):
+        """src/pkg/pkg/ without passport IS flagged as pollution."""
+        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
+
+        project = tmp_path / "myproj"
+        project.mkdir()
+        (project / "src" / "mypkg" / "mypkg").mkdir(parents=True)
+
+        issues = detect_pollution(project)
+        assert len(issues) == 1
+        assert issues[0]["type"] == "duplicate_nested_dir"
+
+    def test_skips_owner_branch_at_root(self, tmp_path):
+        """project/project/ with owner flag is NOT flagged as pollution."""
+        from aipass.spawn.apps.handlers.repair_ops import detect_pollution
+
+        project = tmp_path / "compass"
+        project.mkdir()
+        nested = project / "compass"
+        nested.mkdir()
+
+        reg = project / "COMPASS_REGISTRY.json"
+        reg.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
+                    "branches": [{"name": "COMPASS", "path": "compass", "status": "active", "owner": True}],
+                }
+            )
+        )
+
+        issues = detect_pollution(project)
+        assert len(issues) == 0
+
+
+# ---------------------------------------------------------------------------
+# delete_branch refuses owner branches
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteOwnerProtection:
+    """Tests for delete_branch refusing registry-owner branches."""
+
+    def test_delete_owner_refused(self, tmp_path):
+        """Cannot delete a branch with owner:true in registry."""
+        from aipass.spawn.apps.handlers.delete_ops import delete_branch
+
+        project = tmp_path / "repo"
+        project.mkdir()
+        branch = project / "src" / "aipass" / "aipass_branch"
+        branch.mkdir(parents=True)
+        (branch / ".trinity").mkdir()
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps(
+                {
+                    "identity": {"citizen_class": "manager"},
+                    "citizenship": {"registered": True},
+                }
+            )
+        )
+
+        reg = project / "AIPASS_REGISTRY.json"
+        reg.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "total_branches": 1},
+                    "branches": [
+                        {
+                            "name": "AIPASS_BRANCH",
+                            "path": "src/aipass/aipass_branch",
+                            "status": "active",
+                            "owner": True,
+                            "email": "@aipass_branch",
+                        }
+                    ],
+                }
+            )
+        )
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=reg):
+            result = delete_branch("aipass_branch", confirm=False)
+
+        assert result["success"] is False
+        assert "protected" in result.get("error", "").lower()
+        assert "owner" in result.get("error", "").lower()
+        assert branch.exists()
+
+
+# ---------------------------------------------------------------------------
 # ARCHIVE_EXCLUDE shared constant
 # ---------------------------------------------------------------------------
 

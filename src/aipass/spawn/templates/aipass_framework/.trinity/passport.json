@@ -14,12 +14,14 @@
     "alias": "",
     "path": "{{CWD}}",
     "module": "{{MODULE}}",
+    "email": "{{EMAIL}}",
     "created": "{{DATE}}",
     "git_branch": "work/{{branchname}}"
   },
   "identity": {
     "citizen_class": "{{CITIZEN_CLASS}}",
     "role": "{{ROLE}}",
+    "traits": "{{TRAITS}}",
     "purpose": "{{PURPOSE_BRIEF}}",
     "what_i_do": [],
     "what_i_dont_do": []

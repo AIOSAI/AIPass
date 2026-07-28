@@ -49,6 +49,7 @@ class TestSessionStartHandler:
             result = handle({"source": "startup", "session_id": "test-session"})
 
         assert result["exit_code"] == 0
+        assert result["sound"] == "cadence reset"
         data = json.loads(state_file.read_text())
         assert data["turn"] == -1
 

@@ -2,10 +2,14 @@
 # META DATA HEADER
 # Name: conftest.py - Skills test configuration
 # Date: 2026-03-07
-# Version: 2.0.0
+# Version: 2.1.0
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler via
+#     import_module at fixture-setup time instead of patching the stale
+#     module captured at conftest load — fixes real-file leaks (t_config.json
+#     etc.) when a combined multi-branch run pops sys.modules mid-session
 #   - v2.0.0 (2026-03-28): Added temp_dir, sample_data, mock_infrastructure,
 #     mock_logger, mock_json_handler fixtures for test quality compliance
 #   - v1.0.0 (2026-03-07): Initial implementation
@@ -125,9 +129,16 @@ def mock_infrastructure(
     This fixture:
       1. Redirects the branch's JSON_DIR to tmp_path (test isolation)
       2. Patches the branch logger to a NullHandler (no console noise)
+
+    Re-resolves the module via import_module (not the `_json_mod` captured at
+    conftest collection time) — another branch's conftest popping this module
+    from sys.modules mid-session leaves `_json_mod` stale, so patching it
+    misses the fresh instance tests actually import, and writes land in the
+    real skills_json/ dir instead of tmp_path.
     """
     if _JSON_DIR_ATTR is not None:
-        monkeypatch.setattr(_json_mod, _JSON_DIR_ATTR, tmp_path)
+        json_mod = importlib.import_module(_json_mod_path)
+        monkeypatch.setattr(json_mod, _JSON_DIR_ATTR, tmp_path)
 
     logger_names = [
         BRANCH_MODULE,

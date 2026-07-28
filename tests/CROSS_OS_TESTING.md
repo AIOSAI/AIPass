@@ -87,7 +87,7 @@ you do when you get hardware (a VM, a borrowed Mac, a new laptop).
 | # | Command | Expected | Watch |
 |---|---------|----------|-------|
 | 3.1 | `aipass init /tmp/demo demo` (Win: a temp path) | creates `DEMO_REGISTRY.json`, `.aipass/`, `.claude/settings.json`, `src/demo/` + prints `✓ Project initialized` | ⚠️ cp1252 banner crash (fixed S190 — verify it stays fixed) |
-| 3.2 | `aipass init run --dry-run` | shows the 11-stage plan, no writes | — |
+| 3.2 | `aipass init run --dry-run` | shows the 10-stage plan (`init_flow.TOTAL_STAGES`), no writes | — |
 | 3.3 | `aipass init run --non-interactive` (in a throwaway dir) | completes all stages headless | ⚠️ symlink/daemon steps |
 | 3.4 | `aipass init run` (interactive, manual) | prompts render + accept input; completes | ⚠️ **interactive PTY** — never machine-tested; pexpect territory |
 | 3.5 | `aipass doctor` | health report renders, exit 0 | — |
@@ -135,7 +135,7 @@ you do when you get hardware (a VM, a borrowed Mac, a new laptop).
 | # | Step | Expected | Watch |
 |---|------|----------|-------|
 | 7.1 | Launch an agent session in a terminal | starts, prompt usable | ⚠️ tmux (Linux/mac) vs Windows terminal multiplexer |
-| 7.2 | `aipass init run` full interactive (if not done in 3.4) | all 11 stages accept input | ⚠️ PTY/pexpect |
+| 7.2 | `aipass init run` full interactive (if not done in 3.4) | all 10 stages accept input | ⚠️ PTY/pexpect |
 | 7.3 | Any prompt-driven flow (`--bypass`/flags where available) | bypassable for headless | — |
 
 ---

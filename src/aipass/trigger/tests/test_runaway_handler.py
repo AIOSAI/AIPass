@@ -2,6 +2,7 @@
 
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -305,6 +306,42 @@ class TestAlertFileSchema:
         assert "test.log" in alert["title"]
         assert alert["body"]
         assert alert["created_at"]
+
+    def test_alert_defaults_to_24h_ttl(self, tmp_path: Path) -> None:
+        """expires_at defaults to ~24h from now, not None."""
+        _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+        )
+
+        alerts_file = tmp_path / "alerts.json"
+        data = json.loads(alerts_file.read_text(encoding="utf-8"))
+        expires_at = data["alerts"][0]["expires_at"]
+
+        assert expires_at is not None
+        expires_dt = datetime.fromisoformat(expires_at)
+        delta = expires_dt - datetime.now()
+        assert timedelta(hours=23) < delta <= timedelta(hours=24, minutes=1)
+
+    def test_alert_forever_true_sets_no_expiry(self, tmp_path: Path) -> None:
+        """forever=True writes expires_at=None (permanent alert)."""
+        _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+            forever=True,
+        )
+
+        alerts_file = tmp_path / "alerts.json"
+        data = json.loads(alerts_file.read_text(encoding="utf-8"))
+        assert data["alerts"][0]["expires_at"] is None
 
 
 # ---------------------------------------------------------------------------

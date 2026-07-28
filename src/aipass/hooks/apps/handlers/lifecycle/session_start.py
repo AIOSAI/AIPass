@@ -37,5 +37,6 @@ def handle(hook_data: dict) -> dict:
         logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
     except Exception as exc:
         logger.info("[HOOKS] session_start: cadence reset failed: %s", exc)
+        return {"stdout": "", "exit_code": 0}
 
-    return {"stdout": "", "exit_code": 0}
+    return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}

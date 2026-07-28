@@ -184,11 +184,15 @@ def get_closed_plans() -> List[Dict[str, Any]]:
 
 
 def is_template_content(content: str) -> bool:
-    """Check if plan content is still unedited template (v4.0)
+    """Check if plan content is still unedited template (v5.0)
 
-    Uses bracket placeholders only (not section headers) to detect untouched
-    templates. Also checks for user-added content in key sections — if any
-    real work was added, the plan is NOT a template even if placeholders remain.
+    Priority order:
+    1. User-content signals (checked checkboxes) — strongest evidence of
+       real work, overrides everything.
+    2. Real content in Notes section — overrides bracket markers.
+    3. Non-boilerplate Execution Log entries — user-written entries
+       override bracket markers; template boilerplate is ignored.
+    4. Bracket-marker check — 3+ template placeholders = template.
 
     Args:
         content: Plan file content
@@ -196,37 +200,38 @@ def is_template_content(content: str) -> bool:
     Returns:
         True if plan is essentially an untouched template
     """
-    # User content indicators — if ANY of these are found, plan has real work
+    import re
+
+    # --- 1. User content signals override everything ---
     user_content_signals = [
-        "- [x] Agent deployed",  # Checked execution log item
-        "- [x] Agent completed",  # Checked execution log item
-        "- [x] Seedgo checklist",  # Checked completion item
-        "- [x] All goals achieved",  # Checked completion item
+        "- [x] Agent deployed",
+        "- [x] Agent completed",
+        "- [x] Seedgo checklist",
+        "- [x] All goals achieved",
     ]
     for signal in user_content_signals:
         if signal in content:
             return False
 
-    # Check Notes section for user content (not just the placeholder)
-    import re
-
+    # --- 2. Real Notes content → not template ---
     notes_match = re.search(r"## Notes\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if notes_match:
         notes_content = notes_match.group(1).strip()
-        # If notes has content beyond the template placeholder, it's real work
         if notes_content and notes_content != "[Working notes, issues encountered, decisions made]":
             return False
 
-    # Check Execution Log for user-added entries beyond template
+    # --- 3. Non-boilerplate Exec Log entries → not template ---
+    _exec_boilerplate = ["**Log Pattern:**", "[task]", "[outcome]", "[file]"]
     exec_match = re.search(r"## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if exec_match:
         exec_content = exec_match.group(1).strip()
-        lines = [line.strip() for line in exec_content.split("\n") if line.strip()]
-        # Template has ~6 lines (date header + checkbox items). More = user added content.
-        if len(lines) > 8:
-            return False
+        is_boilerplate = any(m in exec_content for m in _exec_boilerplate)
+        if not is_boilerplate:
+            lines = [line.strip() for line in exec_content.split("\n") if line.strip()]
+            if len(lines) > 8:
+                return False
 
-    # Bracket placeholders only (no section headers — those persist in real plans)
+    # --- 4. Bracket markers: 3+ from any type = template ---
     default_markers = [
         "[What do you want to achieve? Specific end state.]",
         "[How will agents tackle this? What instructions will they need?]",
@@ -250,7 +255,6 @@ def is_template_content(content: str) -> bool:
         "[Any other branches, services, or approvals needed?]",
     ]
 
-    # 3+ bracket placeholders from any type = template
     for markers in [default_markers, master_markers, proposal_markers]:
         found = sum(1 for m in markers if m in content)
         if found >= 3:

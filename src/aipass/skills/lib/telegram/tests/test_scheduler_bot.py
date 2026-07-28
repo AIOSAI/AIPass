@@ -232,6 +232,22 @@ class TestDigest:
             assert "Hourly Queue Digest" in msg
             assert "@api/data-check" in msg
 
+    def test_digest_send_failure_does_not_log_posted(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_scheduler_bot(tmp_path, _patch_base_bot_deps)
+        bot._scheduler_chat_id = 42
+
+        with (
+            patch.object(bot, "_fetch_queue", return_value=SAMPLE_QUEUE),
+            patch.object(bot, "send_message", return_value=None),
+            patch("aipass.skills.lib.telegram.apps.handlers.scheduler_bot.logger") as mock_logger,
+        ):
+            bot._post_digest()
+
+        posted_calls = [c for c in mock_logger.info.call_args_list if "Hourly digest posted" in str(c)]
+        failed_calls = [c for c in mock_logger.warning.call_args_list if "Hourly digest posting failed" in str(c)]
+        assert posted_calls == []
+        assert len(failed_calls) == 1
+
     def test_digest_skips_on_fetch_failure(self, tmp_path, _patch_base_bot_deps):
         bot = _make_scheduler_bot(tmp_path, _patch_base_bot_deps)
         bot._scheduler_chat_id = 42

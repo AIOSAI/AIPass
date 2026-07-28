@@ -30,43 +30,29 @@ RULES:
   - No hardcoded paths
 """
 
-import importlib.util
 import json
 import logging
-import os
 import re
 import shutil
-import tempfile
 import uuid
 from datetime import date
 from pathlib import Path
 
-from aipass.aipass.apps.handlers.init import scaffold_content as sc
+from aipass.aipass.shared import scaffold_content as sc
+from aipass.aipass.shared.project_home import (
+    _claude_local_settings,
+    _claude_settings,
+    _detect_aipass_home,
+    _enroll_project,
+    is_projects_child,
+    is_throwaway_path,
+)
 
 logger = logging.getLogger(__name__)
 
 _STALE_MANAGED_FILES: list[Path] = [
     Path(".aipass") / "aipass_global_prompt.md",
 ]
-
-
-def is_throwaway_path(path: str | Path) -> bool:
-    """True if path is under a temp dir or Claude Code scratchpad."""
-    resolved = str(Path(path).resolve())
-    tmp_roots = [tempfile.gettempdir()]
-    if os.name == "posix":
-        tmp_roots.append("/tmp")
-    for root in tmp_roots:
-        try:
-            r = str(Path(root).resolve())
-        except OSError:
-            logger.info("is_throwaway_path: could not resolve %s", root)
-            continue
-        if resolved == r or resolved.startswith(r + os.sep):
-            return True
-    if "scratchpad" in resolved.lower():
-        return True
-    return False
 
 
 def _sanitize_name(raw: str) -> str:
@@ -76,23 +62,6 @@ def _sanitize_name(raw: str) -> str:
     underscores and strips leading/trailing underscores.
     """
     return re.sub(r"[^A-Z0-9_-]", "_", raw.upper()).strip("_")
-
-
-def _detect_aipass_home() -> str | None:
-    """Detect the AIPass installation root from the aipass package location.
-
-    Returns the parent of the src/ directory (the repo root).
-    Returns None if detection fails.
-    """
-    try:
-        spec = importlib.util.find_spec("aipass")
-        if spec and spec.origin:
-            # aipass/__init__.py lives at src/aipass/__init__.py
-            # parent = src/aipass/, parent.parent = src/, parent.parent.parent = AIPass root
-            return str(Path(spec.origin).resolve().parent.parent.parent)
-    except Exception as exc:
-        logger.info("AIPASS_HOME detection skipped: %s", exc)
-    return None
 
 
 def _hook_fingerprint(hook_entry: dict) -> str:
@@ -133,10 +102,11 @@ def _merge_settings(existing: dict, generated: dict) -> dict:
         if cleaned_hooks:
             merged["hooks"] = cleaned_hooks
 
-    # Merge env: generated wins for AIPASS_HOME, preserve user additions
-    existing_env = existing.get("env", {})
-    generated_env = generated.get("env", {})
-    merged["env"] = {**existing_env, **generated_env}
+    # env: AIPASS_HOME is machine-local — never tracked (see settings.local.json).
+    # Strip it from any previously-tracked settings.json; preserve other user vars.
+    existing_env = {k: v for k, v in existing.get("env", {}).items() if k != "AIPASS_HOME"}
+    if existing_env:
+        merged["env"] = existing_env
 
     # Merge permissions: union deny/ask lists
     existing_perms = existing.get("permissions", {})
@@ -208,75 +178,6 @@ def _merge_hooks_json(existing: dict, template: dict) -> dict:
             merged[event] = merged_hooks
 
     return merged
-
-
-def _claude_settings(aipass_home: str | None = None) -> str:
-    """Generate .claude/settings.json — env and permissions only.
-
-    Hooks are NOT wired at the project level. All AIPass hooks
-    (prompt injection, identity, email, pre-compact, edit gates) fire
-    from provider settings (~/.claude/settings.json), installed by
-    setup.sh. Provider hooks use CWD-walking patterns that work from
-    any directory in any project.
-
-    Project settings only contain:
-    - env.AIPASS_HOME (so hooks can find the AIPass installation)
-    - permissions.deny (basic safety rails)
-
-    Args:
-        aipass_home: Optional AIPass installation root to add as env.AIPASS_HOME.
-    """
-    data: dict = {}
-
-    data["permissions"] = {
-        "deny": [
-            "Bash(git push --force*)",
-            "Bash(git reset --hard*)",
-            "EnterPlanMode",
-        ],
-    }
-
-    if aipass_home and not is_throwaway_path(aipass_home):
-        data["env"] = {"AIPASS_HOME": aipass_home}
-    elif aipass_home:
-        logger.warning(
-            "AIPASS_HOME '%s' is a throwaway path — not writing to settings",
-            aipass_home,
-        )
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-
-
-def _enroll_project(target: Path) -> None:
-    """Enroll a project in the trusted-project registry (DPLAN-0244).
-
-    Lazy import to keep bootstrap.py free of prax/module-level deps.
-    """
-    try:
-        from aipass.hooks.apps.handlers.config.trust_registry import enroll
-
-        if enroll(str(target)):
-            logger.info("Enrolled project in trust registry: %s", target)
-        else:
-            logger.warning("Trust enrollment failed for %s", target)
-    except ImportError as exc:
-        logger.info("Trust registry unavailable, skipping enrollment: %s", exc)
-
-
-def is_projects_child(target: Path) -> bool:
-    """True if *target* is ``<host>/projects/<name>`` — a valid nested project path.
-
-    The host is identified by having a ``*_REGISTRY.json`` in the grandparent
-    of target (i.e. target's parent is named ``projects``).
-    """
-    resolved = target.resolve()
-    if resolved.parent.name != "projects":
-        return False
-    host = resolved.parent.parent
-    try:
-        return any(f.is_file() and f.name.endswith("_REGISTRY.json") for f in host.iterdir())
-    except OSError as exc:
-        logger.info("is_projects_child: could not read host dir %s: %s", host, exc)
-        return False
 
 
 def _guard_init(target: Path, *, allow_projects_child: bool = False) -> None:
@@ -447,16 +348,23 @@ def init_project(
         gitignore_path.write_text(sc.gitignore(), encoding="utf-8")
         created.append(str(gitignore_path))
 
-    # 9. .claude/settings.json
+    # 9. .claude/settings.json — tracked, permissions only (no machine-local paths)
     claude_dir = target / ".claude"
     claude_dir.mkdir(exist_ok=True)
 
     settings_path = claude_dir / "settings.json"
     if not settings_path.exists():
-        settings_path.write_text(_claude_settings(aipass_home), encoding="utf-8")
+        settings_path.write_text(_claude_settings(), encoding="utf-8")
         created.append(str(settings_path))
 
-    # 9b. .claude/commands/prep.md — /prep session wrap-up slash command
+    # 9b. .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
+    if aipass_home and not is_throwaway_path(aipass_home):
+        local_settings_path = claude_dir / "settings.local.json"
+        if not local_settings_path.exists():
+            local_settings_path.write_text(_claude_local_settings(aipass_home), encoding="utf-8")
+            created.append(str(local_settings_path))
+
+    # 9c. .claude/commands/prep.md — /prep session wrap-up slash command
     # Only prep.md here — memo.md belongs at provider level (~/.claude/commands/)
     commands_dir = claude_dir / "commands"
     commands_dir.mkdir(exist_ok=True)
@@ -580,11 +488,11 @@ def update_project(target: Path) -> dict:
         elif tier_dest.exists():
             already_current.append(str(tier_dest))
 
-    # settings.json — smart merge: preserve user hooks + env, update AIPass hooks
+    # settings.json — smart merge: preserve user hooks, update AIPass permissions.
+    # AIPASS_HOME never lives here — machine-local paths go in settings.local.json.
     settings_path = claude_dir / "settings.json"
     if not settings_path.exists():
-        aipass_home = _detect_aipass_home()
-        settings_path.write_text(_claude_settings(aipass_home), encoding="utf-8")
+        settings_path.write_text(_claude_settings(), encoding="utf-8")
         updated.append(str(settings_path))
     else:
         existing_content = settings_path.read_text(encoding="utf-8")
@@ -593,9 +501,7 @@ def update_project(target: Path) -> dict:
         except json.JSONDecodeError as exc:
             logger.info("settings.json parse failed, rebuilding: %s", exc)
             existing = {}
-        existing_env = existing.get("env", {})
-        aipass_home = existing_env.get("AIPASS_HOME") or _detect_aipass_home()
-        generated = json.loads(_claude_settings(aipass_home))
+        generated = json.loads(_claude_settings())
         merged = _merge_settings(existing, generated)
         merged_content = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
         if existing != merged:
@@ -603,6 +509,15 @@ def update_project(target: Path) -> dict:
             updated.append(str(settings_path))
         else:
             already_current.append(str(settings_path))
+
+    # settings.local.json — machine-local AIPASS_HOME (gitignored, create if missing)
+    if aipass_home and not is_throwaway_path(aipass_home):
+        local_settings_path = claude_dir / "settings.local.json"
+        if not local_settings_path.exists():
+            local_settings_path.write_text(_claude_local_settings(aipass_home), encoding="utf-8")
+            updated.append(str(local_settings_path))
+        else:
+            already_current.append(str(local_settings_path))
 
     # hooks.json — union-merge: preserve user enabled, add new hooks from template
     hooks_json_path = aipass_dir / "hooks.json"

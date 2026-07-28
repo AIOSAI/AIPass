@@ -257,19 +257,20 @@ class TestExpiredAlertCleanup:
 
 
 class TestAlertSound:
-    """Sound fires on first injection only."""
+    """Sound fires once per alert per session (session-keyed tempdir guard)."""
 
     def test_sound_on_first_injection(self, tmp_path):
         from aipass.hooks.apps.handlers.prompt import persistent_alert
-
-        persistent_alert._announced.clear()
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         _write_alerts(aipass_dir, [_make_alert(alert_id="snd-001")])
 
-        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
-            result = persistent_alert.handle({})
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            result = persistent_alert.handle({"session_id": "s-snd-001"})
 
         assert "sound" in result
         assert "1 active alert" in result["sound"]
@@ -277,29 +278,59 @@ class TestAlertSound:
     def test_no_sound_on_repeat_injection(self, tmp_path):
         from aipass.hooks.apps.handlers.prompt import persistent_alert
 
-        persistent_alert._announced.clear()
-
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         _write_alerts(aipass_dir, [_make_alert(alert_id="snd-002")])
 
-        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
-            persistent_alert.handle({})
-            result = persistent_alert.handle({})
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            persistent_alert.handle({"session_id": "s-snd-002"})
+            result = persistent_alert.handle({"session_id": "s-snd-002"})
 
         assert "sound" not in result
 
-    def test_sound_on_new_alert_added(self, tmp_path):
+    def test_fresh_process_same_session_still_dedupes(self, tmp_path):
+        """Regression: module-global set used to reset every process (real bridge calls
+        are fresh processes each time) so sound fired on every prompt. Guard file persists
+        across separate handle() calls even after re-importing the module fresh."""
+        import importlib
+
         from aipass.hooks.apps.handlers.prompt import persistent_alert
 
-        persistent_alert._announced.clear()
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id="snd-fresh")])
+
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            persistent_alert.handle({"session_id": "s-fresh"})
+
+        fresh_module = importlib.reload(persistent_alert)
+        with (
+            patch.object(fresh_module, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(fresh_module, "_GUARD_DIR", tmp_path),
+        ):
+            result = fresh_module.handle({"session_id": "s-fresh"})
+
+        assert "sound" not in result
+        importlib.reload(persistent_alert)
+
+    def test_sound_on_new_alert_added(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         _write_alerts(aipass_dir, [_make_alert(alert_id="snd-003")])
 
-        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
-            persistent_alert.handle({})
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            persistent_alert.handle({"session_id": "s-snd-003"})
 
         _write_alerts(
             aipass_dir,
@@ -309,25 +340,84 @@ class TestAlertSound:
             ],
         )
 
-        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
-            result = persistent_alert.handle({})
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            result = persistent_alert.handle({"session_id": "s-snd-003"})
 
         assert "sound" in result
         assert "2 active alerts" in result["sound"]
 
-    def test_no_sound_when_no_alerts(self, tmp_path):
+    def test_different_sessions_both_hear_sound(self, tmp_path):
         from aipass.hooks.apps.handlers.prompt import persistent_alert
 
-        persistent_alert._announced.clear()
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id="snd-indep")])
+
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            first = persistent_alert.handle({"session_id": "s-a"})
+            second = persistent_alert.handle({"session_id": "s-b"})
+
+        assert "sound" in first
+        assert "sound" in second
+
+    def test_no_sound_when_no_alerts(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         _write_alerts(aipass_dir, [])
 
-        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
-            result = persistent_alert.handle({})
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            result = persistent_alert.handle({"session_id": "s-none"})
 
         assert "sound" not in result
+
+
+class TestAlertBannerCap:
+    """Banner truncates at _MAX_ALERTS_SHOWN with a hidden-count note."""
+
+    def test_cap_truncates_and_notes_hidden_count(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        alerts = [_make_alert(alert_id=f"cap-{i}", title=f"Alert {i}") for i in range(13)]
+        _write_alerts(aipass_dir, alerts)
+
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            result = persistent_alert.handle({"session_id": "s-cap"})
+
+        assert "Alert 0" in result["stdout"]
+        assert "Alert 9" in result["stdout"]
+        assert "Alert 10" not in result["stdout"]
+        assert "...and 3 more" in result["stdout"]
+
+    def test_under_cap_no_hidden_note(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id="under-cap")])
+
+        with (
+            patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir),
+            patch.object(persistent_alert, "_GUARD_DIR", tmp_path),
+        ):
+            result = persistent_alert.handle({"session_id": "s-under-cap"})
+
+        assert "more (dismiss some" not in result["stdout"]
 
 
 class TestAlertDismiss:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.0.0
+# Version: 3.0.1
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-07-13
+# Modified: 2026-07-21
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -27,6 +27,12 @@ including background sessions with agent_type "claude".
 Ships in OBSERVE-ONLY mode: logs would-block decisions to engine.jsonl
 but never actually blocks. Flip _OBSERVE_ONLY to False after soak period
 confirms zero false positives.
+
+Occupant PID claims are identity-checked, not just liveness-checked:
+cc_sessions.find_live_for_cwd() cross-verifies each session's recorded
+procStart against the live process's actual start time before treating
+a PID as a genuine occupant, so a PID recycled after the original
+session died can never satisfy a stale claim.
 """
 
 import importlib
@@ -131,7 +137,7 @@ def handle(hook_data: dict) -> dict:
 
         if _OBSERVE_ONLY:
             logger.warning("[presence_gate] OBSERVE-ONLY would-block: %s", reason)
-            return _ALLOW
+            return {**_ALLOW, "sound": "presence gate"}
 
         logger.warning("[presence_gate] BLOCKED: %s", reason)
         return {

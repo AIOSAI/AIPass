@@ -13,9 +13,10 @@ Validates handler compliance with AIPass handler standards.
 Checks handler independence, auto-detection pattern, no orchestration.
 """
 
+import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -23,6 +24,11 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+
+# Cross-handler/orchestration imports are purely import-statement checks, so a
+# violation hiding in a package marker file must not be invisible to the audit
+# the way it would be for content checkers (dead code, naming, etc.).
+INCLUDE_INIT_FILES = True
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -121,6 +127,39 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "HANDLERS"}
 
 
+def _iter_import_modules(content: str) -> Iterator[Tuple[int, str, List[str]]]:
+    """
+    Parse content and yield (line_number, dotted_module, imported_names) for every
+    real import statement — string literals, comments and docstrings can never
+    produce a hit because the AST only contains actual import nodes.
+
+    Relative imports (from . import x) are omitted entirely: they can't reference
+    an absolute dotted path like "apps.handlers"/"apps.modules" and are always
+    same-package, so callers don't need to special-case them.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as e:
+        logger.info("Skipping import scan: SyntaxError during parse: %s", e)
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                continue
+            yield node.lineno, node.module or "", [alias.name for alias in node.names]
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name, []
+
+
+def _line_text(lines: List[str], lineno: int, fallback: str) -> str:
+    """Return the source line at 1-indexed lineno, or a fallback if out of range."""
+    if 0 < lineno <= len(lines):
+        return lines[lineno - 1].strip()
+    return fallback
+
+
 def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
     """
     Check handler independence - no cross-handler imports except defaults
@@ -141,58 +180,26 @@ def check_handler_independence(content: str, lines: List[str], module_path: str)
             own_package = path_parts[i + 1]
             break
 
-    in_docstring = False
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        # Track docstrings (handle both single-line and multi-line)
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            # Count occurrences of the quote marker
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                # Single-line docstring (opening and closing on same line)
-                continue  # Skip this line but don't toggle state
-            else:
-                # Multi-line docstring boundary
-                in_docstring = not in_docstring
-
-        # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith("#"):
+    for lineno, module, names in _iter_import_modules(content):
+        if "apps.handlers" not in module:
             continue
 
-        # Check for handler imports
-        if "apps.handlers" in stripped and ("from " in stripped or "import " in stripped):
-            # Skip if in a string (rough check)
-            if '"from ' in stripped or "'from " in stripped:
-                continue
+        # Allowed: Default handlers (json_handler)
+        if module.endswith("handlers.json") and "json_handler" in names:
+            continue
 
-            # Extract code part (before comment)
-            code_part = stripped.split("#")[0] if "#" in stripped else stripped
+        # Allowed: Same package absolute imports
+        if own_package and f"handlers.{own_package}" in module:
+            continue
 
-            if "apps.handlers" not in code_part:
-                continue
-
-            # Allowed: Default handlers (json_handler)
-            if "handlers.json import json_handler" in code_part:
-                continue
-
-            # Allowed: Same package imports (relative imports like "from .decorators")
-            if code_part.strip().startswith("from ."):
-                continue
-
-            # Allowed: Same package absolute imports
-            if own_package and f"handlers.{own_package}" in code_part:
-                continue
-
-            # Forbidden: Cross-handler imports
-            forbidden_imports.append(f"line {i}: {stripped}")
+        # Forbidden: Cross-handler imports
+        forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
 
     if forbidden_imports:
         return {
             "name": "Handler independence",
             "passed": False,
-            "message": f"Cross-handler imports detected (except defaults): {forbidden_imports[0]}",
+            "message": "Cross-handler imports detected (except defaults): " + "; ".join(forbidden_imports),
         }
 
     return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-handler imports detected"}
@@ -239,50 +246,22 @@ def check_no_orchestration(content: str, lines: List[str]) -> Optional[Dict]:
     """
     module_imports = []
 
-    in_docstring = False
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        # Track docstrings (handle both single-line and multi-line)
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote_marker = '"""' if stripped.startswith('"""') else "'''"
-            # Count occurrences of the quote marker
-            quote_count = stripped.count(quote_marker)
-            if quote_count >= 2:
-                # Single-line docstring (opening and closing on same line)
-                continue  # Skip this line but don't toggle state
-            else:
-                # Multi-line docstring boundary
-                in_docstring = not in_docstring
-
-        # Skip docstrings, comments and empty lines
-        if in_docstring or not stripped or stripped.startswith("#"):
+    for lineno, module, _names in _iter_import_modules(content):
+        if "apps.modules" not in module:
             continue
 
-        # Check for module imports
-        if "apps.modules" in stripped and ("from " in stripped or "import " in stripped):
-            # Skip if in a string
-            if '"from ' in stripped or "'from " in stripped:
-                continue
+        # Allowed: Service imports (prax.apps.modules.logger, cli.apps.modules)
+        if "prax.apps.modules.logger" in module or "cli.apps.modules" in module:
+            continue
 
-            # Extract code part
-            code_part = stripped.split("#")[0] if "#" in stripped else stripped
-
-            if "apps.modules" not in code_part:
-                continue
-
-            # Allowed: Service imports (prax.apps.modules.logger, cli.apps.modules)
-            if "prax.apps.modules.logger" in code_part or "cli.apps.modules" in code_part:
-                continue
-
-            # Forbidden: Module imports (orchestration)
-            module_imports.append(f"line {i}: {stripped}")
+        # Forbidden: Module imports (orchestration)
+        module_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
 
     if module_imports:
         return {
             "name": "No orchestration",
             "passed": False,
-            "message": f"Handler imports modules (orchestration): {module_imports[0]}",
+            "message": "Handler imports modules (orchestration): " + "; ".join(module_imports),
         }
 
     return {"name": "No orchestration", "passed": True, "message": "No module imports detected (pure implementation)"}

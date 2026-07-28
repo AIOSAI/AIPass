@@ -54,6 +54,7 @@ Quick checks beat assumptions: `ls`/`find` for files, `git ls-files`/`grep` for 
 
 - Run `drone @ai_mail inbox 2>/dev/null` — report any unread emails
 - Close any that were already processed but not formally closed
+- Run `drone @devpulse feedback 2>/dev/null` — report unread cross-project feedback; view/reply/clear anything NEW (S304 F46: this box sat unread for 3 months because nothing invoked it)
 
 ## 5. Compass Review (Devpulse only)
 

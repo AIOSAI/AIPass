@@ -993,7 +993,7 @@ def test_run_welcome_dry_run_specific_branch(
     """run_welcome <branch> --dry-run reports whether the branch would be welcomed."""
     from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
 
-    _seed_agent(initialized_db, "GAMMA")
+    _seed_agent(initialized_db, "gamma")
 
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
@@ -1001,7 +1001,7 @@ def test_run_welcome_dry_run_specific_branch(
     result = run_welcome(["gamma", "--dry-run"])
     assert result["success"] is True
     assert result["dry_run"] is True
-    assert result["branch"] == "GAMMA"
+    assert result["branch"] == "gamma"
     assert result["would_welcome"] is True
 
 
@@ -1076,7 +1076,7 @@ def test_run_welcome_specific_branch_success(
     """run_welcome <branch> creates a welcome post for that branch."""
     from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
 
-    _seed_agent(initialized_db, "EPSILON")
+    _seed_agent(initialized_db, "epsilon")
 
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
@@ -1085,7 +1085,7 @@ def test_run_welcome_specific_branch_success(
     assert result["success"] is True
     assert result["action"] == "specific"
     assert result["already_welcomed"] is False
-    assert result["branch"] == "EPSILON"
+    assert result["branch"] == "epsilon"
     assert result["post_id"] is not None
 
 

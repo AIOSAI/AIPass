@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
 
-from aipass.aipass.apps.handlers.init import scaffold_content as sc
 from aipass.aipass.apps.handlers.init.bootstrap import (
     _merge_hooks_json,
     _sanitize_name,
@@ -28,6 +27,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     init_project,
     update_project,
 )
+from aipass.aipass.shared import scaffold_content as sc
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ def test_init_project_settings_no_hooks(tmp_path, monkeypatch):
     data = json.loads(settings_path.read_text(encoding="utf-8"))
 
     assert "hooks" not in data, "Project settings should not contain hooks"
-    assert "env" in data
+    assert "env" not in data, "AIPASS_HOME is machine-local — belongs in settings.local.json"
     assert "permissions" in data
 
 
@@ -547,9 +547,10 @@ def test_update_project_creates_missing_managed_dirs(tmp_path):
     result = update_project(target)
 
     assert (target / ".claude" / "settings.json").exists()
-    # Managed files in deleted dirs re-written (tier0_kernel, tier1_navmap, hooks.json, settings, prep)
+    # Managed files in deleted dirs re-written (tier0_kernel, tier1_navmap,
+    # hooks.json, settings.json, settings.local.json, prep)
     if result["aipass_home"]:
-        assert len(result["updated_files"]) == 5
+        assert len(result["updated_files"]) == 6
     else:
         assert len(result["updated_files"]) == 2
     assert len(result["already_current"]) >= 2
@@ -584,7 +585,7 @@ def test_init_project_returns_aipass_home(tmp_path):
 
 
 def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypatch):
-    """When AIPASS_HOME is detected, settings.json includes env.AIPASS_HOME."""
+    """When AIPASS_HOME is detected, settings.local.json (not settings.json) includes env.AIPASS_HOME."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda _: False,
@@ -598,8 +599,10 @@ def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypat
         pytest.skip("AIPASS_HOME not detectable in this environment")
 
     settings = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert "env" in settings
-    assert settings["env"]["AIPASS_HOME"] == result["aipass_home"]
+    assert "env" not in settings
+
+    local_settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    assert local_settings["env"]["AIPASS_HOME"] == result["aipass_home"]
 
 
 def test_update_project_returns_aipass_home(tmp_path):
@@ -615,7 +618,7 @@ def test_update_project_returns_aipass_home(tmp_path):
 
 
 def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
-    """update_project injects AIPASS_HOME into settings.json if env section is absent."""
+    """update_project recreates settings.local.json with AIPASS_HOME if missing."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda _: False,
@@ -624,17 +627,15 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
     target.mkdir()
     init_project(target, project_name="addenv")
 
-    settings_path = target / ".claude" / "settings.json"
-    data = json.loads(settings_path.read_text(encoding="utf-8"))
-    data.pop("env", None)
-    settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    local_settings_path = target / ".claude" / "settings.local.json"
+    local_settings_path.unlink(missing_ok=True)
 
     result = update_project(target)
 
     if result["aipass_home"] is not None:
-        new_data = json.loads(settings_path.read_text(encoding="utf-8"))
+        new_data = json.loads(local_settings_path.read_text(encoding="utf-8"))
         assert new_data.get("env", {}).get("AIPASS_HOME") == result["aipass_home"]
-        assert str(settings_path) in result["updated_files"]
+        assert str(local_settings_path) in result["updated_files"]
 
 
 # ---------------------------------------------------------------------------
@@ -1256,10 +1257,49 @@ def test_throwaway_path_allows_project():
     assert not is_throwaway_path(str(Path.home() / "Projects" / "myapp"))
 
 
-def test_settings_omits_throwaway_aipass_home(tmp_path):
-    """_claude_settings refuses to write AIPASS_HOME when it's a throwaway path."""
-    from aipass.aipass.apps.handlers.init.bootstrap import _claude_settings
+def test_settings_omits_throwaway_aipass_home(tmp_path, monkeypatch):
+    """init_project skips settings.local.json when detected AIPASS_HOME is a throwaway path."""
+    from aipass.aipass.apps.handlers.init import bootstrap
 
-    content = _claude_settings(str(tmp_path))
-    data = json.loads(content)
-    assert "AIPASS_HOME" not in data.get("env", {})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(tmp_path))
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    bootstrap.init_project(target, project_name="alpha")
+
+    assert not (target / ".claude" / "settings.local.json").exists()
+
+
+# Directory/file-name fragments that .gitignore excludes from git tracking —
+# mirrors scaffold_content.gitignore(). Tracked-file scans must skip these.
+_GITIGNORED_PARTS = (".trinity", ".ai_mail.local", "logs", ".venv", "venv", ".git")
+
+
+def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
+    """No file init_project writes into a TRACKED path may contain the machine-local AIPASS_HOME.
+
+    Regression guard for the settings.json bug: AIPASS_HOME is an absolute,
+    machine-local path and must only ever land in gitignored *.local.json
+    files. This walks every minted file that would actually be committed
+    and greps it for the (fake) AIPASS_HOME value.
+    """
+    from aipass.aipass.apps.handlers.init import bootstrap
+
+    fake_home = str(tmp_path / f"fake_aipass_home_{uuid.uuid4().hex}")
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: fake_home)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+
+    target = tmp_path / "proj"
+    target.mkdir()
+    bootstrap.init_project(target, project_name="pathcheck")
+
+    for path in target.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(target)
+        if any(part in _GITIGNORED_PARTS for part in rel.parts):
+            continue
+        if ".local." in rel.name:
+            continue
+        content = path.read_text(encoding="utf-8")
+        assert fake_home not in content, f"{rel} leaks machine-local AIPASS_HOME"

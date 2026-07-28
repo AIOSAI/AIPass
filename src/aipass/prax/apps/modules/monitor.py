@@ -109,6 +109,14 @@ def print_help():
             "Monitor specific branches (comma-separated)\n    Example: drone @prax monitor run seedgo,cli,flow",
         ),
         (
+            "drone @prax monitor run commons",
+            "Live social feed of The Commons (posts, comments, votes, reactions), read-only",
+        ),
+        (
+            "drone @prax monitor run commons --logs",
+            "Old behavior — tail commons branch's technical prax logs instead of the feed",
+        ),
+        (
             "drone @prax monitor run --relay",
             "Enable Telegram relay (mirrors feed to prax_monitor bot)"
             "\n    Also enabled by env AIPASS_PRAX_MONITOR_RELAY=1",
@@ -153,12 +161,34 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Subcommand routing
     subcmd = args[0]
     if subcmd == "run":
-        return _run_monitor(args[1:])
+        return _dispatch_run(args[1:])
 
     # Unknown subcommand
     error(f"Unknown monitor subcommand: {subcmd}")
     print_help()
     return True
+
+
+def _dispatch_run(run_args: List[str]) -> bool:
+    """Route 'monitor run' — a bare 'commons' target opens the live social feed.
+
+    'commons --logs' escapes back to the branch-log tail, and mixed lists
+    (e.g. 'seedgo,commons') keep treating commons as a branch (feed is
+    standalone-only in v1).
+    """
+    positional = [a for a in run_args if not a.startswith("--")]
+    target = positional[0] if positional else None
+    logs_escape = "--logs" in run_args
+
+    if target == "commons" and not logs_escape:
+        from aipass.prax.apps.handlers.monitoring.commons_feed import run_commons_feed
+
+        feed_args = [a for a in run_args if a != target]
+        relay_enabled = "--relay" in feed_args or is_relay_enabled_by_env()
+        relay_config = _load_relay_config() if relay_enabled else None
+        return run_commons_feed(feed_args, relay_config=relay_config)
+
+    return _run_monitor([a for a in run_args if a != "--logs"])
 
 
 def _load_relay_config() -> Optional[dict]:

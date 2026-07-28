@@ -50,6 +50,8 @@ def _fresh_import_load(monkeypatch, tmp_path):
     # Clear test log redirects so tests exercise real path resolution
     monkeypatch.delenv("AIPASS_TEST_LOG_DIR", raising=False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    # Suppress sys.modules-based pytest detection so tests can verify prod paths
+    monkeypatch.setattr(load_mod, "_is_pytest_session", lambda: False)
 
     return load_mod
 

@@ -170,6 +170,7 @@ class TestHandle:
         ):
             result = presence_gate.handle({})
         assert result["exit_code"] == 0
+        assert result["sound"] == "presence gate"
 
     def test_gate_error_allows(self):
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):

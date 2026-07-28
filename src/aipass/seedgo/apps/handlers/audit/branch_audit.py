@@ -42,19 +42,27 @@ def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     return checkers
 
 
-def _collect_py_files(branch_path: Path) -> List[Dict[str, str]]:
-    """Collect auditable .py files from apps/, respecting ignore patterns."""
+def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dict[str, str]]:
+    """Collect auditable .py files from apps/, respecting ignore patterns.
+
+    __init__.py package markers are excluded by default — most checkers are
+    content-focused (dead code, naming, nesting) and __init__.py is typically
+    boilerplate. Pass include_init=True for import-statement checkers, where a
+    real cross-handler import hiding in a package marker must not go unseen.
+    """
     apps_dir = branch_path / "apps"
     if not apps_dir.exists():
         return []
     ign = ignore_handler.get_audit_ignore_patterns()
+    ignore_entries = ignore_handler.load_ignore_entries(branch_path)
     return [
         {"file": str(f), "name": f.name}
         for f in apps_dir.rglob("*.py")
-        if f.name != "__init__.py"
+        if (include_init or f.name != "__init__.py")
         and not is_disabled_file(f.name)
         and not is_throwaway_path(str(f))
         and not any(p in str(f).lower() for p in ign)
+        and not ignore_handler.is_seedgo_ignored(str(f), branch_path, ignore_entries)
     ]
 
 
@@ -132,6 +140,7 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
     """Audit a branch for standards compliance. Returns backward-compatible dict."""
     entry_file, branch_path = branch["entry_file"], Path(branch["path"])
     checkers, all_files = discover_checkers(pack_path), _collect_py_files(branch_path)
+    files_with_init: List[Dict[str, str]] | None = None
 
     # Discover diagnostics checker from handlers/diagnostics/ (outside pack dirs)
     diag_mod = _load_diagnostics_checker()
@@ -161,7 +170,12 @@ def audit_branch(branch: Dict[str, str], bypass_rules: list, pack_path: Path | N
             results[name], scores[name] = {"passed": False, "score": 0, "error": str(e)}, 0
         # All-files scope: scan every .py file, override score with average
         if scope == "all_files" and all_files:
-            v, s = _run_all_files(checker, name, all_files, bypass_rules)
+            scan_files = all_files
+            if getattr(checker, "INCLUDE_INIT_FILES", False):
+                if files_with_init is None:
+                    files_with_init = _collect_py_files(branch_path, include_init=True)
+                scan_files = files_with_init
+            v, s = _run_all_files(checker, name, scan_files, bypass_rules)
             all_violations[name] = v
             if s:
                 avg_score = int(sum(s) / len(s))

@@ -107,6 +107,25 @@ class TestFeedbackPulseHandler:
 
         assert result["stdout"] == ""
 
+    def test_disabled_logs_distinguishing_line(self, tmp_path, caplog):
+        import logging
+
+        with (
+            patch(
+                "aipass.hooks.apps.handlers.prompt.feedback_pulse._STATE_DIR",
+                tmp_path,
+            ),
+            patch(
+                "aipass.hooks.apps.handlers.prompt.feedback_pulse._is_disabled",
+                return_value=True,
+            ),
+            caplog.at_level(logging.INFO),
+        ):
+            for i in range(11):
+                self._handler()({"session_id": "test-disabled-log"})
+
+        assert "skipped (disabled via .aipass/feedback_off sentinel)" in caplog.text
+
     def test_output_is_one_line(self, tmp_path):
         result = {"stdout": "", "exit_code": 0}
         with (

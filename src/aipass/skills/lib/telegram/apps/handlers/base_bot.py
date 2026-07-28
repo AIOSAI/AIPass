@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.3.1
+# Version: 1.4.1
 # Created: 2026-02-24
-# Modified: 2026-06-15
+# Modified: 2026-07-24
 # =============================================
 
 """
@@ -142,6 +142,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 NETWORK_BACKOFF_INIT = 1  # seconds
 NETWORK_BACKOFF_CAP = 60  # seconds
 NETWORK_LOG_INTERVAL = 300  # 5 minutes between offline summary lines
+STARTUP_RETRY_CAP_SECONDS = 180  # ~3 minutes of backoff before failing loud
 
 
 class _NetworkPollError(Exception):
@@ -294,7 +295,7 @@ class BaseBot:
         logger.info("%s starting (bot_id=%s)", self.bot_name, self.bot_id)
 
         # Verify connection
-        if not self.verify_connection():
+        if not self._verify_connection_with_retry():
             logger.error("Startup health check FAILED - cannot reach Telegram API")
             return 1
 
@@ -430,15 +431,46 @@ class BaseBot:
                 logger.info("Telegram API OK - @%s", bot_info.get("username", "unknown"))
                 return True
 
-            logger.error("Telegram API rejected: %s", data.get("description", "unknown"))
+            logger.warning("Telegram API rejected: %s", data.get("description", "unknown"))
             return False
 
         except URLError as e:
-            logger.error("Telegram API connection failed: %s", e)
+            logger.warning("Telegram API connection failed: %s", e)
             return False
         except Exception as e:
-            logger.error("Telegram API health check error: %s", e)
+            logger.warning("Telegram API health check error: %s", e)
             return False
+
+    def _verify_connection_with_retry(self) -> bool:
+        """
+        Retry the startup health check with exponential backoff.
+
+        Absorbs a boot-time DNS/network race (systemd's network-online.target
+        can resolve before DNS is actually usable) in-process instead of
+        exiting 1 into a systemd restart storm. Mirrors the poll loop's
+        _NetworkPollError backoff. A real, sustained outage still fails loud
+        via the caller once STARTUP_RETRY_CAP_SECONDS is exhausted.
+        """
+        if self.verify_connection():
+            return True
+
+        backoff = NETWORK_BACKOFF_INIT
+        elapsed = 0.0
+        attempt = 1
+
+        while elapsed < STARTUP_RETRY_CAP_SECONDS:
+            logger.warning("Startup health check failed (attempt %d) — retrying in %ds", attempt, backoff)
+            time.sleep(backoff)
+            elapsed += backoff
+            attempt += 1
+
+            if self.verify_connection():
+                logger.info("Startup health check recovered after %d retries (%ds)", attempt - 1, int(elapsed))
+                return True
+
+            backoff = min(backoff * 2, NETWORK_BACKOFF_CAP)
+
+        return False
 
     def poll_updates(self, offset: int) -> list:
         """
@@ -467,6 +499,8 @@ class BaseBot:
             if _is_routine_read_timeout(e):
                 return []
             if _is_network_error(e):
+                raise _NetworkPollError(str(e)) from e
+            if isinstance(e, HTTPError) and (e.code >= 500 or e.code == 409):
                 raise _NetworkPollError(str(e)) from e
             logger.error("Poll error: %s", e)
             return []

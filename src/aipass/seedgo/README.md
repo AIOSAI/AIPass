@@ -120,9 +120,9 @@ seedgo/
 │       │   ├── branch_audit.py      # Per-branch scoring engine
 │       │   ├── discovery.py         # Branch discovery (CWD-first registry)
 │       │   └── audit_display.py     # Rich result formatting
-│       ├── bypass/                  # Bypass system
+│       ├── bypass/                  # Bypass + ignore systems
 │       │   ├── bypass_handler.py    # .seedgo/bypass.json loader
-│       │   └── ignore_handler.py    # .seedgo/ignore patterns
+│       │   └── ignore_handler.py    # Audit ignore patterns + .seedgoignore engine
 │       ├── config/                  # Configuration handlers
 │       ├── diagnostics/             # Pyright integration + branch discovery
 │       ├── json/                    # JSON tracking (json_handler)
@@ -145,6 +145,8 @@ seedgo/
 **CWD-first registry:** `_find_registry()` walks CWD parents first (for external project support), falls back to `__file__` parents, uses `*_REGISTRY.json` glob (not hardcoded name).
 
 **Bypass system:** `.seedgo/bypass.json` per branch. Each entry has file, standard, optional lines, and required reason. Checkers call `is_bypassed()` per violation. Bypass is intentional documented deviation, not ignoring.
+
+**`.seedgoignore` (throwaway paths, no reason required):** Drop a `.seedgoignore` file into any directory to exclude matching files/dirs from scans, audits, and the per-file checklist — same gitignore-style patterns and per-directory nesting semantics as a real `.gitignore` (via `pathspec`). Scope is exactly that directory's subtree; a nested `.seedgoignore` adds further excludes on top of any ancestor's, it doesn't replace them. A global default (`tools/`) applies fleet-wide with zero setup, since every branch's `apps/tools/` is deliberate throwaway prototyping space — quick scripts for fast answers, not standards-compliant by design. Unlike bypass (documented exception to a specific standard on a specific file), `.seedgoignore` removes the file from consideration entirely and needs no reason. It does **not** touch diagnostics (ruff/pyright) — those keep running on ignored files so auto-fix still catches real errors while you write; only standards checks skip them. See `ignore_handler.load_ignore_entries()` / `is_seedgo_ignored()`.
 
 ---
 

@@ -45,6 +45,9 @@ from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
 # Throwaway / prototype detection
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_prototype_file, is_throwaway_path
 
+# .seedgoignore — gitignore-style per-directory + global default (tools/)
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -140,6 +143,10 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if prototype or is_prototype_file(resolved):
         return [{"standard": "(skip)", "passed": True, "detail": "Prototype mode — standards skipped"}]
 
+    branch_path = _resolve_branch_path(resolved)
+    if branch_path is not None and is_seedgo_ignored(resolved, branch_path):
+        return [{"standard": "(skip)", "passed": True, "detail": "Ignored via .seedgoignore"}]
+
     # Discover pack path
     pack_path = _resolve_pack_path(pack_name)
     if pack_path is None:
@@ -191,20 +198,28 @@ def _resolve_pack_path(pack_name: str) -> Optional[Path]:
     return None
 
 
-def _load_bypass_for_file(file_path: str) -> list:
-    """Load bypass rules for the branch containing file_path."""
+def _resolve_branch_path(file_path: str) -> Optional[Path]:
+    """Resolve the absolute branch root containing file_path, or None."""
     branch = get_branch_from_path(file_path)
     if branch is None:
-        return []
+        return None
     raw_path = branch.get("path", "")
     if not raw_path:
-        return []
+        return None
     bp = Path(raw_path)
     if not bp.is_absolute():
         from aipass.seedgo.apps.handlers.bypass.bypass_handler import _find_registry
 
         registry_path = _find_registry()
         bp = (registry_path.parent / bp).resolve()
+    return bp
+
+
+def _load_bypass_for_file(file_path: str) -> list:
+    """Load bypass rules for the branch containing file_path."""
+    bp = _resolve_branch_path(file_path)
+    if bp is None:
+        return []
     return load_bypass_rules(str(bp))
 
 

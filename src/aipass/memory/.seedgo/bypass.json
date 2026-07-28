@@ -760,31 +760,6 @@
       "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
     },
     {
-      "file": "tools/migrate_entries.py",
-      "standard": "architecture",
-      "reason": "Standalone utility script in tools/ — intentionally outside 3-layer apps/ structure."
-    },
-    {
-      "file": "tools/strip_trinity_limits.py",
-      "standard": "architecture",
-      "reason": "One-time migration script in tools/ — intentionally outside 3-layer apps/ structure."
-    },
-    {
-      "file": "tools/strip_trinity_limits.py",
-      "standard": "log_visibility",
-      "reason": "Standalone script — cannot import prax logger. Uses stdlib logging."
-    },
-    {
-      "file": "tools/migrate_entries.py",
-      "standard": "silent_catch",
-      "reason": "Standalone script — cannot import prax logger. Errors reported via stderr print + result dict."
-    },
-    {
-      "file": "tools/migrate_entries.py",
-      "standard": "debug_print",
-      "reason": "Standalone script — print(stderr) is the error reporting mechanism. No prax available."
-    },
-    {
       "file": "tests/test_detector.py",
       "standard": "architecture",
       "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."

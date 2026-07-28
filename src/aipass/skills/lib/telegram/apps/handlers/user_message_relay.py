@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user_message_relay.py
 # Description: Relay user messages from non-TG doors to the branch TG chat
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-07-20
 # =============================================
 
 """
@@ -187,6 +187,7 @@ def handle(hook_data: dict) -> dict:
         if send_user_message(bot_token, chat_id, prompt):
             _last_relay_hash = msg_hash
             logger.info("[TG] user message relayed to chat_id=%s", chat_id)
+            return {"stdout": "", "exit_code": 0, "sound": "user message relay"}
 
         return {"stdout": "", "exit_code": 0}
     except Exception as e:

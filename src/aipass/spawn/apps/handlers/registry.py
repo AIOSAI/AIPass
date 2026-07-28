@@ -36,6 +36,59 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
 
 
+_PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
+
+
+def is_protected(branch_name, branch_dir=None, registry_path=None):
+    """Check if a branch is protected from deletion and pollution cleanup.
+
+    Protection layers (any one is sufficient):
+      1. Hardcoded floor — spawn, devpulse, drone.
+      2. Registry owner flag — entry has ``owner: true``.
+      3. Active passport — ``.trinity/passport.json`` with
+         ``citizenship.registered == True``.
+
+    Args:
+        branch_name: Branch name to check (case-insensitive).
+        branch_dir: Path to the branch directory (for passport check).
+            Auto-resolved from registry when omitted.
+        registry_path: Path to ``*_REGISTRY.json``.
+            Auto-discovered via ``find_registry()`` when omitted.
+
+    Returns:
+        Tuple of (protected: bool, reason: str).
+    """
+    name_lower = branch_name.lower()
+
+    if name_lower in _PROTECTED_FLOOR:
+        return True, f"infrastructure ({', '.join(sorted(_PROTECTED_FLOOR))})"
+
+    try:
+        rp = Path(registry_path) if registry_path else find_registry()
+        reg_data = load_registry(rp)
+        for entry in branches_as_list(reg_data.get("branches", [])):
+            if entry.get("name", "").lower() == name_lower:
+                if entry.get("owner") is True:
+                    return True, "registry owner"
+                if branch_dir is None:
+                    branch_dir = (rp.parent / entry.get("path", "")).resolve()
+                break
+    except (OSError, ValueError, KeyError) as exc:
+        logger.info("[is_protected] Registry lookup failed for %s: %s", branch_name, exc)
+
+    if branch_dir is not None:
+        passport_path = Path(branch_dir) / ".trinity" / "passport.json"
+        if passport_path.is_file():
+            try:
+                passport = json_handler.read_json(passport_path)
+                if passport and passport.get("citizenship", {}).get("registered") is True:
+                    return True, "active citizen"
+            except (OSError, ValueError, KeyError) as exc:
+                logger.info("[is_protected] Passport read failed for %s: %s", branch_name, exc)
+
+    return False, ""
+
+
 def branches_as_list(branches):
     """Normalize branches to a list regardless of storage format.
 

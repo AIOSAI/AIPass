@@ -32,8 +32,15 @@ def _mock_infrastructure(monkeypatch):
     mock_console = MagicMock()
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
+    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+        is_seedgo_ignored as real_is_seedgo_ignored,
+        load_ignore_entries as real_load_ignore_entries,
+    )
+
     mock_ignore_handler = MagicMock()
     mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
+    mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
     mock_scan_branch = MagicMock(return_value=None)
 
     # -- prax ---------------------------------------------------------------
@@ -1087,6 +1094,27 @@ class TestCollectPyFiles:
         assert "handler.py" in names
         assert "__init__.py" not in names
 
+    def test_collects_init_files_when_requested(self, tmp_path, monkeypatch):
+        """include_init=True keeps __init__.py — for import checkers that must not miss them."""
+        import sys
+
+        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
+        if skip_dirs:
+            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+
+        from aipass.seedgo.apps.handlers.audit.branch_audit import (
+            _collect_py_files,
+        )
+
+        apps_dir = tmp_path / "apps"
+        apps_dir.mkdir()
+        (apps_dir / "__init__.py").write_text("", encoding="utf-8")
+        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
+        result = _collect_py_files(tmp_path, include_init=True)
+        names = [f["name"] for f in result]
+        assert "module.py" in names
+        assert "__init__.py" in names
+
     def test_respects_ignore_patterns(self, tmp_path, monkeypatch):
         """Files matching ignore patterns are excluded."""
         import sys
@@ -1133,6 +1161,29 @@ class TestCollectPyFiles:
         names = [f["name"] for f in result]
         assert "module.py" in names
         assert "dashboard_sync(disabled).py" not in names
+
+    def test_respects_seedgo_ignore_tools_dir(self, tmp_path, monkeypatch):
+        """Files under apps/tools/ are excluded via the global .seedgoignore default."""
+        import sys
+
+        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
+        if skip_dirs:
+            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+
+        from aipass.seedgo.apps.handlers.audit.branch_audit import (
+            _collect_py_files,
+        )
+
+        apps_dir = tmp_path / "apps"
+        apps_dir.mkdir()
+        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
+        tools_dir = apps_dir / "tools"
+        tools_dir.mkdir()
+        (tools_dir / "scratch.py").write_text("pass", encoding="utf-8")
+        result = _collect_py_files(tmp_path)
+        names = [f["name"] for f in result]
+        assert "module.py" in names
+        assert "scratch.py" not in names
 
 
 class TestExtractBranchLevelViolations:
@@ -1462,6 +1513,7 @@ def _make_checker(
     checker = MagicMock()
     checker.AUDIT_SCOPE = scope
     checker.FILE_FILTER = None
+    checker.INCLUDE_INIT_FILES = False
 
     if has_check_module:
         default_mod = {
@@ -1675,6 +1727,41 @@ class TestAuditBranch:
 
         result = branch_audit.audit_branch(branch, [])
         assert "naming_violations" in result
+
+    def test_all_files_scope_include_init_files_opt_in(self, tmp_path, monkeypatch):
+        """Checker with INCLUDE_INIT_FILES=True sees __init__.py; a normal checker does not."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, branch_path = _setup_branch(tmp_path)
+        apps_dir = Path(branch_path) / "apps"
+        (apps_dir / "__init__.py").write_text("pass", encoding="utf-8")
+
+        import_checker = _make_checker(scope="all_files")
+        import_checker.INCLUDE_INIT_FILES = True
+        normal_checker = _make_checker(scope="all_files")
+
+        # tmp_path lives under the system temp dir, which is_throwaway_path
+        # filters out wholesale — neutralize that so _collect_py_files sees
+        # the fixture's files, same as it would for a real branch on disk.
+        monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda path_str: False)
+        monkeypatch.setattr(
+            branch_audit,
+            "discover_checkers",
+            lambda pack_path=None: {"handlers": import_checker, "naming": normal_checker},
+        )
+        monkeypatch.setattr(
+            branch_audit,
+            "_load_diagnostics_checker",
+            lambda: None,
+        )
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        branch_audit.audit_branch(branch, [])
+
+        import_checked_names = {Path(c.args[0]).name for c in import_checker.check_module.call_args_list}
+        normal_checked_names = {Path(c.args[0]).name for c in normal_checker.check_module.call_args_list}
+        assert "__init__.py" in import_checked_names
+        assert "__init__.py" not in normal_checked_names
 
     def test_dynamic_post_check(self, tmp_path, monkeypatch):
         """check_branch_post discovered and called."""

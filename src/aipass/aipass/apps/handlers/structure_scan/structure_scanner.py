@@ -93,7 +93,7 @@ def find_project_root(start: Path) -> Optional[Path]:
 # =============================================================================
 
 
-_SCAN_SKIP_DIRS = {".archive", ".venv", ".git", "__pycache__", "node_modules", ".chroma"}
+_SCAN_SKIP_DIRS = {".archive", ".backup", ".venv", ".git", "__pycache__", "node_modules", ".chroma", "templates"}
 
 
 def scan_agents(project_root: Path) -> List[AgentInfo]:
@@ -286,12 +286,15 @@ def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
 def check_registry_consistency(
     registry_path: Path,
     agents: List[AgentInfo],
+    project_root: Optional[Path] = None,
 ) -> List[RegistryIssue]:
     """Validate that registry branches[].path entries match actual filesystem.
 
     Returns:
         List of RegistryIssue for each problem found.
     """
+    anchor = (project_root or registry_path.parent).resolve()
+
     try:
         data = json.loads(registry_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -309,7 +312,8 @@ def check_registry_consistency(
             issues.append(RegistryIssue(name, "", "missing"))
             continue
 
-        reg_path = Path(path_str).resolve()
+        p = Path(path_str)
+        reg_path = p.resolve() if p.is_absolute() else (anchor / p).resolve()
         if not reg_path.exists():
             issues.append(RegistryIssue(name, path_str, "missing"))
         elif str(reg_path) not in agent_paths:

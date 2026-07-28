@@ -29,7 +29,7 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import (
     _find_claude_bin,
     resolve_branch,
     DispatchStatus,
-    MODEL_MAP,
+    KNOWN_MODEL_ALIASES,
     DEFAULT_MODEL,
     _acquire_lock,
     _load_config,
@@ -572,24 +572,22 @@ def _fake_open_factory(real_status_path, mapping):
 # --- Model flag tests ---------------------------------------------------
 
 
-def test_model_map_has_expected_entries():
-    """MODEL_MAP should contain sonnet, opus, haiku shorthand mappings."""
-    assert "sonnet" in MODEL_MAP
-    assert "opus" in MODEL_MAP
-    assert "haiku" in MODEL_MAP
-    assert "claude-sonnet-4-6" in MODEL_MAP["sonnet"]
-    assert "claude-opus-4-6" in MODEL_MAP["opus"]
+def test_known_model_aliases_has_expected_entries():
+    """KNOWN_MODEL_ALIASES should contain sonnet, opus, haiku."""
+    assert "sonnet" in KNOWN_MODEL_ALIASES
+    assert "opus" in KNOWN_MODEL_ALIASES
+    assert "haiku" in KNOWN_MODEL_ALIASES
 
 
-def test_default_model_is_opus():
-    """Default model should be opus."""
-    assert DEFAULT_MODEL == "opus"
+def test_default_model_is_sonnet():
+    """Default model should be sonnet."""
+    assert DEFAULT_MODEL == "sonnet"
 
 
-def test_model_map_values_are_full_ids():
-    """All MODEL_MAP values should be full claude model IDs."""
-    for key, value in MODEL_MAP.items():
-        assert value.startswith("claude-"), f"{key} -> {value} doesn't start with 'claude-'"
+def test_known_model_aliases_are_bare_names():
+    """All KNOWN_MODEL_ALIASES should be bare alias names (no 'claude-' prefix)."""
+    for alias in KNOWN_MODEL_ALIASES:
+        assert not alias.startswith("claude-"), f"{alias} should be a bare alias"
 
 
 # --- _find_claude_bin tests ------------------------------------------
@@ -999,6 +997,57 @@ class TestWakeBranch:
         status, ok = wake_branch("@testbranch")
         assert ok is True
         assert any(s[1] == "manager" for s in status.steps)
+
+    def test_manager_daemon_scheduled_wake_spawns_interactive(self, tmp_path, monkeypatch):
+        """Manager + sender=@daemon bypasses the gate and spawns an interactive
+        tmux session — managers are never headless. Self-authored
+        .daemon/schedule.json = consent; the daemon cannot write other branches' files."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        trinity = branch_path / ".trinity"
+        trinity.mkdir(parents=True, exist_ok=True)
+        (trinity / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "manager"}}),
+            encoding="utf-8",
+        )
+        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        tmux_calls = []
+
+        def _fake_run(cmd, **kwargs):
+            tmux_calls.append(list(cmd))
+
+            class _Done:
+                returncode = 0
+                stderr = ""
+
+            return _Done()
+
+        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: "/usr/bin/tmux")
+        monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
+        status, ok = wake_branch("@testbranch", custom_message="continue the work", sender="@daemon")
+        assert ok is True
+        # Gate records the bypass as an ok step (not the info skip)...
+        assert any(s[0] == "ok" and s[1] == "manager" for s in status.steps)
+        # ...and the spawn is an interactive tmux session, not the headless monitor.
+        assert any(s[0] == "ok" and s[1] == "spawn" and "tmux" in s[2] for s in status.steps)
+        assert [c[:2] for c in tmux_calls] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        # Prompt travels via file (quoting-proof, debuggable).
+        prompt_file = branch_path / ".daemon" / "last_wake_prompt.txt"
+        assert prompt_file.read_text(encoding="utf-8") == "continue the work"
+
+    def test_manager_daemon_wake_fails_without_tmux(self, tmp_path, monkeypatch):
+        """Manager + sender=@daemon with no tmux binary fails loud (no silent headless fallback)."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        trinity = branch_path / ".trinity"
+        trinity.mkdir(parents=True, exist_ok=True)
+        (trinity / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "manager"}}),
+            encoding="utf-8",
+        )
+        _patch_wake_deps(monkeypatch, _clean_zombies=lambda: 0)
+        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: None)
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+        assert ok is False
+        assert any(s[0] == "fail" and s[1] == "tmux" for s in status.steps)
 
     def test_non_manager_target_continues(self, tmp_path, monkeypatch):
         """Target with non-manager citizen_class proceeds to spawn."""

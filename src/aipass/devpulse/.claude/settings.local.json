@@ -1,4 +1,5 @@
 {
+  "autoCompactWindow": 350000,
   "permissions": {
     "allow": [],
     "deny": [

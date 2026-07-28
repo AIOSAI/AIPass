@@ -14,7 +14,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     is_projects_child,
     update_project,
 )
-from aipass.aipass.apps.handlers.init.scaffold_content import (
+from aipass.aipass.shared.scaffold_content import (
     global_prompt_md,
     inbox_json,
     prep_md,

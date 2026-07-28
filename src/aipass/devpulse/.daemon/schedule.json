@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "branch": "@devpulse",
+  "jobs": [
+    {
+      "id": "cl-harvest-resume",
+      "enabled": false,
+      "schedule": {
+        "type": "interval",
+        "interval_minutes": 60
+      },
+      "wake": {
+        "fresh": true
+      },
+      "prompt": "AIPass @daemon ONE-SHOT wake (test) — 60-min pacing gap for the Marketstand Craigslist harvest.\nDo these IN ORDER:\n1. FIRST, make this non-repeating: open src/aipass/devpulse/.daemon/schedule.json and set the 'cl-harvest-resume' job \"enabled\": false. (One-shot — must not fire again.)\n2. Run normal startup, then read .trinity/local.json todo #97 (exact harvest state + next targets + pipeline) and projects/marketstand/docs/camera_burst_index.md.\n3. Confirm Claude-in-Chrome is connected (tabs_context_mcp). If the browser is NOT connected, add a local.json note that the daemon wake fired but browser was unavailable, then STOP.\n4. If connected, continue the legacy harvest: post the next 2-3 high-value items value-first via the proven pipeline — FB copy verbatim -> burst photo from ~/Pictures/Camera -> tools/prep_photos.py -> EYEBALL web/01 -> CL reuse-flow post -> WebFetch ghost-check (prefix 'Today is 2026-07-24') -> 'drone @marketstand listings record <slug> <url> craigslist' run from projects/marketstand. Stay under ~12-15 CL/day (already 10 today), real gaps.\nThen STOP.",
+      "_note": "PARKED 2026-07-24 per Patrick: daemon manager self-wake works (wake.py v2, tmux interactive spawn, 235 tests green) but occupancy semantics unresolved. No mail fallback - email IS a dispatch. Idle interactive session = asleep. Resume via DPLAN."
+    }
+  ]
+}

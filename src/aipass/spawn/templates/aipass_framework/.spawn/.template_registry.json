@@ -5,11 +5,6 @@
       "name": ".ai_mail.local",
       "path": ".ai_mail.local"
     },
-    "d002": {
-      "has_branch_placeholder": false,
-      "name": ".pytest_cache",
-      "path": ".pytest_cache"
-    },
     "d003": {
       "has_branch_placeholder": false,
       "name": ".aipass",
@@ -119,16 +114,6 @@
       "has_branch_placeholder": false,
       "name": "integrations",
       "path": "apps/integrations"
-    },
-    "d025": {
-      "has_branch_placeholder": false,
-      "name": "v",
-      "path": ".pytest_cache/v"
-    },
-    "d026": {
-      "has_branch_placeholder": false,
-      "name": "cache",
-      "path": ".pytest_cache/v/cache"
     }
   },
   "files": {
@@ -211,7 +196,7 @@
       "path": ".trinity/observations.json"
     },
     "f014": {
-      "content_hash": "d523dee2ef39",
+      "content_hash": "98f1e33dace0",
       "has_branch_placeholder": false,
       "name": "passport.json",
       "path": ".trinity/passport.json"
@@ -281,12 +266,6 @@
       "has_branch_placeholder": false,
       "name": "README.md",
       "path": "apps/plugins/README.md"
-    },
-    "f026": {
-      "content_hash": "3ed731b65d06",
-      "has_branch_placeholder": false,
-      "name": ".gitignore",
-      "path": ".pytest_cache/.gitignore"
     },
     "f027": {
       "content_hash": "024209a8c889",
@@ -402,24 +381,6 @@
       "name": "requirements.project.txt",
       "path": "requirements.project.txt"
     },
-    "f046": {
-      "content_hash": "37dc88ef9a0a",
-      "has_branch_placeholder": false,
-      "name": "CACHEDIR.TAG",
-      "path": ".pytest_cache/CACHEDIR.TAG"
-    },
-    "f047": {
-      "content_hash": "73fd6fccdd80",
-      "has_branch_placeholder": false,
-      "name": "README.md",
-      "path": ".pytest_cache/README.md"
-    },
-    "f048": {
-      "content_hash": "0575fdabafa9",
-      "has_branch_placeholder": false,
-      "name": "nodeids",
-      "path": ".pytest_cache/v/cache/nodeids"
-    },
     "f049": {
       "content_hash": "5610e3ccaf8b",
       "has_branch_placeholder": false,
@@ -429,7 +390,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-07-17",
+    "last_updated": "2026-07-27",
     "version": "1.0.0"
   }
 }

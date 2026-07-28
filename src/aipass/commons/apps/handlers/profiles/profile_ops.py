@@ -58,7 +58,7 @@ def show_profile(args: List[str]) -> dict:
 
     # Determine which branch to show
     if args:
-        target_branch = args[0].upper()
+        target_branch = args[0].lower()
     else:
         caller = get_caller_branch()
         if not caller:

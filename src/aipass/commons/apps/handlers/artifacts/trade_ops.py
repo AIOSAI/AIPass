@@ -54,8 +54,8 @@ RARITY_COLORS = {
 
 
 def _resolve_branch_name(mention: str) -> Optional[str]:
-    """Resolve a @mention to a branch name."""
-    name = mention.lstrip("@").upper()
+    """Resolve a @mention to a branch name (lowercase-normalized)."""
+    name = mention.lstrip("@").lower()
 
     if not os.path.exists(BRANCH_REGISTRY_PATH):
         return None
@@ -64,7 +64,7 @@ def _resolve_branch_name(mention: str) -> Optional[str]:
         with open(BRANCH_REGISTRY_PATH, encoding="utf-8") as f:
             registry = json.load(f)
         for branch in registry.get("branches", []):
-            if branch.get("name") == name:
+            if branch.get("name", "").lower() == name:
                 return name
         return None
     except Exception:
