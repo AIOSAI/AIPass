@@ -72,6 +72,39 @@ class TestClassRegistry:
         with pytest.raises(ValueError, match="Unknown citizen class"):
             get_template_dir("nonexistent")
 
+    def test_manager_not_template_selectable(self):
+        """'manager' is a real identity class but never a template-selectable class (validate_class)."""
+        from aipass.spawn.apps.handlers.class_registry import validate_class
+
+        assert validate_class("manager") is False
+
+    def test_resolve_template_class_passthrough_for_registered_classes(self):
+        """Non-manager registered classes resolve to themselves."""
+        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
+
+        assert resolve_template_class({"citizen_class": "aipass_framework"}) == "aipass_framework"
+        assert resolve_template_class({"citizen_class": "project_agent", "role": "anything"}) == "project_agent"
+
+    def test_resolve_template_class_manager_role_project_agent(self):
+        """manager + role=project_agent resolves the project_agent template."""
+        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
+
+        assert resolve_template_class({"citizen_class": "manager", "role": "project_agent"}) == "project_agent"
+
+    def test_resolve_template_class_manager_other_role_defaults_aipass_framework(self):
+        """manager + any non-project_agent role (devpulse: orchestration_hub) resolves aipass_framework."""
+        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
+
+        assert resolve_template_class({"citizen_class": "manager", "role": "orchestration_hub"}) == "aipass_framework"
+        assert resolve_template_class({"citizen_class": "manager"}) == "aipass_framework"
+
+    def test_resolve_template_class_unknown_raises(self):
+        """An unregistered citizen_class raises ValueError naming registered classes."""
+        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
+
+        with pytest.raises(ValueError, match="Unknown citizen_class"):
+            resolve_template_class({"citizen_class": "nonexistent"})
+
 
 # =============================================================================
 # CLASS-AWARE CREATE TESTS
@@ -144,14 +177,15 @@ class TestClassAwareUpdate:
 
         assert _read_citizen_class(tmp_path) == "aipass_framework"
 
-    def test_read_citizen_class_missing_passport(self, tmp_path):
-        """Missing passport defaults to 'aipass_framework'."""
+    def test_read_citizen_class_missing_passport_raises(self, tmp_path):
+        """Missing passport is a loud hard error, not a silent 'aipass_framework' default (DPLAN-0262)."""
         from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
 
-        assert _read_citizen_class(tmp_path) == "aipass_framework"
+        with pytest.raises(FileNotFoundError, match="No passport.json"):
+            _read_citizen_class(tmp_path)
 
-    def test_read_citizen_class_no_field(self, tmp_path):
-        """Passport without citizen_class field defaults to 'aipass_framework'."""
+    def test_read_citizen_class_no_field_raises(self, tmp_path):
+        """Passport without citizen_class field is a loud hard error, not a silent default."""
         from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
 
         passport_dir = tmp_path / ".trinity"
@@ -159,7 +193,41 @@ class TestClassAwareUpdate:
         passport = {"identity": {"role": "test"}}
         (passport_dir / "passport.json").write_text(json.dumps(passport))
 
+        with pytest.raises(ValueError, match="Unknown citizen_class"):
+            _read_citizen_class(tmp_path)
+
+    def test_read_citizen_class_corrupt_passport_raises(self, tmp_path):
+        """Corrupt passport JSON is a loud hard error naming the passport path."""
+        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
+
+        passport_dir = tmp_path / ".trinity"
+        passport_dir.mkdir()
+        (passport_dir / "passport.json").write_text("{not valid json")
+
+        with pytest.raises(ValueError, match="Corrupt or unreadable passport.json"):
+            _read_citizen_class(tmp_path)
+
+    def test_read_citizen_class_manager_devpulse_shape_resolves_aipass_framework(self, tmp_path):
+        """manager + non-project_agent role (e.g. devpulse's orchestration_hub) resolves aipass_framework."""
+        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
+
+        passport_dir = tmp_path / ".trinity"
+        passport_dir.mkdir()
+        passport = {"identity": {"citizen_class": "manager", "role": "orchestration_hub"}}
+        (passport_dir / "passport.json").write_text(json.dumps(passport))
+
         assert _read_citizen_class(tmp_path) == "aipass_framework"
+
+    def test_read_citizen_class_manager_project_agent_shape_resolves_project_agent(self, tmp_path):
+        """manager + role='project_agent' resolves the project_agent template."""
+        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
+
+        passport_dir = tmp_path / ".trinity"
+        passport_dir.mkdir()
+        passport = {"identity": {"citizen_class": "manager", "role": "project_agent"}}
+        (passport_dir / "passport.json").write_text(json.dumps(passport))
+
+        assert _read_citizen_class(tmp_path) == "project_agent"
 
     def test_update_all_requires_class_via_cli(self):
         """update --all without class should return error code."""

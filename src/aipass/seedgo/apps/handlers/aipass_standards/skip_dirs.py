@@ -49,12 +49,8 @@ def _get_temp_roots() -> list[Path]:
 def is_throwaway_path(path_str: str) -> bool:
     """Return True if path is under a system temp dir or scratchpad."""
     resolved = Path(path_str).resolve()
-    for temp_root in _get_temp_roots():
-        try:
-            resolved.relative_to(temp_root)
-            return True
-        except ValueError:
-            logger.info("[skip_dirs] %s not under %s", resolved, temp_root)
+    if any(resolved.is_relative_to(temp_root) for temp_root in _get_temp_roots()):
+        return True
     if "scratchpad" in str(resolved).lower():
         return True
     return False

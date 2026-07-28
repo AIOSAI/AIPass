@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-07-27]
 
+**feat(spawn)** — passport drift auto-heal (DPLAN-0262, fallout of PR #710):
+existing agents never received template-guaranteed passport fields — 17/17
+core passports drifted (`email`, `git_branch`, `traits`), invisible for
+months. `spawn update` now heals passports against a strict allowlist
+(`branch_info.email`, `branch_info.git_branch`, `identity.traits`) — existing
+values always win, identity content stays create-only, legacy top-level
+`traits` arrays migrate into `identity.traits`, backup before every write.
+The silent citizen-class fallback is gone: unknown class, corrupt or missing
+passport now hard-error loudly (`resolve_template_class()` recognizes
+`manager` via a role tiebreaker instead of guessing `aipass_framework`).
+New `test_passport_drift.py` is a permanent live canary — red on any future
+drift. Template scaffold smoke test degrades to skip on branches with their
+own conftest. Fleet healed post-verification: 17 core + 3 project agents,
+canary green. 377 spawn tests + E2E (throwaway citizens, hand-drifted /
+corrupt / unknown-class passports, local + Docker). Built by @spawn,
+devpulse-verified.
+
 **feat(spawn)** — passport templates now populate `traits` and `email`
 (PR #710, first external contribution — thanks @slaguru666): `--traits` and
 the branch address were computed by spawn's placeholder builder and silently

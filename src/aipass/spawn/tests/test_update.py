@@ -135,6 +135,25 @@ def branch_dir(tmp_path):
     (branch / "docs").mkdir()
     (branch / ".spawn").mkdir()
 
+    # passport.json — _read_citizen_class requires one (no fallback, DPLAN-0262).
+    # Fully allowlist-complete so generic engine tests don't incidentally trigger
+    # a passport heal diff; test_passport_drift.py and TestPassportHeal cover healing.
+    (branch / ".trinity").mkdir()
+    (branch / ".trinity" / "passport.json").write_text(
+        json.dumps(
+            {
+                "branch_info": {
+                    "branch_name": "test_branch",
+                    "email": "@test_branch",
+                    "git_branch": "work/test_branch",
+                },
+                "identity": {"citizen_class": "aipass_framework", "role": "test", "traits": ""},
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
     return branch
 
 
@@ -368,23 +387,16 @@ class TestUpdateBranch:
 class TestNeverUpdateGuard:
     """Tests for create-only file protection (P1 engine, TDPLAN-0006)."""
 
-    def test_trinity_files_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
-        """Update must never modify .trinity/ files even when template has them."""
+    def test_trinity_local_json_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """Update must never modify .trinity/local.json even when template has it (create-only)."""
         from aipass.spawn.apps.handlers.update_ops import update_branch
 
-        # Add .trinity/ to template
         trinity_tpl = template_dir / ".trinity"
         trinity_tpl.mkdir(exist_ok=True)
-        (trinity_tpl / "passport.json").write_text('{"identity": {"role": "template"}}')
         (trinity_tpl / "local.json").write_text('{"sessions": []}')
 
-        # Add .trinity/ to branch with different content
         trinity_branch = branch_dir / ".trinity"
-        trinity_branch.mkdir(exist_ok=True)
-        (trinity_branch / "passport.json").write_text('{"identity": {"role": "real_agent"}}')
         (trinity_branch / "local.json").write_text('{"sessions": [{"id": 1}]}')
-
-        passport_before = (trinity_branch / "passport.json").read_text()
         local_before = (trinity_branch / "local.json").read_text()
 
         with (
@@ -394,8 +406,38 @@ class TestNeverUpdateGuard:
             result = update_branch("test_branch")
 
         assert result["success"] is True
-        assert (trinity_branch / "passport.json").read_text() == passport_before
         assert (trinity_branch / "local.json").read_text() == local_before
+
+    def test_passport_identity_content_never_touched_by_heal(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """passport.json heals allowlisted fields only — role/purpose/etc. stay create-only,
+        even when the branch_dir fixture's passport is already allowlist-complete and the
+        template disagrees on a non-allowlisted field (role) and on allowlisted ones (email,
+        git_branch, traits) — existing always wins, template's differing values never land."""
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        trinity_tpl = template_dir / ".trinity"
+        trinity_tpl.mkdir(exist_ok=True)
+        (trinity_tpl / "passport.json").write_text(
+            json.dumps(
+                {
+                    "branch_info": {"email": "@template_default", "git_branch": "work/template_default"},
+                    "identity": {"role": "template_role_should_not_apply", "traits": "should_not_apply"},
+                },
+                indent=2,
+            )
+        )
+
+        trinity_branch = branch_dir / ".trinity"
+        passport_before = (trinity_branch / "passport.json").read_text()
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            result = update_branch("test_branch")
+
+        assert result["success"] is True
+        assert (trinity_branch / "passport.json").read_text() == passport_before
 
     def test_dashboard_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
         """Update must never modify DASHBOARD.local.json even when template differs."""
