@@ -61,7 +61,9 @@ def enroll(project_dir: str) -> bool:
         logger.warning("[HOOKS] cannot enroll %s: no .aipass/hooks.json", project_path)
         return False
     config_hash = _hash_file(config_path)
-    registry = read_registry()
+    registry, dropped = prune_stale(read_registry())
+    if dropped:
+        logger.info("[HOOKS] enroll: pruned %d stale registry entries", dropped)
     registry["projects"][str(project_path)] = {
         "enrolled": _isoformat_now(),
         "config_hash": config_hash,
@@ -98,6 +100,35 @@ def is_trusted(project_dir: str) -> bool:
         return False
     current_hash = _hash_file(config_path)
     return current_hash == entry.get("config_hash", "")
+
+
+def is_unenrolled(project_dir: str) -> bool:
+    """True when a project has hooks.json but no registry entry at all.
+
+    Distinct from is_hash_mismatch() — that flags an existing enrollment gone
+    stale. This flags the normal first-run state: hooks.json exists, nobody
+    has ever run `aipass init update` for this project, so hooks are
+    silently off. Mutually exclusive with is_hash_mismatch() (an entry can't
+    be both absent and present).
+    """
+    project_path = str(Path(project_dir).resolve())
+    registry = read_registry()
+    if project_path in registry["projects"]:
+        return False
+    config_path = Path(project_dir).resolve() / ".aipass" / "hooks.json"
+    return config_path.exists()
+
+
+def prune_stale(registry: dict) -> tuple[dict, int]:
+    """Drop registry entries whose project path no longer exists on disk.
+
+    Generic dead-path detection, not tmpdir-pattern matching -- catches any
+    deleted or moved project, not just pytest tmp dirs. Returns the pruned
+    registry and the number of entries dropped.
+    """
+    live = {path: entry for path, entry in registry["projects"].items() if Path(path).exists()}
+    dropped = len(registry["projects"]) - len(live)
+    return {**registry, "projects": live}, dropped
 
 
 def is_hash_mismatch(project_dir: str) -> bool:

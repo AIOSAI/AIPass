@@ -92,20 +92,27 @@ def _claude_local_settings(aipass_home: str) -> str:
     return json.dumps({"env": {"AIPASS_HOME": aipass_home}}, indent=2, ensure_ascii=False) + "\n"
 
 
-def _enroll_project(target: Path) -> None:
+def _enroll_project(target: Path) -> bool:
     """Enroll a project in the trusted-project registry (DPLAN-0244).
 
+    Skips throwaway paths (temp dirs, Claude Code scratchpads) so ephemeral
+    test/pytest directories never bloat the registry (GH-712).
     Lazy import to keep this module free of prax/module-level deps.
     """
+    if is_throwaway_path(target):
+        logger.info("Skipping trust enrollment for throwaway path: %s", target)
+        return False
     try:
         from aipass.hooks.apps.handlers.config.trust_registry import enroll
 
         if enroll(str(target)):
             logger.info("Enrolled project in trust registry: %s", target)
-        else:
-            logger.warning("Trust enrollment failed for %s", target)
+            return True
+        logger.warning("Trust enrollment failed for %s", target)
+        return False
     except ImportError as exc:
         logger.info("Trust registry unavailable, skipping enrollment: %s", exc)
+        return False
 
 
 def is_projects_child(target: Path) -> bool:

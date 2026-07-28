@@ -11,6 +11,45 @@ PyPI version — not the changelog header.
 
 ## [2026-07-27]
 
+**feat(hooks)** — never-enrolled projects get a voice (GH-712, DPLAN-0263):
+an external project ran 6+ days with its whole hook layer silently dark
+because it was never enrolled in the trust registry — fail-open by design,
+zero signal. `never_enrolled_banner()` now fires a one-time-per-session
+nudge ("hooks are OFF here — run `aipass init update`") for any project
+with a hooks.json but no registry entry; trust checks run unconditionally
+for UserPromptSubmit (the old `presence_gate` gate was bridge-specific and
+fragile). `prune_stale()` drops dead project paths at enroll time.
+1,287 hooks tests green, live-verified on both fresh and populated
+registries. Built by @hooks, devpulse-verified.
+
+**feat(aipass)** — trust registry hygiene + honest enrollment output
+(GH-712, DPLAN-0263): `_enroll_project()` now skips throwaway paths (the
+leak that bloated the registry to 795KB / 2,272 entries — 2,245 dead
+pytest tmpdirs, parsed on every hook fire in every project); new
+`aipass trust prune` CLI drops dead-path entries (live run: 2,141 pruned,
+795KB → 44KB); `aipass init update` now *says* "Enrolled in trust
+registry — hooks active" instead of enrolling silently. 791 tests green.
+Built by @aipass, devpulse-verified.
+
+**fix(setup)** — DPLAN-0263 audit sweep: fresh installs now include the
+`[llm]` extra (previously every fresh venv was born with the fleet-wide
+`get_response()` contract dead — openai lived in an optional extra the
+install line never requested; root cause of a 2-month silent outage);
+generated registry seeds `metadata.id` so spawn's `REGISTRY_ID`
+placeholder renders real values on fresh fleets.
+
+**refactor(setup)** — setup.sh delegates `.trinity` stubs to spawn's
+templates (DPLAN-0263 P2): `bootstrap_branch()` no longer hand-rolls
+passport/local/observations heredocs — it renders all three from spawn's
+own templates via `resolve_template_class` + `build_replacements_dict`,
+the same machinery `spawn create`/`update` use. The heredocs had drifted
+to a pre-numbered-entry schema (dict `key_learnings`, nested
+observations) the cap/rollover system doesn't expect — second source of
+truth eliminated. Renders memory's live `*_meta` cap lines; keeps
+relative `branch_info.path` and the `aipass.` module prefix. 378 spawn
+tests green, fresh/idempotent/manager E2E scenarios verified twice
+(builder + devpulse independently). Built by @spawn, devpulse-verified.
+
 **fix(setup)** — the drift canary's first catch, same night it shipped:
 `setup.sh` still bootstrapped every core branch with `citizen_class:
 "builder"` — the pre-rename legacy name — so every fresh clone (all CI

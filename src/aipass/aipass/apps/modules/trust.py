@@ -19,11 +19,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success
+from aipass.hooks.apps.handlers.config import trust_registry
 from aipass.hooks.apps.handlers.config.trust_registry import (
     enroll,
     read_registry,
     revoke,
 )
+from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 COMMAND = "trust"
@@ -69,6 +71,9 @@ def print_help() -> None:
         "  [green]aipass trust <path>[/green]     [dim]# Enroll a project (requires .aipass/hooks.json)[/dim]"
     )
     console.print("  [green]aipass revoke <path>[/green]    [dim]# Remove a project from the registry[/dim]")
+    console.print(
+        "  [green]aipass trust prune[/green]      [dim]# Drop entries whose project path no longer exists[/dim]"
+    )
     console.print()
 
 
@@ -87,6 +92,23 @@ def _do_trust(args: list[str]) -> bool:
         logger.info("[AIPASS] trust: enrolled %s", target)
     else:
         error(f"Failed to enroll {target}")
+    return True
+
+
+def _do_prune() -> bool:
+    """Drop registry entries whose project path no longer exists on disk."""
+    registry = read_registry()
+    projects = registry.get("projects", {})
+    stale = [path for path in projects if not Path(path).exists()]
+    for path in stale:
+        del projects[path]
+    if stale:
+        json_handler.write_json_file(trust_registry.REGISTRY_PATH, registry)
+        json_handler.log_operation("prune", {"pruned_count": len(stale)}, module_name="trust")
+        success(f"Pruned {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'} from the trust registry.")
+        logger.info("[AIPASS] trust: pruned %d stale entries", len(stale))
+    else:
+        console.print("[dim]No stale entries found.[/dim]")
     return True
 
 
@@ -113,6 +135,8 @@ def handle_command(command: str, args: list[str]) -> bool:
         if args[0] == "--info":
             print_introspection()
             return True
+        if args[0] == "prune":
+            return _do_prune()
         return _do_trust(args)
     if command == _COMMAND_REVOKE:
         if not args or args[0] in ("--help", "-h", "help"):
