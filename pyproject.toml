@@ -54,6 +54,11 @@ memory = [
 telegram = [
     "telethon>=1.36",
 ]
+drive = [
+    "google-auth>=2.29",
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.126",
+]
 seedgo = []
 dev = [
     "pytest>=9.0.3",

@@ -117,7 +117,7 @@ class TestDriveClient:
         assert client._drive_service is mock_service
 
     def test_authenticate_no_api(self) -> None:
-        """GOOGLE_API_AVAILABLE=False, authenticate() returns False."""
+        """GOOGLE_API_AVAILABLE=False, authenticate() returns False and logs ERROR."""
         mod = _fresh_import("aipass.backup.apps.handlers.drive.client")
         mod.GOOGLE_API_AVAILABLE = False  # type: ignore[attr-defined]
         client = mod.DriveClient()
@@ -125,6 +125,9 @@ class TestDriveClient:
         result = client.authenticate()
         assert result is False
         assert client.last_error == "Google API libraries not installed"
+        mod.logger.error.assert_called_once()
+        assert "pip install" in mod.logger.error.call_args[0][0]
+        mod.logger.warning.assert_not_called()
 
     def test_authenticate_service_returns_none(self) -> None:
         """get_drive_service returns None, authenticate() returns False."""
@@ -145,6 +148,47 @@ class TestDriveClient:
         result = client.authenticate()
         assert result is False
         assert "boom" in (client.last_error or "")
+        mod.logger.warning.assert_called_once()
+        mod.logger.error.assert_not_called()
+
+    def test_authenticate_missing_libs_exception_escalates_to_error(self) -> None:
+        """get_drive_service raising the real 'libraries not installed' RuntimeError
+
+        (the exact shape @api's google_client.get_google_service raises when
+        google-auth/google-auth-oauthlib/google-api-python-client aren't
+        installed) must escalate to logger.error carrying the install hint,
+        so log_watcher/medic can see it -- WARNING is a documented no-op path.
+        """
+        mod = _fresh_import("aipass.backup.apps.handlers.drive.client")
+        client = mod.DriveClient()
+        mod.get_drive_service = MagicMock(  # type: ignore[attr-defined]
+            side_effect=RuntimeError(
+                "Google auth libraries not installed. Install: pip install "
+                "google-auth google-auth-oauthlib google-api-python-client"
+            )
+        )
+
+        result = client.authenticate()
+        assert result is False
+        mod.logger.error.assert_called_once()
+        assert "not installed" in mod.logger.error.call_args[0][0]
+        mod.logger.warning.assert_not_called()
+
+    def test_authenticate_transient_failure_stays_warning(self) -> None:
+        """A non-install auth failure (bad creds, network) stays at WARNING --
+
+        only the actionable 'libraries not installed' case escalates to ERROR.
+        """
+        mod = _fresh_import("aipass.backup.apps.handlers.drive.client")
+        client = mod.DriveClient()
+        mod.get_drive_service = MagicMock(  # type: ignore[attr-defined]
+            side_effect=RuntimeError("Unable to find the server at oauth2.googleapis.com")
+        )
+
+        result = client.authenticate()
+        assert result is False
+        mod.logger.warning.assert_called_once()
+        mod.logger.error.assert_not_called()
 
     def test_drive_service_property_main(self) -> None:
         """drive_service returns main service when no thread-local."""

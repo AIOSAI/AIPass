@@ -9,6 +9,24 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-28]
+
+**fix(backup+setup)** — Drive sync outage root-caused + made medic-visible
+(Patrick escalation from the MacBook): Drive sync died 2026-07-17 when a
+setup.sh run wiped the venv — the google libraries
+(google-auth/google-auth-oauthlib/google-api-python-client) were never
+declared in pyproject, only ever hand-installed, so the clean install
+couldn't restore them. Worse, the failure was structurally invisible:
+@api's gateway RuntimeError died in a generic `except Exception` →
+`logger.warning`, and WARNING routes to @trigger's no-op handler — medic
+can only see ERROR/CRITICAL. Now: `authenticate()` escalates the
+"libraries not installed" case to `logger.error` with the install hint
+(transient auth/network failures stay WARNING — regression-guarded);
+new `[drive]` extra owns the deps; setup.sh installs it by default so
+Drive sync survives venv rebuilds (the OAuth secret in ~/.secrets always
+did). 249 backup tests green, live-verified on the real broken venv,
+seedgo 100%. Built by @backup, devpulse-verified + wiring landed.
+
 ## [2026-07-27]
 
 **feat(hooks)** — never-enrolled projects get a voice (GH-712, DPLAN-0263):
