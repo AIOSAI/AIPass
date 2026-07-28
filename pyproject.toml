@@ -59,6 +59,9 @@ drive = [
     "google-auth-oauthlib>=1.2",
     "google-api-python-client>=2.126",
 ]
+bluesky = [
+    "atproto>=0.0.69",
+]
 seedgo = []
 dev = [
     "pytest>=9.0.3",

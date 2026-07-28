@@ -11,6 +11,27 @@ PyPI version — not the changelog header.
 
 ## [2026-07-28]
 
+**fix(flow)** — plan restore was type-blind (VERA repro from Vera Studio:
+`restore PPLAN-0011` collided with FPLAN-0011): `restore_plan_impl` always
+loaded the default fplan registry because prefix-stripping never re-derived
+the type for routing. close_ops already had the correct routing — its four
+helpers are now a shared `registry_routing.py` consumed by both ops (fix
+the class, not the symptom). Backup recovery is prefix-restricted too (it
+could previously recover a newer same-numbered backup of the wrong type),
+and restore messages now print the real plan type. 738 tests green incl.
+new cross-type collision coverage, seedgo 100%. Built by @flow,
+devpulse-verified. Known follow-up flagged: create's advertised 4th-arg
+template selector is dead code in the parser (pre-existing, unshipped).
+
+**chore(feedback)** — VERA feedback sweep: `atproto` (Bluesky SDK behind
+@api's publish driver) was the third undeclared dependency caught in 12
+hours — new `[bluesky]` extra, setup.sh installs it by default; VERA's
+`weekly_update.md` SOP template committed to flow's playbook templates
+(registration + create-syntax verified by @flow); stale tier0_kernel
+docstring corrected (claimed every-turn, actual cadence period 5);
+Patrick's external-project update flow proposal banked as DPLAN-0264
+with VERA's S32 audit evidence.
+
 **fix(api)** — Google credential refresh adopts the transient-vs-structural
 log split (error 78cd43aa, 324 occurrences): `TransportError` (network/DNS
 blips) now logs WARNING; genuine credential failures (invalid_grant,

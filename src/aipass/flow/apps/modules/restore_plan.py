@@ -92,7 +92,8 @@ def _display_messages(messages: List[Dict[str, Any]]):
             error_type = msg.get("error_type", "general")
             plan_key = msg.get("plan_key", "")
             details = msg.get("details", None)
-            console.print(format_restore_error(error_type, plan_key, details=details))
+            prefix = msg.get("prefix", "FPLAN")
+            console.print(format_restore_error(error_type, plan_key, details=details, prefix=prefix))
 
         elif msg_type == "warning":
             warning(msg["text"])
@@ -104,10 +105,12 @@ def _display_messages(messages: List[Dict[str, Any]]):
             console.print(f"[green]{msg['text']}[/green]")
 
         elif msg_type == "restore_header":
-            console.print(format_restore_header(msg["plan_key"], msg["plan_info"]))
+            console.print(format_restore_header(msg["plan_key"], msg["plan_info"], prefix=msg.get("prefix", "FPLAN")))
 
         elif msg_type == "restore_success":
-            console.print(format_restore_success(msg["plan_key"], msg.get("location")))
+            console.print(
+                format_restore_success(msg["plan_key"], msg.get("location"), prefix=msg.get("prefix", "FPLAN"))
+            )
 
 
 # =============================================
@@ -167,7 +170,7 @@ def print_help():
 # =============================================
 
 
-def recover_plan_from_backup(plan_key: str) -> tuple[bool, str]:
+def recover_plan_from_backup(plan_key: str, plan_num_raw: str | None = None) -> tuple[bool, str]:
     """
     Attempt to recover a plan from processed_plans backup (thin orchestrator)
 
@@ -175,12 +178,15 @@ def recover_plan_from_backup(plan_key: str) -> tuple[bool, str]:
 
     Args:
         plan_key: Normalized plan number (e.g., "0165")
+        plan_num_raw: Original plan number as given by the caller, prefix
+            intact (e.g. "PPLAN-0165"). Scopes recovery to that type.
 
     Returns:
         (success, message)
     """
     return _recover_plan_from_backup_impl(
         plan_key,
+        plan_num_raw=plan_num_raw,
         load_registry=load_registry,
         save_registry=save_registry,
     )

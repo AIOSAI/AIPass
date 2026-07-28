@@ -250,12 +250,14 @@ class TestRestoreNotFound:
                 },
             }
         }
-        load_mock = MagicMock(
-            side_effect=[
-                {"plans": {}},  # first load: empty
-                recovered_registry,  # second load: after recovery
-            ]
-        )
+
+        # registry_file-keyed responses -- only fplan_registry.json has the
+        # recovered plan; every other type's registry is empty. Emulates the
+        # real load_registry() contract (routes on registry_file, not call order).
+        def load_side_effect(registry_file=None):
+            return recovered_registry if registry_file == "fplan_registry.json" else {"plans": {}}
+
+        load_mock = MagicMock(side_effect=load_side_effect)
         deps = _make_deps(
             validate_plan_exists=MagicMock(return_value=(False, "not found")),
             recover_plan_from_backup_fn=MagicMock(return_value=(True, "Recovered FPLAN-9999")),
@@ -399,7 +401,134 @@ class TestRestoreDashboardFailures:
 
 
 # ═══════════════════════════════════════════════════════════
-# 9. recover_plan_from_backup
+# 9. restore_plan_impl -- cross-type same-number collision (VERA repro)
+# ═══════════════════════════════════════════════════════════
+
+
+class TestRestoreCrossTypeCollision:
+    """Regression coverage for the reported bug: `restore PPLAN-0011` must
+    never resolve against FPLAN-0011 just because both share number 0011."""
+
+    def _registries(self, tmp_path):
+        fplan_file = tmp_path / "FPLAN-0011.md"
+        fplan_file.write_text("# FPLAN", encoding="utf-8")
+        pplan_file = tmp_path / "PPLAN-0011.md"
+        pplan_file.write_text("# PPLAN", encoding="utf-8")
+
+        fplan_registry = {
+            "plans": {
+                "0011": {
+                    "status": "open",  # already open -- would error if wrongly matched
+                    "file_path": str(fplan_file),
+                    "location": str(tmp_path),
+                    "relative_path": "flow",
+                    "subject": "Unrelated FPLAN",
+                },
+            }
+        }
+        pplan_registry = {
+            "plans": {
+                "0011": {
+                    "status": "closed",
+                    "file_path": str(pplan_file),
+                    "location": str(tmp_path),
+                    "relative_path": "flow",
+                    "subject": "Weekly update playbook run",
+                    "closed": "2026-07-20",
+                    "closed_reason": "completed",
+                },
+            }
+        }
+        return fplan_registry, pplan_registry
+
+    def test_explicit_prefix_restores_correct_type(self, tmp_path):
+        fn = _import_restore_plan_impl()
+        from aipass.flow.apps.handlers.plan.validator import (
+            normalize_plan_number as real_normalize,
+            validate_plan_exists as real_validate,
+        )
+
+        fplan_registry, pplan_registry = self._registries(tmp_path)
+        registries = {"fplan_registry.json": fplan_registry, "pplan_registry.json": pplan_registry}
+        load_mock = MagicMock(side_effect=lambda registry_file="": registries[registry_file])
+        save_mock = MagicMock()
+
+        deps = _make_deps(
+            normalize_plan_number=real_normalize,
+            validate_plan_exists=real_validate,
+            load_registry=load_mock,
+            save_registry=save_mock,
+        )
+
+        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+            result = fn(plan_num="PPLAN-0011", **deps)
+
+        assert result["success"] is True
+        assert result["plan_key"] == "0011"
+        # Never touched the unrelated FPLAN-0011 entry
+        assert fplan_registry["plans"]["0011"]["status"] == "open"
+        save_mock.assert_called_once()
+        saved_registry = save_mock.call_args[0][0]
+        assert save_mock.call_args[1].get("registry_file") == "pplan_registry.json"
+        assert saved_registry["plans"]["0011"]["status"] == "open"
+
+    def test_explicit_prefix_does_not_fall_back_to_other_type(self, tmp_path):
+        """If PPLAN-0011 doesn't exist but FPLAN-0011 does, restore must fail
+        outright -- never silently restore the FPLAN entry instead."""
+        fn = _import_restore_plan_impl()
+        from aipass.flow.apps.handlers.plan.validator import (
+            normalize_plan_number as real_normalize,
+            validate_plan_exists as real_validate,
+        )
+
+        fplan_registry, _ = self._registries(tmp_path)
+        registries = {"fplan_registry.json": fplan_registry, "pplan_registry.json": {"plans": {}}}
+        load_mock = MagicMock(side_effect=lambda registry_file="": registries[registry_file])
+
+        deps = _make_deps(
+            normalize_plan_number=real_normalize,
+            validate_plan_exists=real_validate,
+            load_registry=load_mock,
+            recover_plan_from_backup_fn=MagicMock(return_value=(False, "no backup")),
+        )
+
+        result = fn(plan_num="PPLAN-0011", **deps)
+
+        assert result["success"] is False
+        assert any(m.get("error_type") == "not_found" for m in result["messages"])
+        assert any(m.get("prefix") == "PPLAN" for m in result["messages"])
+
+    def test_restore_success_message_carries_resolved_type_prefix(self, tmp_path):
+        """Display messages must reflect the plan's real type, not a silent
+        'FPLAN' default -- otherwise a restored PPLAN prints as 'FPLAN-0011'."""
+        fn = _import_restore_plan_impl()
+        from aipass.flow.apps.handlers.plan.validator import (
+            normalize_plan_number as real_normalize,
+            validate_plan_exists as real_validate,
+        )
+
+        _, pplan_registry = self._registries(tmp_path)
+        registries = {"pplan_registry.json": pplan_registry}
+        load_mock = MagicMock(side_effect=lambda registry_file="": registries[registry_file])
+
+        deps = _make_deps(
+            normalize_plan_number=real_normalize,
+            validate_plan_exists=real_validate,
+            load_registry=load_mock,
+            save_registry=MagicMock(),
+        )
+
+        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+            result = fn(plan_num="PPLAN-0011", **deps)
+
+        header = next(m for m in result["messages"] if m["type"] == "restore_header")
+        success = next(m for m in result["messages"] if m["type"] == "restore_success")
+        assert header["prefix"] == "PPLAN"
+        assert success["prefix"] == "PPLAN"
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. recover_plan_from_backup
 # ═══════════════════════════════════════════════════════════
 
 
@@ -499,3 +628,66 @@ class TestRecoverPlanFromBackup:
 
         assert ok is True
         assert "DPLAN-0005" in msg
+
+    def test_no_prefix_writes_to_registry_matching_recovered_file(self, tmp_path):
+        """Even without an explicit prefix, the entry must land in the
+        registry matching the RECOVERED file's actual type (DPLAN here),
+        never the default fplan_registry.json."""
+        fn = _import_recover_plan_from_backup()
+
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+        backup_file = backup_dir / "DPLAN-0005.md"
+        backup_file.write_text("# Plan\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
+
+        registry = {"plans": {}}
+        load = MagicMock(return_value=registry)
+        save = MagicMock()
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
+            ok, msg = fn("0005", load_registry=load, save_registry=save)
+
+        assert ok is True
+        load.assert_called_once_with(registry_file="dplan_registry.json")
+        save.assert_called_once()
+        assert save.call_args[1].get("registry_file") == "dplan_registry.json"
+
+    def test_explicit_prefix_restricts_search_to_matching_type(self, tmp_path):
+        """A caller-specified prefix must not be overridden by a newer
+        same-numbered backup from a different plan type."""
+        fn = _import_recover_plan_from_backup()
+
+        backup_dir = tmp_path / "processed_plans"
+        backup_dir.mkdir()
+
+        # Older FPLAN backup, requested explicitly
+        fplan_backup = backup_dir / "FPLAN-0011.md"
+        fplan_backup.write_text("# FPLAN\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
+
+        import time
+
+        time.sleep(0.05)
+
+        # Newer PPLAN backup with the SAME number -- must be ignored
+        pplan_backup = backup_dir / "PPLAN-0011.md"
+        pplan_backup.write_text("# PPLAN\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
+
+        registries = {}
+        load = MagicMock(side_effect=lambda registry_file=None: registries.setdefault(registry_file, {"plans": {}}))
+        save = MagicMock()
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", backup_dir),
+            patch("aipass.flow.apps.handlers.plan.restore_ops._PKG_ROOT", tmp_path),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.FLOW_ROOT", tmp_path / "flow"),
+        ):
+            ok, msg = fn("0011", plan_num_raw="FPLAN-0011", load_registry=load, save_registry=save)
+
+        assert ok is True
+        assert "FPLAN-0011" in msg
+        save.assert_called_once()
+        assert save.call_args[1].get("registry_file") == "fplan_registry.json"

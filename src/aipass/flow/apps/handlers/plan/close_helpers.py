@@ -24,7 +24,6 @@ Usage:
     )
 """
 
-import json
 import sys
 import subprocess
 from pathlib import Path
@@ -34,6 +33,7 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
 
 # =============================================
 # INFRASTRUCTURE
@@ -56,64 +56,10 @@ def _find_repo_root() -> Path:
 
 PROCESSED_PLANS_DIR = _find_repo_root() / ".backup" / "processed_plans"
 
-# =============================================
-# PLAN TYPE ROUTING
-# =============================================
-
-
-def _extract_prefix(plan_num_raw: str) -> str | None:
-    """Extract plan-type prefix (e.g. ``"DPLAN"``) from raw input."""
-    import re
-
-    m = re.match(r"^([A-Z]+PLAN)-", plan_num_raw.strip(), re.IGNORECASE)
-    return m.group(1).upper() if m else None
-
-
-def _resolve_registry_file(plan_num_raw: str) -> str | None:
-    """Resolve registry_file from a raw plan number with prefix.
-
-    Returns registry filename or None if no prefix detected.
-    """
-    prefix = _extract_prefix(plan_num_raw)
-    if prefix is None:
-        return None
-    return f"{prefix.lower()}_registry.json"
-
-
-def _load_template_registry() -> Dict[str, Any]:
-    """Read template_registry.json directly (avoids cross-handler import)."""
-    registry_path = FLOW_ROOT / "flow_json" / "template_registry.json"
-    try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to read template_registry.json: {e}")
-        return {"types": {}}
-
-
-def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | None:
-    """Search all registries for a plan number when no prefix given.
-
-    Returns registry filename where the plan was found, or None.
-    """
-    try:
-        template_reg = _load_template_registry()
-        for _type_key, config in template_reg.get("types", {}).items():
-            prefix = config.get("prefix", "")
-            if not prefix:
-                continue
-            reg_file = f"{prefix.lower()}_registry.json"
-            try:
-                registry = load_registry_fn(registry_file=reg_file)
-                if plan_key in registry.get("plans", {}):
-                    return reg_file
-            except Exception as e:
-                logger.warning(f"[{MODULE_NAME}] Failed to search registry '{reg_file}' for plan '{plan_key}': {e}")
-                continue
-    except Exception as e:
-        logger.warning(f"[{MODULE_NAME}] Failed to discover plan types while searching for plan '{plan_key}': {e}")
-    return None
-
+# Plan-type routing (_extract_prefix, _resolve_registry_file,
+# _load_template_registry, _find_plan_across_registries) now lives in
+# registry_routing.py -- imported above so existing call sites/tests in
+# this module and close_ops.py keep working unchanged.
 
 # =============================================
 # HELPER
