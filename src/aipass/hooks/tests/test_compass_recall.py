@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_compass_recall.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-07-16
+# Modified: 2026-07-28
 # =============================================
 
 """Tests for handlers/prompt/compass_recall.py."""
@@ -12,6 +12,24 @@
 import json
 import os
 from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_real_trust_banners():
+    """dispatch() runs both trust banners unconditionally on UserPromptSubmit.
+
+    Same neutralization as test_engine.py's autouse fixture: without it, the
+    banners do a real CWD-to-home walk against the actual ~/.aipass registry,
+    and on a never-enrolled machine (fresh clone, CI runner) the one-time
+    nudge short-circuits dispatch() before the handlers under test run.
+    """
+    with (
+        patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+        patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+    ):
+        yield
 
 
 CANDIDATE_GOOD = {

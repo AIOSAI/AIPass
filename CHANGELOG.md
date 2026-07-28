@@ -20,7 +20,12 @@ with a hooks.json but no registry entry; trust checks run unconditionally
 for UserPromptSubmit (the old `presence_gate` gate was bridge-specific and
 fragile). `prune_stale()` drops dead project paths at enroll time.
 1,287 hooks tests green, live-verified on both fresh and populated
-registries. Built by @hooks, devpulse-verified.
+registries. Built by @hooks, devpulse-verified. CI follow-up: the new
+banner made `test_compass_recall.py`'s engine tests enrollment-dependent
+(green on enrolled dev machines, red on fresh checkouts — all 10 CI reds
+were this one test); neutralized with the same autouse banner-patch
+fixture test_engine.py already used, verified under a fresh-machine
+HOME-override simulation.
 
 **feat(aipass)** — trust registry hygiene + honest enrollment output
 (GH-712, DPLAN-0263): `_enroll_project()` now skips throwaway paths (the
