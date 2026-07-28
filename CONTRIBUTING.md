@@ -10,6 +10,10 @@ Open an issue first. Use the [issue templates](https://github.com/AIOSAI/AIPass/
 
 PRs are welcome after an issue has been discussed. Keep changes focused -- one fix or feature per PR. Include tests where applicable.
 
+**Target the `dev` branch.** `main` only receives tested release trains from `dev` -- all work integrates on `dev` first (full test suite + standards audit), then rides a dev-to-main merge. GitHub defaults new PRs to `main`; switch the base to `dev` when you open one. If you forget, we'll retarget it -- your PR stays open either way.
+
+Changes under `src/aipass/spawn/templates/` also need the template registry regenerated (`drone @spawn regenerate-registry`) -- the registry tracks a content hash per template file and will report drift otherwise.
+
 ## Development
 
 - Python 3.10+

@@ -9,6 +9,34 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-27]
+
+**feat(spawn)** — passport templates now populate `traits` and `email`
+(PR #710, first external contribution — thanks @slaguru666): `--traits` and
+the branch address were computed by spawn's placeholder builder and silently
+discarded because no template referenced `{{TRAITS}}`/`{{EMAIL}}`; every
+agent's identity hook rendered `Email: unknown`. Two lines per template
+(`aipass_framework` + `project_agent`), registry regenerated (also drops
+seven stale `.pytest_cache` entries), 5 regression tests. Verified
+clean-room + Docker (Ubuntu 24.04): spawn suite 363 green both, all five
+new tests confirmed red pre-fix. No-flag agents render exactly as before.
+
+**fix(skills)** — Telegram 409 conflict fix v1.4.1: base bot session-conflict
+handling + scheduler bot hardening (base_bot, scheduler_bot), closing the
+live outage where a stale Telegram session held getUpdates and locked
+users out. Skills suite 1090 green.
+
+**feat(ai_mail)** — wake v2 (DPLAN-0261 groundwork): daemon self-wake support —
+the step-3 manager gate now recognizes `.daemon/schedule.json` as
+self-authored consent, so a branch's own scheduled job may wake a manager
+while dispatch/manual manager wakes stay blocked. Test + live-verified;
+ai_mail suite 780 green.
+
+**docs** — CONTRIBUTING.md: external PRs target `dev` (main only receives
+tested release trains — gap surfaced by PR #710); template-registry
+regeneration note. CROSS_OS_TESTING.md touch-up. devpulse `.daemon/`
+schedule tracked (disabled), consistent with other branches.
+
 ## [2026-07-21]
 
 **feat(prax)** — Commons live social feed in the monitor (DPLAN-0257, Patrick
