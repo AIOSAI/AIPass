@@ -18,7 +18,10 @@ runners, every external contributor) got legacy-class passports that the
 just-removed silent fallback used to absorb. Renamed to `aipass_framework`
 and extended the bootstrap passport stub to the full template contract
 (`git_branch`, `traits`, `purpose`, …), so CI-built fleets satisfy the
-canary honestly.
+canary honestly. Second canary catch same night: the bootstrap list was
+also missing backup/commons/daemon/skills entirely (a stale "moved to
+external repos" note from S82/S87 — they returned to core long ago); all
+17 core branches now bootstrap.
 
 **fix(hooks)** — e2e rm-gate test relied on trust-registry bootstrap
 coincidence: on machines with an existing `trusted_projects.json` the

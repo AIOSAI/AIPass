@@ -230,8 +230,30 @@ def _engine_log(clean_venv: CleanVenv) -> Path | None:
     return hits[0] if hits else None
 
 
+def _trust_registry(clean_venv: CleanVenv, op: str, work: Path) -> None:
+    """Run trust_registry.enroll/revoke inside the clean venv.
+
+    The harness python has no aipass installed on e2e-wheel runners (only the
+    clean venv gets the wheel — that isolation is the point of this suite), so
+    the trust call must go through the venv's own interpreter, never a
+    harness-level import.
+    """
+    proc = subprocess.run(
+        [
+            str(clean_venv.python),
+            "-c",
+            f"from aipass.hooks.apps.handlers.config.trust_registry import {op}; {op}({str(work)!r})",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"trust_registry.{op} failed in clean venv:\n{proc.stdout}\n{proc.stderr}")
+
+
 @pytest.fixture(scope="module")
-def hook_workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+def hook_workspace(clean_venv: CleanVenv, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """A tmp workspace holding an isolated .aipass/hooks.json with only rm_gate.
 
     Explicitly enrolled in the trust registry rather than relying on
@@ -243,17 +265,15 @@ def hook_workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     firing rm_gate — machine-dependent flakiness this fixture must not rely
     on (ref e2e rm_gate discovery-0-handlers, dispatch fc0ebf7d).
     """
-    from aipass.hooks.apps.handlers.config.trust_registry import enroll, revoke
-
     work = tmp_path_factory.mktemp("hook_ws")
     aipass_dir = work / ".aipass"
     aipass_dir.mkdir(parents=True, exist_ok=True)
     (aipass_dir / "hooks.json").write_text(json.dumps(_RM_GATE_CONFIG), encoding="utf-8")
-    enroll(str(work))
+    _trust_registry(clean_venv, "enroll", work)
     try:
         yield work
     finally:
-        revoke(str(work))
+        _trust_registry(clean_venv, "revoke", work)
 
 
 def test_t2a_rm_gate_blocks(clean_venv: CleanVenv, hook_workspace: Path) -> None:

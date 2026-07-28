@@ -607,10 +607,14 @@ bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchest
 bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "aipass_framework" "Vector memory bank"
 bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "aipass_framework" "Concierge — init, doctor, profile, onboarding"
 bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "aipass_framework" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "aipass_framework" "Local-first backups, snapshots and restore"
+bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "aipass_framework" "Community social space — posts, comments, votes"
+bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "aipass_framework" "Task scheduler — per-branch schedule discovery"
+bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "Capability framework — discoverable skill units"
 
-# External branches
-# NOTE: backup, daemon removed S82/S87. commons, skills moved to external repos.
-# Only the 13 core branches above should be bootstrapped.
+# All 17 core branches in src/aipass/ are bootstrapped above. (A stale note here
+# once claimed backup/commons/daemon/skills were external — they returned to core
+# long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
 
 echo "  13 branches bootstrapped"
 
