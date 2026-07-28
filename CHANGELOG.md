@@ -18,7 +18,12 @@ revoked token) stay ERROR for the medic pipeline — same convention as the
 backup Drive-sync fix. Plus a README Known Issues note: extras added after
 a venv was built need a setup.sh re-run to appear. openai stays in `[llm]`
 (api's core-vs-extra call — plumbing not product). 516 tests green,
-pyright 0, seedgo 100%. Built by @api, devpulse-verified.
+pyright 0, seedgo 100%. Built by @api, devpulse-verified. CI follow-up:
+the ImportError fallback set `TransportError = None`, and `except None`
+is a TypeError at catch time — red on every runner without the `[drive]`
+extra (the refresh test bypasses the availability gate). Fallback is now
+an empty tuple (legally catches nothing); verified under a forced
+no-libs simulation.
 
 **fix(backup+setup)** — Drive sync outage root-caused + made medic-visible
 (Patrick escalation from the MacBook): Drive sync died 2026-07-17 when a

@@ -62,7 +62,10 @@ except ImportError as e:
     GOOGLE_AUTH_AVAILABLE = False
     Credentials = None  # type: ignore[assignment, misc]
     Request = None  # type: ignore[assignment, misc]
-    TransportError = None  # type: ignore[assignment, misc]
+    # Unlike the class placeholders above, this one appears in an `except`
+    # clause — None there is a TypeError at catch time, an empty tuple
+    # legally catches nothing.
+    TransportError = ()  # type: ignore[assignment, misc]
     InstalledAppFlow = None  # type: ignore[assignment, misc]
 
 
