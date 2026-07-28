@@ -22,6 +22,11 @@ and restore messages now print the real plan type. 738 tests green incl.
 new cross-type collision coverage, seedgo 100%. Built by @flow,
 devpulse-verified. Known follow-up flagged: create's advertised 4th-arg
 template selector is dead code in the parser (pre-existing, unshipped).
+CI follow-up: the adapted recovery test let type discovery read the real
+`flow_json/template_registry.json` — runtime-managed and gitignored, so
+fresh checkouts have none and the no-prefix fallback searches zero types;
+discovery is now pinned in the test (close_ops tests already mocked it —
+the house pattern).
 
 **chore(feedback)** — VERA feedback sweep: `atproto` (Bluesky SDK behind
 @api's publish driver) was the third undeclared dependency caught in 12

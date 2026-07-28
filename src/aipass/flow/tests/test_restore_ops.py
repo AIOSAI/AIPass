@@ -264,7 +264,17 @@ class TestRestoreNotFound:
             load_registry=load_mock,
         )
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        # The no-prefix fallback discovers plan types from flow_json/
+        # template_registry.json — a runtime-managed (gitignored) file that
+        # doesn't exist on fresh checkouts/CI. Pin the discovery so this
+        # test never depends on the machine's live registry state.
+        with (
+            patch(
+                "aipass.flow.apps.handlers.plan.registry_routing._load_template_registry",
+                return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}},
+            ),
+            patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True),
+        ):
             result = fn(plan_num="9999", **deps)
 
         assert result["success"] is True
