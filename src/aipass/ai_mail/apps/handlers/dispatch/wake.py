@@ -18,6 +18,7 @@ which handles agent lifecycle (cleanup, bounce emails on failure).
 
 import json
 import os
+import shlex
 import shutil
 import sys
 import subprocess
@@ -491,6 +492,65 @@ def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
     return None
 
 
+# ─── Interactive Manager Spawn ──────────────────────────
+
+
+def _spawn_manager_interactive(
+    branch_path: Path,
+    email: str,
+    prompt: str,
+    model: Optional[str],
+    status: "DispatchStatus",
+) -> Tuple["DispatchStatus", bool]:
+    """Spawn an interactive tmux session for a manager branch.
+
+    Managers are never headless — they run interactive sessions the user can
+    attach to (same pattern as the manual tmux interactive wake). Used only
+    for @daemon-scheduled self-wakes that passed the manager gate. No dispatch
+    lock or monitor: the occupancy check is the one-instance guard for
+    interactive sessions.
+    """
+    if shutil.which("tmux") is None:
+        status.fail("tmux", "tmux not found — cannot spawn interactive manager session")
+        logger.warning("[wake] %s manager wake failed — tmux missing", email)
+        return status, False
+
+    # Prompt goes through a file — survives quoting, debuggable after the fact.
+    daemon_dir = branch_path / ".daemon"
+    daemon_dir.mkdir(parents=True, exist_ok=True)
+    prompt_file = daemon_dir / "last_wake_prompt.txt"
+    prompt_file.write_text(prompt, encoding="utf-8")
+
+    session = f"daemon-{branch_path.name}-{time.strftime('%H%M%S')}"
+    model_arg = f" --model {shlex.quote(model)}" if model else ""
+    claude_line = f'{shlex.quote(_CLAUDE_BIN)}{model_arg} "$(cat {shlex.quote(str(prompt_file))})"'
+    try:
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session, "-c", str(branch_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        subprocess.run(
+            ["tmux", "send-keys", "-t", session, claude_line, "Enter"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        detail = getattr(exc, "stderr", "") or str(exc)
+        status.fail("tmux", f"Interactive spawn failed: {detail[:200]}")
+        logger.error("[wake] %s interactive tmux spawn failed: %s", email, detail)
+        return status, False
+
+    status.ok("spawn", f"Interactive tmux session '{session}' started (attach: tmux attach -t {session})")
+    logger.info("[wake] %s manager woken interactively in tmux session %s", email, session)
+    json_handler.log_operation("wake_manager_interactive", {"branch": email, "session": session})
+    return status, True
+
+
 # ─── Main Wake Function ─────────────────────────────────
 
 
@@ -538,16 +598,26 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
-    # Step 3: Manager check — managers are never woken, mail only
+    # Step 3: Manager check — managers are never woken, mail only.
+    # Exception: @daemon scheduler fires. A branch's .daemon/schedule.json is
+    # self-authored (the daemon cannot write another branch's files), so a
+    # daemon-scheduled wake is the manager waking ITSELF — consent is the
+    # schedule's existence. Dispatch/manual wakes remain blocked.
     passport_file = branch_path / ".trinity" / "passport.json"
+    manager_scheduled = False  # daemon-scheduled manager wake → interactive tmux spawn
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
         if citizen_class == "manager":
-            status.info("manager", f"{email} is a manager — mail only, wake skipped")
-            logger.info("[wake] %s is citizen_class=manager — wake skipped, mail delivered", email)
-            return status, True
+            if sender == "@daemon":
+                manager_scheduled = True
+                status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
+                logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
+            else:
+                status.info("manager", f"{email} is a manager — mail only, wake skipped")
+                logger.info("[wake] %s is citizen_class=manager — wake skipped, mail delivered", email)
+                return status, True
     except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
         logger.info("[wake] Could not read passport for %s: %s", email, exc)
 
@@ -582,6 +652,11 @@ def wake_branch(
         return status, False
 
     status.ok("occupancy", "No interactive session")
+
+    # Managers never run headless: a daemon-scheduled manager wake spawns an
+    # interactive tmux session instead of the -p/monitor pipeline below.
+    if manager_scheduled:
+        return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, model, status)
 
     # Step 7: Build spawn command
     config = _load_config()
