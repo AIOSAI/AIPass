@@ -11,6 +11,30 @@ PyPI version — not the changelog header.
 
 ## [2026-07-27]
 
+**fix(setup)** — the drift canary's first catch, same night it shipped:
+`setup.sh` still bootstrapped every core branch with `citizen_class:
+"builder"` — the pre-rename legacy name — so every fresh clone (all CI
+runners, every external contributor) got legacy-class passports that the
+just-removed silent fallback used to absorb. Renamed to `aipass_framework`
+and extended the bootstrap passport stub to the full template contract
+(`git_branch`, `traits`, `purpose`, …), so CI-built fleets satisfy the
+canary honestly.
+
+**fix(hooks)** — e2e rm-gate test relied on trust-registry bootstrap
+coincidence: on machines with an existing `trusted_projects.json` the
+ephemeral hook workspace was never enrolled, the gate failed open, and the
+test failed while CI (fresh registry → bootstrap auto-trust) stayed green.
+The fixture now enrolls/revokes the workspace deterministically. e2e 14/14
+both environments. Flagged for backlog: never-enrolled projects fail open
+with only a quiet log warning — no TRUST BREAK-style banner. Built by @hooks.
+
+**fix(flow)** — registry monitor runaway logs (137 lines/min): plan-file
+regex never matched real slugged filenames (all 310 plans read as deleted
+every scan), `IGNORE_FOLDERS` substring match skipped whole trees (`dev`
+matched `devpulse`), closed plans weren't excluded from orphan checks.
+False removed-events per scan: 303 → 1. 733 flow tests green, 3 new
+regressions. Built by @flow.
+
 **feat(spawn)** — passport drift auto-heal (DPLAN-0262, fallout of PR #710):
 existing agents never received template-guaranteed passport fields — 17/17
 core passports drifted (`email`, `git_branch`, `traits`), invisible for

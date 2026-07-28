@@ -231,13 +231,29 @@ def _engine_log(clean_venv: CleanVenv) -> Path | None:
 
 
 @pytest.fixture(scope="module")
-def hook_workspace(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A tmp workspace holding an isolated .aipass/hooks.json with only rm_gate."""
+def hook_workspace(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """A tmp workspace holding an isolated .aipass/hooks.json with only rm_gate.
+
+    Explicitly enrolled in the trust registry rather than relying on
+    find_project_config()'s bootstrap() path: bootstrap() only auto-trusts
+    AIPASS_HOME when ~/.aipass/trusted_projects.json doesn't exist yet. On a
+    machine with a real, already-populated registry (any dev box with prior
+    AIPass usage), bootstrap() never fires, this workspace is never enrolled,
+    and the hook silently discovers zero handlers (fails open) instead of
+    firing rm_gate — machine-dependent flakiness this fixture must not rely
+    on (ref e2e rm_gate discovery-0-handlers, dispatch fc0ebf7d).
+    """
+    from aipass.hooks.apps.handlers.config.trust_registry import enroll, revoke
+
     work = tmp_path_factory.mktemp("hook_ws")
     aipass_dir = work / ".aipass"
     aipass_dir.mkdir(parents=True, exist_ok=True)
     (aipass_dir / "hooks.json").write_text(json.dumps(_RM_GATE_CONFIG), encoding="utf-8")
-    return work
+    enroll(str(work))
+    try:
+        yield work
+    finally:
+        revoke(str(work))
 
 
 def test_t2a_rm_gate_blocks(clean_venv: CleanVenv, hook_workspace: Path) -> None:

@@ -489,14 +489,22 @@ bootstrap_branch() {
   },
   "branch_info": {
     "branch_name": "${name}",
+    "alias": "",
     "path": "src/aipass/${name}",
-    "email": "@${name}"
+    "module": "aipass.${name}",
+    "email": "@${name}",
+    "created": "${DATE_TODAY}",
+    "git_branch": "main"
   },
   "identity": {
     "name": "${name}",
     "citizen_class": "${citizen_class}",
     "role": "${role}",
-    "status": "active"
+    "status": "active",
+    "traits": [],
+    "purpose": "${role}",
+    "what_i_do": [],
+    "what_i_dont_do": []
   }
 }
 JSONEOF
@@ -586,19 +594,19 @@ JSONEOF
 }
 
 # Branches inside src/aipass/
-bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone"    "builder" "Command routing and module discovery"
-bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo"   "builder" "Standards enforcement and code auditing"
-bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax"     "builder" "Logging and monitoring system"
-bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli"      "builder" "Display formatting service"
-bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow"     "builder" "Workflow and plan management"
-bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail"  "builder" "Inter-agent messaging and dispatch"
-bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api"      "builder" "LLM access and model routing"
-bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger"  "builder" "Event-driven automation"
-bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn"    "builder" "Branch lifecycle management"
+bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "aipass_framework" "Command routing and module discovery"
+bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo" "aipass_framework" "Standards enforcement and code auditing"
+bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "aipass_framework" "Logging and monitoring system"
+bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "aipass_framework" "Display formatting service"
+bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "aipass_framework" "Workflow and plan management"
+bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail" "aipass_framework" "Inter-agent messaging and dispatch"
+bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api" "aipass_framework" "LLM access and model routing"
+bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "aipass_framework" "Event-driven automation"
+bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "aipass_framework" "Branch lifecycle management"
 bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
-bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory"   "builder" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass"   "builder" "Concierge — init, doctor, profile, onboarding"
-bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks"    "builder" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "aipass_framework" "Vector memory bank"
+bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "aipass_framework" "Concierge — init, doctor, profile, onboarding"
+bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "aipass_framework" "Hook engine — cross-platform hook dispatch and per-project config"
 
 # External branches
 # NOTE: backup, daemon removed S82/S87. commons, skills moved to external repos.
