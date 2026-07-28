@@ -26,6 +26,7 @@ from aipass.skills.lib.telegram.apps.handlers.base_bot import (
     _is_network_error,
     _is_routine_read_timeout,
     NETWORK_LOG_INTERVAL,
+    STARTUP_RETRY_CAP_SECONDS,
 )
 
 
@@ -218,6 +219,14 @@ class TestPollUpdatesErrorClassification:
     def test_http_503_raises_network_poll_error(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         exc = HTTPError("https://api.telegram.org/...", 503, "Service Unavailable", HTTPMessage(), None)
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc):
+            with pytest.raises(_NetworkPollError):
+                bot.poll_updates(0)
+
+    def test_http_409_raises_network_poll_error(self, tmp_path, _patch_base_bot_deps):
+        """HTTP 409 Conflict is a stale-session artifact after a connection reset, not a duplicate poller — backoff."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        exc = HTTPError("https://api.telegram.org/...", 409, "Conflict", HTTPMessage(), None)
         with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc):
             with pytest.raises(_NetworkPollError):
                 bot.poll_updates(0)
@@ -422,3 +431,81 @@ class TestLogOnceSemantics:
             bot.run()
 
         assert bot._health["errors"] == 5
+
+
+# =============================================
+# 6. Startup health-check retry-with-backoff
+# =============================================
+
+
+class TestStartupVerifyConnectionRetry:
+    def test_immediate_success_no_sleep(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot.verify_connection = lambda timeout=15: True
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep:
+            result = bot._verify_connection_with_retry()
+            # time.sleep is a process-global patch target — filter to this backoff's
+            # own (always-integer) values so an unrelated thread's real, unmocked
+            # sleep() elsewhere in the process can't leak noise into the assertion.
+            backoff_calls = [c.args[0] for c in mock_sleep.call_args_list if isinstance(c.args[0], int)]
+
+        assert result is True
+        assert backoff_calls == []
+
+    def test_recovers_after_retries(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        call_count = 0
+
+        def flaky_then_ok(timeout=15):
+            nonlocal call_count
+            call_count += 1
+            return call_count >= 3
+
+        bot.verify_connection = flaky_then_ok
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep:
+            result = bot._verify_connection_with_retry()
+            sleep_values = [c.args[0] for c in mock_sleep.call_args_list if isinstance(c.args[0], int)]
+
+        assert result is True
+        assert sleep_values == [1, 2]
+
+    def test_gives_up_after_cap_and_returns_false(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot.verify_connection = lambda timeout=15: False
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep:
+            result = bot._verify_connection_with_retry()
+            sleep_values = [c.args[0] for c in mock_sleep.call_args_list if isinstance(c.args[0], int)]
+
+        assert result is False
+        assert sum(sleep_values) >= STARTUP_RETRY_CAP_SECONDS
+        assert sleep_values == [1, 2, 4, 8, 16, 32, 60, 60]
+
+    def test_retry_attempts_logged_at_warning_not_error(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot.verify_connection = lambda timeout=15: False
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            bot._verify_connection_with_retry()
+
+        assert mock_logger.error.call_count == 0
+        assert mock_logger.warning.call_count >= 1
+
+    def test_run_fails_loud_once_after_cap_exhausted(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot.verify_connection = lambda timeout=15: False
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            result = bot.run()
+
+        assert result == 1
+        fail_calls = [c for c in mock_logger.error.call_args_list if "Startup health check FAILED" in str(c)]
+        assert len(fail_calls) == 1
