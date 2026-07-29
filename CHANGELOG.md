@@ -11,6 +11,16 @@ PyPI version — not the changelog header.
 
 ## [2026-07-28]
 
+**fix(ci)** — ruff config pinned against 0.16.0's default expansion
+(dependabot PR#707 lint red, 6,651 errors): we had no explicit `select`,
+so the bump silently opted us into a dozen new rule families (UP/I/BLE/
+DTZ/SIM/…), and the 0.16 formatter started reformatting Python snippets
+inside markdown (43 READMEs). `select = ["E4","E7","E9","F"]` pins the
+rule set we always linted against; `extend-exclude = ["*.md"]` keeps
+READMEs prose. Verified locally: check + format --check green under both
+0.15.22 and 0.16.0, zero source changes. Adopting new rule families is a
+deliberate cleanup DPLAN, not a version-bump side effect.
+
 **fix(flow)** — plan restore was type-blind (VERA repro from Vera Studio:
 `restore PPLAN-0011` collided with FPLAN-0011): `restore_plan_impl` always
 loaded the default fplan registry because prefix-stripping never re-derived
