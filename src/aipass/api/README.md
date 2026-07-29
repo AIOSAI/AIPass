@@ -145,6 +145,7 @@ Private drivers in `apps/integrations/{project}/driver.py` (gitignored) register
 ## Known Issues
 
 - Google auth libraries are optional deps — commands fail with install instructions if missing
+- `openai`/Google auth ModuleNotFoundError despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed
 - Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`)
 - No rate limiting on OpenRouter calls (S117 finding)
 

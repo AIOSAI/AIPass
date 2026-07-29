@@ -187,6 +187,10 @@ def test_init_project_enrolls(tmp_path, monkeypatch):
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda p: False,
     )
+    monkeypatch.setattr(
+        "aipass.aipass.shared.project_home.is_throwaway_path",
+        lambda p: False,
+    )
 
     aipass_home = tmp_path / "aipass_home"
     aipass_home.mkdir()
@@ -213,6 +217,10 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
+        lambda p: False,
+    )
+    monkeypatch.setattr(
+        "aipass.aipass.shared.project_home.is_throwaway_path",
         lambda p: False,
     )
 
@@ -247,3 +255,104 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
     new_hash = new_reg["projects"][str(target.resolve())]["config_hash"]
     assert new_hash != old_hash
     assert is_trusted(str(target.resolve())) is True
+
+
+def test_enroll_project_skips_throwaway_path(tmp_path):
+    """_enroll_project() refuses to enroll a pytest/temp-dir path (GH-712 leak fix)."""
+    from aipass.aipass.shared.project_home import _enroll_project
+
+    project = tmp_path / "throwaway"
+    project.mkdir()
+    hooks_dir = project / ".aipass"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+
+    assert _enroll_project(project) is False
+    assert is_trusted(str(project.resolve())) is False
+
+
+def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
+    """update_project()'s result dict flags whether enrollment happened."""
+    from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
+
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
+        lambda p: False,
+    )
+    monkeypatch.setattr(
+        "aipass.aipass.shared.project_home.is_throwaway_path",
+        lambda p: False,
+    )
+
+    aipass_home = tmp_path / "aipass_home"
+    aipass_home.mkdir()
+    aipass_dir = aipass_home / ".aipass"
+    aipass_dir.mkdir()
+    template = aipass_dir / "project_hooks.json"
+    template.write_text('{"hooks_enabled": true}', encoding="utf-8")
+    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+        lambda: str(aipass_home),
+    )
+
+    target = tmp_path / "reportproj"
+    target.mkdir()
+    init_project(target, project_name="test")
+
+    new_template = (
+        '{"hooks_enabled": true, "SessionStart": '
+        '{"new_hook": {"handler": "aipass.hooks.apps.handlers.test.handle", "enabled": true}}}'
+    )
+    template.write_text(new_template, encoding="utf-8")
+    result = update_project(target)
+
+    assert result["trust_enrolled"] is True
+
+
+# ---------------------------------------------------------------------------
+# trust prune
+# ---------------------------------------------------------------------------
+
+
+def test_prune_removes_stale_entries(tmp_path):
+    """aipass trust prune drops entries whose project path no longer exists."""
+    from aipass.aipass.apps.modules.trust import handle_command
+
+    live = tmp_path / "live"
+    live.mkdir()
+    hooks_dir = live / ".aipass"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text("{}", encoding="utf-8")
+    enroll(str(live))
+
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    gone_hooks = gone / ".aipass"
+    gone_hooks.mkdir()
+    (gone_hooks / "hooks.json").write_text("{}", encoding="utf-8")
+    enroll(str(gone))
+    import shutil
+
+    shutil.rmtree(gone)
+
+    assert handle_command("trust", ["prune"]) is True
+    registry = read_registry()
+    assert str(live.resolve()) in registry["projects"]
+    assert str(gone.resolve()) not in registry["projects"]
+
+
+def test_prune_no_stale_entries(tmp_path):
+    """aipass trust prune reports cleanly when nothing is stale."""
+    from aipass.aipass.apps.modules.trust import handle_command
+
+    live = tmp_path / "live"
+    live.mkdir()
+    hooks_dir = live / ".aipass"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text("{}", encoding="utf-8")
+    enroll(str(live))
+
+    assert handle_command("trust", ["prune"]) is True
+    registry = read_registry()
+    assert str(live.resolve()) in registry["projects"]

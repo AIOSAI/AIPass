@@ -158,6 +158,49 @@ class TestScanPlanFilesImpl:
         assert "0001" not in result["added"]
         assert "0002" not in result["added"]
 
+    def test_detects_plan_files_with_slug_and_date_suffix(self, tmp_path):
+        """Real plan filenames carry a subject slug + date suffix and must still match."""
+        mod = _import_monitor_ops()
+        (tmp_path / "FPLAN-0001_some_subject_slug_2026-07-27.md").write_text("plan", encoding="utf-8")
+
+        with patch.object(mod, "_fire_event", return_value=True):
+            result = mod.scan_plan_files_impl(
+                ecosystem_root=tmp_path,
+                load_registry=lambda: {"plans": {}},
+            )
+        assert "0001" in result["added"]
+
+    def test_ignored_folder_requires_exact_name_match(self, tmp_path):
+        """Substring matches (e.g. 'dev' in 'devpulse') must not skip unrelated directories."""
+        mod = _import_monitor_ops()
+        lookalike_dir = tmp_path / "devpulse"
+        lookalike_dir.mkdir()
+        _make_plan_file(lookalike_dir, "0001")
+
+        with patch.object(mod, "_fire_event", return_value=True):
+            result = mod.scan_plan_files_impl(
+                ecosystem_root=tmp_path,
+                load_registry=lambda: {"plans": {}},
+            )
+        assert "0001" in result["added"]
+
+    def test_orphaned_closed_plan_does_not_fire_deleted(self, tmp_path):
+        """Closed plans are expected to be archived out of the scan tree — not orphans."""
+        mod = _import_monitor_ops()
+        registry = {
+            "plans": {
+                "0001": {"file_path": str(tmp_path / "FPLAN-0001.md"), "status": "closed"},
+                "0002": {"file_path": str(tmp_path / "FPLAN-0002.md"), "status": "open"},
+            }
+        }
+        with patch.object(mod, "_fire_event", return_value=True):
+            result = mod.scan_plan_files_impl(
+                ecosystem_root=tmp_path,
+                load_registry=lambda: registry,
+            )
+        assert "0001" not in result["removed"]
+        assert "0002" in result["removed"]
+
     def test_detects_orphaned_registry_entries(self, tmp_path):
         """Registry entries with no matching file should fire deleted events."""
         mod = _import_monitor_ops()

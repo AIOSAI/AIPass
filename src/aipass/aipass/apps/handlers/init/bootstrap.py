@@ -462,6 +462,7 @@ def update_project(target: Path) -> dict:
     skipped: list[str] = []
     removed: list[str] = []
     aipass_home: str | None = None
+    trust_enrolled = False
 
     # Managed directories — create if missing (graceful recovery).
     aipass_dir = target / ".aipass"
@@ -536,7 +537,7 @@ def update_project(target: Path) -> dict:
             if existing_hooks != merged_hooks:
                 hooks_json_path.write_text(merged_hooks_content, encoding="utf-8")
                 updated.append(str(hooks_json_path))
-                _enroll_project(target)
+                trust_enrolled = _enroll_project(target)
             else:
                 already_current.append(str(hooks_json_path))
         else:
@@ -545,7 +546,7 @@ def update_project(target: Path) -> dict:
                 encoding="utf-8",
             )
             updated.append(str(hooks_json_path))
-            _enroll_project(target)
+            trust_enrolled = _enroll_project(target)
     elif hooks_json_path.exists():
         already_current.append(str(hooks_json_path))
 
@@ -607,4 +608,5 @@ def update_project(target: Path) -> dict:
         "skipped_files": skipped,
         "removed_files": removed,
         "aipass_home": aipass_home,
+        "trust_enrolled": trust_enrolled,
     }

@@ -13,16 +13,23 @@
 import json
 from unittest.mock import patch
 
+from aipass.hooks.apps.handlers.config import loader
 from aipass.hooks.apps.handlers.config.trust_registry import (
     _hash_file,
     bootstrap,
     enroll,
     is_hash_mismatch,
     is_trusted,
+    is_unenrolled,
+    prune_stale,
     read_registry,
     revoke,
 )
-from aipass.hooks.apps.handlers.config.loader import find_project_config, trust_break_banner
+from aipass.hooks.apps.handlers.config.loader import (
+    find_project_config,
+    never_enrolled_banner,
+    trust_break_banner,
+)
 
 
 class TestRegistryHelpers:
@@ -193,6 +200,186 @@ class TestIsHashMismatch:
             enroll(str(project))
             hooks_file.unlink()
             assert is_hash_mismatch(str(project)) is False
+
+
+class TestIsUnenrolled:
+    """Unit tests for is_unenrolled() — normal first-run state, not a break."""
+
+    def test_never_registered_with_hooks_json_is_unenrolled(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "fresh_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            assert is_unenrolled(str(project)) is True
+
+    def test_no_hooks_json_is_not_unenrolled(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "no_config"
+        project.mkdir()
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            assert is_unenrolled(str(project)) is False
+
+    def test_enrolled_project_is_not_unenrolled(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "myproject"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+            assert is_unenrolled(str(project)) is False
+
+    def test_hash_mismatch_project_is_not_unenrolled(self, temp_test_dir, mock_logger):
+        """Mutually exclusive with is_hash_mismatch() — an entry can't be both absent and present."""
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "tampered_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+            hooks_file.write_text('{"hooks_enabled": true, "tampered": true}')
+            assert is_unenrolled(str(project)) is False
+            assert is_hash_mismatch(str(project)) is True
+
+
+class TestPruneStale:
+    """Unit tests for prune_stale() — generic dead-path detection."""
+
+    def test_drops_entries_for_deleted_projects(self, temp_test_dir, mock_logger):
+        live_project = temp_test_dir / "live"
+        live_project.mkdir()
+        registry = {
+            "version": 1,
+            "projects": {
+                str(live_project): {"enrolled": "x", "config_hash": "sha256:a", "config_path": "x"},
+                "/gone/forever": {"enrolled": "x", "config_hash": "sha256:b", "config_path": "x"},
+            },
+        }
+        pruned, dropped = prune_stale(registry)
+        assert dropped == 1
+        assert str(live_project) in pruned["projects"]
+        assert "/gone/forever" not in pruned["projects"]
+
+    def test_no_dead_paths_drops_nothing(self, temp_test_dir, mock_logger):
+        live_project = temp_test_dir / "live"
+        live_project.mkdir()
+        registry = {
+            "version": 1,
+            "projects": {str(live_project): {"enrolled": "x", "config_hash": "sha256:a", "config_path": "x"}},
+        }
+        pruned, dropped = prune_stale(registry)
+        assert dropped == 0
+        assert pruned["projects"] == registry["projects"]
+
+    def test_enroll_wires_prune_into_hot_path(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        dead_dir = temp_test_dir / "dead_project"
+        dead_dir.mkdir()
+        (dead_dir / ".aipass").mkdir()
+        (dead_dir / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        live_project = temp_test_dir / "live_project"
+        live_project.mkdir()
+        (live_project / ".aipass").mkdir()
+        (live_project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(dead_dir))
+            import shutil
+
+            shutil.rmtree(dead_dir)
+            enroll(str(live_project))
+        data = json.loads(reg_path.read_text())
+        assert str(dead_dir.resolve()) not in data["projects"]
+        assert str(live_project.resolve()) in data["projects"]
+
+
+class TestNeverEnrolledBanner:
+    """Tests for loader.never_enrolled_banner() — one-time-per-session nudge."""
+
+    def test_never_enrolled_fires_once_per_session(self, temp_test_dir, mock_logger, tmp_path):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "fresh_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+            patch.object(loader, "_GUARD_DIR", tmp_path),
+        ):
+            first = never_enrolled_banner("session-abc")
+            second = never_enrolled_banner("session-abc")
+        assert first is not None
+        assert "HOOKS ARE OFF" in first
+        assert second is None
+
+    def test_never_enrolled_fires_again_for_different_session(self, temp_test_dir, mock_logger, tmp_path):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "fresh_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+            patch.object(loader, "_GUARD_DIR", tmp_path),
+        ):
+            never_enrolled_banner("session-one")
+            second_session = never_enrolled_banner("session-two")
+        assert second_session is not None
+
+    def test_enrolled_project_never_nudged(self, temp_test_dir, mock_logger, tmp_path):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "trusted_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+            patch.object(loader, "_GUARD_DIR", tmp_path),
+        ):
+            assert never_enrolled_banner("session-abc") is None
+
+    def test_hash_mismatch_project_never_nudged(self, temp_test_dir, mock_logger, tmp_path):
+        """A trust break gets trust_break_banner(), not the never-enrolled nudge."""
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "tampered_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        hooks_file.write_text('{"hooks_enabled": true, "tampered": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+            patch.object(loader, "_GUARD_DIR", tmp_path),
+        ):
+            assert never_enrolled_banner("session-abc") is None
+
+    def test_no_session_id_never_dedups_but_still_returns_banner(self, temp_test_dir, mock_logger, tmp_path):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "fresh_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+            patch.object(loader, "_GUARD_DIR", tmp_path),
+        ):
+            assert never_enrolled_banner("") is not None
+            assert never_enrolled_banner("") is not None
 
 
 class TestTrustBreakBanner:

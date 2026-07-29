@@ -26,11 +26,13 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
-from aipass.flow.apps.handlers.plan.close_helpers import (
-    PROCESSED_PLANS_DIR,
+from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
     _find_plan_across_registries,
+)
+from aipass.flow.apps.handlers.plan.close_helpers import (
+    PROCESSED_PLANS_DIR,
     _find_relocated_plan,
     _find_unregistered_plan_file,
     _self_heal_unregistered_plan,

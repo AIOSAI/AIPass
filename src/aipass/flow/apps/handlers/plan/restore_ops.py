@@ -27,6 +27,11 @@ from aipass.prax import logger
 
 # logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.registry_routing import (
+    _extract_prefix,
+    _resolve_registry_file,
+    _find_plan_across_registries,
+)
 
 # =============================================
 # INFRASTRUCTURE
@@ -55,15 +60,22 @@ MODULE_NAME = "restore_plan"
 # =============================================
 
 
-def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_registry: Any = None) -> tuple[bool, str]:
+def recover_plan_from_backup(
+    plan_key: str, plan_num_raw: str | None = None, load_registry: Any = None, save_registry: Any = None
+) -> tuple[bool, str]:
     """
     Attempt to recover a plan from processed_plans backup.
 
-    Plan-type-agnostic: searches for any prefix matching the plan key
-    (e.g. FPLAN-0165, DPLAN-0165).
+    When ``plan_num_raw`` carries an explicit type prefix (e.g. "PPLAN-0011"),
+    recovery is restricted to that type -- it will not silently recover a
+    same-numbered backup from a different plan type (e.g. FPLAN-0011).
+    Falls back to a plan-type-agnostic search (any prefix matching the plan
+    key) only when no prefix was given.
 
     Args:
         plan_key: Normalized plan number (e.g., "0165")
+        plan_num_raw: Original plan number as given by the caller, prefix
+            intact (e.g. "PPLAN-0165"). Used to scope the backup search.
         load_registry: Registry loader function (injected from module)
         save_registry: Registry saver function (injected from module)
 
@@ -73,8 +85,11 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
     # Check backup processed_plans directory
     processed_plans = PROCESSED_PLANS_DIR
 
-    # Search for any prefix matching the plan key (FPLAN-, DPLAN-, etc.)
-    variants = list(processed_plans.glob(f"*-{plan_key}*.md")) if processed_plans.exists() else []
+    # If caller gave an explicit type prefix, restrict the search to it.
+    # Otherwise fall back to matching any prefix against the plan key.
+    requested_prefix = _extract_prefix(plan_num_raw) if plan_num_raw else None
+    glob_pattern = f"{requested_prefix}-{plan_key}*.md" if requested_prefix else f"*-{plan_key}*.md"
+    variants = list(processed_plans.glob(glob_pattern)) if processed_plans.exists() else []
     plan_file = None  # No default -- use variant search
     if variants:
         # Sort by modification time, newest first
@@ -141,8 +156,13 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
     # Derive display label from the backup filename
     plan_label = plan_file.stem  # e.g. "FPLAN-0165" or "DPLAN-0004"
 
-    # Create minimal registry entry
-    registry = load_registry()
+    # Write into the registry matching the RECOVERED file's actual type
+    # (not the caller-requested prefix or the default fplan registry) --
+    # a same-numbered plan of another type must never collide with this entry.
+    actual_prefix = _extract_prefix(plan_label)
+    reg_file = f"{actual_prefix.lower()}_registry.json" if actual_prefix else None
+
+    registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
     registry["plans"][plan_key] = {
         "location": original_location,
         "relative_path": relative_path,
@@ -154,7 +174,10 @@ def recover_plan_from_backup(plan_key: str, load_registry: Any = None, save_regi
         "closed_reason": "recovered_from_backup",
         "template_type": "default",
     }
-    save_registry(registry)
+    if reg_file:
+        save_registry(registry, registry_file=reg_file)
+    else:
+        save_registry(registry)
 
     return True, f"Recovered {plan_label} from {plan_file.name} to {original_location}"
 
@@ -208,26 +231,52 @@ def restore_plan_impl(
 
         # 1. VALIDATE: Normalize plan number (handler)
         plan_key = normalize_plan_number(plan_num)
+        requested_prefix = _extract_prefix(plan_num)
 
-        # 2. LOAD DATA: Get registry (service)
-        registry = load_registry()
+        # 2. LOAD DATA: Detect correct registry from prefix, then load
+        # (mirrors close_ops -- a bare load_registry() always defaults to
+        # fplan_registry.json and would silently resolve the wrong plan
+        # whenever another type shares this number, e.g. PPLAN-0011 vs FPLAN-0011)
+        reg_file = _resolve_registry_file(plan_num)
+        if reg_file:
+            registry = load_registry(registry_file=reg_file)
+        else:
+            # No prefix -- try default registry first
+            registry = load_registry()
+            exists_default, _ = validate_plan_exists(plan_key, registry)
+            if not exists_default:
+                # Search other registries
+                found_reg = _find_plan_across_registries(plan_key, load_registry)
+                if found_reg:
+                    reg_file = found_reg
+                    registry = load_registry(registry_file=reg_file)
 
         # 3. VALIDATE: Check plan exists (handler)
         exists, error_msg = validate_plan_exists(plan_key, registry)
         if not exists:
             # AUTO-RECOVERY: Try to recover from processed_plans
             messages.append({"type": "warning", "text": f"PLAN-{plan_key} not in registry - attempting recovery..."})
-            recovered, recovery_msg = recover_plan_from_backup_fn(plan_key)
+            recovered, recovery_msg = recover_plan_from_backup_fn(plan_key, plan_num)
 
             if recovered:
                 messages.append({"type": "success", "text": recovery_msg})
-                # Reload registry with recovered plan
-                registry = load_registry()
+                # Recovery writes into the registry matching the recovered
+                # file's actual type -- find it if we didn't already know it
+                if not reg_file:
+                    reg_file = _find_plan_across_registries(plan_key, load_registry)
+                registry = load_registry(registry_file=reg_file) if reg_file else load_registry()
                 plan_info = registry["plans"][plan_key]
                 plan_file = Path(plan_info.get("file_path", ""))
             else:
                 logger.warning(f"[{MODULE_NAME}] {error_msg} - Recovery failed: {recovery_msg}")
-                messages.append({"type": "error", "error_type": "not_found", "plan_key": plan_key})
+                messages.append(
+                    {
+                        "type": "error",
+                        "error_type": "not_found",
+                        "plan_key": plan_key,
+                        "prefix": requested_prefix or "FPLAN",
+                    }
+                )
                 messages.append({"type": "dim", "text": f"Recovery attempt: {recovery_msg}"})
                 return {
                     "success": False,
@@ -239,10 +288,17 @@ def restore_plan_impl(
             plan_info = registry["plans"][plan_key]
             plan_file = Path(plan_info.get("file_path", ""))
 
+        # Derive the plan's actual type prefix for display (from the resolved
+        # file/registry, falling back to what the caller requested)
+        plan_label = plan_file.stem if plan_file.name else f"PLAN-{plan_key}"
+        plan_prefix = _extract_prefix(plan_label) or requested_prefix or "FPLAN"
+
         # 4. VALIDATE: Check plan is closed
         if plan_info.get("status") != "closed":
             logger.warning(f"[{MODULE_NAME}] Plan {plan_key} is already open")
-            messages.append({"type": "error", "error_type": "already_open", "plan_key": plan_key})
+            messages.append(
+                {"type": "error", "error_type": "already_open", "plan_key": plan_key, "prefix": plan_prefix}
+            )
             return {
                 "success": False,
                 "messages": messages,
@@ -253,7 +309,9 @@ def restore_plan_impl(
         # 5. VALIDATE: Check file exists at registered location
         if not plan_file.exists():
             logger.warning(f"[{MODULE_NAME}] File not found at {plan_file}")
-            messages.append({"type": "error", "error_type": "file_missing", "plan_key": plan_key})
+            messages.append(
+                {"type": "error", "error_type": "file_missing", "plan_key": plan_key, "prefix": plan_prefix}
+            )
             return {
                 "success": False,
                 "messages": messages,
@@ -262,7 +320,7 @@ def restore_plan_impl(
             }
 
         # 6. DISPLAY: Plan info header data
-        messages.append({"type": "restore_header", "plan_key": plan_key, "plan_info": plan_info})
+        messages.append({"type": "restore_header", "plan_key": plan_key, "plan_info": plan_info, "prefix": plan_prefix})
 
         # 7. UPDATE REGISTRY: Restore to open status
         plan_info["status"] = "open"
@@ -274,7 +332,10 @@ def restore_plan_impl(
         plan_info.pop("memory_created_date", None)
         plan_info.pop("memory_file", None)
 
-        save_registry(registry)
+        if reg_file:
+            save_registry(registry, registry_file=reg_file)
+        else:
+            save_registry(registry)
         logger.info(f"[{MODULE_NAME}] Restored plan {plan_key} to open status")
 
         # 8. UPDATE DASHBOARDS: Sync dashboard files (handlers)
@@ -289,7 +350,9 @@ def restore_plan_impl(
 
         # 9. Success message data
         restored_location = plan_info.get("location", "unknown")
-        messages.append({"type": "restore_success", "plan_key": plan_key, "location": restored_location})
+        messages.append(
+            {"type": "restore_success", "plan_key": plan_key, "location": restored_location, "prefix": plan_prefix}
+        )
 
         # Fire trigger event for plan restore
         try:

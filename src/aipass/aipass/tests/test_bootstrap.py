@@ -447,6 +447,7 @@ def test_update_project_return_dict_structure(tmp_path):
         "skipped_files",
         "removed_files",
         "aipass_home",
+        "trust_enrolled",
     }
     assert result["project_name"] == "UPD"
     assert result["target"] == str(target.resolve())

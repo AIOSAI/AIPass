@@ -1,16 +1,18 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-07
-# Modified: 2026-06-06
+# Modified: 2026-07-27
 # =============================================
 
 """Update handler — path-based template sync engine.
 
 P1 rewrite (TDPLAN-0006, issue #636): replaces the broken ID-based
 change-detection engine with explicit template walking. No renames,
-no pruning, never touches identity/memory files.
+no pruning, never touches identity/memory files wholesale — the one
+exception is passport.json's narrow allowlist heal (DPLAN-0262), see
+_PASSPORT_HEAL_ALLOWLIST.
 """
 
 import json
@@ -47,6 +49,21 @@ _SKIP_TRACKING = frozenset(
     }
 )
 
+# passport.json is the one .trinity/ file that heals (DPLAN-0262 fix phase) — every
+# other .trinity/ file (local.json, observations.json, README.md) stays create-only
+# under _NEVER_UPDATE_PREFIXES above.
+_PASSPORT_HEAL_PATH = ".trinity/passport.json"
+
+# Only these dotted (section, key) pairs are allowed to reach an existing passport.
+# Identity content (role/purpose/what_i_do/what_i_dont_do), citizenship, and
+# document_metadata stay create-only — a passport's voice is its own, not the
+# template's, even when a field the template guarantees is missing.
+_PASSPORT_HEAL_ALLOWLIST = (
+    ("branch_info", "email"),
+    ("branch_info", "git_branch"),
+    ("identity", "traits"),
+)
+
 
 def _is_never_update(resolved_path: str) -> bool:
     """Check if a resolved path is in the create-only set."""
@@ -68,8 +85,9 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
 
     Path-based engine: walks the template directory, resolves placeholder
     paths, and for each file decides add/merge/skip. No renames, no pruning.
-    Identity files (.trinity/*, DASHBOARD, birth_certificate, bypass.json)
-    are never touched — create-only.
+    Identity/memory files (DASHBOARD, birth_certificate, bypass.json, and all
+    of .trinity/ except passport.json) are create-only. passport.json heals
+    against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST.
     """
     errors: list[str] = []
     counts = {"additions": 0, "renames": 0, "updates": 0, "pruned": 0, "skipped_py": 0}
@@ -130,6 +148,21 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
             continue
 
         resolved_path = replace_placeholders(rel_path, replacements)
+
+        if resolved_path == _PASSPORT_HEAL_PATH:
+            dest = branch_dir / resolved_path
+            if dest.exists():
+                result = _heal_passport(
+                    template_file, dest, replacements, dry_run, trace, branch_dir / ".spawn" / ".recovery"
+                )
+                if result == "updated":
+                    counts["updates"] += 1
+                    updates_detail.append({"template_path": rel_path, "branch_path": resolved_path})
+                elif result == "error":
+                    errors.append(f"Passport heal failed for {resolved_path}")
+            elif trace:
+                logger.info("[update] SKIP (no passport to heal): %s", resolved_path)
+            continue
 
         if _is_never_update(resolved_path):
             if trace:
@@ -259,26 +292,29 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
 
 
 def _read_citizen_class(branch_dir: Path) -> str:
-    """Read citizen_class from a branch's passport.json."""
-    from aipass.spawn.apps.handlers.class_registry import validate_class
+    """Read a branch's passport.json and resolve it to a template class.
+
+    No fallback (DPLAN-0262, Patrick ruling): a missing passport, corrupt JSON, or
+    unknown citizen_class is a loud hard error naming the passport path and the
+    registered classes — never a silent 'aipass_framework' guess. Silent defaulting
+    here is exactly what let real passports drift from their template contract
+    undetected for months.
+    """
+    from aipass.spawn.apps.handlers.class_registry import resolve_template_class
 
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
-        return "aipass_framework"
+        raise FileNotFoundError(f"No passport.json at {passport_path} — cannot resolve template class.")
+
     try:
         data = json.loads(passport_path.read_text(encoding="utf-8"))
-        citizen_class = data.get("identity", {}).get("citizen_class", "aipass_framework")
-        if not validate_class(citizen_class):
-            logger.warning(
-                "[update] Unknown citizen_class '%s' in %s, falling back to 'aipass_framework'",
-                citizen_class,
-                passport_path,
-            )
-            return "aipass_framework"
-        return citizen_class
     except (json.JSONDecodeError, IOError) as e:
-        logger.warning("[update] Failed to read citizen_class from passport %s: %s", passport_path, e)
-        return "aipass_framework"
+        raise ValueError(f"Corrupt or unreadable passport.json at {passport_path}: {e}") from e
+
+    try:
+        return resolve_template_class(data.get("identity", {}))
+    except ValueError as e:
+        raise ValueError(f"{e} (passport: {passport_path})") from e
 
 
 def _resolve_branch_path(branch_name: str) -> Path | None:
@@ -295,6 +331,75 @@ def _resolve_branch_path(branch_name: str) -> Path | None:
                 return (project_root / rel_path).resolve()
 
     return None
+
+
+def _heal_passport(
+    template_file: Path,
+    dest: Path,
+    replacements: dict,
+    dry_run: bool,
+    trace: bool,
+    backup_dest: Path | None = None,
+) -> str:
+    """Heal an existing passport.json against the allowlist only (DPLAN-0262).
+
+    Reuses deep_merge's scalar/list decision (additive, existing-always-wins) but
+    applies it one allowlisted field at a time, mutating the field in place rather
+    than rebuilding the whole dict — every other drifted or missing field (identity
+    content, citizenship, document_metadata) stays exactly as create-only as it was
+    before this fix, and healthy passports that already satisfy the allowlist come
+    out byte-for-byte unchanged (no template-driven key reordering). email/git_branch
+    fill from the template whenever missing or blank — the template always renders a
+    real, derivable value for both, so there's no "custom content" to protect there.
+    identity.traits is different: a hand-written template default is never a fill
+    source (it's a free-text field, not a derived one), so an existing traits value —
+    even "" — is left alone unless there's a legacy value to migrate. A legacy
+    top-level `traits` array (devpulse, aipass — predates the identity.traits schema)
+    is migrated into identity.traits rather than left to duplicate or orphan: it's
+    always stripped from the top level, and only lands in identity.traits if that
+    field doesn't already have real content of its own.
+
+    Returns "updated", "unchanged", or "error".
+    """
+    try:
+        template_content = template_file.read_text(encoding="utf-8")
+        template_content = replace_placeholders(template_content, replacements)
+        template_data = json.loads(template_content)
+
+        existing_text = dest.read_text(encoding="utf-8")
+        existing_data = json.loads(existing_text)
+
+        legacy_traits = existing_data.pop("traits", None)
+
+        for section, key in _PASSPORT_HEAL_ALLOWLIST:
+            section_data = existing_data.setdefault(section, {})
+            if (section, key) == ("identity", "traits"):
+                if legacy_traits is not None and not section_data.get(key):
+                    section_data[key] = legacy_traits
+                elif key not in section_data:
+                    section_data[key] = template_data.get(section, {}).get(key)
+                continue
+            template_value = template_data.get(section, {}).get(key)
+            section_data[key] = deep_merge(template_value, section_data.get(key))
+
+        merged_text = json.dumps(existing_data, indent=2, ensure_ascii=False) + "\n"
+
+        if merged_text == existing_text:
+            if trace:
+                logger.info("[update] Passport unchanged: %s", dest)
+            return "unchanged"
+
+        if not dry_run:
+            backup_json(dest, backup_dir=backup_dest)
+            dest.write_text(merged_text, encoding="utf-8")
+
+        if trace:
+            logger.info("[update] Passport healed: %s", dest)
+        return "updated"
+
+    except (json.JSONDecodeError, IOError) as exc:
+        logger.error("[update] Passport heal failed for %s: %s", dest, exc)
+        return "error"
 
 
 def _merge_json(

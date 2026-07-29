@@ -1,5 +1,4 @@
 {
-  "autoCompactWindow": 350000,
   "permissions": {
     "allow": [],
     "deny": [
@@ -9,5 +8,6 @@
     "ask": []
   },
   "enabledMcpjsonServers": [],
+  "autoCompactWindow": 350000,
   "prefersReducedMotion": true
 }

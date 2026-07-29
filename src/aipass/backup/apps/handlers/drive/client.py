@@ -74,6 +74,11 @@ class DriveClient:
         """Authenticate through the @api gateway."""
         if not GOOGLE_API_AVAILABLE:
             self.last_error = "Google API libraries not installed"
+            logger.error(
+                "[backup] Drive sync unavailable: aipass.api Google client gateway "
+                "failed to import. Install: pip install google-auth "
+                "google-auth-oauthlib google-api-python-client"
+            )
             json_handler.log_operation(
                 "drive_authenticate",
                 {"success": False, "reason": self.last_error},
@@ -93,7 +98,13 @@ class DriveClient:
             return True
         except Exception as exc:
             self.last_error = str(exc)
-            logger.warning(f"Drive authentication failed: {exc}")
+            # Distinguish the structural "not installed" failure (actionable,
+            # needs a human to run pip install) from transient auth/network
+            # errors — only the former escalates to ERROR for medic to catch.
+            if "libraries not installed" in self.last_error:
+                logger.error(f"[backup] Drive sync unavailable: {exc}")
+            else:
+                logger.warning(f"Drive authentication failed: {exc}")
             json_handler.log_operation(
                 "drive_authenticate",
                 {"success": False, "error": self.last_error},

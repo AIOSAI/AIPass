@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor_ops.py
 # Description: Registry Monitor Implementation Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-08
-# Modified: 2026-04-22
+# Modified: 2026-07-27
 # =============================================
 
 """
@@ -33,7 +33,9 @@ from aipass.flow.apps.handlers.json import json_handler
 MODULE_NAME = "registry_monitor"
 
 # PLAN file pattern — matches any plan prefix (FPLAN, DPLAN, APLAN, RPLAN, TDPLAN, etc.)
-PLAN_PATTERN = re.compile(r"^[A-Z]+PLAN-\d{4}\.md$")
+# Real plan files carry a subject slug + date suffix: PREFIX-NNNN_slug_YYYY-MM-DD.md
+# The slug is optional so bare PREFIX-NNNN.md (e.g. test fixtures) still matches.
+PLAN_PATTERN = re.compile(r"^([A-Z]+PLAN)-(\d{4})(?:_.*)?\.md$")
 
 # Directories to ignore during monitoring
 IGNORE_FOLDERS = {
@@ -146,25 +148,26 @@ def scan_plan_files_impl(
 
     # Use os.walk() with error handling
     for root, dirs, files in os.walk(str(ecosystem_root), topdown=True, onerror=handle_walk_error):
-        # Skip ignored directories (modify dirs in-place to prevent descent)
-        dirs[:] = [d for d in dirs if not any(ignored in d for ignored in IGNORE_FOLDERS)]
+        # Skip ignored directories (modify dirs in-place to prevent descent).
+        # Exact-name match — substring match ("dev" in "devpulse", "sys" in "system_logs")
+        # silently skipped whole project trees, causing their open plans to read as orphaned.
+        dirs[:] = [d for d in dirs if d not in IGNORE_FOLDERS]
 
         # Check for PLAN files in this directory
         for filename in files:
-            if PLAN_PATTERN.match(filename):
+            match = PLAN_PATTERN.match(filename)
+            if match:
                 file_path = Path(root) / filename
-                match = re.search(r"[A-Z]+PLAN-(\d{4})\.md$", filename)
-                if match:
-                    plan_number = match.group(1)
+                plan_number = match.group(2)
 
-                    # Duplicate detection
-                    if plan_number in plan_files:
-                        if plan_number not in duplicates:
-                            duplicates[plan_number] = [plan_files[plan_number]]
-                        duplicates[plan_number].append(file_path)
-                        logger.warning(f"[{MODULE_NAME}] Duplicate plan {filename} found: {file_path}")
-                    else:
-                        plan_files[plan_number] = file_path
+                # Duplicate detection
+                if plan_number in plan_files:
+                    if plan_number not in duplicates:
+                        duplicates[plan_number] = [plan_files[plan_number]]
+                    duplicates[plan_number].append(file_path)
+                    logger.warning(f"[{MODULE_NAME}] Duplicate plan {filename} found: {file_path}")
+                else:
+                    plan_files[plan_number] = file_path
 
     # Auto-renumber duplicates (keep first, renumber rest)
     renumbered: List[Dict[str, str]] = []
@@ -224,8 +227,13 @@ def scan_plan_files_impl(
                     updated.append(plan_number)
                     logger.info(f"[{MODULE_NAME}] Fired plan_file_moved for {file_path.name}")
 
-    # Fire events for orphaned registry entries (in registry but file doesn't exist)
+    # Fire events for orphaned registry entries (in registry but file doesn't exist).
+    # Closed plans are expected to be archived out of the scanned tree (see IGNORE_FOLDERS) —
+    # treating that as "deleted" every scan is what caused the runaway log (305 closed plans
+    # logged as orphaned on every single run). Only open plans can be genuinely orphaned.
     for plan_number in list(plans.keys()):
+        if plans[plan_number].get("status") == "closed":
+            continue
         if plan_number not in plan_files:
             # Registry entry but no file - fire deleted event
             orphan_path = plans[plan_number].get("file_path", "")
@@ -237,7 +245,12 @@ def scan_plan_files_impl(
     # Log event results
     if added or updated or removed or renumbered:
         logger.info(
-            f"[{MODULE_NAME}] Events fired - Created: {len(added)}, Moved: {len(updated)}, Deleted: {len(removed)}, Renumbered: {len(renumbered)}"
+            "[%s] Events fired - Created: %d, Moved: %d, Deleted: %d, Renumbered: %d",
+            MODULE_NAME,
+            len(added),
+            len(updated),
+            len(removed),
+            len(renumbered),
         )
 
     # Reload registry to get updated count (after handlers processed events)

@@ -977,6 +977,8 @@ def _handle_init_update(args: list[str]) -> int:
             success("All files already current.")
         if current:
             console.print(f"  ({len(current)} already up to date)")
+        if result.get("trust_enrolled"):
+            success("Enrolled in trust registry — hooks active.")
         # Owner/identity check + heal via the frozen sync-registry contract
         try:
             check_proc = subprocess.run(

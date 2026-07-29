@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from aipass.hooks.apps.modules.engine import (
     dispatch,
@@ -24,6 +25,22 @@ from aipass.hooks.apps.modules.engine import (
 )
 from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.config.trust_registry import enroll
+
+
+@pytest.fixture(autouse=True)
+def _no_real_trust_banners():
+    """dispatch() now runs both trust banners unconditionally on UserPromptSubmit.
+
+    Neutralize by default so the many dispatch()-calling tests in this file
+    never do a real CWD-to-home walk against the actual ~/.aipass registry.
+    Tests that want to exercise the banners override with their own nested
+    patch, which takes precedence inside its `with` block.
+    """
+    with (
+        patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+        patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+    ):
+        yield
 
 
 class TestMatches:
@@ -296,8 +313,50 @@ class TestDispatch:
             result = dispatch("UserPromptSubmit", "{}", config)
         assert result == ("", 0)
 
-    def test_trust_break_check_skipped_when_presence_gate_not_dispatched(self, mock_logger):
-        """The check is scoped to the presence_gate-filtered bridge call, not every UserPromptSubmit dispatch."""
+    def test_never_enrolled_banner_short_circuits_dispatch(self, mock_logger):
+        """A never-enrolled nudge must reach the user and skip normal hook dispatch."""
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+            patch(
+                "aipass.hooks.apps.handlers.config.loader.never_enrolled_banner",
+                return_value="# HOOKS ARE OFF — not yet enrolled",
+            ),
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            result = dispatch("UserPromptSubmit", "{}", config)
+        mock_run.assert_not_called()
+        assert result == ("# HOOKS ARE OFF — not yet enrolled", 0)
+
+    def test_no_never_enrolled_nudge_falls_through_to_normal_dispatch(self, mock_logger):
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+            patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+        ):
+            result = dispatch("UserPromptSubmit", "{}", config)
+        assert result == ("", 0)
+
+    def test_trust_break_takes_precedence_over_never_enrolled_nudge(self, mock_logger):
+        """Both can't fire for the same project in practice, but trust_break must win if they did."""
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"presence_gate": {}}}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch(
+                "aipass.hooks.apps.handlers.config.loader.trust_break_banner",
+                return_value="# TRUST BREAK — ALL AIPASS HOOKS DISABLED",
+            ) as mock_trust_banner,
+            patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner") as mock_nudge,
+        ):
+            result = dispatch("UserPromptSubmit", "{}", config)
+        mock_trust_banner.assert_called_once()
+        mock_nudge.assert_not_called()
+        assert result == ("# TRUST BREAK — ALL AIPASS HOOKS DISABLED", 0)
+
+    def test_trust_break_check_runs_unconditionally_for_user_prompt_submit(self, mock_logger):
+        """The check runs for every UserPromptSubmit dispatch, not just presence_gate-filtered calls."""
         config = {
             "hooks_enabled": True,
             "UserPromptSubmit": {"other_hook": {"enabled": True, "command": "echo hi", "matcher": ""}},
@@ -305,11 +364,13 @@ class TestDispatch:
         with (
             patch("aipass.hooks.apps.modules.engine._log"),
             patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner") as mock_banner,
+            patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
             patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
         ):
+            mock_banner.return_value = None
             mock_run.return_value = {"exit_code": 0, "stdout": "hi", "stderr": "", "elapsed_ms": 5}
             dispatch("UserPromptSubmit", "{}", config)
-        mock_banner.assert_not_called()
+        mock_banner.assert_called_once()
 
     def test_trust_break_check_skipped_for_non_prompt_events(self, mock_logger):
         config = {"hooks_enabled": True, "PreToolUse": {"presence_gate": {}}}

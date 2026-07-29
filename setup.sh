@@ -224,8 +224,8 @@ fi
 echo "Upgrading pip ..."
 "$VENV_PYTHON" -m pip install --upgrade pip --quiet
 
-echo "Installing aipass in editable mode (with dev + memory extras) — this can take a few minutes while the memory wheels build ..."
-"$VENV_PYTHON" -m pip install -e ".[dev,memory]"
+echo "Installing aipass in editable mode (with dev, memory, llm, drive, bluesky extras) — this can take a few minutes while the memory wheels build ..."
+"$VENV_PYTHON" -m pip install -e ".[dev,memory,llm,drive,bluesky]"
 
 # --- Detect shadowing drone installs (Windows) ---
 # Issues #317 + #321: system-Python pip or legacy npm aipass-drone can shadow venv drone.exe.
@@ -417,7 +417,7 @@ fi
 if [ ! -f "AIPASS_REGISTRY.json" ]; then
     echo "Generating AIPASS_REGISTRY.json ..."
     python3 - "$SCRIPT_DIR" << 'PYEOF'
-import json, sys, os
+import json, sys, os, uuid
 from pathlib import Path
 from datetime import date
 
@@ -440,11 +440,11 @@ for d in sorted(src_dir.iterdir()):
             "last_active": today,
         })
 
-# NOTE: commons and skills were external branches, now removed from public repo.
-# Registry only includes branches discovered under src/aipass/.
+# Registry includes every branch discovered under src/aipass/ — no hardcoded list.
 
 registry = {
     "metadata": {
+        "id": str(uuid.uuid4()),
         "version": "1.0.0",
         "last_updated": today,
         "total_branches": len(branches),
@@ -464,8 +464,6 @@ fi
 echo ""
 echo "Bootstrapping branch identity files ..."
 
-DATE_TODAY=$(date +%Y-%m-%d)
-
 bootstrap_branch() {
     local name="$1"
     local path="$2"
@@ -473,95 +471,66 @@ bootstrap_branch() {
     local role="$4"
     local created=0
 
-    # .trinity/passport.json
+    # .trinity/passport.json + local.json + observations.json
+    # DPLAN-0263 P2: rendered from spawn's own aipass_framework/manager templates
+    # (single source of truth) instead of hand-rolled heredocs — the heredocs had
+    # drifted to a pre-numbered-entry schema (key_learnings as dict, observations
+    # nested session/entries) that the cap/rollover system doesn't expect. By this
+    # point in the script the venv exists and aipass is pip-installed editable
+    # (with the memory extra), so VENV_PYTHON can import aipass.spawn's renderer
+    # directly. rel_path keeps branch_info.path relative ("src/aipass/<name>",
+    # matching every real passport) instead of the absolute path build_replacements_dict
+    # would otherwise render for an absolute target_dir.
     mkdir -p "$path/.trinity"
-    if [ ! -f "$path/.trinity/passport.json" ]; then
-        cat > "$path/.trinity/passport.json" << JSONEOF
-{
-  "document_metadata": {
-    "document_type": "identity",
-    "document_name": "${name}.PASSPORT",
-    "version": "1.0.0",
-    "schema_version": "1.0.0",
-    "created": "${DATE_TODAY}",
-    "last_updated": "${DATE_TODAY}",
-    "managed_by": "${name}"
-  },
-  "branch_info": {
-    "branch_name": "${name}",
-    "path": "src/aipass/${name}",
-    "email": "@${name}"
-  },
-  "identity": {
-    "name": "${name}",
-    "citizen_class": "${citizen_class}",
-    "role": "${role}",
-    "status": "active"
-  }
-}
-JSONEOF
-        created=1
-    fi
+    local rel_path="${path#"$SCRIPT_DIR"/}"
+    local rendered
+    if [ ! -f "$path/.trinity/passport.json" ] || [ ! -f "$path/.trinity/local.json" ] || [ ! -f "$path/.trinity/observations.json" ]; then
+        rendered=$("$VENV_PYTHON" - "$name" "$rel_path" "$citizen_class" "$role" << 'PYEOF'
+import sys
+from pathlib import Path
 
-    # .trinity/local.json
-    if [ ! -f "$path/.trinity/local.json" ]; then
-        cat > "$path/.trinity/local.json" << JSONEOF
-{
-  "document_metadata": {
-    "document_type": "session_history",
-    "document_name": "${name}.LOCAL",
-    "version": "1.0.0",
-    "schema_version": "1.0.0",
-    "created": "${DATE_TODAY}",
-    "last_updated": "${DATE_TODAY}",
-    "managed_by": "${name}",
-    "tags": ["session_tracking", "work_log", "${name}"],
-    "limits": {"max_lines": 600, "note": "Auto-rollover when max_lines exceeded"},
-    "status": {"health": "healthy", "current_lines": 0, "last_health_check": "${DATE_TODAY}"}
-  },
-  "active_tasks": {
-    "today_focus": "First session — explore codebase and capabilities",
-    "recently_completed": []
-  },
-  "key_learnings": {},
-  "sessions": []
-}
-JSONEOF
-        created=1
-    fi
+from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
+from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 
-    # .trinity/observations.json
-    if [ ! -f "$path/.trinity/observations.json" ]; then
-        cat > "$path/.trinity/observations.json" << JSONEOF
-{
-  "document_metadata": {
-    "document_type": "collaboration_patterns",
-    "document_name": "${name}.OBSERVATIONS",
-    "version": "1.0.0",
-    "schema_version": "1.0.0",
-    "created": "${DATE_TODAY}",
-    "last_updated": "${DATE_TODAY}",
-    "managed_by": "${name}",
-    "tags": ["collaboration", "patterns", "${name}"],
-    "limits": {"max_lines": 600, "note": "Auto-rollover when max_lines exceeded"},
-    "status": {"health": "healthy", "current_lines": 0, "last_health_check": "${DATE_TODAY}"}
-  },
-  "guidelines": {
-    "purpose": "Capture collaboration patterns and experiential insights over time",
-    "chronological_order": "Newest entries at TOP, oldest at BOTTOM - NEVER reorder"
-  },
-  "observations": [
-    {
-      "date": "${DATE_TODAY}",
-      "session": 1,
-      "entries": [
-        {"title": "First Contact", "detail": "Branch initialized. Ready to begin capturing collaboration patterns."}
-      ]
-    }
-  ]
-}
-JSONEOF
-        created=1
+branch_name, target_path, citizen_class, role = sys.argv[1:5]
+target = Path(target_path)
+
+# "manager" (devpulse) isn't template-selectable — resolve_template_class picks
+# its real shape via identity.role, same logic `spawn update` heals against.
+template_class = resolve_template_class({"citizen_class": citizen_class, "role": role})
+template_dir = get_template_dir(template_class)
+
+try:
+    from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
+    meta_tabs = render_all_meta_tabs()
+except ImportError:
+    meta_tabs = {}
+
+replacements = build_replacements_dict(
+    target, branch_name, role=role, purpose=role, citizen_class=citizen_class, meta_tabs=meta_tabs,
+)
+# build_replacements_dict's MODULE default is bare (shared with non-package
+# project_agent branches) — every src/aipass/* branch's real import path
+# carries the aipass. package prefix.
+replacements["MODULE"] = f"aipass.{replacements['branchname']}"
+
+created = []
+for filename in ("passport.json", "local.json", "observations.json"):
+    dest = target / ".trinity" / filename
+    if dest.exists():
+        continue
+    src = template_dir / ".trinity" / filename
+    content = replace_placeholders(src.read_text(encoding="utf-8"), replacements)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content, encoding="utf-8")
+    created.append(filename)
+
+print(",".join(created))
+PYEOF
+)
+        if [ -n "$rendered" ]; then
+            created=1
+        fi
     fi
 
     # .seedgo/bypass.json
@@ -586,23 +555,27 @@ JSONEOF
 }
 
 # Branches inside src/aipass/
-bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone"    "builder" "Command routing and module discovery"
-bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo"   "builder" "Standards enforcement and code auditing"
-bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax"     "builder" "Logging and monitoring system"
-bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli"      "builder" "Display formatting service"
-bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow"     "builder" "Workflow and plan management"
-bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail"  "builder" "Inter-agent messaging and dispatch"
-bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api"      "builder" "LLM access and model routing"
-bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger"  "builder" "Event-driven automation"
-bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn"    "builder" "Branch lifecycle management"
+bootstrap_branch "drone"    "$SCRIPT_DIR/src/aipass/drone" "aipass_framework" "Command routing and module discovery"
+bootstrap_branch "seedgo"   "$SCRIPT_DIR/src/aipass/seedgo" "aipass_framework" "Standards enforcement and code auditing"
+bootstrap_branch "prax"     "$SCRIPT_DIR/src/aipass/prax" "aipass_framework" "Logging and monitoring system"
+bootstrap_branch "cli"      "$SCRIPT_DIR/src/aipass/cli" "aipass_framework" "Display formatting service"
+bootstrap_branch "flow"     "$SCRIPT_DIR/src/aipass/flow" "aipass_framework" "Workflow and plan management"
+bootstrap_branch "ai_mail"  "$SCRIPT_DIR/src/aipass/ai_mail" "aipass_framework" "Inter-agent messaging and dispatch"
+bootstrap_branch "api"      "$SCRIPT_DIR/src/aipass/api" "aipass_framework" "LLM access and model routing"
+bootstrap_branch "trigger"  "$SCRIPT_DIR/src/aipass/trigger" "aipass_framework" "Event-driven automation"
+bootstrap_branch "spawn"    "$SCRIPT_DIR/src/aipass/spawn" "aipass_framework" "Branch lifecycle management"
 bootstrap_branch "devpulse" "$SCRIPT_DIR/src/aipass/devpulse" "manager" "Orchestration hub and coordination"
-bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory"   "builder" "Vector memory bank"
-bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass"   "builder" "Concierge — init, doctor, profile, onboarding"
-bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks"    "builder" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "memory"   "$SCRIPT_DIR/src/aipass/memory" "aipass_framework" "Vector memory bank"
+bootstrap_branch "aipass"   "$SCRIPT_DIR/src/aipass/aipass" "aipass_framework" "Concierge — init, doctor, profile, onboarding"
+bootstrap_branch "hooks"    "$SCRIPT_DIR/src/aipass/hooks" "aipass_framework" "Hook engine — cross-platform hook dispatch and per-project config"
+bootstrap_branch "backup"   "$SCRIPT_DIR/src/aipass/backup" "aipass_framework" "Local-first backups, snapshots and restore"
+bootstrap_branch "commons"  "$SCRIPT_DIR/src/aipass/commons" "aipass_framework" "Community social space — posts, comments, votes"
+bootstrap_branch "daemon"   "$SCRIPT_DIR/src/aipass/daemon" "aipass_framework" "Task scheduler — per-branch schedule discovery"
+bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "Capability framework — discoverable skill units"
 
-# External branches
-# NOTE: backup, daemon removed S82/S87. commons, skills moved to external repos.
-# Only the 13 core branches above should be bootstrapped.
+# All 17 core branches in src/aipass/ are bootstrapped above. (A stale note here
+# once claimed backup/commons/daemon/skills were external — they returned to core
+# long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
 
 echo "  13 branches bootstrapped"
 

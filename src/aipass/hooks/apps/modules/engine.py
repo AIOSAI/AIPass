@@ -202,19 +202,6 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
 
     event_hooks = config.get(event_type, {})
 
-    if event_type == "UserPromptSubmit" and "presence_gate" in event_hooks:
-        from aipass.hooks.apps.handlers.config.loader import trust_break_banner
-
-        banner = trust_break_banner()
-        if banner:
-            logger.error("[HOOKS] trust break detected — emitting loud banner")
-            _log({"ts": time.time(), "event": event_type, "action": "trust_break_banner"})
-            return banner, 0
-
-    if not event_hooks:
-        _log({"ts": time.time(), "event": event_type, "action": "no_hooks_configured"})
-        return "", 0
-
     match_value = ""
     parsed = {}
     try:
@@ -222,12 +209,31 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         match_value = parsed.get("tool_name", "") or parsed.get("compact_type", "") or parsed.get("type", "")
     except json.JSONDecodeError as exc:
         logger.warning("[HOOKS] stdin parse error: %s", exc)
+    payload_session_id = parsed.get("session_id", "")
+
+    if event_type == "UserPromptSubmit":
+        from aipass.hooks.apps.handlers.config.loader import never_enrolled_banner, trust_break_banner
+
+        banner = trust_break_banner()
+        if banner:
+            logger.error("[HOOKS] trust break detected — emitting loud banner")
+            _log({"ts": time.time(), "event": event_type, "action": "trust_break_banner"})
+            return banner, 0
+
+        nudge = never_enrolled_banner(payload_session_id)
+        if nudge:
+            logger.warning("[HOOKS] never-enrolled project — emitting one-time nudge")
+            _log({"ts": time.time(), "event": event_type, "action": "never_enrolled_banner"})
+            return nudge, 0
+
+    if not event_hooks:
+        _log({"ts": time.time(), "event": event_type, "action": "no_hooks_configured"})
+        return "", 0
 
     outputs = []
     total_start = time.monotonic()
     budget_state = None
     budget_dirty = False
-    payload_session_id = parsed.get("session_id", "")
 
     for hook_name, hook_def in event_hooks.items():
         if not hook_def.get("enabled", True):

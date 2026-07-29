@@ -29,7 +29,7 @@ def _find_project_file(filename: str) -> Path | None:
 
 
 def handle(hook_data: dict) -> dict:
-    """Load tier0 kernel — every turn (cadence period 1)."""
+    """Load tier0 kernel — cadence-gated (period from cadence_config.json, default 5)."""
     try:
         import importlib
 

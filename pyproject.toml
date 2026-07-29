@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.7.4"
+version = "2.7.5"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -54,6 +54,14 @@ memory = [
 telegram = [
     "telethon>=1.36",
 ]
+drive = [
+    "google-auth>=2.29",
+    "google-auth-oauthlib>=1.2",
+    "google-api-python-client>=2.126",
+]
+bluesky = [
+    "atproto>=0.0.69",
+]
 seedgo = []
 dev = [
     "pytest>=9.0.3",
@@ -97,8 +105,15 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 120
+# ruff 0.16.0 started linting/formatting Python code blocks inside markdown.
+# READMEs are prose with illustrative snippets — keep them out of scope.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
+# Pin the pre-ruff-0.16 default rule set: 0.16.0 expanded the defaults to many
+# new families (UP/I/BLE/DTZ/SIM/...) = 6.6k instant errors. Adopting new
+# families is a deliberate cleanup, not a version-bump side effect.
+select = ["E4", "E7", "E9", "F"]
 ignore = ["E402"]
 
 [tool.ruff.lint.per-file-ignores]

@@ -9,7 +9,163 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-28]
+
+**fix(ci)** — ruff config pinned against 0.16.0's default expansion
+(dependabot PR#707 lint red, 6,651 errors): we had no explicit `select`,
+so the bump silently opted us into a dozen new rule families (UP/I/BLE/
+DTZ/SIM/…), and the 0.16 formatter started reformatting Python snippets
+inside markdown (43 READMEs). `select = ["E4","E7","E9","F"]` pins the
+rule set we always linted against; `extend-exclude = ["*.md"]` keeps
+READMEs prose. Verified locally: check + format --check green under both
+0.15.22 and 0.16.0, zero source changes. Adopting new rule families is a
+deliberate cleanup DPLAN, not a version-bump side effect.
+
+**fix(flow)** — plan restore was type-blind (VERA repro from Vera Studio:
+`restore PPLAN-0011` collided with FPLAN-0011): `restore_plan_impl` always
+loaded the default fplan registry because prefix-stripping never re-derived
+the type for routing. close_ops already had the correct routing — its four
+helpers are now a shared `registry_routing.py` consumed by both ops (fix
+the class, not the symptom). Backup recovery is prefix-restricted too (it
+could previously recover a newer same-numbered backup of the wrong type),
+and restore messages now print the real plan type. 738 tests green incl.
+new cross-type collision coverage, seedgo 100%. Built by @flow,
+devpulse-verified. Known follow-up flagged: create's advertised 4th-arg
+template selector is dead code in the parser (pre-existing, unshipped).
+CI follow-up: the adapted recovery test let type discovery read the real
+`flow_json/template_registry.json` — runtime-managed and gitignored, so
+fresh checkouts have none and the no-prefix fallback searches zero types;
+discovery is now pinned in the test (close_ops tests already mocked it —
+the house pattern).
+
+**chore(feedback)** — VERA feedback sweep: `atproto` (Bluesky SDK behind
+@api's publish driver) was the third undeclared dependency caught in 12
+hours — new `[bluesky]` extra, setup.sh installs it by default; VERA's
+`weekly_update.md` SOP template committed to flow's playbook templates
+(registration + create-syntax verified by @flow); stale tier0_kernel
+docstring corrected (claimed every-turn, actual cadence period 5);
+Patrick's external-project update flow proposal banked as DPLAN-0264
+with VERA's S32 audit evidence.
+
+**fix(api)** — Google credential refresh adopts the transient-vs-structural
+log split (error 78cd43aa, 324 occurrences): `TransportError` (network/DNS
+blips) now logs WARNING; genuine credential failures (invalid_grant,
+revoked token) stay ERROR for the medic pipeline — same convention as the
+backup Drive-sync fix. Plus a README Known Issues note: extras added after
+a venv was built need a setup.sh re-run to appear. openai stays in `[llm]`
+(api's core-vs-extra call — plumbing not product). 516 tests green,
+pyright 0, seedgo 100%. Built by @api, devpulse-verified. CI follow-up:
+the ImportError fallback set `TransportError = None`, and `except None`
+is a TypeError at catch time — red on every runner without the `[drive]`
+extra (the refresh test bypasses the availability gate). Fallback is now
+an empty tuple (legally catches nothing); verified under a forced
+no-libs simulation.
+
+**fix(backup+setup)** — Drive sync outage root-caused + made medic-visible
+(Patrick escalation from the MacBook): Drive sync died 2026-07-17 when a
+setup.sh run wiped the venv — the google libraries
+(google-auth/google-auth-oauthlib/google-api-python-client) were never
+declared in pyproject, only ever hand-installed, so the clean install
+couldn't restore them. Worse, the failure was structurally invisible:
+@api's gateway RuntimeError died in a generic `except Exception` →
+`logger.warning`, and WARNING routes to @trigger's no-op handler — medic
+can only see ERROR/CRITICAL. Now: `authenticate()` escalates the
+"libraries not installed" case to `logger.error` with the install hint
+(transient auth/network failures stay WARNING — regression-guarded);
+new `[drive]` extra owns the deps; setup.sh installs it by default so
+Drive sync survives venv rebuilds (the OAuth secret in ~/.secrets always
+did). 249 backup tests green, live-verified on the real broken venv,
+seedgo 100%. Built by @backup, devpulse-verified + wiring landed.
+
 ## [2026-07-27]
+
+**feat(hooks)** — never-enrolled projects get a voice (GH-712, DPLAN-0263):
+an external project ran 6+ days with its whole hook layer silently dark
+because it was never enrolled in the trust registry — fail-open by design,
+zero signal. `never_enrolled_banner()` now fires a one-time-per-session
+nudge ("hooks are OFF here — run `aipass init update`") for any project
+with a hooks.json but no registry entry; trust checks run unconditionally
+for UserPromptSubmit (the old `presence_gate` gate was bridge-specific and
+fragile). `prune_stale()` drops dead project paths at enroll time.
+1,287 hooks tests green, live-verified on both fresh and populated
+registries. Built by @hooks, devpulse-verified. CI follow-up: the new
+banner made `test_compass_recall.py`'s engine tests enrollment-dependent
+(green on enrolled dev machines, red on fresh checkouts — all 10 CI reds
+were this one test); neutralized with the same autouse banner-patch
+fixture test_engine.py already used, verified under a fresh-machine
+HOME-override simulation.
+
+**feat(aipass)** — trust registry hygiene + honest enrollment output
+(GH-712, DPLAN-0263): `_enroll_project()` now skips throwaway paths (the
+leak that bloated the registry to 795KB / 2,272 entries — 2,245 dead
+pytest tmpdirs, parsed on every hook fire in every project); new
+`aipass trust prune` CLI drops dead-path entries (live run: 2,141 pruned,
+795KB → 44KB); `aipass init update` now *says* "Enrolled in trust
+registry — hooks active" instead of enrolling silently. 791 tests green.
+Built by @aipass, devpulse-verified.
+
+**fix(setup)** — DPLAN-0263 audit sweep: fresh installs now include the
+`[llm]` extra (previously every fresh venv was born with the fleet-wide
+`get_response()` contract dead — openai lived in an optional extra the
+install line never requested; root cause of a 2-month silent outage);
+generated registry seeds `metadata.id` so spawn's `REGISTRY_ID`
+placeholder renders real values on fresh fleets.
+
+**refactor(setup)** — setup.sh delegates `.trinity` stubs to spawn's
+templates (DPLAN-0263 P2): `bootstrap_branch()` no longer hand-rolls
+passport/local/observations heredocs — it renders all three from spawn's
+own templates via `resolve_template_class` + `build_replacements_dict`,
+the same machinery `spawn create`/`update` use. The heredocs had drifted
+to a pre-numbered-entry schema (dict `key_learnings`, nested
+observations) the cap/rollover system doesn't expect — second source of
+truth eliminated. Renders memory's live `*_meta` cap lines; keeps
+relative `branch_info.path` and the `aipass.` module prefix. 378 spawn
+tests green, fresh/idempotent/manager E2E scenarios verified twice
+(builder + devpulse independently). Built by @spawn, devpulse-verified.
+
+**fix(setup)** — the drift canary's first catch, same night it shipped:
+`setup.sh` still bootstrapped every core branch with `citizen_class:
+"builder"` — the pre-rename legacy name — so every fresh clone (all CI
+runners, every external contributor) got legacy-class passports that the
+just-removed silent fallback used to absorb. Renamed to `aipass_framework`
+and extended the bootstrap passport stub to the full template contract
+(`git_branch`, `traits`, `purpose`, …), so CI-built fleets satisfy the
+canary honestly. Second canary catch same night: the bootstrap list was
+also missing backup/commons/daemon/skills entirely (a stale "moved to
+external repos" note from S82/S87 — they returned to core long ago); all
+17 core branches now bootstrap.
+
+**fix(hooks)** — e2e rm-gate test relied on trust-registry bootstrap
+coincidence: on machines with an existing `trusted_projects.json` the
+ephemeral hook workspace was never enrolled, the gate failed open, and the
+test failed while CI (fresh registry → bootstrap auto-trust) stayed green.
+The fixture now enrolls/revokes the workspace deterministically. e2e 14/14
+both environments. Flagged for backlog: never-enrolled projects fail open
+with only a quiet log warning — no TRUST BREAK-style banner. Built by @hooks.
+
+**fix(flow)** — registry monitor runaway logs (137 lines/min): plan-file
+regex never matched real slugged filenames (all 310 plans read as deleted
+every scan), `IGNORE_FOLDERS` substring match skipped whole trees (`dev`
+matched `devpulse`), closed plans weren't excluded from orphan checks.
+False removed-events per scan: 303 → 1. 733 flow tests green, 3 new
+regressions. Built by @flow.
+
+**feat(spawn)** — passport drift auto-heal (DPLAN-0262, fallout of PR #710):
+existing agents never received template-guaranteed passport fields — 17/17
+core passports drifted (`email`, `git_branch`, `traits`), invisible for
+months. `spawn update` now heals passports against a strict allowlist
+(`branch_info.email`, `branch_info.git_branch`, `identity.traits`) — existing
+values always win, identity content stays create-only, legacy top-level
+`traits` arrays migrate into `identity.traits`, backup before every write.
+The silent citizen-class fallback is gone: unknown class, corrupt or missing
+passport now hard-error loudly (`resolve_template_class()` recognizes
+`manager` via a role tiebreaker instead of guessing `aipass_framework`).
+New `test_passport_drift.py` is a permanent live canary — red on any future
+drift. Template scaffold smoke test degrades to skip on branches with their
+own conftest. Fleet healed post-verification: 17 core + 3 project agents,
+canary green. 377 spawn tests + E2E (throwaway citizens, hand-drifted /
+corrupt / unknown-class passports, local + Docker). Built by @spawn,
+devpulse-verified.
 
 **feat(spawn)** — passport templates now populate `traits` and `email`
 (PR #710, first external contribution — thanks @slaguru666): `--traits` and

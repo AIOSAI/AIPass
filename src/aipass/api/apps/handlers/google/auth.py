@@ -53,6 +53,7 @@ CLIENT_SECRET_PATH = SECRETS_DIR / "google_client_secret.json"
 try:
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
+    from google.auth.exceptions import TransportError
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     GOOGLE_AUTH_AVAILABLE = True
@@ -61,6 +62,10 @@ except ImportError as e:
     GOOGLE_AUTH_AVAILABLE = False
     Credentials = None  # type: ignore[assignment, misc]
     Request = None  # type: ignore[assignment, misc]
+    # Unlike the class placeholders above, this one appears in an `except`
+    # clause — None there is a TypeError at catch time, an empty tuple
+    # legally catches nothing.
+    TransportError = ()  # type: ignore[assignment, misc]
     InstalledAppFlow = None  # type: ignore[assignment, misc]
 
 
@@ -120,6 +125,9 @@ def refresh_credentials(creds: "Credentials") -> bool:
         creds.refresh(Request())
         _save_credentials(creds)
         return True
+    except TransportError as e:  # type: ignore[misc]
+        logger.warning(f"Credential refresh failed - transient network error: {e}")
+        return False
     except Exception as e:
         logger.error(f"Failed to refresh credentials: {e}")
         return False
