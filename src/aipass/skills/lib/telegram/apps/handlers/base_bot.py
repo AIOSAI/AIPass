@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-02-24
-# Modified: 2026-07-24
+# Modified: 2026-07-28
 # =============================================
 
 """
@@ -171,6 +171,16 @@ def _is_network_error(exc: Exception) -> bool:
 
 def _is_routine_read_timeout(exc: Exception) -> bool:
     return "timed out" in str(exc) and "read operation" in str(getattr(exc, "reason", exc))
+
+
+def _extract_retry_after(exc: HTTPError, default: int = 30) -> int:
+    """Read Telegram's retry_after (seconds) from a 429 response body, falling back to default."""
+    try:
+        body = json.loads(exc.read().decode("utf-8"))
+    except Exception as parse_err:
+        logger.info("Cannot parse 429 error body: %s", parse_err)
+        return default
+    return body.get("parameters", {}).get("retry_after", default)
 
 
 # =============================================
@@ -502,6 +512,11 @@ class BaseBot:
                 raise _NetworkPollError(str(e)) from e
             if isinstance(e, HTTPError) and (e.code >= 500 or e.code == 409):
                 raise _NetworkPollError(str(e)) from e
+            if isinstance(e, HTTPError) and e.code == 429:
+                retry = _extract_retry_after(e)
+                logger.warning("Poll rate-limited (429) — backing off %ds", retry)
+                time.sleep(retry)
+                return []
             logger.error("Poll error: %s", e)
             return []
         except (ConnectionError, OSError) as e:

@@ -14,8 +14,9 @@ Tests cover:
   - _is_routine_read_timeout classification
 """
 
+import json
 from http.client import HTTPMessage
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -231,17 +232,35 @@ class TestPollUpdatesErrorClassification:
             with pytest.raises(_NetworkPollError):
                 bot.poll_updates(0)
 
-    def test_http_429_not_network_error(self, tmp_path, _patch_base_bot_deps):
-        """Client-side HTTP errors (4xx) should NOT trigger network backoff."""
+    def test_http_429_backs_off_using_retry_after(self, tmp_path, _patch_base_bot_deps):
+        """HTTP 429 must respect Telegram's retry_after, not rapid-fire retry (worsens the throttle)."""
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        body = json.dumps({"ok": False, "parameters": {"retry_after": 12}}).encode("utf-8")
         exc = HTTPError("https://api.telegram.org/...", 429, "Too Many Requests", HTTPMessage(), None)
+        exc.read = MagicMock(return_value=body)
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep,
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
         ):
             result = bot.poll_updates(0)
         assert result == []
-        mock_logger.error.assert_called_once()
+        mock_sleep.assert_called_once_with(12)
+        mock_logger.error.assert_not_called()
+        mock_logger.warning.assert_called_once()
+
+    def test_http_429_unparseable_body_defaults_to_30s(self, tmp_path, _patch_base_bot_deps):
+        """No/garbled response body still backs off (default 30s), never falls through to a tight loop."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        exc = HTTPError("https://api.telegram.org/...", 429, "Too Many Requests", HTTPMessage(), None)
+        exc.read = MagicMock(side_effect=OSError("no body"))
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep,
+        ):
+            result = bot.poll_updates(0)
+        assert result == []
+        mock_sleep.assert_called_once_with(30)
 
     def test_unexpected_exception_logs_error(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
