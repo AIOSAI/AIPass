@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-28] — post-v2.7.5
+
+**fix(skills)** — Telegram `base_bot` error-classification: 409 conflict
+handling (v1.4.1) + 429 rate-limit backoff (v1.4.2). A 429 was previously
+unclassified — generic branch, zero delay, tight re-poll loop against an
+API that just said back off. Now honors Telegram's `retry_after` from the
+response body (30s fallback via `_extract_retry_after`, same pattern as
+`_stream_edit`). 839/839 TG + 252/252 skills tests green. Built by
+@skills from medic threads a495228a/c042d846, devpulse-landed.
+
 ## [2026-07-28]
 
 **fix(ci)** — ruff config pinned against 0.16.0's default expansion
