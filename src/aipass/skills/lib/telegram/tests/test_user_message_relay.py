@@ -11,7 +11,9 @@ Tests for user_message_relay — the UserPromptSubmit hook handler that posts
 user messages from non-TG doors to the branch TG chat.
 
 Tests cover:
-  - find_bot_for_cwd: env var priority, CWD matching, missing dirs, no match
+  - find_bot_for_cwd: env var priority, CWD matching, missing dirs, no match,
+    real bot_factory naming ({bot_id}.json), offset/control-file exclusion,
+    missing-chat_id fallback to sole allowed_user_id, ambiguous/no-fallback skip
   - send_user_message: formatting, truncation, network errors
   - _is_system_noise: system notifications, task notifications, local-command
     output, Caveat line, dispatch wake prompts
@@ -66,7 +68,7 @@ def bot_dirs(tmp_path):
         "work_dir": str(work),
         "bot_id": "test_bot",
     }
-    (mirror / "bot-test_bot.json").write_text(json.dumps(bot_data))
+    (mirror / "test_bot.json").write_text(json.dumps(bot_data))
 
     with (
         patch.object(relay_mod, "MIRROR_DIR", mirror),
@@ -118,7 +120,7 @@ class TestFindBotForCwd:
     def test_skips_bot_without_chat_id(self, tmp_path):
         mirror = tmp_path / "mirror"
         mirror.mkdir()
-        (mirror / "bot-bad.json").write_text(json.dumps({"bot_token": "tok", "work_dir": "/tmp"}))
+        (mirror / "bad.json").write_text(json.dumps({"bot_token": "tok", "work_dir": "/tmp"}))
         with (
             patch.object(relay_mod, "MIRROR_DIR", mirror),
             patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
@@ -129,12 +131,102 @@ class TestFindBotForCwd:
     def test_skips_corrupt_json(self, tmp_path):
         mirror = tmp_path / "mirror"
         mirror.mkdir()
-        (mirror / "bot-bad.json").write_text("not json{{{")
+        (mirror / "bad.json").write_text("not json{{{")
         with (
             patch.object(relay_mod, "MIRROR_DIR", mirror),
             patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
         ):
             result = find_bot_for_cwd("/tmp")
+        assert result is None
+
+    def test_real_bot_factory_naming_resolves(self, tmp_path):
+        """MIRROR_DIR shadow files are named {bot_id}.json — no 'bot-' prefix."""
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        bot_data = {"chat_id": 7235222625, "bot_token": "tok", "work_dir": str(work), "bot_id": "devpulse"}
+        (mirror / "devpulse.json").write_text(json.dumps(bot_data))
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", mirror),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
+        ):
+            result = find_bot_for_cwd(str(work))
+        assert result is not None
+        assert result["bot_id"] == "devpulse"
+
+    def test_offset_and_lock_files_excluded(self, tmp_path):
+        """Non-bot json siblings (*_offset.json, control files) never match."""
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        (mirror / "devpulse_offset.json").write_text(json.dumps({"offset": 123, "updated": "now"}))
+        (mirror / "prax_monitor_control.json").write_text(json.dumps({"paused": False, "level": "all"}))
+        bot_data = {"chat_id": 7235222625, "bot_token": "tok", "work_dir": str(work), "bot_id": "devpulse"}
+        (mirror / "devpulse.json").write_text(json.dumps(bot_data))
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", mirror),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
+        ):
+            result = find_bot_for_cwd(str(work))
+        assert result is not None
+        assert result["chat_id"] == 7235222625
+
+    def test_missing_chat_id_falls_back_to_sole_allowed_user(self, tmp_path):
+        """A private Telegram chat's chat_id equals its sole authorized user_id."""
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        bot_data = {
+            "bot_token": "tok",
+            "work_dir": str(work),
+            "bot_id": "devpulse",
+            "allowed_user_ids": [7235222625],
+        }
+        (mirror / "devpulse.json").write_text(json.dumps(bot_data))
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", mirror),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
+        ):
+            result = find_bot_for_cwd(str(work))
+        assert result is not None
+        assert result["chat_id"] == 7235222625
+
+    def test_missing_chat_id_multiple_allowed_users_skips(self, tmp_path):
+        """Can't safely guess which user's chat — ambiguous, so skip silently."""
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        bot_data = {
+            "bot_token": "tok",
+            "work_dir": str(work),
+            "bot_id": "shared",
+            "allowed_user_ids": [111, 222],
+        }
+        (mirror / "shared.json").write_text(json.dumps(bot_data))
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", mirror),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
+        ):
+            result = find_bot_for_cwd(str(work))
+        assert result is None
+
+    def test_missing_chat_id_no_allowed_users_skips(self, tmp_path):
+        """No chat_id and no allowed_user_ids to fall back on — skip, no crash."""
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        bot_data = {"bot_token": "tok", "work_dir": str(work), "bot_id": "sync_test", "allowed_user_ids": []}
+        (mirror / "sync_test.json").write_text(json.dumps(bot_data))
+        with (
+            patch.object(relay_mod, "MIRROR_DIR", mirror),
+            patch.object(relay_mod, "PENDING_DIR", tmp_path / "pending"),
+        ):
+            result = find_bot_for_cwd(str(work))
         assert result is None
 
     def test_missing_dirs_no_crash(self, tmp_path):

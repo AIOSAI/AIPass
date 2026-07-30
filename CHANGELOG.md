@@ -11,7 +11,19 @@ PyPI version — not the changelog header.
 
 ## [2026-07-30] — post-v2.7.5
 
-**feat(skills)** — `/suspend` control verb + rtcwake heartbeat (DPLAN-0270
+**fix(skills)** — `user_message_relay` (terminal→TG mirror) was inert since
+creation, two causes (`user_message_relay.py`): (1) it globbed `bot-*.json`
+for bot configs, but `bot_factory` writes mirror configs as `{bot_id}.json` —
+zero matches ever (the `bot-*.json` naming is real but belongs to the
+PENDING_DIR transcript-relay stream files, a different subsystem);
+(2) `devpulse.json` carries no `chat_id` — added a read-only fallback: a
+single-entry `allowed_user_ids` IS the private-chat id (documented Bot API
+behavior), ambiguous/empty configs still skip silently, no new write path.
+The existing test fixture used the wrong `bot-` prefixed filename itself —
+which is exactly why the bug survived; fixture fixed, 5 regression tests
+added. 882/882 TG green (devpulse re-verified), seedgo 100%. Hook-side fix,
+no bot restarts needed. Built by @skills (FPLAN-0363), closes todo #85 /
+DPLAN-0270 P2 residual. (DPLAN-0270
 P5, night build): suspend the laptop from the control chat. No-arg =
 heartbeat mode (ack → arm RTC alarm via `sudo -n rtcwake -m no` →
 `systemctl suspend`; on each timed wake a root systemd system-sleep hook
