@@ -9,6 +9,24 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-29] — post-v2.7.5
+
+**feat(flow)** — registry auto-heal doctrine (`heal_registry.py`, wired into
+the normal registry scan): plan-number conflicts now resolve themselves —
+number collisions (a different live file squatting on a closed row's number),
+unregistered plan files, and wrong-prefix ghost rows (the FPLAN-0011 recovery
+class) all heal by renumber-and-register. Original registry rows are never
+touched, `.md` files never renamed. Path-level idempotency index prevents the
+same squatter re-registering under a fresh number every scan (caught live:
+first version minted 3 duplicate opens per cadence cycle; twice-run proof now
+in the test suite — second scan must heal zero). `dropbox` added to
+IGNORE_FOLDERS (exact-match, received-files dirs never auto-register — 802
+plans under `.backup` were already correctly ignored) and the ignore policy
+is documented in flow's README. Live results: healed the 0165 collision +
+0175 unregistered file Patrick's plan audit surfaced, plus 2 more of the same
+classes found on its own. 763 tests green, seedgo 100%. Doctrine per Patrick:
+flow always auto-heals — never manual registry resolution (compass #186/#190).
+
 ## [2026-07-28] — post-v2.7.5
 
 **fix(skills)** — Telegram `base_bot` error-classification: 409 conflict

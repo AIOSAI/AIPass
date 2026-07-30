@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2025-11-21
-# Modified: 2026-04-22
+# Modified: 2026-07-29
 # =============================================
 
 """
@@ -15,6 +15,8 @@ All business logic delegated to handlers/registry/monitor_ops.py.
 Features:
 - Scan and heal registry (orphaned entries, missing files)
 - Duplicate plan detection with auto-renumbering
+- Registry doctrine self-heal (number collisions, unregistered files,
+  wrong-prefix rows) applied directly on every scan
 - Registry status reporting
 
 Usage:
@@ -63,6 +65,9 @@ from aipass.flow.apps.handlers.registry.monitor_ops import (
     get_status_impl,
 )
 
+# Registry doctrine self-heal (number collisions / unregistered files / wrong-prefix rows)
+from aipass.flow.apps.handlers.registry.heal_registry import heal_registry_doctrine_impl
+
 # =============================================
 # CONFIGURATION
 # =============================================
@@ -90,17 +95,28 @@ ECOSYSTEM_ROOT = REPO_ROOT  # Scan from repo root
 
 def scan_plan_files() -> Dict[str, Any]:
     """
-    Scan ecosystem for PLAN files and fire events to heal registry (thin orchestrator)
+    Scan ecosystem for PLAN files and heal the registry (thin orchestrator)
 
-    Delegates to monitor_ops handler for implementation.
+    Two passes, both delegated to handlers:
+    1. monitor_ops.scan_plan_files_impl — detection + duplicate renumbering
+    2. heal_registry.heal_registry_doctrine_impl — direct, synchronous
+       registry repair for the three doctrine cases (number collision,
+       unregistered file, wrong-prefix row). Runs on every scan so these
+       never need a manual JSON fix again.
 
     Returns:
-        Dict with scan results and event stats
+        Dict with scan results, event stats, and doctrine heal results
     """
-    return scan_plan_files_impl(
+    result = scan_plan_files_impl(
         ecosystem_root=ECOSYSTEM_ROOT,
         load_registry=load_registry,
     )
+
+    heal_result = heal_registry_doctrine_impl(ecosystem_root=ECOSYSTEM_ROOT)
+    result["doctrine_healed"] = heal_result["healed_count"]
+    result["doctrine_heals"] = heal_result["healed"]
+
+    return result
 
 
 def get_status() -> Dict[str, Any]:
@@ -162,6 +178,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print(f"  • Updated: {len(result['updated'])}")
         console.print(f"  • Removed: {len(result['removed'])}")
         console.print(f"  • Renumbered: {len(result['renumbered'])}")
+        console.print(f"  • Doctrine healed: {result.get('doctrine_healed', 0)}")
+
+        if result.get("doctrine_healed", 0) > 0:
+            for heal in result.get("doctrine_heals", []):
+                prefix = heal.get("prefix", "?")
+                number = heal.get("number", "?")
+                console.print(f"    - {prefix}-{number}: {heal.get('action', 'unknown')}")
 
         if result["healing_performed"]:
             change_count = len(result["added"]) + len(result["updated"]) + len(result["removed"])
@@ -221,6 +244,7 @@ def print_introspection():
     console.print("[yellow]Features:[/yellow]")
     console.print("  • Scan and heal registry")
     console.print("  • Duplicate detection with auto-renumbering")
+    console.print("  • Doctrine self-heal (collisions, unregistered files, wrong-prefix rows)")
     console.print("  • Registry status reporting")
     console.print()
 
@@ -232,6 +256,7 @@ def print_introspection():
 
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  • [cyan]handlers/registry/monitor_ops.py (implementation)[/cyan]")
+    console.print("  • [cyan]handlers/registry/heal_registry.py (doctrine self-heal)[/cyan]")
     console.print("  • [cyan]handlers/registry/load_registry.py[/cyan]")
     console.print("  • [cyan]handlers/registry/save_registry.py[/cyan]")
     console.print()

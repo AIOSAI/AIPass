@@ -144,6 +144,32 @@ Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` wh
 - Plan registries auto-close entries for missing files
 - New template directories auto-register on next command
 
+### Ignored Folders
+
+`IGNORE_FOLDERS` (`apps/handlers/registry/monitor_ops.py`) is the set of directory
+names the registry scan never descends into — dev/VCS tooling, backups, archives,
+and system paths that legitimately contain files matching the PLAN filename
+pattern but should never be registered as live plans.
+
+**Exact-match only, never substring/pattern matching.** A folder name is skipped
+only when it equals an entry in the set exactly. Substring matching was tried
+historically and broke: a folder named `dev` would substring-match inside
+`devpulse`, silently skipping the entire `devpulse/` tree from scanning (see
+`key_learning #33`, `registry_monitor_runaway_log_fix`). Exact-match avoids that
+trap entirely — adding `dropbox` only ever matches a folder literally named
+`dropbox`, never `devpulse-dropbox-clone` or similar.
+
+`dropbox` is in the set because every branch has one as its received-files
+inbox — anything can land there, including old snapshot/backup copies of plan
+files with real `PLAN-NNNN` filenames, so no live plan should ever be scanned
+out of a `dropbox/` tree.
+
+The current folder list lives in `monitor_ops.py` itself (`IGNORE_FOLDERS`) —
+that file is the source of truth; this README doesn't duplicate the list to
+avoid drift. Both `registry_monitor`'s scan pass and `heal_registry`'s doctrine
+self-heal (collisions / unregistered files / wrong-prefix rows) import this
+same set, so a folder added here is skipped by both in lockstep.
+
 ---
 
 ## Close Pipeline
