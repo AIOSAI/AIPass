@@ -144,6 +144,10 @@ NETWORK_BACKOFF_CAP = 60  # seconds
 NETWORK_LOG_INTERVAL = 300  # 5 minutes between offline summary lines
 STARTUP_RETRY_CAP_SECONDS = 180  # ~3 minutes of backoff before failing loud
 CONTROL_SESSION_PREFIX = "aipass-"  # tmux session prefix for /start /kill /status control verbs (DPLAN-0270 P1)
+RTCWAKE_BIN = "/usr/sbin/rtcwake"  # exact path — must match the sudoers.d grant exactly, no wildcards
+SUSPEND_HEARTBEAT_DEFAULT_MINUTES = 25  # /suspend heartbeat interval, overridable via bot config
+SUSPEND_GRACE_WINDOW_SECONDS = 100  # post-resume window to wait for a command before re-arming (DPLAN-0270 P5)
+RESUME_SIGNAL_FILE = Path.home() / ".aipass" / "telegram_bots" / "resume_signal.json"  # written by system-sleep hook
 
 
 class _NetworkPollError(Exception):
@@ -274,6 +278,14 @@ class BaseBot:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_gen: int = 0
 
+        # /suspend control verb state (DPLAN-0270 P5) — heartbeat mode only;
+        # single-wake /suspend <duration> never touches these.
+        self._suspend_heartbeat_active = False
+        self._suspend_chat_id: Optional[int] = None
+        self._suspend_last_resume_seen: float | None = None
+        self._suspend_resume_pending_since: float | None = None
+        self._last_control_command_at: float = 0.0
+
         # Conversation state for /create flow (keyed by chat_id)
         self._create_state: dict[int, dict] = {}
         self._create_state_ttl = 300  # 5 minutes
@@ -354,6 +366,7 @@ class BaseBot:
 
         while self.state["running"]:
             try:
+                self._check_resume_signal()
                 updates = self.poll_updates(offset)
 
                 # Reset general backoff on successful poll
@@ -730,6 +743,7 @@ class BaseBot:
             True if command was handled (caller should return), False to fall through.
         """
         cmd_name, cmd_args = parsed
+        self._last_control_command_at = time.time()
 
         # /logs command — session log stream control
         if cmd_name == "logs":
@@ -767,6 +781,10 @@ class BaseBot:
 
         if cmd_name == "kill" and self._is_control_bot():
             self._handle_control_kill(chat_id, cmd_args)
+            return True
+
+        if cmd_name == "suspend" and self._is_control_bot():
+            self._handle_control_suspend(chat_id, cmd_args)
             return True
 
         # Compute conversation uptime (resets on /new) and daemon uptime (since boot)
@@ -1742,6 +1760,159 @@ class BaseBot:
 
         logger.info("Control /kill: killed '%s' (session '%s')", branch, session_name)
         self.send_message(chat_id, f"killed {branch}")
+
+    def _suspend_heartbeat_seconds(self) -> int:
+        """Heartbeat interval for /suspend, in seconds — config override or hardcoded default."""
+        minutes = SUSPEND_HEARTBEAT_DEFAULT_MINUTES
+        try:
+            from .config import load_bot_config
+
+            config = load_bot_config(self.bot_id)
+            if config:
+                minutes = config.get("suspend_heartbeat_minutes", minutes)
+        except Exception as e:
+            logger.warning("Could not read suspend_heartbeat_minutes, using default: %s", e)
+        return int(minutes) * 60
+
+    def _parse_suspend_duration(self, arg: str) -> tuple[Optional[int], Optional[str]]:
+        """
+        Parse the optional /suspend duration argument.
+
+        Returns (seconds, error). No arg -> (None, None): heartbeat mode.
+        "8h" / "45m" -> (seconds, None): single-wake mode. Malformed arg
+        returns (None, error_message).
+        """
+        arg = arg.strip()
+        if not arg:
+            return None, None
+
+        match = re.fullmatch(r"(\d+)([hm])", arg.lower())
+        if not match:
+            return None, f"Bad duration '{arg}' — use e.g. /suspend 8h or /suspend 45m (no arg = heartbeat mode)."
+
+        value, unit = match.groups()
+        seconds = int(value) * (3600 if unit == "h" else 60)
+        if seconds <= 0:
+            return None, "Duration must be positive."
+        return seconds, None
+
+    def _handle_control_suspend(self, chat_id: int, arg: str) -> None:
+        """
+        /suspend [duration] control verb (DPLAN-0270 P5).
+
+        No arg: heartbeat mode — suspends now, wakes every
+        _suspend_heartbeat_seconds() to check for a command, re-arming if
+        none arrived within the grace window, until a command shows up.
+        "/suspend 8h": single-wake mode — one RTC alarm, no heartbeat re-arm.
+
+        `systemctl suspend` is asynchronous (man systemctl: "will not wait
+        for the suspend/resume cycle to complete") — it returns almost
+        immediately, well before the machine actually sleeps. This method
+        never blocks across the suspend/resume boundary; the grace-window
+        and re-arm decision happen later, back in run()'s poll loop, driven
+        by the resume signal a systemd system-sleep hook writes on actual
+        wake (see _check_resume_signal).
+        """
+        seconds, err = self._parse_suspend_duration(arg)
+        if err:
+            self.send_message(chat_id, err)
+            return
+
+        if seconds is None:
+            interval = self._suspend_heartbeat_seconds()
+            self.send_message(chat_id, f"Suspending now. Heartbeat every {interval // 60}m until a command arrives.")
+            self._suspend_heartbeat_active = True
+            self._suspend_chat_id = chat_id
+            self._arm_and_suspend(chat_id, interval)
+            return
+
+        self.send_message(chat_id, f"Suspending now. Single wake in {arg.strip()} — no heartbeat.")
+        self._arm_and_suspend(chat_id, seconds)
+
+    def _arm_and_suspend(self, chat_id: int, seconds: int) -> None:
+        """Arm the RTC wake alarm, then suspend. Caller has already sent the ack message."""
+        try:
+            subprocess.run(
+                ["sudo", "-n", RTCWAKE_BIN, "-m", "no", "-s", str(seconds)],
+                check=True,
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            detail = e.stderr.decode() if isinstance(e, subprocess.CalledProcessError) and e.stderr else str(e)
+            logger.error("Failed to arm rtcwake: %s", detail)
+            self.send_message(
+                chat_id,
+                "Can't arm the wake alarm — the rtcwake sudoers grant isn't installed yet. "
+                "See tools/suspend/install_suspend_grants.sh. Not suspending.",
+            )
+            self._suspend_heartbeat_active = False
+            return
+
+        try:
+            subprocess.run(["systemctl", "suspend"], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.decode() if e.stderr else str(e)
+            logger.error("Failed to suspend: %s", detail)
+            subprocess.run(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)
+            self.send_message(
+                chat_id,
+                "Wake alarm armed, but suspend failed — the login1.suspend polkit grant isn't "
+                "installed yet. See tools/suspend/install_suspend_grants.sh. Disarmed the alarm; staying awake.",
+            )
+            self._suspend_heartbeat_active = False
+            return
+
+        logger.info("Suspend armed+enqueued: wake in %ds (heartbeat=%s)", seconds, self._suspend_heartbeat_active)
+
+    def _check_resume_signal(self) -> None:
+        """
+        Poll-loop hook (DPLAN-0270 P5): react to the system-sleep resume signal.
+
+        No-op unless a heartbeat suspend is in flight. The signal file is
+        written by the root-owned systemd system-sleep hook on actual
+        resume (see tools/suspend/aipass-resume-signal) — the only reliable
+        "we just woke up" marker, since `systemctl suspend` itself returns
+        asynchronously and can't be used to detect resume from within this
+        process (see _handle_control_suspend).
+        """
+        if not self._suspend_heartbeat_active:
+            return
+
+        try:
+            data = json.loads(RESUME_SIGNAL_FILE.read_text(encoding="utf-8"))
+            resumed_at = float(data.get("resumed_at", 0))
+        except (FileNotFoundError, ValueError, OSError) as e:
+            logger.warning("Could not read resume signal file: %s", e)
+            return
+
+        if self._suspend_last_resume_seen is None or resumed_at > self._suspend_last_resume_seen:
+            self._suspend_last_resume_seen = resumed_at
+            self._suspend_resume_pending_since = time.time()
+            logger.info("Resume signal seen (resumed_at=%s) — starting grace window", resumed_at)
+            return
+
+        if self._suspend_resume_pending_since is None:
+            return
+
+        if time.time() - self._suspend_resume_pending_since < SUSPEND_GRACE_WINDOW_SECONDS:
+            return
+
+        self._suspend_resume_pending_since = None
+
+        if self._last_control_command_at >= self._suspend_last_resume_seen:
+            self._suspend_heartbeat_active = False
+            logger.info("Suspend heartbeat: command received post-resume, staying awake")
+            if self._suspend_chat_id is not None:
+                self.send_message(self._suspend_chat_id, "Staying awake — command received.")
+            return
+
+        if self._suspend_chat_id is None:
+            logger.error("Suspend heartbeat active but no chat_id recorded — aborting heartbeat")
+            self._suspend_heartbeat_active = False
+            return
+
+        logger.info("Suspend heartbeat: no command in grace window, re-arming")
+        self._arm_and_suspend(self._suspend_chat_id, self._suspend_heartbeat_seconds())
 
     # =============================================
     # PENDING FILE MANAGEMENT
@@ -2855,6 +3026,11 @@ class BaseBot:
             commands["kill"] = {
                 "description": "Kill a terminal agent's tmux session — /kill [branch] (default: aipass)",
                 "menu_text": "Kill session",
+            }
+            commands["suspend"] = {
+                "description": "Suspend the machine — /suspend (heartbeat, re-arms until a command "
+                "arrives) or /suspend 8h (single wake, no heartbeat)",
+                "menu_text": "Suspend machine",
             }
         return commands
 

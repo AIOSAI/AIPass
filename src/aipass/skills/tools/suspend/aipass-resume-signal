@@ -1,0 +1,23 @@
+#!/bin/sh
+# AIPass resume signal — DPLAN-0270 P5.
+#
+# Installed to /etc/systemd/system-sleep/ (root:root 0755). systemd invokes
+# every executable in that directory with args "pre|post" "suspend|..." —
+# see man systemd-suspend.service. The "post" call only runs once the
+# machine has actually resumed; that guarantee is why this hook exists at
+# all — `systemctl suspend` itself returns asynchronously ("will not wait
+# for the suspend/resume cycle to complete", man systemctl) so the bot
+# process cannot detect real resume from its own suspend call. This script
+# just stamps a timestamp; the already-running telegram bot's poll loop
+# reads it (see base_bot.py _check_resume_signal) and drives the actual
+# grace-window / re-arm decision there.
+
+SIGNAL_FILE="/home/patrick/.aipass/telegram_bots/resume_signal.json"
+
+case "$1" in
+  post)
+    mkdir -p "$(dirname "$SIGNAL_FILE")"
+    printf '{"resumed_at": %s, "sleep_verb": "%s"}\n' "$(date +%s)" "$2" > "$SIGNAL_FILE"
+    chmod 644 "$SIGNAL_FILE"
+    ;;
+esac

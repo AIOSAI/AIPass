@@ -124,6 +124,14 @@ src/aipass/*/apps/integrations/**
 src/aipass/hooks/tools/*
 !src/aipass/hooks/tools/install_boot_shim.sh
 
+# skills suspend grants — reviewable root-grant drafts + installer for the
+# /suspend control verb (DPLAN-0270 P5). Must ship: Patrick reviews and
+# installs from the repo. Collides with the blanket tools/ ignore (line 51).
+!src/aipass/skills/tools/
+src/aipass/skills/tools/*
+!src/aipass/skills/tools/suspend/
+!src/aipass/skills/tools/suspend/**
+
 # User/sample projects — each is its own git repo (git init on create).
 # Contents never belong to the AIPass repo; only the catalog README is tracked
 # so the public repo can point at the standalone project repos.

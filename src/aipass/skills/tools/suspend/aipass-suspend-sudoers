@@ -1,0 +1,12 @@
+# AIPass /suspend control verb — DPLAN-0270 P5.
+# Installed to /etc/sudoers.d/aipass-suspend (root:root 0440).
+#
+# Exact binary path only, no wildcards on the binary itself (classic
+# sudoers hardening — a wildcarded/bare command name could be shadowed by
+# a different binary earlier in $PATH). The numeric -s argument is
+# wildcarded because it varies per call (heartbeat interval or a duration
+# like "8h"/"45m" converted to seconds); this is safe regardless, since
+# base_bot.py always invokes rtcwake via an argv list (never shell=True),
+# so there is no shell-injection surface for that argument to exploit.
+patrick ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m no -s [0-9]*
+patrick ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m disable

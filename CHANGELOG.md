@@ -9,6 +9,26 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-30] — post-v2.7.5
+
+**feat(skills)** — `/suspend` control verb + rtcwake heartbeat (DPLAN-0270
+P5, night build): suspend the laptop from the control chat. No-arg =
+heartbeat mode (ack → arm RTC alarm via `sudo -n rtcwake -m no` →
+`systemctl suspend`; on each timed wake a root systemd system-sleep hook
+stamps `resume_signal.json`, the bot's poll loop gives a ~100s grace window
+to drain Telegram's server-side queue, stays awake if a command arrived,
+else re-arms and re-suspends). `/suspend 8h`/`45m` = single-wake night mode.
+Root grants ship as reviewable repo drafts (`tools/suspend/`): hardened
+sudoers drop-in (exact binary path), polkit rule scoped to
+`org.freedesktop.login1.suspend` + one user (needed because a `--user`
+service is not an "active session" for polkit), system-sleep hook, and a
+one-shot installer (`visudo -c` validated) — nothing installs or suspends
+until Patrick runs it. Failure paths abort before suspending and name the
+missing grant. 20 new tests (subprocess fully mocked), 877/877 TG green,
+seedgo 100%. Built by @skills (FPLAN-0362), devpulse-verified + landed.
+`systemctl suspend` is async per man systemctl — the sleep-hook signal file
+is the only reliable resume marker; that finding drove the design.
+
 ## [2026-07-29] — post-v2.7.5
 
 **feat(skills)** — Telegram control verbs v1+v1.1 (`base_bot.py`,
