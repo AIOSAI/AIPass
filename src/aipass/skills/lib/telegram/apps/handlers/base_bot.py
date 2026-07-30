@@ -143,6 +143,7 @@ NETWORK_BACKOFF_INIT = 1  # seconds
 NETWORK_BACKOFF_CAP = 60  # seconds
 NETWORK_LOG_INTERVAL = 300  # 5 minutes between offline summary lines
 STARTUP_RETRY_CAP_SECONDS = 180  # ~3 minutes of backoff before failing loud
+CONTROL_SESSION_PREFIX = "aipass-"  # tmux session prefix for /start /kill /status control verbs (DPLAN-0270 P1)
 
 
 class _NetworkPollError(Exception):
@@ -687,6 +688,34 @@ class BaseBot:
         else:
             logger.info("Ignoring unsupported message type")
 
+    def _is_control_bot(self) -> bool:
+        """
+        True for bots exposing the /start /kill /status control verbs (DPLAN-0270 P1).
+
+        Covers both a bare base bot (branch_name=None) and the deployed AIPASS
+        control-center bot, whose persisted config sets branch_name="aipass"
+        (it is the same bot_id="base" process — there is no separate bot).
+        """
+        return self.branch_name is None or self.branch_name == "aipass"
+
+    def _effective_standard_commands(self) -> Optional[dict]:
+        """
+        Override the /start entry for control bots.
+
+        STANDARD_COMMANDS' generic "what this bot does" welcome text is stale
+        once /start wakes a terminal agent instead of describing the bot.
+        Returns None for non-control bots so callers fall back to the shared
+        STANDARD_COMMANDS dict unchanged.
+        """
+        if not self._is_control_bot():
+            return None
+        overridden = {**STANDARD_COMMANDS}
+        overridden["start"] = {
+            "description": "Wake a terminal agent — /start [branch] (default: aipass)",
+            "menu_text": "Wake agent",
+        }
+        return overridden
+
     def _dispatch_command(self, chat_id: int, parsed: tuple) -> bool:
         """
         Dispatch a parsed command to the appropriate handler.
@@ -728,6 +757,18 @@ class BaseBot:
                 self.send_message(chat_id, "Nothing to cancel.")
             return True
 
+        # Control verbs (DPLAN-0270 P1) — control bots only (see _is_control_bot).
+        # /start here supersedes the STANDARD_COMMANDS welcome text for the
+        # control-center bot; branch bots fall through to the normal /start
+        # welcome message unchanged.
+        if cmd_name == "start" and self._is_control_bot():
+            self._handle_control_start(chat_id, cmd_args)
+            return True
+
+        if cmd_name == "kill" and self._is_control_bot():
+            self._handle_control_kill(chat_id, cmd_args)
+            return True
+
         # Compute conversation uptime (resets on /new) and daemon uptime (since boot)
         conv_elapsed = time.time() - self.state.get("conversation_start", self.state["start_time"])
         conv_h, conv_rem = divmod(int(conv_elapsed), 3600)
@@ -755,6 +796,8 @@ class BaseBot:
             registry_text = self._build_registry_status()
             if registry_text:
                 status_text += f"\n\n{registry_text}"
+            if self._is_control_bot():
+                status_text += f"\n\n{self._build_control_sessions_text()}"
             self.send_message(chat_id, status_text)
             logger.info("Handled /status command")
             return True
@@ -764,6 +807,7 @@ class BaseBot:
             session_name=self.session_name,
             branch_name=self.bot_id,
             bot_name=self.bot_name,
+            standard_commands=self._effective_standard_commands(),
             custom_commands=merged_commands or None,
             chat_id=chat_id,
             message_count=self.state.get("message_count"),
@@ -815,7 +859,9 @@ class BaseBot:
 
         # Ensure tmux session
         if not self.ensure_tmux_session():
-            logger.error("Cannot process message - no live session to mirror")
+            # Expected condition (presence guard) — user gets the explanation
+            # below, so WARNING not ERROR.
+            logger.warning("Cannot process message - no live session to mirror")
             branch = self.branch_name or self.work_dir.name
             self.send_message(
                 chat_id,
@@ -1471,7 +1517,9 @@ class BaseBot:
         # Legacy AIPASS_SESSION_TYPE=telegram own-session spawn RETIRED.
         # The bot is a thin relay — it follows the presence pointer or an
         # explicit shared_session. Start a Claude session in the branch first.
-        logger.error(
+        # Expected condition (not a failure) — user is told directly via
+        # send_message in handle_message, so WARNING not ERROR.
+        logger.warning(
             "No live session to mirror — presence pointer empty, no shared session. "
             "Start a Claude session in the branch directory first."
         )
@@ -1554,6 +1602,146 @@ class BaseBot:
                 e.stderr.decode() if e.stderr else str(e),
             )
             return False
+
+    # =============================================
+    # CONTROL VERBS (DPLAN-0270 P1) — base bot only
+    # =============================================
+
+    def _list_aipass_sessions(self) -> list[dict]:
+        """
+        List tmux sessions matching the aipass-* control-verb prefix.
+
+        Returns:
+            List of dicts with keys: name, branch, pid, alive.
+        """
+        sessions: list[dict] = []
+        try:
+            result = subprocess.run(
+                ["tmux", "list-sessions", "-F", "#{session_name}"],
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            logger.warning("tmux not found — is it installed?")
+            return sessions
+
+        if result.returncode != 0:
+            return sessions  # no tmux server running — honestly, zero sessions
+
+        for name in result.stdout.splitlines():
+            name = name.strip()
+            if not name.startswith(CONTROL_SESSION_PREFIX):
+                continue
+            branch = name[len(CONTROL_SESSION_PREFIX) :]
+            pid = None
+            alive = False
+            try:
+                pane = subprocess.run(
+                    ["tmux", "list-panes", "-t", name, "-F", "#{pane_pid} #{pane_dead}"],
+                    capture_output=True,
+                    text=True,
+                )
+                if pane.returncode == 0 and pane.stdout.strip():
+                    first_pid, dead_flag = pane.stdout.splitlines()[0].split()
+                    pid = int(first_pid)
+                    alive = dead_flag == "0"
+            except (FileNotFoundError, ValueError) as e:
+                logger.warning("Could not read pane info for '%s': %s", name, e)
+            sessions.append({"name": name, "branch": branch, "pid": pid, "alive": alive})
+
+        return sessions
+
+    def _build_control_sessions_text(self) -> str:
+        """Build the aipass-* session listing shown in /status (control-center only)."""
+        sessions = self._list_aipass_sessions()
+        if not sessions:
+            return "AIPass sessions: none running."
+
+        lines = ["AIPass sessions:"]
+        for s in sessions:
+            state = "alive" if s["alive"] else "dead"
+            pid_text = s["pid"] if s["pid"] is not None else "?"
+            lines.append(f"  @{s['branch']} — PID {pid_text} ({state})")
+        return "\n".join(lines)
+
+    def _handle_control_start(self, chat_id: int, branch_arg: str) -> None:
+        """
+        /start <branch> control verb — wake a terminal agent (default: aipass).
+
+        Supersedes the FPLAN-0289 presence guard for this explicit command
+        only — plain messages still require an existing live session. One
+        session per branch (compass #106 occupancy doctrine): never spawns
+        a second if aipass-<branch> is already running.
+        """
+        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
+
+        try:
+            exists = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True).returncode == 0
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot start '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
+
+        if exists:
+            self.send_message(chat_id, f"'{branch}' is already running.")
+            logger.info("Control /start: '%s' already running, skipping spawn", session_name)
+            return
+
+        branch_info = validate_branch(branch)
+        if not branch_info:
+            self.send_message(chat_id, f"Branch '@{branch}' not found in registry.")
+            return
+
+        path = branch_info.get("path", "")
+        try:
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-s", session_name, "-c", path],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, f"{CLAUDE_BIN} -c || {CLAUDE_BIN}", "Enter"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to start '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
+            self.send_message(chat_id, f"Failed to start '{branch}' — see logs.")
+            return
+
+        logger.info("Control /start: woke '%s' (session '%s', path '%s')", branch, session_name, path)
+        self.send_message(chat_id, f"woke {branch}")
+
+    def _handle_control_kill(self, chat_id: int, branch_arg: str) -> None:
+        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling)."""
+        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
+
+        try:
+            exists = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True).returncode == 0
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot kill '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
+
+        if not exists:
+            self.send_message(chat_id, f"'{branch}' is not running.")
+            return
+
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to kill '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
+            self.send_message(chat_id, f"Failed to kill '{branch}' — see logs.")
+            return
+
+        logger.info("Control /kill: killed '%s' (session '%s')", branch, session_name)
+        self.send_message(chat_id, f"killed {branch}")
 
     # =============================================
     # PENDING FILE MANAGEMENT
@@ -2363,7 +2551,10 @@ class BaseBot:
     def _set_command_menu(self) -> None:
         """Set the Telegram command menu via setMyCommands on startup."""
         merged_commands = {**self.custom_commands, **self.get_custom_commands()}
-        commands = build_botfather_commands(custom_commands=merged_commands or None)
+        commands = build_botfather_commands(
+            standard_commands=self._effective_standard_commands(),
+            custom_commands=merged_commands or None,
+        )
         if self.bot_token:
             ok = set_bot_commands(self.bot_token, commands)
             if ok:
@@ -2659,6 +2850,11 @@ class BaseBot:
             commands["cancel"] = {
                 "description": "Cancel an in-progress /create",
                 "menu_text": "Cancel create",
+            }
+        if self._is_control_bot():
+            commands["kill"] = {
+                "description": "Kill a terminal agent's tmux session — /kill [branch] (default: aipass)",
+                "menu_text": "Kill session",
             }
         return commands
 

@@ -304,7 +304,7 @@ class TestParseCommand:
 
     def test_none_input_returns_none(self) -> None:
         """Returns None for None input."""
-        assert parse_command(None) is None
+        assert parse_command(None) is None  # type: ignore[arg-type]
 
 
 # =============================================
@@ -978,7 +978,10 @@ class TestBaseBotStartupMenu:
 
         mock_set_commands.assert_called_once()
         actual_commands = mock_set_commands.call_args[0][1]
-        expected = build_botfather_commands(custom_commands=bot.get_custom_commands())
+        expected = build_botfather_commands(
+            standard_commands=bot._effective_standard_commands(),
+            custom_commands=bot.get_custom_commands(),
+        )
         assert actual_commands == expected
 
     @patch("aipass.skills.lib.telegram.apps.handlers.base_bot.set_bot_commands", return_value=True)

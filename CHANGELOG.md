@@ -11,7 +11,32 @@ PyPI version — not the changelog header.
 
 ## [2026-07-29] — post-v2.7.5
 
-**feat(flow)** — registry auto-heal doctrine (`heal_registry.py`, wired into
+**feat(skills)** — Telegram control verbs v1+v1.1 (`base_bot.py`,
+`telegram_standards.py`): the bot chat is now a control plane — `/status`
+(honest `aipass-*` tmux session listing), `/start <branch>` (wake:
+attach-or-respawn via `claude -c`, no longer a welcome stub), `/kill <branch>`
+(deterministic bot-side `tmux kill-session`, no LLM in the loop) — works with
+zero Claude PIDs running. v1.1 root-cause: there is no separate "aipass" bot —
+Patrick's control-center chat IS `bot_id=base` with `branch_name: "aipass"`
+persisted, so v1's `branch_name is None` gate silently excluded it; new
+`_is_control_bot()` (base or aipass) fixes the gate, BotFather menu
+re-registered live (7 commands, `/kill` new, `/start` label corrected —
+verified via `getMyCommands` against the running bot). Supersedes FPLAN-0289
+"attach-not-spawn" for explicit control verbs (guard stays for plain
+messages). Live phone test passed: kill/start "like a switch". 857/857 TG +
+1109/1109 skills tests, seedgo 100%. Built by @skills (FPLAN-0360),
+design DPLAN-0270, devpulse-landed.
+
+**fix(prax)** — `prax_registry.json` torn-write corruption
+(`registry/save.py`): the shared module registry was written with plain
+`open('w')+json.dump` by every prax-initialized process (each telegram bot,
+each branch process, plus the ecosystem-wide file watcher they all run) —
+concurrent truncate-and-write races interleaved and left trailing garbage
+("Extra data: line 21 column 2", 109 load-failure spams in the base bot log).
+Now atomic: temp file + fsync + `os.replace`, matching `json_handler.py`'s
+proven pattern. 1067/1067 prax tests green, 2 regression tests added (no
+leftover tmp files; 20x sequential saves all parseable). Built by @prax
+(FPLAN-0358), devpulse-landed. (`heal_registry.py`, wired into
 the normal registry scan): plan-number conflicts now resolve themselves —
 number collisions (a different live file squatting on a closed row's number),
 unregistered plan files, and wrong-prefix ghost rows (the FPLAN-0011 recovery
