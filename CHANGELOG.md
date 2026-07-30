@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [2026-07-30] — post-v2.7.5
 
+**fix(flow)** — heal doctrine case 4: missing-file sweep on every scan
+(`heal_registry.py`). The dead-file auto-close only ran inside
+`create_plan_impl`, so a phantom row died only if a NEW plan of the same
+type happened to be created — DPLAN-0265's auto-close was that coincidence
+(DPLAN-0270 created moments later), while phantom TDPLAN-0015 sat open
+indefinitely because no new TDPLAN ever came (proved empirically: scan
+healed 0, 0015 still open, before the fix). `_heal_missing_file_plans` now
+runs in the per-type doctrine loop — every registered type swept for dead
+file_paths on every scan, independent of create activity. Live: 0015
+auto-closed in one pass, second run healed 0 (idempotent). Also codified:
+a dead-path row can close AND have its number squatted simultaneously —
+independent doctrine cases. 4+1 new tests, 769 green, seedgo 100%. Built
+by @flow (DPLAN-0271), night-shift, devpulse-landed.
+
 **fix(skills)** — `user_message_relay` (terminal→TG mirror) was inert since
 creation, two causes (`user_message_relay.py`): (1) it globbed `bot-*.json`
 for bot configs, but `bot_factory` writes mirror configs as `{bot_id}.json` —

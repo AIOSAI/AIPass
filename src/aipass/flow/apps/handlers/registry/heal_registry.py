@@ -21,6 +21,14 @@ never again require a manual JSON edit:
 3. Wrong-prefix row — a registry row lives in the wrong type's registry
    entirely (e.g. a row keyed "0011" in fplan_registry.json whose
    file_path actually names a TDPLAN file).
+4. Missing-file orphan — a registry row is still "open" but its
+   file_path no longer exists on disk, and no on-disk file squats on
+   that number (if one did, that's case 1 instead). Previously this
+   only self-healed as a side effect of creating a *new* plan of the
+   same type (auto_cleanup.auto_close_orphaned_plans, wired into
+   create_plan_impl) — so a type with no recent creates could sit on a
+   stale open row indefinitely. Now every scan closes these directly,
+   for every registered type, regardless of create activity.
 
 Guarantees:
 - On-disk .md files are NEVER renamed, moved or deleted here. Only
@@ -47,6 +55,7 @@ from typing import Any, Callable, Dict, List, Tuple
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plans
 from aipass.flow.apps.handlers.plan.close_helpers import _self_heal_unregistered_plan
 from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
@@ -112,6 +121,67 @@ def _build_plan_file_index(ecosystem_root: Path) -> Dict[Tuple[str, str], Path]:
 
     logger.info(f"[{MODULE_NAME}] Indexed {len(index)} plan file(s) under {ecosystem_root}")
     return index
+
+
+# =============================================
+# CASE 4 — MISSING-FILE ORPHANS
+# =============================================
+
+
+def _heal_missing_file_plans(
+    prefix: str,
+    registry_file: str,
+    load_registry_fn: Callable[..., Dict[str, Any]],
+    save_registry_fn: Callable[..., bool],
+) -> List[Dict[str, Any]]:
+    """Close open registry rows whose file_path no longer exists on disk.
+
+    Reuses the same logic create_plan_impl already applies to whatever
+    type it's creating into (auto_cleanup.auto_close_orphaned_plans), but
+    runs it here for every registered type on every scan — so a type with
+    no recent creates doesn't sit on a stale open row indefinitely.
+
+    Args:
+        prefix: Plan-type prefix (e.g. "TDPLAN")
+        registry_file: Registry filename for this type
+        load_registry_fn: Registry loader (injected)
+        save_registry_fn: Registry saver (injected)
+
+    Returns:
+        List of heal-action dicts performed for this type.
+    """
+    try:
+        registry = load_registry_fn(registry_file=registry_file)
+    except Exception as e:
+        logger.warning(f"[{MODULE_NAME}] Could not load '{registry_file}' — skipping {prefix} orphan sweep: {e}")
+        return []
+
+    registry.setdefault("plans", {})
+    open_before = {num for num, entry in registry["plans"].items() if entry.get("status") == "open"}
+
+    registry, closed_count = auto_close_orphaned_plans(registry)
+    if closed_count == 0:
+        return []
+
+    save_registry_fn(registry, registry_file=registry_file)
+
+    actions: List[Dict[str, Any]] = []
+    for number in sorted(open_before):
+        entry = registry["plans"].get(number, {})
+        if entry.get("closed_reason") != "auto_closed_missing_file":
+            continue
+        actions.append(
+            {
+                "action": "auto_closed_missing_file",
+                "prefix": prefix,
+                "registry_file": registry_file,
+                "number": number,
+                "file": entry.get("file_path", ""),
+            }
+        )
+        logger.info(f"[{MODULE_NAME}] Auto-closed missing-file orphan {prefix}-{number}: {entry.get('file_path', '')}")
+
+    return actions
 
 
 # =============================================
@@ -401,6 +471,10 @@ def heal_registry_doctrine_impl(
         if not prefix:
             continue
         registry_file = f"{prefix.lower()}_registry.json"
+        try:
+            actions.extend(_heal_missing_file_plans(prefix, registry_file, load_registry_fn, save_registry_fn))
+        except Exception as e:
+            logger.error(f"[{MODULE_NAME}] Missing-file sweep failed for type {prefix}: {e}")
         try:
             actions.extend(
                 _heal_type_registry(prefix, registry_file, plan_file_index, load_registry_fn, save_registry_fn)

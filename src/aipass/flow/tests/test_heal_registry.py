@@ -8,11 +8,12 @@
 
 """Tests for the registry doctrine self-heal handler.
 
-Covers the three corruption classes the doctrine must auto-fix:
-1. Number collision  -> resolved_collision
-2. Unregistered file -> registered_unregistered_file
-3. Wrong-prefix row  -> removed_ghost_row / rehomed_wrong_prefix_row /
-                        removed_orphaned_wrong_prefix_row
+Covers the four corruption classes the doctrine must auto-fix:
+1. Number collision   -> resolved_collision
+2. Unregistered file  -> registered_unregistered_file
+3. Wrong-prefix row   -> removed_ghost_row / rehomed_wrong_prefix_row /
+                         removed_orphaned_wrong_prefix_row
+4. Missing-file orphan -> auto_closed_missing_file
 
 Invariant asserted throughout: on-disk .md files are NEVER renamed,
 moved or deleted by this handler — only registry JSON rows change.
@@ -386,7 +387,98 @@ class TestNumberCollision:
 
 
 # ═══════════════════════════════════════════════════════════
-# 4. Case 3 — wrong-prefix rows
+# 4. Case 4 — missing-file orphan
+# ═══════════════════════════════════════════════════════════
+
+
+class TestMissingFileOrphan:
+    """An open row whose file_path is gone, with nothing squatting on its
+    number, self-closes on every scan — not just when a same-type plan
+    happens to get created (auto_cleanup.auto_close_orphaned_plans is
+    otherwise only reachable from create_plan_impl)."""
+
+    def test_open_row_with_dead_file_path_is_closed(self, tmp_path, quiet_cross_prefix):
+        """TDPLAN-0015-shaped case: file gone, nothing squats on the number."""
+        mod = _import_heal_registry()
+        dead_path = str(tmp_path / "TDPLAN-0011_cross_os_acceptance_checks_2026-07-02.md")
+        store = FakeRegistryStore(
+            {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
+        )
+
+        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+
+        assert len(actions) == 1
+        assert actions[0] == {
+            "action": "auto_closed_missing_file",
+            "prefix": "TDPLAN",
+            "registry_file": "tdplan_registry.json",
+            "number": "0015",
+            "file": dead_path,
+        }
+
+        row = store.plans("tdplan_registry.json")["0015"]
+        assert row["status"] == "closed"
+        assert row["closed_reason"] == "auto_closed_missing_file"
+
+    def test_second_scan_heals_nothing(self, tmp_path, quiet_cross_prefix):
+        """Once closed, the row is no longer 'open' -- a re-scan is a no-op."""
+        mod = _import_heal_registry()
+        dead_path = str(tmp_path / "TDPLAN-0011_gone_2026-07-02.md")
+        store = FakeRegistryStore(
+            {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
+        )
+
+        first = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        second = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+
+        assert len(first) == 1
+        assert second == []
+
+    def test_row_whose_file_still_exists_is_left_alone(self, tmp_path, quiet_cross_prefix):
+        """A live file_path is not this doctrine case -- nothing changes."""
+        mod = _import_heal_registry()
+        real_file = _make_plan_file(tmp_path, "TDPLAN-0020_still_here_2026-07-01.md")
+        store = FakeRegistryStore(
+            {
+                "tdplan_registry.json": {
+                    "plans": {"0020": {"status": "open", "file_path": str(real_file)}},
+                    "next_number": 21,
+                }
+            }
+        )
+
+        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+
+        assert actions == []
+        assert store.saves == []
+
+    def test_already_closed_row_is_not_reprocessed(self, tmp_path, quiet_cross_prefix):
+        """A row that's already closed (any reason) is not this doctrine's target."""
+        mod = _import_heal_registry()
+        dead_path = str(tmp_path / "TDPLAN-0016_dup_2026-07-02.md")
+        store = FakeRegistryStore(
+            {
+                "tdplan_registry.json": {
+                    "plans": {
+                        "0016": {
+                            "status": "closed",
+                            "file_path": dead_path,
+                            "closed_reason": "second_generation_dup_of_0015",
+                        }
+                    },
+                    "next_number": 17,
+                }
+            }
+        )
+
+        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+
+        assert actions == []
+        assert store.saves == []
+
+
+# ═══════════════════════════════════════════════════════════
+# 5. Case 3 — wrong-prefix rows
 # ═══════════════════════════════════════════════════════════
 
 
@@ -520,7 +612,7 @@ class TestWrongPrefixRows:
 
 
 # ═══════════════════════════════════════════════════════════
-# 5. heal_registry_doctrine_impl — orchestrator
+# 6. heal_registry_doctrine_impl — orchestrator
 # ═══════════════════════════════════════════════════════════
 
 
@@ -569,6 +661,49 @@ class TestHealRegistryDoctrineImpl:
 
         assert result == {"healed": [], "healed_count": 0}
         assert store.saves == []
+
+    def test_missing_file_orphan_self_closes_on_scan_alone(self, tmp_path, quiet_cross_prefix):
+        """The real dispatch finding: TDPLAN-0015's file is gone and nothing on
+        disk squats on its number -- this only used to self-heal as a side
+        effect of *creating* a new TDPLAN. A scan with no on-disk TDPLAN files
+        at all must still close it."""
+        mod = _import_heal_registry()
+        dead_path = str(tmp_path / "TDPLAN-0011_cross_os_acceptance_checks_2026-07-02.md")
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {"plans": {}, "next_number": 356},
+                "tdplan_registry.json": {
+                    "plans": {"0015": {"status": "open", "file_path": dead_path}},
+                    "next_number": 16,
+                },
+            }
+        )
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
+            result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
+
+        assert result["healed_count"] == 1
+        assert result["healed"][0]["action"] == "auto_closed_missing_file"
+        assert result["healed"][0]["number"] == "0015"
+        assert store.plans("tdplan_registry.json")["0015"]["status"] == "closed"
+
+    def test_missing_file_heal_failure_does_not_abort_run(self, tmp_path, quiet_cross_prefix):
+        """A blown-up missing-file sweep for one type doesn't abort the others."""
+        mod = _import_heal_registry()
+        store = FakeRegistryStore(
+            {
+                "fplan_registry.json": {"plans": {}, "next_number": 1},
+                "tdplan_registry.json": {"plans": {}, "next_number": 1},
+            }
+        )
+
+        with (
+            patch.object(mod, "_load_template_registry", return_value={"types": TYPES}),
+            patch.object(mod, "_heal_missing_file_plans", side_effect=RuntimeError("boom")),
+        ):
+            result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
+
+        assert result == {"healed": [], "healed_count": 0}
 
     def test_per_type_heals_run_before_wrong_prefix_sweep(self, tmp_path, quiet_cross_prefix):
         """Case 1/2 first, then case 3 — so case 3 is left with ghost cleanup only."""
@@ -629,7 +764,7 @@ class TestHealRegistryDoctrineImpl:
 
 
 # ═══════════════════════════════════════════════════════════
-# 6. Files are never mutated
+# 7. Files are never mutated
 # ═══════════════════════════════════════════════════════════
 
 
@@ -663,7 +798,11 @@ class TestNeverTouchesPlanFiles:
         ):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
 
-        assert result["healed_count"] == 2
+        # 3 heals: the dead-path ghost row closes (case 4) *and* the real
+        # file squatting on its number still gets its own registration
+        # (case 1) -- the two are independent, not mutually exclusive.
+        assert result["healed_count"] == 3
+        assert store.plans("fplan_registry.json")["0011"]["closed_reason"] == "auto_closed_missing_file"
         for path, content in before.items():
             assert path.exists()
             assert path.read_text(encoding="utf-8") == content
