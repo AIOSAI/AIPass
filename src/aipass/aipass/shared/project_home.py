@@ -100,6 +100,16 @@ def _claude_md_excludes(aipass_home: str) -> list[str]:
     return [(home / "CLAUDE.md").as_posix(), (home / ".claude" / "CLAUDE.md").as_posix()]
 
 
+def _normalize_exclude(entry: str) -> str:
+    """Separator-insensitive form for comparing claudeMdExcludes entries.
+
+    A fence written by hand (or by an older build) with backslashes must still
+    count as present on Windows — normalize both sides before comparing, but
+    never rewrite user-authored values.
+    """
+    return entry.replace("\\", "/")
+
+
 def _claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
     """Generate .claude/settings.local.json — machine-local env (gitignored).
 
@@ -126,9 +136,11 @@ def _merge_local_settings(existing: dict, generated: dict) -> dict:
         merged["env"] = merged_env
 
     combined_excludes = list(existing.get("claudeMdExcludes", []))
+    seen = {_normalize_exclude(e) for e in combined_excludes}
     for item in generated.get("claudeMdExcludes", []):
-        if item not in combined_excludes:
+        if _normalize_exclude(item) not in seen:
             combined_excludes.append(item)
+            seen.add(_normalize_exclude(item))
     if combined_excludes:
         merged["claudeMdExcludes"] = combined_excludes
 
@@ -207,6 +219,7 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
             logger.info("find_fenceless_projects: unparseable %s: %s", local_settings, exc)
             fenceless.append(child)
             continue
-        if not expected.issubset(set(data.get("claudeMdExcludes", []))):
+        present = {_normalize_exclude(e) for e in data.get("claudeMdExcludes", [])}
+        if not {_normalize_exclude(e) for e in expected}.issubset(present):
             fenceless.append(child)
     return fenceless

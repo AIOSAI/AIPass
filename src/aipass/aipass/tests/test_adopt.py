@@ -214,8 +214,8 @@ def test_adopt_writes_claude_md_excludes_fence(host_env):
     settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
     assert settings["env"]["AIPASS_HOME"] == fake_home
     assert settings["claudeMdExcludes"] == [
-        str(Path(fake_home) / "CLAUDE.md"),
-        str(Path(fake_home) / ".claude" / "CLAUDE.md"),
+        (Path(fake_home) / "CLAUDE.md").as_posix(),
+        (Path(fake_home) / ".claude" / "CLAUDE.md").as_posix(),
     ]
 
 

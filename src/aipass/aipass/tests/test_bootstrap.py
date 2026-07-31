@@ -679,7 +679,7 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
 
     data = json.loads(local_settings_path.read_text(encoding="utf-8"))
     assert data["env"]["AIPASS_HOME"] == str(host)
-    assert data["claudeMdExcludes"] == [str(host / "CLAUDE.md"), str(host / ".claude" / "CLAUDE.md")]
+    assert data["claudeMdExcludes"] == [(host / "CLAUDE.md").as_posix(), (host / ".claude" / "CLAUDE.md").as_posix()]
     assert str(local_settings_path) in result["updated_files"]
 
 
@@ -733,8 +733,8 @@ def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, mo
     data = json.loads(local_settings_path.read_text(encoding="utf-8"))
     assert data["claudeMdExcludes"] == [
         custom_entry,
-        str(host / "CLAUDE.md"),
-        str(host / ".claude" / "CLAUDE.md"),
+        (host / "CLAUDE.md").as_posix(),
+        (host / ".claude" / "CLAUDE.md").as_posix(),
     ]
 
 

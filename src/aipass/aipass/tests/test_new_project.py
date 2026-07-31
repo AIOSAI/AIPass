@@ -239,8 +239,8 @@ def test_create_project_gets_claude_md_excludes_fence(host_env, monkeypatch):
     target = Path(result["target"])
     local_settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
     assert local_settings["claudeMdExcludes"] == [
-        str(host_env / "CLAUDE.md"),
-        str(host_env / ".claude" / "CLAUDE.md"),
+        (host_env / "CLAUDE.md").as_posix(),
+        (host_env / ".claude" / "CLAUDE.md").as_posix(),
     ]
 
 
