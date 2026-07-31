@@ -11,7 +11,17 @@ PyPI version — not the changelog header.
 
 ## [2026-07-30] — post-v2.7.5
 
-**docs(skills)** — telegram SKILL.md refreshed v1.0.0 → 1.4.0 against shipped
+**fix(skills)** — wake-sources script idempotency, live-caught during the T3
+deploy session with Patrick: masking an already-masked GPE returns EINVAL on
+this kernel, so the boot unit's first `enable --now` failed while the
+hand-applied mask was still active (the script's "safe to repeat" comment was
+wrong). GPE write now guarded by a state check, mirroring the existing
+wakeup-toggle guard; proven by re-running the installer against the
+already-applied state — unit green. Devpulse-landed (small cross-branch fix),
+skills notified. **T3 DEPLOYED same session on Patrick's "make it permanent":
+grants refreshed, wake-sources boot unit enabled (masks now persist reboots),
+telegram-bot@base restarted onto the hardened resume logic. DPLAN-0270 freeze
+lifted; remaining: overnight heartbeat soak (T4).**
 reality (Patrick flagged it stale; every claim verified against source, not the
 brief): control verbs + control-center concept, /suspend modes + grants package
 (honestly marked code-only pending DPLAN-0270's T3 deploy), streaming replies

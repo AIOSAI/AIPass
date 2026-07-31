@@ -9,7 +9,10 @@
 # than hand-applied once.
 #
 # Idempotent by design:
-#   - the GPE mask write ("mask") is a direct command, safe to repeat.
+#   - the GPE mask write is guarded: masking an already-masked GPE returns
+#     EINVAL on this kernel (live-caught 2026-07-30: first `--now` start failed
+#     because the mask had been hand-applied earlier the same day), so the
+#     write only happens when the sysfs entry doesn't already show "masked".
 #   - /proc/acpi/wakeup TOGGLES a device's wakeup flag on every write, so each
 #     device is only written if it's currently enabled — writing to an
 #     already-disabled device would silently re-enable it.
@@ -21,8 +24,12 @@ WAKEUP_FILE="/proc/acpi/wakeup"
 WAKE_DEVICES=(XHC1 RP01 RP02 RP03 RP05 RP06)
 
 if [ -w "$GPE_FILE" ]; then
-    echo mask > "$GPE_FILE"
-    echo "Masked $GPE_FILE"
+    if grep -q "masked" "$GPE_FILE"; then
+        echo "$GPE_FILE already masked — skipping"
+    else
+        echo mask > "$GPE_FILE"
+        echo "Masked $GPE_FILE"
+    fi
 else
     echo "Skipping $GPE_FILE (not present/writable on this kernel)" >&2
 fi
