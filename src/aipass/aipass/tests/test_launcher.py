@@ -137,27 +137,27 @@ class TestPreSetupInstall:
         _make_executable(setup)
 
         result = subprocess.run(
-            ["bash", str(launcher), "install", "--no-init"],
+            ["bash", str(launcher), "install", "--no-chat"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        assert "--no-init" in result.stdout
+        assert "--no-chat" in result.stdout
 
-    def test_install_passes_project_flag(self, tmp_path):
-        """--project and its value pass through to setup.sh."""
+    def test_install_passes_path_flag(self, tmp_path):
+        """--path and its value pass through to setup.sh."""
         launcher = _isolated_launcher(tmp_path)
         setup = tmp_path / "setup.sh"
         setup.write_text('#!/usr/bin/env bash\necho "FLAGS:$@"\n')
         _make_executable(setup)
 
         result = subprocess.run(
-            ["bash", str(launcher), "install", "--project", str(tmp_path / "proj")],
+            ["bash", str(launcher), "install", "--path", str(tmp_path / "home")],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        assert "--project" in result.stdout
+        assert "--path" in result.stdout
 
 
 class TestPostSetupForwarding:
