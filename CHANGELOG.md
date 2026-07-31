@@ -9,6 +9,25 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — post-v2.7.5
+
+**feat(aipass)** — CLAUDE.md fence for nested projects + return-path breadcrumb
+(DPLAN-0247 follow-through). Root cause found via Patrick's cold `aipass new`
+test: Claude Code loads CLAUDE.md from every ancestor directory (git boundaries
+don't stop the walk), so agents in `projects/<name>/` inherited the host root
+CLAUDE.md and culture file — the newborn ran the host startup ritual its own
+protocol never contained. Gate proven live before building: `claudeMdExcludes`
+in the project's `.claude/settings.local.json`. Shipped through the shared
+scaffold so `init`/`new`/`adopt` all emit it (generation-time path resolution,
+merge-never-clobber, idempotent), `aipass init update` retrofits existing
+tenants, and doctor flags fenceless nested projects. Breadcrumb: `launch_inline`
+now shell-wraps the exec so a return path (`cd <agent home> && claude
+--continue`) prints after the session exits — CC's own hint is cwd-blind and
+fails from any other directory. Built by @aipass (832 tests, 41 new; seedgo
+100%), devpulse-verified E2E: fresh project fence + clean-context probe, sha-
+identical idempotency on the reference tenant, 4 tenants retrofitted live
+(doctor WARN → PASS, env pins preserved).
+
 ## [2026-07-30] — post-v2.7.5
 
 **fix(skills)** — wake-sources script idempotency, live-caught during the T3

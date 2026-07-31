@@ -17,9 +17,11 @@ from aipass.aipass.apps.handlers.handoff_platform import (
     build_cli_cmd,
     build_manual_command,
     launch_handoff,
+    launch_inline,
     launch_terminal,
     launch_tmux,
     launch_wt,
+    return_path_breadcrumb,
 )
 
 # Ensure encoding='utf-8' appears (PATTERN check)
@@ -77,6 +79,30 @@ class TestBuildManualCommand:
         """Manual command includes flag when skip-permissions."""
         result = build_manual_command("claude", "test", "/tmp", "skip-permissions")
         assert "--dangerously-skip-permissions" in result
+
+
+# =============================================================================
+# TestReturnPathBreadcrumb
+# =============================================================================
+
+
+class TestReturnPathBreadcrumb:
+    """Tests for return_path_breadcrumb()."""
+
+    def test_returns_cd_and_continue(self) -> None:
+        """Breadcrumb is `cd <cwd> && claude --continue`."""
+        assert return_path_breadcrumb("/home/user/proj") == "cd /home/user/proj && claude --continue"
+
+    def test_uses_continue_not_resume(self) -> None:
+        """Uses --continue, never --resume <id> — session stores are per-directory,
+        so a bare --resume hint (no cwd) fails from anywhere else."""
+        result = return_path_breadcrumb("/tmp/somewhere")
+        assert "--continue" in result
+        assert "--resume" not in result
+
+    def test_reflects_the_given_cwd(self) -> None:
+        """Different cwd values are reflected verbatim in the breadcrumb."""
+        assert "cd /a/b/c " in return_path_breadcrumb("/a/b/c")
 
 
 # =============================================================================
@@ -287,6 +313,119 @@ class TestLaunchWt:
                 side_effect=subprocess.TimeoutExpired("wt", 15),
             ):
                 assert launch_wt("claude", "test", "/tmp") is False
+
+
+# =============================================================================
+# TestLaunchInline
+# =============================================================================
+
+
+def _inline_which(
+    cli_path: str | None = "/usr/bin/claude",
+    bash_path: str | None = "/bin/bash",
+    sh_path: str | None = "/usr/bin/sh",
+):
+    """Build a shutil.which side_effect that resolves cli/bash/sh to distinct paths."""
+
+    def _side_effect(name: str) -> str | None:
+        return {"claude": cli_path, "bash": bash_path, "sh": sh_path}.get(name)
+
+    return _side_effect
+
+
+class TestLaunchInline:
+    """Tests for launch_inline() — shell-wrapped exec with a return-path breadcrumb.
+
+    ``launch_inline`` calls ``os.execvp`` (process replacement), so every test
+    mocks ``os.chdir``/``os.execvp`` — letting either run for real would replace
+    the test process itself.
+    """
+
+    def test_returns_without_exec_when_cli_not_found(self) -> None:
+        """No CLI on PATH — logs and returns, never touches chdir/execvp."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value=None):
+            with patch("os.chdir") as mock_chdir, patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj")
+        mock_chdir.assert_not_called()
+        mock_execvp.assert_not_called()
+
+    def test_chdirs_into_cwd_before_exec(self) -> None:
+        """Changes into the target cwd before exec'ing the wrapper shell."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir") as mock_chdir, patch("os.execvp"):
+                launch_inline("claude", "hello", "/tmp/proj")
+        mock_chdir.assert_called_once_with("/tmp/proj")
+
+    def test_execs_shell_wrapper_not_cli_directly(self) -> None:
+        """execvp is called with the shell, not the CLI binary — the CLI is embedded in -c."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj")
+        mock_execvp.assert_called_once()
+        shell_arg, argv = mock_execvp.call_args[0]
+        assert shell_arg == "/bin/bash"
+        assert argv[0] == "/bin/bash"
+        assert argv[1] == "-c"
+
+    def test_shell_command_includes_cli_invocation_and_prompt(self) -> None:
+        """The exec'd shell command runs the resolved CLI path with the prompt."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello world", "/tmp/proj")
+        _, argv = mock_execvp.call_args[0]
+        shell_cmd = argv[2]
+        assert "/usr/bin/claude" in shell_cmd
+        assert "hello world" in shell_cmd
+
+    def test_shell_command_includes_breadcrumb_after_cli(self) -> None:
+        """Breadcrumb (cd + claude --continue) prints via printf after the CLI invocation."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj")
+        _, argv = mock_execvp.call_args[0]
+        shell_cmd = argv[2]
+        breadcrumb = return_path_breadcrumb("/tmp/proj")
+        assert breadcrumb in shell_cmd
+        cli_idx = shell_cmd.index("/usr/bin/claude")
+        breadcrumb_idx = shell_cmd.index(breadcrumb)
+        assert cli_idx < breadcrumb_idx, "breadcrumb must print after the CLI invocation, not before"
+
+    def test_falls_back_to_sh_when_bash_missing(self) -> None:
+        """Uses sh (resolved via which) when bash isn't on PATH."""
+        which = _inline_which(bash_path=None)
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=which):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj")
+        shell_arg = mock_execvp.call_args[0][0]
+        assert shell_arg == "/usr/bin/sh"
+
+    def test_falls_back_to_bin_sh_literal_when_neither_found(self) -> None:
+        """Uses the hardcoded /bin/sh fallback when neither bash nor sh resolve via which."""
+        which = _inline_which(bash_path=None, sh_path=None)
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=which):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj")
+        shell_arg = mock_execvp.call_args[0][0]
+        assert shell_arg == "/bin/sh"
+
+    def test_skip_permissions_variant_included_in_shell_command(self) -> None:
+        """flag_variant is honored — the skip-permissions flag appears in the exec'd command."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hello", "/tmp/proj", flag_variant="skip-permissions")
+        _, argv = mock_execvp.call_args[0]
+        assert "--dangerously-skip-permissions" in argv[2]
+
+    def test_prompt_with_special_chars_is_shell_quoted(self) -> None:
+        """A prompt containing shell metacharacters is safely quoted, not interpolated raw."""
+        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", side_effect=_inline_which()):
+            with patch("os.chdir"), patch("os.execvp") as mock_execvp:
+                launch_inline("claude", "hi $(whoami) && rm -rf /", "/tmp/proj")
+        _, argv = mock_execvp.call_args[0]
+        shell_cmd = argv[2]
+        # shlex.join quotes the whole argv — the dangerous substring must appear
+        # wrapped in quotes, not as bare, executable shell syntax.
+        assert "'hi $(whoami) && rm -rf /'" in shell_cmd
 
 
 # =============================================================================

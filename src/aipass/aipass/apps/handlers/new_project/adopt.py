@@ -172,11 +172,12 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
     claude_dir = target / ".claude"
     _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)
 
-    # .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
+    # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes
+    # fence (gitignored). adopt only runs on <host>/projects/<name> (checked above).
     if aipass_home and not is_throwaway_path(aipass_home):
         _write_if_missing(
             claude_dir / "settings.local.json",
-            _claude_local_settings(aipass_home),
+            _claude_local_settings(aipass_home, nested=True),
             dry_run=dry_run,
             planned=files,
         )

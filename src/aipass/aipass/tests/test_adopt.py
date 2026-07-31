@@ -14,6 +14,7 @@ filesystem. dry_run tests assert zero filesystem mutation.
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -193,6 +194,29 @@ def test_adopt_writes_registry_and_settings(host_env):
     assert (target / ".claude" / "settings.json").exists()
     settings = json.loads((target / ".claude" / "settings.json").read_text())
     assert "env" not in settings
+
+
+def test_adopt_writes_claude_md_excludes_fence(host_env):
+    """adopt only ever targets <host>/projects/<name>, so settings.local.json must
+    always carry the claudeMdExcludes fence when AIPASS_HOME is detected — never
+    just the bare env.AIPASS_HOME that `nested=False` would produce."""
+    _, target = host_env
+    fake_home = "/fake/aipass/home"
+    with (
+        patch(
+            "aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home",
+            return_value=fake_home,
+        ),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+    ):
+        adopt_project(target, no_agent=True)
+
+    settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    assert settings["env"]["AIPASS_HOME"] == fake_home
+    assert settings["claudeMdExcludes"] == [
+        str(Path(fake_home) / "CLAUDE.md"),
+        str(Path(fake_home) / ".claude" / "CLAUDE.md"),
+    ]
 
 
 def test_adopt_no_agent_skips_spawn(host_env):

@@ -161,6 +161,7 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
         _claude_settings,
         _detect_aipass_home,
         _enroll_project,
+        is_projects_child,
         is_throwaway_path,
     )
 
@@ -214,10 +215,11 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
     )
     created.append(".claude/settings.json")
 
-    # .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
+    # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes
+    # fence (gitignored). `aipass new` always creates under <host>/projects/<name>.
     if aipass_home and not is_throwaway_path(aipass_home):
         (claude_dir / "settings.local.json").write_text(
-            _claude_local_settings(aipass_home),
+            _claude_local_settings(aipass_home, nested=is_projects_child(target)),
             encoding="utf-8",
         )
         created.append(".claude/settings.local.json")

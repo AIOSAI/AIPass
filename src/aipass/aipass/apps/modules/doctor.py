@@ -21,6 +21,7 @@ from aipass.cli.apps.modules import console, error as cli_error, success
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
+from aipass.aipass.shared.project_home import _detect_aipass_home, find_fenceless_projects
 
 from aipass.aipass.apps.handlers.cross_os import (
     CrossOsGapError,
@@ -697,6 +698,24 @@ def _check_structure() -> List[CheckResult]:
         results.append(CheckResult("pyproject.toml", GLYPH_PASS, "present", ""))
     else:
         results.append(CheckResult("pyproject.toml", GLYPH_WARN, "missing", "Create pyproject.toml for pip packaging"))
+
+    # CLAUDE.md ancestor fence — nested projects/<name> must exclude the host's
+    # CLAUDE.md + .claude/CLAUDE.md, or Claude Code inherits them via ancestor walk.
+    aipass_home = _detect_aipass_home()
+    if aipass_home:
+        fenceless = find_fenceless_projects(aipass_home)
+        if fenceless:
+            for proj in fenceless:
+                results.append(
+                    CheckResult(
+                        f"CLAUDE.md fence: {proj.name}",
+                        GLYPH_WARN,
+                        "missing claudeMdExcludes",
+                        f"Run 'aipass init update {proj}'",
+                    )
+                )
+        else:
+            results.append(CheckResult("CLAUDE.md fence", GLYPH_PASS, "all nested projects fenced", ""))
 
     return results
 
