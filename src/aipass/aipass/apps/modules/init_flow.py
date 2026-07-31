@@ -772,9 +772,15 @@ def _preflight_check(*, allow_projects_child: bool = False) -> str | None:
                 logger.info("[init_flow] skipping unstattable entry %s: %s", f, exc)
                 continue
             if is_registry:
+                if f.name == "AIPASS_REGISTRY.json":
+                    return (
+                        f"This is the AIPass engine repo itself (found {f.name} at {parent}),\n"
+                        "not a project. Projects live in their own directory — cd into one "
+                        "(e.g. ~/aipass-project) and run 'aipass init run' there."
+                    )
                 return (
                     f"Already inside an AIPass project (found {f.name} at {parent}).\n"
-                    "Use 'aipass init update' to upgrade an existing project."
+                    f"Use 'aipass init update {parent}' to upgrade it."
                 )
         if parent == parent.parent:
             break

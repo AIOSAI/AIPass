@@ -12,7 +12,13 @@ RUN apt-get update && apt-get install -y \
     jq \
     nodejs \
     npm \
+    bubblewrap \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+# Claude Code sandboxing needs the sandbox runtime on PATH (plus bwrap above);
+# global npm install requires root, so it happens before the testuser drop.
+RUN npm install -g @anthropic-ai/sandbox-runtime
 
 RUN useradd -m -s /bin/bash testuser
 
