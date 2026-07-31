@@ -57,14 +57,13 @@ except ImportError as e:
 
 
 def _delivery_callback(branch_path, new_count, opened_count, total):
-    """Post-delivery callback: delegates to error_dispatch handler."""
-    on_email_delivered(
-        branch_path,
-        new_count,
-        opened_count,
-        total,
-        update_central_fn=update_central,
-    )
+    """Post-delivery callback: delegates to error_dispatch handler.
+
+    Signature matches deliver_email_to_branch's on_delivered contract;
+    only update_central_fn is forwarded — on_email_delivered has no use
+    for the per-delivery counts.
+    """
+    on_email_delivered(update_central_fn=update_central)
 
 
 def _get_branch_info_fn():

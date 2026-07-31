@@ -88,21 +88,14 @@ def dispatch_send_error(
         return False
 
 
-def on_email_delivered(
-    branch_path,
-    new_count: int,
-    opened_count: int,
-    total: int,
-    update_central_fn: Optional[Callable] = None,
-) -> None:
+def on_email_delivered(update_central_fn: Optional[Callable] = None) -> None:
     """
     Post-delivery callback: update central.
 
+    update_central_fn takes no arguments — it rescans all branch inboxes
+    itself, so per-delivery counts aren't part of its contract.
+
     Args:
-        branch_path: Path to the branch that received email
-        new_count: Number of new (unread) messages
-        opened_count: Number of opened messages
-        total: Total message count
         update_central_fn: Callable for update_central
     """
     if update_central_fn:

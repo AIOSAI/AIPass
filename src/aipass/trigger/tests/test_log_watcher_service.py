@@ -226,10 +226,13 @@ class TestMain:
         t = threading.Thread(target=mod.main, daemon=True)
         t.start()
 
-        # Give it a moment to register signals and start waiting
+        # Poll-wait for main() to register the SIGTERM handler instead of a
+        # fixed sleep, which can flake under load (deadline avoids a hang).
         import time
 
-        time.sleep(0.05)
+        deadline = time.monotonic() + 2.0
+        while signal.SIGTERM not in installed_handlers and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         # Invoke the captured SIGTERM handler
         assert signal.SIGTERM in installed_handlers

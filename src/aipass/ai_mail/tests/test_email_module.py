@@ -1442,26 +1442,12 @@ class TestDeliveryCallback:
     """Tests for email_send._delivery_callback."""
 
     def test_delivery_callback_calls_on_email_delivered(self, monkeypatch):
-        """_delivery_callback delegates to on_email_delivered with correct args."""
+        """_delivery_callback delegates to on_email_delivered with only update_central_fn."""
         delivered_args: list[dict] = []
 
-        def mock_on_delivered(
-            branch_path,
-            new_count,
-            opened_count,
-            total,
-            update_central_fn=None,
-        ):
+        def mock_on_delivered(update_central_fn=None):
             """Capture on_email_delivered arguments."""
-            delivered_args.append(
-                {
-                    "branch_path": branch_path,
-                    "new_count": new_count,
-                    "opened_count": opened_count,
-                    "total": total,
-                    "update_central_fn": update_central_fn,
-                }
-            )
+            delivered_args.append({"update_central_fn": update_central_fn})
 
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.on_email_delivered",
@@ -1472,10 +1458,6 @@ class TestDeliveryCallback:
 
         _delivery_callback("/some/path", 3, 2, 5)
         assert len(delivered_args) == 1
-        assert delivered_args[0]["branch_path"] == "/some/path"
-        assert delivered_args[0]["new_count"] == 3
-        assert delivered_args[0]["opened_count"] == 2
-        assert delivered_args[0]["total"] == 5
 
 
 # ===========================================================================
