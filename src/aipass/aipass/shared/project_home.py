@@ -95,7 +95,9 @@ def _claude_md_excludes(aipass_home: str) -> list[str]:
     the host root CLAUDE.md and .claude/CLAUDE.md unless excluded.
     """
     home = Path(aipass_home)
-    return [str(home / "CLAUDE.md"), str(home / ".claude" / "CLAUDE.md")]
+    # Forward slashes on every platform — settings files carry POSIX-style
+    # paths, and Windows Path.__str__ would emit backslashes here.
+    return [(home / "CLAUDE.md").as_posix(), (home / ".claude" / "CLAUDE.md").as_posix()]
 
 
 def _claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
