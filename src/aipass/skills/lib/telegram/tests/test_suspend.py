@@ -33,6 +33,7 @@ import pytest
 
 from aipass.skills.lib.telegram.apps.handlers.base_bot import (
     BaseBot,
+    RESUME_WALLCLOCK_JUMP_SECONDS,
     RTCWAKE_BIN,
     SUSPEND_GRACE_WINDOW_SECONDS,
     SUSPEND_HEARTBEAT_DEFAULT_MINUTES,
@@ -71,6 +72,22 @@ def _make_bot(tmp_path, _patch_base_bot_deps, branch_name=None):
 
 def _cpe(cmd, stderr=b""):
     return subprocess.CalledProcessError(1, cmd, stderr=stderr)
+
+
+class _SteppedClock:
+    """time.time() mock that holds each value until advance() is called — immune to
+    incidental internal time.time() calls (e.g. Python logging's LogRecord timestamp),
+    unlike a plain side_effect=[...] list which those calls would silently exhaust."""
+
+    def __init__(self, *values):
+        self._values = values
+        self._i = 0
+
+    def __call__(self, *_args, **_kwargs):
+        return self._values[self._i]
+
+    def advance(self):
+        self._i += 1
 
 
 # =============================================
@@ -319,6 +336,141 @@ class TestCheckResumeSignal:
         mock_run.assert_not_called()
         bot.send_message.assert_not_called()  # type: ignore[union-attr]
         assert bot._suspend_resume_pending_since == 1000.0
+
+
+# =============================================
+# wall-clock-jump resume detection (DPLAN-0270 P5 hardening — primary signal,
+# file hook proven unreliable: systemd never ran it across 5 real suspends)
+# =============================================
+
+
+class TestWallClockJumpResumeDetection:
+    def test_normal_idle_gap_does_not_look_like_resume(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 1000.0 + 30)  # a normal long-poll iteration
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+        ):
+            bot._check_resume_signal()  # establishes the baseline loop mark
+            clock.advance()
+            bot._check_resume_signal()  # normal-length gap
+
+        assert bot._suspend_resume_pending_since is None
+
+    def test_large_gap_triggers_resume_with_no_signal_file_at_all(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 1000.0 + RESUME_WALLCLOCK_JUMP_SECONDS + 1)
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+        ):
+            bot._check_resume_signal()  # baseline mark
+            clock.advance()
+            bot._check_resume_signal()  # frozen for a real-suspend-sized gap
+
+        assert bot._suspend_resume_pending_since is not None
+
+    def test_inactive_heartbeat_still_updates_loop_mark(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        assert bot._suspend_heartbeat_active is False
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1234.0):
+            bot._check_resume_signal()
+
+        assert bot._suspend_last_loop_mark == 1234.0
+
+
+# =============================================
+# stale-stamp baseline fix — a pre-existing resume_signal.json from earlier
+# manual testing must not be misread as a fresh resume right after activation
+# =============================================
+
+
+class TestStaleStampBaseline:
+    def test_pre_existing_stamp_not_treated_as_fresh_after_activation(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        signal_file = tmp_path / "resume_signal.json"
+        signal_file.write_text(json.dumps({"resumed_at": 500.0}))  # stale, from earlier manual testing
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
+            patch("subprocess.run"),
+        ):
+            bot._handle_control_suspend(chat_id=7, arg="")  # activates heartbeat mode
+
+        assert bot._suspend_last_resume_seen == 500.0  # baselined to the current stamp, not None
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", signal_file),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=600.0),
+        ):
+            bot._check_resume_signal()
+
+        assert bot._suspend_resume_pending_since is None  # the stale stamp must not look fresh
+
+
+# =============================================
+# spurious-wake absorption — wake mid-heartbeat, grace window, no command,
+# re-arm + re-suspend on its own (DPLAN-0270 P5: "absorb spurious wakes
+# rather than chase hardware")
+# =============================================
+
+
+class TestSpuriousWakeAbsorption:
+    def test_rearms_after_grace_window_with_no_signal_file_present(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+
+        missing = tmp_path / "no_signal.json"
+        t0 = 1000.0
+        wake_at = t0 + RESUME_WALLCLOCK_JUMP_SECONDS + 5
+        after_grace = wake_at + SUSPEND_GRACE_WINDOW_SECONDS + 1
+        clock = _SteppedClock(t0, wake_at, after_grace)
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()  # baseline mark before the (spurious) suspend
+            clock.advance()
+            bot._check_resume_signal()  # wall-clock jump detected — grace window starts
+            clock.advance()
+            bot._check_resume_signal()  # grace window elapses, no command — re-arm
+
+        assert mock_run.call_args_list[0].args[0][:5] == ["sudo", "-n", RTCWAKE_BIN, "-m", "no"]
+        assert bot._suspend_heartbeat_active is True  # absorbed the spurious wake, heartbeat continues
+
+    def test_does_not_re_detect_while_grace_window_already_pending(self, tmp_path, _patch_base_bot_deps):
+        """A slow iteration (e.g. network hiccup) during an active grace window must not
+        be mistaken for a second fresh resume and reset the window."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 1000.0 + RESUME_WALLCLOCK_JUMP_SECONDS + 5)
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+        ):
+            bot._check_resume_signal()  # sets the loop mark mid-grace-window
+            clock.advance()
+            bot._check_resume_signal()  # big gap here, but a window is already pending
+
+        assert bot._suspend_resume_pending_since == 1000.0  # untouched — still the original window
 
 
 # =============================================

@@ -11,7 +11,27 @@ PyPI version — not the changelog header.
 
 ## [2026-07-30] — post-v2.7.5
 
-**fix(flow)** — heal doctrine case 4: missing-file sweep on every scan
+**feat(skills)** — /suspend hardening after live phone testing (CODE ONLY —
+deliberately not deployed; Patrick's slow-down ruling, deploy happens in a
+planned test session): (1) resume detection rewritten — wall-clock jump in
+the poll loop is now the primary signal (a >45s gap between iterations =
+the process was frozen = we just resumed; threshold sits above the
+POLL_TIMEOUT+backoff idle ceiling), because systemd on the target machine
+provably never executes /etc/systemd/system-sleep hooks (5 live suspends,
+zero stamps, no errors — cause unknown, worked around); the root hook is
+demoted to optional fallback. (2) Stale-stamp bug fixed — heartbeat
+activation now baselines to the file's current stamp (live-caught: a
+manual test stamp was read as a fresh resume before the suspend even
+started). (3) Installer uses install -D (live-caught: /etc/systemd/
+system-sleep/ didn't exist → install failed). (4) New wake-sources boot
+unit reapplies the gpe4E mask + XHC1/RP0x wakeup disables every reboot
+(live-found: a gpe4E interrupt storm — 8.5M — was yanking the machine out
+of S3 within seconds; masking it took a 60s alarm test from 8–13s sleeps
+to exact-second wake). (5) Spurious-wake absorption tested: wake → grace →
+no command → re-arm+re-suspend, plus a mid-grace slow-iteration edge case
+found while writing the test. 888/888 TG (devpulse re-verified), 26
+suspend tests, seedgo 100%. Built by @skills, live evidence from Patrick's
+phone testing session.: missing-file sweep on every scan
 (`heal_registry.py`). The dead-file auto-close only ran inside
 `create_plan_impl`, so a phantom row died only if a NEW plan of the same
 type happened to be created — DPLAN-0265's auto-close was that coincidence
