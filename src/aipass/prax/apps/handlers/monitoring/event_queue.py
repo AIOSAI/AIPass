@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 import threading
+import time
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
@@ -49,13 +50,13 @@ class MonitoringQueue:
         self.recent_events = []  # For deduplication
         self.lock = threading.Lock()
         self._stopped = threading.Event()
+        self._dropped = 0
+        self._last_drop_warning = 0.0
 
     def enqueue(self, event: MonitoringEvent) -> bool:
         """Add event to queue (thread-safe)"""
         if self._stopped.is_set():
             return False
-
-        json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
 
         # Simple deduplication + queue put under single lock
         with self.lock:
@@ -66,12 +67,27 @@ class MonitoringQueue:
                 self.recent_events.append(event)
                 if len(self.recent_events) > 100:
                     self.recent_events.pop(0)
-                return True
             except Exception as e:
-                logger.warning(
-                    f"[event_queue] Failed to enqueue event (type={event.event_type}, branch={event.branch}): {e}"
-                )
+                # Rate-limited on purpose: this warning lands in a log prax itself
+                # watches, so per-event logging turns a full queue into a
+                # self-feeding firehose — every warning spawns a new log event
+                # that also fails to enqueue (live-caught 2026-07-31, 20-80
+                # warnings/sec sustained). queue.Full has an empty str(), hence !r.
+                self._dropped += 1
+                now = time.monotonic()
+                if now - self._last_drop_warning >= 30.0:
+                    logger.warning(
+                        f"[event_queue] Dropping events ({self._dropped} since last report; "
+                        f"latest type={event.event_type}, branch={event.branch}): {e!r}"
+                    )
+                    self._dropped = 0
+                    self._last_drop_warning = now
                 return False
+
+        # Outside the lock, and only for events that actually queued — logging
+        # per *attempt* was another per-event write into a watched log.
+        json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
+        return True
 
     def dequeue(self, timeout: float = 0.1) -> Optional[MonitoringEvent]:
         """Get next event from queue (thread-safe)"""
