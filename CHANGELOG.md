@@ -26,7 +26,12 @@ now shell-wraps the exec so a return path (`cd <agent home> && claude
 fails from any other directory. Built by @aipass (832 tests, 41 new; seedgo
 100%), devpulse-verified E2E: fresh project fence + clean-context probe, sha-
 identical idempotency on the reference tenant, 4 tenants retrofitted live
-(doctor WARN → PASS, env pins preserved).
+(doctor WARN → PASS, env pins preserved). Windows-hardened in two follow-up
+fixes on the same train: `as_posix()` at the generation site (a524461d — settings
+files carry POSIX paths on every platform), then separator-insensitive
+comparison everywhere fences are checked (ed093df6 — `_normalize_exclude` in
+merge-dedupe and doctor's fence detection, so a hand-written backslash fence
+still counts as present and is never rewritten).
 
 ## [2026-07-30] — post-v2.7.5
 
