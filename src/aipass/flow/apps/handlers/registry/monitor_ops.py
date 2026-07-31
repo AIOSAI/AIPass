@@ -67,6 +67,7 @@ IGNORE_FOLDERS = {
     ".local",
     "Downloads",
     "downloads",
+    "dropbox",
     # System directories (permission issues)
     "proc",
     "sys",

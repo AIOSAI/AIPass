@@ -200,10 +200,15 @@ def handle_command(command: str, args: list[str]) -> bool:
     logger.info("[AIPASS] new project: %s (%s) at %s", name, template, result["target"])
 
     if result["agent_created"] and sys.stdin.isatty():
+        from aipass.aipass.apps.handlers.handoff_platform import (
+            launch_inline,
+            return_path_breadcrumb,
+        )
+
         console.print()
-        console.print("[dim]Launching your manager agent — Ctrl-C to stay in the shell[/dim]")
+        console.print("[dim]Launching your manager agent — Ctrl-C to stay in the shell.[/dim]")
+        console.print(f"[dim]Return anytime with: {return_path_breadcrumb(result['agent_home'])}[/dim]")
         console.print()
-        from aipass.aipass.apps.handlers.handoff_platform import launch_inline
 
         launch_inline(
             "claude",

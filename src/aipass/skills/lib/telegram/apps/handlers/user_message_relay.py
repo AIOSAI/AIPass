@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user_message_relay.py
 # Description: Relay user messages from non-TG doors to the branch TG chat
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-14
-# Modified: 2026-07-20
+# Modified: 2026-07-30
 # =============================================
 
 """
@@ -47,37 +47,56 @@ def _try_load_bot(path: Path) -> dict | None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and data.get("chat_id") and data.get("bot_token"):
-            return data
-        return None
     except (json.JSONDecodeError, OSError):
         return None
+    if not isinstance(data, dict) or not data.get("bot_token"):
+        return None
+    if data.get("chat_id"):
+        return data
+    # Telegram private chats: chat.id == the user's numeric ID. Safe fallback
+    # only when there's exactly one authorized user (every bot in this fleet) —
+    # config shadow files don't get chat_id back-filled after first contact.
+    allowed = data.get("allowed_user_ids")
+    if isinstance(allowed, list) and len(allowed) == 1:
+        return {**data, "chat_id": allowed[0]}
+    return None
+
+
+def _find_in_dir(search_dir: Path, pattern: str, cwd_path: Path) -> dict | None:
+    if not search_dir.exists():
+        return None
+    for bot_file in sorted(search_dir.glob(pattern)):
+        data = _try_load_bot(bot_file)
+        if not data or not data.get("work_dir"):
+            continue
+        try:
+            cwd_path.relative_to(Path(data["work_dir"]))
+            return data
+        except ValueError:
+            continue
+    return None
 
 
 def find_bot_for_cwd(cwd: str) -> dict | None:
-    """Find a mirror/pending bot file whose work_dir contains the given CWD."""
+    """Find a mirror/pending bot file whose work_dir contains the given CWD.
+
+    MIRROR_DIR configs are the bot_factory.py shadow files, named
+    {bot_id}.json. PENDING_DIR files keep the older bot-{bot_id}.json naming
+    (transcript-relay stream state) — the two directories use different
+    conventions, so they're searched with different glob patterns.
+    """
     cwd_path = Path(cwd)
 
     env_bot_id = os.environ.get("AIPASS_BOT_ID")
     if env_bot_id:
-        for search_dir in [MIRROR_DIR, PENDING_DIR]:
-            data = _try_load_bot(search_dir / f"bot-{env_bot_id}.json")
-            if data:
-                return data
+        data = _try_load_bot(MIRROR_DIR / f"{env_bot_id}.json")
+        if data:
+            return data
+        data = _try_load_bot(PENDING_DIR / f"bot-{env_bot_id}.json")
+        if data:
+            return data
 
-    for search_dir in [MIRROR_DIR, PENDING_DIR]:
-        if not search_dir.exists():
-            continue
-        for bot_file in sorted(search_dir.glob("bot-*.json")):
-            data = _try_load_bot(bot_file)
-            if not data or not data.get("work_dir"):
-                continue
-            try:
-                cwd_path.relative_to(Path(data["work_dir"]))
-                return data
-            except ValueError:
-                continue
-    return None
+    return _find_in_dir(MIRROR_DIR, "*.json", cwd_path) or _find_in_dir(PENDING_DIR, "bot-*.json", cwd_path)
 
 
 def send_user_message(bot_token: str, chat_id: int, text: str, origin: str = "\U0001f5a5️") -> bool:

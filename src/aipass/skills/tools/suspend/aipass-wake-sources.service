@@ -1,0 +1,13 @@
+[Unit]
+Description=AIPass: mask spurious wake sources (gpe4E storm, USB wake) at boot (DPLAN-0270 P5)
+# Both settings this reapplies are runtime-only ACPI/sysfs knobs, not
+# persisted anywhere in firmware — they reset on every reboot. Without this
+# unit they'd need re-applying by hand after every restart.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aipass-wake-sources.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

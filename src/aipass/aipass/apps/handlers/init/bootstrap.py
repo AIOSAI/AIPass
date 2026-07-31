@@ -44,6 +44,7 @@ from aipass.aipass.shared.project_home import (
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
+    _merge_local_settings,
     is_projects_child,
     is_throwaway_path,
 )
@@ -361,7 +362,9 @@ def init_project(
     if aipass_home and not is_throwaway_path(aipass_home):
         local_settings_path = claude_dir / "settings.local.json"
         if not local_settings_path.exists():
-            local_settings_path.write_text(_claude_local_settings(aipass_home), encoding="utf-8")
+            local_settings_path.write_text(
+                _claude_local_settings(aipass_home, nested=is_projects_child(target)), encoding="utf-8"
+            )
             created.append(str(local_settings_path))
 
     # 9c. .claude/commands/prep.md — /prep session wrap-up slash command
@@ -511,14 +514,29 @@ def update_project(target: Path) -> dict:
         else:
             already_current.append(str(settings_path))
 
-    # settings.local.json — machine-local AIPASS_HOME (gitignored, create if missing)
+    # settings.local.json (gitignored) — machine-local AIPASS_HOME + claudeMdExcludes
+    # fence. Retrofit-safe: merges into existing content, never clobbers.
     if aipass_home and not is_throwaway_path(aipass_home):
         local_settings_path = claude_dir / "settings.local.json"
+        generated = json.loads(_claude_local_settings(aipass_home, nested=is_projects_child(target)))
         if not local_settings_path.exists():
-            local_settings_path.write_text(_claude_local_settings(aipass_home), encoding="utf-8")
+            local_settings_path.write_text(json.dumps(generated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             updated.append(str(local_settings_path))
         else:
-            already_current.append(str(local_settings_path))
+            existing_content = local_settings_path.read_text(encoding="utf-8")
+            try:
+                existing = json.loads(existing_content)
+            except json.JSONDecodeError as exc:
+                logger.info("settings.local.json parse failed, rebuilding: %s", exc)
+                existing = {}
+            merged = _merge_local_settings(existing, generated)
+            if existing != merged:
+                local_settings_path.write_text(
+                    json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+                )
+                updated.append(str(local_settings_path))
+            else:
+                already_current.append(str(local_settings_path))
 
     # hooks.json — union-merge: preserve user enabled, add new hooks from template
     hooks_json_path = aipass_dir / "hooks.json"

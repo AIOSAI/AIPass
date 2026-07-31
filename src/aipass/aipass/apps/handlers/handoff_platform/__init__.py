@@ -50,6 +50,16 @@ def build_manual_command(cli: str, prompt: str, cwd: str, flag_variant: str = "d
     return f'cd {cwd} && {cli_cmd} "{safe_prompt}"'
 
 
+def return_path_breadcrumb(cwd: str) -> str:
+    """The exact line to get back into this agent's Claude Code session.
+
+    Claude Code's own exit hint prints a bare `--resume <id>` with no cwd —
+    session stores are per-directory, so that hint fails from anywhere else.
+    `--continue` from the right directory needs no id.
+    """
+    return f"cd {cwd} && claude --continue"
+
+
 def _find_terminal_emulator() -> str | None:
     """Find an available terminal emulator on the system."""
     for term in ("gnome-terminal", "xfce4-terminal", "konsole", "xterm"):
@@ -157,8 +167,15 @@ def launch_wt(cli: str, prompt: str, cwd: str, flag_variant: str = "default") ->
 
 
 def launch_inline(cli: str, prompt: str, cwd: str, flag_variant: str = "default") -> None:
-    """Replace the current process with the CLI in the agent directory. Does not return."""
+    """Replace the current process with the CLI in the agent directory. Does not return.
+
+    Wraps the CLI in a shell so a return-path breadcrumb prints once the
+    session exits (see ``return_path_breadcrumb``) — ``execvp`` replaces this
+    process outright, so nothing after this call can print once the CLI
+    starts; the breadcrumb has to be baked into the exec'd command itself.
+    """
     import os
+    import shlex
 
     cli_cmd = build_cli_cmd(cli, flag_variant)
     cli_bin = cli_cmd.split()[0]
@@ -168,9 +185,12 @@ def launch_inline(cli: str, prompt: str, cwd: str, flag_variant: str = "default"
         return
 
     os.chdir(cwd)
-    argv = cli_cmd.split() + [prompt]
-    logger.info("[handoff_platform] exec inline: %s (cwd=%s)", " ".join(argv), cwd)
-    os.execvp(cli_path, argv)
+    argv = [cli_path, *cli_cmd.split()[1:], prompt]
+    breadcrumb = return_path_breadcrumb(cwd)
+    shell_cmd = f"{shlex.join(argv)}; printf '\\n%s\\n' {shlex.quote(breadcrumb)}"
+    shell = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
+    logger.info("[handoff_platform] exec inline via shell: %s (cwd=%s)", shell_cmd, cwd)
+    os.execvp(shell, [shell, "-c", shell_cmd])
 
 
 def launch_handoff(

@@ -22,7 +22,7 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     find_project_root,
     scan_agents,
 )
-from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_WARN
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules.doctor import _check_structure
 
 
@@ -460,7 +460,10 @@ class TestCheckStructureIntegration:
         _make_agent(tmp_path, "agent1", "uuid-1")
         _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
-        with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
+        ):
             results = _check_structure()
         glyphs = {r.glyph for r in results}
         assert GLYPH_FAIL not in glyphs
@@ -489,3 +492,52 @@ class TestCheckStructureIntegration:
         pollution_results = [r for r in results if "pollution" in r.label]
         assert len(pollution_results) == 1
         assert pollution_results[0].glyph == GLYPH_FAIL
+
+    def test_fenceless_nested_project_reported(self, tmp_path: Path) -> None:
+        """Nested projects/<name> missing the claudeMdExcludes fence shows up as WARN."""
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        nested = tmp_path / "projects" / "nested-app"
+        nested.mkdir(parents=True)
+        (nested / "NESTED-APP_REGISTRY.json").write_text("{}", encoding="utf-8")
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
+        ):
+            results = _check_structure()
+        fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
+        assert len(fence_results) == 1
+        assert fence_results[0].glyph == GLYPH_WARN
+        assert fence_results[0].label == "CLAUDE.md fence: nested-app"
+
+    def test_all_nested_projects_fenced_reported_pass(self, tmp_path: Path) -> None:
+        """A correctly-fenced nested project produces a single PASS CheckResult."""
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        nested = tmp_path / "projects" / "nested-app"
+        claude_dir = nested / ".claude"
+        claude_dir.mkdir(parents=True)
+        (nested / "NESTED-APP_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (claude_dir / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "env": {"AIPASS_HOME": str(tmp_path)},
+                    "claudeMdExcludes": [
+                        str(tmp_path / "CLAUDE.md"),
+                        str(tmp_path / ".claude" / "CLAUDE.md"),
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
+        ):
+            results = _check_structure()
+        fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
+        assert len(fence_results) == 1
+        assert fence_results[0].glyph == GLYPH_PASS
+        assert fence_results[0].label == "CLAUDE.md fence"

@@ -28,7 +28,10 @@ Usage:
 
 import json
 import logging
+import os
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any
 
 from aipass.prax.apps.handlers.config.load import PRAX_ROOT, ECOSYSTEM_ROOT
@@ -43,6 +46,35 @@ logger = logging.getLogger(__name__)
 MODULE_NAME = "save"
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
+
+# =============================================
+# INTERNAL HELPERS
+# =============================================
+
+
+def _atomic_write(json_path: Path, content: str) -> None:
+    """Write content to file atomically via temp file + rename.
+
+    prax_registry.json is written by every branch's logging init plus the
+    filesystem watcher, all racing on the same shared file with no lock.
+    A plain open("w") can tear under concurrent writers and leave invalid
+    JSON behind; os.replace() is atomic, so readers always see either the
+    fully old or fully new file, never a partial mix.
+    """
+    fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, json_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError as cleanup_err:
+            logger.warning("save: temp file cleanup failed for '%s': %s", tmp_path, cleanup_err)
+        raise
+
 
 # =============================================
 # HANDLER FUNCTION
@@ -92,9 +124,9 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]]) -> bool:
             },
         }
 
-        # Save to file
-        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
-            json.dump(registry_structure, f, indent=2, ensure_ascii=False)
+        # Save to file atomically (temp file + rename)
+        content = json.dumps(registry_structure, indent=2, ensure_ascii=False)
+        _atomic_write(REGISTRY_FILE, content)
 
         json_handler.log_operation("registry_saved", {"total_modules": len(modules)})
 

@@ -87,9 +87,64 @@ def _claude_settings() -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _claude_local_settings(aipass_home: str) -> str:
-    """Generate .claude/settings.local.json — machine-local env (gitignored)."""
-    return json.dumps({"env": {"AIPASS_HOME": aipass_home}}, indent=2, ensure_ascii=False) + "\n"
+def _claude_md_excludes(aipass_home: str) -> list[str]:
+    """Absolute paths of the host CLAUDE.md files a nested project must fence out.
+
+    Claude Code loads CLAUDE.md from every ancestor directory regardless of git
+    boundaries, so a project nested under ``<host>/projects/<name>`` inherits
+    the host root CLAUDE.md and .claude/CLAUDE.md unless excluded.
+    """
+    home = Path(aipass_home)
+    # Forward slashes on every platform — settings files carry POSIX-style
+    # paths, and Windows Path.__str__ would emit backslashes here.
+    return [(home / "CLAUDE.md").as_posix(), (home / ".claude" / "CLAUDE.md").as_posix()]
+
+
+def _normalize_exclude(entry: str) -> str:
+    """Separator-insensitive form for comparing claudeMdExcludes entries.
+
+    A fence written by hand (or by an older build) with backslashes must still
+    count as present on Windows — normalize both sides before comparing, but
+    never rewrite user-authored values.
+    """
+    return entry.replace("\\", "/")
+
+
+def _claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
+    """Generate .claude/settings.local.json — machine-local env (gitignored).
+
+    When *nested* is True (target lives under ``<host>/projects/<name>``),
+    also emits ``claudeMdExcludes`` fencing out the host's ancestor CLAUDE.md
+    files — see ``_claude_md_excludes``.
+    """
+    data: dict = {"env": {"AIPASS_HOME": aipass_home}}
+    if nested:
+        data["claudeMdExcludes"] = _claude_md_excludes(aipass_home)
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def _merge_local_settings(existing: dict, generated: dict) -> dict:
+    """Merge generated .claude/settings.local.json content into existing (retrofit-safe).
+
+    Unions ``env`` and ``claudeMdExcludes`` rather than overwriting, so a
+    hand-edited or previously-written file is never clobbered.
+    """
+    merged = dict(existing)
+
+    merged_env = {**existing.get("env", {}), **generated.get("env", {})}
+    if merged_env:
+        merged["env"] = merged_env
+
+    combined_excludes = list(existing.get("claudeMdExcludes", []))
+    seen = {_normalize_exclude(e) for e in combined_excludes}
+    for item in generated.get("claudeMdExcludes", []):
+        if _normalize_exclude(item) not in seen:
+            combined_excludes.append(item)
+            seen.add(_normalize_exclude(item))
+    if combined_excludes:
+        merged["claudeMdExcludes"] = combined_excludes
+
+    return merged
 
 
 def _enroll_project(target: Path) -> bool:
@@ -130,3 +185,41 @@ def is_projects_child(target: Path) -> bool:
     except OSError as exc:
         logger.info("is_projects_child: could not read host dir %s: %s", host, exc)
         return False
+
+
+def find_fenceless_projects(aipass_home: str) -> list[Path]:
+    """Nested ``<aipass_home>/projects/<name>`` dirs missing the CLAUDE.md ancestor fence.
+
+    A project is nested if it has a ``*_REGISTRY.json``. It's fenceless if its
+    ``.claude/settings.local.json`` is missing, unparseable, or lacks the
+    ``claudeMdExcludes`` entries from ``_claude_md_excludes``.
+    """
+    projects_dir = Path(aipass_home) / "projects"
+    if not projects_dir.is_dir():
+        return []
+    expected = set(_claude_md_excludes(aipass_home))
+    fenceless: list[Path] = []
+    for child in sorted(projects_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            is_project = any(f.is_file() and f.name.endswith("_REGISTRY.json") for f in child.iterdir())
+        except OSError as exc:
+            logger.info("find_fenceless_projects: could not read %s: %s", child, exc)
+            continue
+        if not is_project:
+            continue
+        local_settings = child / ".claude" / "settings.local.json"
+        if not local_settings.is_file():
+            fenceless.append(child)
+            continue
+        try:
+            data = json.loads(local_settings.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            logger.info("find_fenceless_projects: unparseable %s: %s", local_settings, exc)
+            fenceless.append(child)
+            continue
+        present = {_normalize_exclude(e) for e in data.get("claudeMdExcludes", [])}
+        if not {_normalize_exclude(e) for e in expected}.issubset(present):
+            fenceless.append(child)
+    return fenceless

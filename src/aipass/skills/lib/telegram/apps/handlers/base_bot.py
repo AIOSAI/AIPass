@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-02-24
-# Modified: 2026-07-24
+# Modified: 2026-07-28
 # =============================================
 
 """
@@ -143,6 +143,18 @@ NETWORK_BACKOFF_INIT = 1  # seconds
 NETWORK_BACKOFF_CAP = 60  # seconds
 NETWORK_LOG_INTERVAL = 300  # 5 minutes between offline summary lines
 STARTUP_RETRY_CAP_SECONDS = 180  # ~3 minutes of backoff before failing loud
+CONTROL_SESSION_PREFIX = "aipass-"  # tmux session prefix for /start /kill /status control verbs (DPLAN-0270 P1)
+RTCWAKE_BIN = "/usr/sbin/rtcwake"  # exact path — must match the sudoers.d grant exactly, no wildcards
+SUSPEND_HEARTBEAT_DEFAULT_MINUTES = 25  # /suspend heartbeat interval, overridable via bot config
+SUSPEND_GRACE_WINDOW_SECONDS = 100  # post-resume window to wait for a command before re-arming (DPLAN-0270 P5)
+RESUME_SIGNAL_FILE = Path.home() / ".aipass" / "telegram_bots" / "resume_signal.json"  # optional secondary signal
+# Wall-clock gap between consecutive poll-loop iterations that means "we were actually
+# asleep," not just idle. Ceiling for a normal iteration is ~POLL_TIMEOUT (30s long-poll)
+# plus overhead; a sustained network outage can add one NETWORK_BACKOFF_CAP (60s) sleep on
+# top of that per iteration. 45s sits above the idle ceiling with room for jitter, while
+# still catching short heartbeat intervals used for live testing (DPLAN-0270 P5) — tune
+# upward if real backoff-heavy outages start producing false "resume" detections.
+RESUME_WALLCLOCK_JUMP_SECONDS = 45
 
 
 class _NetworkPollError(Exception):
@@ -171,6 +183,16 @@ def _is_network_error(exc: Exception) -> bool:
 
 def _is_routine_read_timeout(exc: Exception) -> bool:
     return "timed out" in str(exc) and "read operation" in str(getattr(exc, "reason", exc))
+
+
+def _extract_retry_after(exc: HTTPError, default: int = 30) -> int:
+    """Read Telegram's retry_after (seconds) from a 429 response body, falling back to default."""
+    try:
+        body = json.loads(exc.read().decode("utf-8"))
+    except Exception as parse_err:
+        logger.info("Cannot parse 429 error body: %s", parse_err)
+        return default
+    return body.get("parameters", {}).get("retry_after", default)
 
 
 # =============================================
@@ -263,6 +285,15 @@ class BaseBot:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_gen: int = 0
 
+        # /suspend control verb state (DPLAN-0270 P5) — heartbeat mode only;
+        # single-wake /suspend <duration> never touches these.
+        self._suspend_heartbeat_active = False
+        self._suspend_chat_id: Optional[int] = None
+        self._suspend_last_resume_seen: float | None = None
+        self._suspend_resume_pending_since: float | None = None
+        self._suspend_last_loop_mark: float | None = None
+        self._last_control_command_at: float = 0.0
+
         # Conversation state for /create flow (keyed by chat_id)
         self._create_state: dict[int, dict] = {}
         self._create_state_ttl = 300  # 5 minutes
@@ -343,6 +374,7 @@ class BaseBot:
 
         while self.state["running"]:
             try:
+                self._check_resume_signal()
                 updates = self.poll_updates(offset)
 
                 # Reset general backoff on successful poll
@@ -502,6 +534,11 @@ class BaseBot:
                 raise _NetworkPollError(str(e)) from e
             if isinstance(e, HTTPError) and (e.code >= 500 or e.code == 409):
                 raise _NetworkPollError(str(e)) from e
+            if isinstance(e, HTTPError) and e.code == 429:
+                retry = _extract_retry_after(e)
+                logger.warning("Poll rate-limited (429) — backing off %ds", retry)
+                time.sleep(retry)
+                return []
             logger.error("Poll error: %s", e)
             return []
         except (ConnectionError, OSError) as e:
@@ -672,6 +709,34 @@ class BaseBot:
         else:
             logger.info("Ignoring unsupported message type")
 
+    def _is_control_bot(self) -> bool:
+        """
+        True for bots exposing the /start /kill /status control verbs (DPLAN-0270 P1).
+
+        Covers both a bare base bot (branch_name=None) and the deployed AIPASS
+        control-center bot, whose persisted config sets branch_name="aipass"
+        (it is the same bot_id="base" process — there is no separate bot).
+        """
+        return self.branch_name is None or self.branch_name == "aipass"
+
+    def _effective_standard_commands(self) -> Optional[dict]:
+        """
+        Override the /start entry for control bots.
+
+        STANDARD_COMMANDS' generic "what this bot does" welcome text is stale
+        once /start wakes a terminal agent instead of describing the bot.
+        Returns None for non-control bots so callers fall back to the shared
+        STANDARD_COMMANDS dict unchanged.
+        """
+        if not self._is_control_bot():
+            return None
+        overridden = {**STANDARD_COMMANDS}
+        overridden["start"] = {
+            "description": "Wake a terminal agent — /start [branch] (default: aipass)",
+            "menu_text": "Wake agent",
+        }
+        return overridden
+
     def _dispatch_command(self, chat_id: int, parsed: tuple) -> bool:
         """
         Dispatch a parsed command to the appropriate handler.
@@ -686,6 +751,7 @@ class BaseBot:
             True if command was handled (caller should return), False to fall through.
         """
         cmd_name, cmd_args = parsed
+        self._last_control_command_at = time.time()
 
         # /logs command — session log stream control
         if cmd_name == "logs":
@@ -711,6 +777,22 @@ class BaseBot:
                 self.send_message(chat_id, "Bot creation cancelled.")
             else:
                 self.send_message(chat_id, "Nothing to cancel.")
+            return True
+
+        # Control verbs (DPLAN-0270 P1) — control bots only (see _is_control_bot).
+        # /start here supersedes the STANDARD_COMMANDS welcome text for the
+        # control-center bot; branch bots fall through to the normal /start
+        # welcome message unchanged.
+        if cmd_name == "start" and self._is_control_bot():
+            self._handle_control_start(chat_id, cmd_args)
+            return True
+
+        if cmd_name == "kill" and self._is_control_bot():
+            self._handle_control_kill(chat_id, cmd_args)
+            return True
+
+        if cmd_name == "suspend" and self._is_control_bot():
+            self._handle_control_suspend(chat_id, cmd_args)
             return True
 
         # Compute conversation uptime (resets on /new) and daemon uptime (since boot)
@@ -740,6 +822,8 @@ class BaseBot:
             registry_text = self._build_registry_status()
             if registry_text:
                 status_text += f"\n\n{registry_text}"
+            if self._is_control_bot():
+                status_text += f"\n\n{self._build_control_sessions_text()}"
             self.send_message(chat_id, status_text)
             logger.info("Handled /status command")
             return True
@@ -749,6 +833,7 @@ class BaseBot:
             session_name=self.session_name,
             branch_name=self.bot_id,
             bot_name=self.bot_name,
+            standard_commands=self._effective_standard_commands(),
             custom_commands=merged_commands or None,
             chat_id=chat_id,
             message_count=self.state.get("message_count"),
@@ -800,7 +885,9 @@ class BaseBot:
 
         # Ensure tmux session
         if not self.ensure_tmux_session():
-            logger.error("Cannot process message - no live session to mirror")
+            # Expected condition (presence guard) — user gets the explanation
+            # below, so WARNING not ERROR.
+            logger.warning("Cannot process message - no live session to mirror")
             branch = self.branch_name or self.work_dir.name
             self.send_message(
                 chat_id,
@@ -1456,7 +1543,9 @@ class BaseBot:
         # Legacy AIPASS_SESSION_TYPE=telegram own-session spawn RETIRED.
         # The bot is a thin relay — it follows the presence pointer or an
         # explicit shared_session. Start a Claude session in the branch first.
-        logger.error(
+        # Expected condition (not a failure) — user is told directly via
+        # send_message in handle_message, so WARNING not ERROR.
+        logger.warning(
             "No live session to mirror — presence pointer empty, no shared session. "
             "Start a Claude session in the branch directory first."
         )
@@ -1539,6 +1628,330 @@ class BaseBot:
                 e.stderr.decode() if e.stderr else str(e),
             )
             return False
+
+    # =============================================
+    # CONTROL VERBS (DPLAN-0270 P1) — base bot only
+    # =============================================
+
+    def _list_aipass_sessions(self) -> list[dict]:
+        """
+        List tmux sessions matching the aipass-* control-verb prefix.
+
+        Returns:
+            List of dicts with keys: name, branch, pid, alive.
+        """
+        sessions: list[dict] = []
+        try:
+            result = subprocess.run(
+                ["tmux", "list-sessions", "-F", "#{session_name}"],
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            logger.warning("tmux not found — is it installed?")
+            return sessions
+
+        if result.returncode != 0:
+            return sessions  # no tmux server running — honestly, zero sessions
+
+        for name in result.stdout.splitlines():
+            name = name.strip()
+            if not name.startswith(CONTROL_SESSION_PREFIX):
+                continue
+            branch = name[len(CONTROL_SESSION_PREFIX) :]
+            pid = None
+            alive = False
+            try:
+                pane = subprocess.run(
+                    ["tmux", "list-panes", "-t", name, "-F", "#{pane_pid} #{pane_dead}"],
+                    capture_output=True,
+                    text=True,
+                )
+                if pane.returncode == 0 and pane.stdout.strip():
+                    first_pid, dead_flag = pane.stdout.splitlines()[0].split()
+                    pid = int(first_pid)
+                    alive = dead_flag == "0"
+            except (FileNotFoundError, ValueError) as e:
+                logger.warning("Could not read pane info for '%s': %s", name, e)
+            sessions.append({"name": name, "branch": branch, "pid": pid, "alive": alive})
+
+        return sessions
+
+    def _build_control_sessions_text(self) -> str:
+        """Build the aipass-* session listing shown in /status (control-center only)."""
+        sessions = self._list_aipass_sessions()
+        if not sessions:
+            return "AIPass sessions: none running."
+
+        lines = ["AIPass sessions:"]
+        for s in sessions:
+            state = "alive" if s["alive"] else "dead"
+            pid_text = s["pid"] if s["pid"] is not None else "?"
+            lines.append(f"  @{s['branch']} — PID {pid_text} ({state})")
+        return "\n".join(lines)
+
+    def _handle_control_start(self, chat_id: int, branch_arg: str) -> None:
+        """
+        /start <branch> control verb — wake a terminal agent (default: aipass).
+
+        Supersedes the FPLAN-0289 presence guard for this explicit command
+        only — plain messages still require an existing live session. One
+        session per branch (compass #106 occupancy doctrine): never spawns
+        a second if aipass-<branch> is already running.
+        """
+        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
+
+        try:
+            exists = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True).returncode == 0
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot start '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
+
+        if exists:
+            self.send_message(chat_id, f"'{branch}' is already running.")
+            logger.info("Control /start: '%s' already running, skipping spawn", session_name)
+            return
+
+        branch_info = validate_branch(branch)
+        if not branch_info:
+            self.send_message(chat_id, f"Branch '@{branch}' not found in registry.")
+            return
+
+        path = branch_info.get("path", "")
+        try:
+            subprocess.run(
+                ["tmux", "new-session", "-d", "-s", session_name, "-c", path],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, f"{CLAUDE_BIN} -c || {CLAUDE_BIN}", "Enter"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to start '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
+            self.send_message(chat_id, f"Failed to start '{branch}' — see logs.")
+            return
+
+        logger.info("Control /start: woke '%s' (session '%s', path '%s')", branch, session_name, path)
+        self.send_message(chat_id, f"woke {branch}")
+
+    def _handle_control_kill(self, chat_id: int, branch_arg: str) -> None:
+        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling)."""
+        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
+
+        try:
+            exists = subprocess.run(["tmux", "has-session", "-t", session_name], capture_output=True).returncode == 0
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot kill '%s'", branch)
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
+
+        if not exists:
+            self.send_message(chat_id, f"'{branch}' is not running.")
+            return
+
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error("Failed to kill '%s': %s", session_name, e.stderr.decode() if e.stderr else str(e))
+            self.send_message(chat_id, f"Failed to kill '{branch}' — see logs.")
+            return
+
+        logger.info("Control /kill: killed '%s' (session '%s')", branch, session_name)
+        self.send_message(chat_id, f"killed {branch}")
+
+    def _suspend_heartbeat_seconds(self) -> int:
+        """Heartbeat interval for /suspend, in seconds — config override or hardcoded default."""
+        minutes = SUSPEND_HEARTBEAT_DEFAULT_MINUTES
+        try:
+            from .config import load_bot_config
+
+            config = load_bot_config(self.bot_id)
+            if config:
+                minutes = config.get("suspend_heartbeat_minutes", minutes)
+        except Exception as e:
+            logger.warning("Could not read suspend_heartbeat_minutes, using default: %s", e)
+        return int(minutes) * 60
+
+    def _parse_suspend_duration(self, arg: str) -> tuple[Optional[int], Optional[str]]:
+        """
+        Parse the optional /suspend duration argument.
+
+        Returns (seconds, error). No arg -> (None, None): heartbeat mode.
+        "8h" / "45m" -> (seconds, None): single-wake mode. Malformed arg
+        returns (None, error_message).
+        """
+        arg = arg.strip()
+        if not arg:
+            return None, None
+
+        match = re.fullmatch(r"(\d+)([hm])", arg.lower())
+        if not match:
+            return None, f"Bad duration '{arg}' — use e.g. /suspend 8h or /suspend 45m (no arg = heartbeat mode)."
+
+        value, unit = match.groups()
+        seconds = int(value) * (3600 if unit == "h" else 60)
+        if seconds <= 0:
+            return None, "Duration must be positive."
+        return seconds, None
+
+    def _handle_control_suspend(self, chat_id: int, arg: str) -> None:
+        """
+        /suspend [duration] control verb (DPLAN-0270 P5).
+
+        No arg: heartbeat mode — suspends now, wakes every
+        _suspend_heartbeat_seconds() to check for a command, re-arming if
+        none arrived within the grace window, until a command shows up.
+        "/suspend 8h": single-wake mode — one RTC alarm, no heartbeat re-arm.
+
+        `systemctl suspend` is asynchronous (man systemctl: "will not wait
+        for the suspend/resume cycle to complete") — it returns almost
+        immediately, well before the machine actually sleeps. This method
+        never blocks across the suspend/resume boundary; the grace-window
+        and re-arm decision happen later, back in run()'s poll loop, driven
+        by a wall-clock jump the loop detects on actual wake (see
+        _check_resume_signal).
+        """
+        seconds, err = self._parse_suspend_duration(arg)
+        if err:
+            self.send_message(chat_id, err)
+            return
+
+        if seconds is None:
+            interval = self._suspend_heartbeat_seconds()
+            self.send_message(chat_id, f"Suspending now. Heartbeat every {interval // 60}m until a command arrives.")
+            self._suspend_heartbeat_active = True
+            self._suspend_chat_id = chat_id
+            # Baseline to whatever the (optional) signal file already says, so a stale
+            # stamp from earlier manual testing can't be misread as a fresh resume.
+            self._suspend_last_resume_seen = self._read_resume_stamp()
+            self._arm_and_suspend(chat_id, interval)
+            return
+
+        self.send_message(chat_id, f"Suspending now. Single wake in {arg.strip()} — no heartbeat.")
+        self._arm_and_suspend(chat_id, seconds)
+
+    def _arm_and_suspend(self, chat_id: int, seconds: int) -> None:
+        """Arm the RTC wake alarm, then suspend. Caller has already sent the ack message."""
+        try:
+            subprocess.run(
+                ["sudo", "-n", RTCWAKE_BIN, "-m", "no", "-s", str(seconds)],
+                check=True,
+                capture_output=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            detail = e.stderr.decode() if isinstance(e, subprocess.CalledProcessError) and e.stderr else str(e)
+            logger.error("Failed to arm rtcwake: %s", detail)
+            self.send_message(
+                chat_id,
+                "Can't arm the wake alarm — the rtcwake sudoers grant isn't installed yet. "
+                "See tools/suspend/install_suspend_grants.sh. Not suspending.",
+            )
+            self._suspend_heartbeat_active = False
+            return
+
+        try:
+            subprocess.run(["systemctl", "suspend"], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            detail = e.stderr.decode() if e.stderr else str(e)
+            logger.error("Failed to suspend: %s", detail)
+            subprocess.run(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)
+            self.send_message(
+                chat_id,
+                "Wake alarm armed, but suspend failed — the login1.suspend polkit grant isn't "
+                "installed yet. See tools/suspend/install_suspend_grants.sh. Disarmed the alarm; staying awake.",
+            )
+            self._suspend_heartbeat_active = False
+            return
+
+        logger.info("Suspend armed+enqueued: wake in %ds (heartbeat=%s)", seconds, self._suspend_heartbeat_active)
+
+    def _read_resume_stamp(self) -> float | None:
+        """Read the optional system-sleep hook's resumed_at stamp, if the file exists and parses."""
+        try:
+            data = json.loads(RESUME_SIGNAL_FILE.read_text(encoding="utf-8"))
+            return float(data.get("resumed_at", 0))
+        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError):
+            return None
+
+    def _resume_signal_file_advanced(self) -> bool:
+        """
+        Optional secondary resume signal — True only if the file's resumed_at
+        stamp is strictly newer than the last one seen (or the activation
+        baseline). Proven unreliable on this hardware (systemd never runs the
+        system-sleep hook across 5 real suspends, despite it working fine when
+        run manually as root) — belt-and-braces only, never load-bearing.
+        """
+        stamp = self._read_resume_stamp()
+        if stamp is None:
+            return False
+        if self._suspend_last_resume_seen is not None and stamp <= self._suspend_last_resume_seen:
+            return False
+        self._suspend_last_resume_seen = stamp
+        return True
+
+    def _check_resume_signal(self) -> None:
+        """
+        Poll-loop hook (DPLAN-0270 P5): detect resume via a wall-clock jump.
+
+        Primary signal: a real OS suspend freezes this process entirely, so a
+        gap between consecutive poll-loop iterations far bigger than the
+        Telegram long-poll ceiling (POLL_TIMEOUT=30s) can only mean we were
+        actually asleep — that gap's discovery IS the resume signal. No root,
+        no file, works on any hardware. The system-sleep hook's signal file is
+        read as an optional secondary signal; the bot never depends on it.
+        """
+        now = time.time()
+        last_mark = self._suspend_last_loop_mark
+        self._suspend_last_loop_mark = now
+
+        if not self._suspend_heartbeat_active:
+            return
+
+        # While a grace window is already pending, skip re-detection entirely — a slow
+        # iteration during the window (e.g. a network hiccup) must not be mistaken for a
+        # second fresh resume and keep bailing out before the elapsed-check below ever runs.
+        if self._suspend_resume_pending_since is None:
+            gap = (now - last_mark) if last_mark is not None else 0.0
+            resumed = gap > RESUME_WALLCLOCK_JUMP_SECONDS
+            source = "wall-clock jump"
+            if not resumed:
+                resumed = self._resume_signal_file_advanced()
+                source = "resume-signal file"
+            if resumed:
+                self._suspend_resume_pending_since = now
+                logger.info("Resume detected via %s (gap=%.0fs) — starting grace window", source, gap)
+            return
+
+        resume_detected_at = self._suspend_resume_pending_since
+        if now - resume_detected_at < SUSPEND_GRACE_WINDOW_SECONDS:
+            return
+
+        self._suspend_resume_pending_since = None
+
+        if self._last_control_command_at >= resume_detected_at:
+            self._suspend_heartbeat_active = False
+            logger.info("Suspend heartbeat: command received post-resume, staying awake")
+            if self._suspend_chat_id is not None:
+                self.send_message(self._suspend_chat_id, "Staying awake — command received.")
+            return
+
+        if self._suspend_chat_id is None:
+            logger.error("Suspend heartbeat active but no chat_id recorded — aborting heartbeat")
+            self._suspend_heartbeat_active = False
+            return
+
+        logger.info("Suspend heartbeat: no command in grace window, re-arming (spurious wake absorbed)")
+        self._arm_and_suspend(self._suspend_chat_id, self._suspend_heartbeat_seconds())
 
     # =============================================
     # PENDING FILE MANAGEMENT
@@ -2348,7 +2761,10 @@ class BaseBot:
     def _set_command_menu(self) -> None:
         """Set the Telegram command menu via setMyCommands on startup."""
         merged_commands = {**self.custom_commands, **self.get_custom_commands()}
-        commands = build_botfather_commands(custom_commands=merged_commands or None)
+        commands = build_botfather_commands(
+            standard_commands=self._effective_standard_commands(),
+            custom_commands=merged_commands or None,
+        )
         if self.bot_token:
             ok = set_bot_commands(self.bot_token, commands)
             if ok:
@@ -2644,6 +3060,16 @@ class BaseBot:
             commands["cancel"] = {
                 "description": "Cancel an in-progress /create",
                 "menu_text": "Cancel create",
+            }
+        if self._is_control_bot():
+            commands["kill"] = {
+                "description": "Kill a terminal agent's tmux session — /kill [branch] (default: aipass)",
+                "menu_text": "Kill session",
+            }
+            commands["suspend"] = {
+                "description": "Suspend the machine — /suspend (heartbeat, re-arms until a command "
+                "arrives) or /suspend 8h (single wake, no heartbeat)",
+                "menu_text": "Suspend machine",
             }
         return commands
 

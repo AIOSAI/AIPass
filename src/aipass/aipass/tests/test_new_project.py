@@ -222,6 +222,28 @@ def test_create_project_python_template(host_env, monkeypatch):
     assert (target / "src" / "pyapp" / "__init__.py").exists()
 
 
+def test_create_project_gets_claude_md_excludes_fence(host_env, monkeypatch):
+    """aipass new always creates under <host>/projects/<name> — nested fence must be written."""
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch(
+            "aipass.aipass.shared.project_home._detect_aipass_home",
+            return_value=str(host_env),
+        ),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.shared.project_home.is_throwaway_path", return_value=False),
+    ):
+        result = create_project("fenced", template="empty", no_agent=True)
+
+    target = Path(result["target"])
+    local_settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    assert local_settings["claudeMdExcludes"] == [
+        (host_env / "CLAUDE.md").as_posix(),
+        (host_env / ".claude" / "CLAUDE.md").as_posix(),
+    ]
+
+
 def test_create_project_rejects_existing(host_env, monkeypatch):
     monkeypatch.chdir(host_env)
     (host_env / "projects" / "taken").mkdir()

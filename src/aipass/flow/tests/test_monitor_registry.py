@@ -184,6 +184,39 @@ class TestScanPlanFilesImpl:
             )
         assert "0001" in result["added"]
 
+    def test_dropbox_folder_is_ignored(self, tmp_path):
+        """dropbox/ is a received-files inbox -- old snapshot copies must never register."""
+        mod = _import_monitor_ops()
+        dropbox_dir = tmp_path / "dropbox"
+        dropbox_dir.mkdir()
+        _make_plan_file(dropbox_dir, "0001")
+
+        good_dir = tmp_path / "active"
+        good_dir.mkdir()
+        _make_plan_file(good_dir, "0002")
+
+        with patch.object(mod, "_fire_event", return_value=True):
+            result = mod.scan_plan_files_impl(
+                ecosystem_root=tmp_path,
+                load_registry=lambda: {"plans": {}},
+            )
+        assert "0001" not in result["added"]
+        assert "0002" in result["added"]
+
+    def test_dropbox_ignore_requires_exact_name_match(self, tmp_path):
+        """Lookalike names (e.g. 'dropbox-clone') must not be skipped -- exact match only."""
+        mod = _import_monitor_ops()
+        lookalike_dir = tmp_path / "dropbox-clone"
+        lookalike_dir.mkdir()
+        _make_plan_file(lookalike_dir, "0001")
+
+        with patch.object(mod, "_fire_event", return_value=True):
+            result = mod.scan_plan_files_impl(
+                ecosystem_root=tmp_path,
+                load_registry=lambda: {"plans": {}},
+            )
+        assert "0001" in result["added"]
+
     def test_orphaned_closed_plan_does_not_fire_deleted(self, tmp_path):
         """Closed plans are expected to be archived out of the scan tree — not orphans."""
         mod = _import_monitor_ops()

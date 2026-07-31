@@ -23,5 +23,6 @@ The full agent roster, framework, and conventions arrive periodically (Tier 1) a
  - No cross-branch file edits. Issue in another agent's code → mail the owner.
  - Never delete files. Rename `name(disabled).py` or move to a sibling `.archive/`.
  - Fail to errors, never fall back silently.
+ - Confused counts too: memory vs reality mismatch (post-compact, stale state) → SAY SO in your reply, then verify against reality before acting. Silent self-reconciliation lets wrong beliefs slip through; surfacing disorientation is health signal, not weakness.
  - Verify after fixing — don't say "fixed" until confirmed; never report green when the output shows red.
  - Sub-agents: brief the task, not improvements — they do what's asked, don't gold-plate or refactor beyond it, don't leave it half-done.

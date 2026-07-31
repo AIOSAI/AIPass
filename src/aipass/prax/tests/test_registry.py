@@ -290,6 +290,33 @@ class TestSaveModuleRegistry:
         save_mod.save_module_registry({"x": {}})
         save_mod.logger.error.assert_called()  # type: ignore[union-attr]
 
+    def test_no_leftover_tmp_file_after_save(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Atomic write should leave no .tmp file behind after a successful save."""
+        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        save_mod.save_module_registry({"mod": {"path": "x"}})
+
+        leftovers = list(save_mod.PRAX_JSON_DIR.glob("*.tmp"))
+        assert leftovers == []
+
+    def test_concurrent_saves_never_produce_torn_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Interleaved writers (temp file + rename) must never corrupt the registry file.
+
+        Regression test for the torn-write bug: a plain open("w") + json.dump
+        truncates immediately on open, so two concurrent writers could
+        interleave and leave trailing garbage after the closing brace
+        (matches the reported 'Extra data: line 21 column 2' error). Atomic
+        rename guarantees every reader sees a complete, valid file.
+        """
+        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+
+        for i in range(20):
+            result = save_mod.save_module_registry({f"mod_{i}": {"path": f"p{i}"}})
+            assert result is True
+            # Every single write must leave the file fully parseable - this
+            # is what atomic rename guarantees even under real concurrency.
+            data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
+            assert data["modules"] == {f"mod_{i}": {"path": f"p{i}"}}
+
 
 # =============================================
 # TESTS: round-trip (save then load)

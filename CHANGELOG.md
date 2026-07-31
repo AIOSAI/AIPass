@@ -9,6 +9,172 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — post-v2.7.5
+
+**feat(aipass)** — CLAUDE.md fence for nested projects + return-path breadcrumb
+(DPLAN-0247 follow-through). Root cause found via Patrick's cold `aipass new`
+test: Claude Code loads CLAUDE.md from every ancestor directory (git boundaries
+don't stop the walk), so agents in `projects/<name>/` inherited the host root
+CLAUDE.md and culture file — the newborn ran the host startup ritual its own
+protocol never contained. Gate proven live before building: `claudeMdExcludes`
+in the project's `.claude/settings.local.json`. Shipped through the shared
+scaffold so `init`/`new`/`adopt` all emit it (generation-time path resolution,
+merge-never-clobber, idempotent), `aipass init update` retrofits existing
+tenants, and doctor flags fenceless nested projects. Breadcrumb: `launch_inline`
+now shell-wraps the exec so a return path (`cd <agent home> && claude
+--continue`) prints after the session exits — CC's own hint is cwd-blind and
+fails from any other directory. Built by @aipass (832 tests, 41 new; seedgo
+100%), devpulse-verified E2E: fresh project fence + clean-context probe, sha-
+identical idempotency on the reference tenant, 4 tenants retrofitted live
+(doctor WARN → PASS, env pins preserved). Windows-hardened in two follow-up
+fixes on the same train: `as_posix()` at the generation site (a524461d — settings
+files carry POSIX paths on every platform), then separator-insensitive
+comparison everywhere fences are checked (ed093df6 — `_normalize_exclude` in
+merge-dedupe and doctor's fence detection, so a hand-written backslash fence
+still counts as present and is never rewritten).
+
+## [2026-07-30] — post-v2.7.5
+
+**fix(skills)** — wake-sources script idempotency, live-caught during the T3
+deploy session with Patrick: masking an already-masked GPE returns EINVAL on
+this kernel, so the boot unit's first `enable --now` failed while the
+hand-applied mask was still active (the script's "safe to repeat" comment was
+wrong). GPE write now guarded by a state check, mirroring the existing
+wakeup-toggle guard; proven by re-running the installer against the
+already-applied state — unit green. Devpulse-landed (small cross-branch fix),
+skills notified. **T3 DEPLOYED same session on Patrick's "make it permanent":
+grants refreshed, wake-sources boot unit enabled (masks now persist reboots),
+telegram-bot@base restarted onto the hardened resume logic. DPLAN-0270 freeze
+lifted; remaining: overnight heartbeat soak (T4).**
+reality (Patrick flagged it stale; every claim verified against source, not the
+brief): control verbs + control-center concept, /suspend modes + grants package
+(honestly marked code-only pending DPLAN-0270's T3 deploy), streaming replies
+as a live-edit layer on the Stop-hook flow, user_message_relay's
+dual-registration requirement (hooks.json enable + provider bridge entry,
+`drone @hooks verify` — the half-registration that kept the mirror dead since
+07-14, found and wired live tonight, DPLAN-0272 P0/P2), offline 409/429
+backoffs. Ported-but-unwired table + seedgo bypass reconciled both directions:
+chunk_text/_extract_assistant_text now wired (removed), tmux_manager helpers
+confirmed still unwired (control verbs call tmux directly). Doc + bypass.json
+only — no code, no deploys, freeze intact. Built @skills, devpulse-landed.
+
+**feat(skills)** — /suspend hardening after live phone testing (CODE ONLY —
+deliberately not deployed; Patrick's slow-down ruling, deploy happens in a
+planned test session): (1) resume detection rewritten — wall-clock jump in
+the poll loop is now the primary signal (a >45s gap between iterations =
+the process was frozen = we just resumed; threshold sits above the
+POLL_TIMEOUT+backoff idle ceiling), because systemd on the target machine
+provably never executes /etc/systemd/system-sleep hooks (5 live suspends,
+zero stamps, no errors — cause unknown, worked around); the root hook is
+demoted to optional fallback. (2) Stale-stamp bug fixed — heartbeat
+activation now baselines to the file's current stamp (live-caught: a
+manual test stamp was read as a fresh resume before the suspend even
+started). (3) Installer uses install -D (live-caught: /etc/systemd/
+system-sleep/ didn't exist → install failed). (4) New wake-sources boot
+unit reapplies the gpe4E mask + XHC1/RP0x wakeup disables every reboot
+(live-found: a gpe4E interrupt storm — 8.5M — was yanking the machine out
+of S3 within seconds; masking it took a 60s alarm test from 8–13s sleeps
+to exact-second wake). (5) Spurious-wake absorption tested: wake → grace →
+no command → re-arm+re-suspend, plus a mid-grace slow-iteration edge case
+found while writing the test. 888/888 TG (devpulse re-verified), 26
+suspend tests, seedgo 100%. Built by @skills, live evidence from Patrick's
+phone testing session.: missing-file sweep on every scan
+(`heal_registry.py`). The dead-file auto-close only ran inside
+`create_plan_impl`, so a phantom row died only if a NEW plan of the same
+type happened to be created — DPLAN-0265's auto-close was that coincidence
+(DPLAN-0270 created moments later), while phantom TDPLAN-0015 sat open
+indefinitely because no new TDPLAN ever came (proved empirically: scan
+healed 0, 0015 still open, before the fix). `_heal_missing_file_plans` now
+runs in the per-type doctrine loop — every registered type swept for dead
+file_paths on every scan, independent of create activity. Live: 0015
+auto-closed in one pass, second run healed 0 (idempotent). Also codified:
+a dead-path row can close AND have its number squatted simultaneously —
+independent doctrine cases. 4+1 new tests, 769 green, seedgo 100%. Built
+by @flow (DPLAN-0271), night-shift, devpulse-landed.
+
+**fix(skills)** — `user_message_relay` (terminal→TG mirror) was inert since
+creation, two causes (`user_message_relay.py`): (1) it globbed `bot-*.json`
+for bot configs, but `bot_factory` writes mirror configs as `{bot_id}.json` —
+zero matches ever (the `bot-*.json` naming is real but belongs to the
+PENDING_DIR transcript-relay stream files, a different subsystem);
+(2) `devpulse.json` carries no `chat_id` — added a read-only fallback: a
+single-entry `allowed_user_ids` IS the private-chat id (documented Bot API
+behavior), ambiguous/empty configs still skip silently, no new write path.
+The existing test fixture used the wrong `bot-` prefixed filename itself —
+which is exactly why the bug survived; fixture fixed, 5 regression tests
+added. 882/882 TG green (devpulse re-verified), seedgo 100%. Hook-side fix,
+no bot restarts needed. Built by @skills (FPLAN-0363), closes todo #85 /
+DPLAN-0270 P2 residual. (DPLAN-0270
+P5, night build): suspend the laptop from the control chat. No-arg =
+heartbeat mode (ack → arm RTC alarm via `sudo -n rtcwake -m no` →
+`systemctl suspend`; on each timed wake a root systemd system-sleep hook
+stamps `resume_signal.json`, the bot's poll loop gives a ~100s grace window
+to drain Telegram's server-side queue, stays awake if a command arrived,
+else re-arms and re-suspends). `/suspend 8h`/`45m` = single-wake night mode.
+Root grants ship as reviewable repo drafts (`tools/suspend/`): hardened
+sudoers drop-in (exact binary path), polkit rule scoped to
+`org.freedesktop.login1.suspend` + one user (needed because a `--user`
+service is not an "active session" for polkit), system-sleep hook, and a
+one-shot installer (`visudo -c` validated) — nothing installs or suspends
+until Patrick runs it. Failure paths abort before suspending and name the
+missing grant. 20 new tests (subprocess fully mocked), 877/877 TG green,
+seedgo 100%. Built by @skills (FPLAN-0362), devpulse-verified + landed.
+`systemctl suspend` is async per man systemctl — the sleep-hook signal file
+is the only reliable resume marker; that finding drove the design.
+
+## [2026-07-29] — post-v2.7.5
+
+**feat(skills)** — Telegram control verbs v1+v1.1 (`base_bot.py`,
+`telegram_standards.py`): the bot chat is now a control plane — `/status`
+(honest `aipass-*` tmux session listing), `/start <branch>` (wake:
+attach-or-respawn via `claude -c`, no longer a welcome stub), `/kill <branch>`
+(deterministic bot-side `tmux kill-session`, no LLM in the loop) — works with
+zero Claude PIDs running. v1.1 root-cause: there is no separate "aipass" bot —
+Patrick's control-center chat IS `bot_id=base` with `branch_name: "aipass"`
+persisted, so v1's `branch_name is None` gate silently excluded it; new
+`_is_control_bot()` (base or aipass) fixes the gate, BotFather menu
+re-registered live (7 commands, `/kill` new, `/start` label corrected —
+verified via `getMyCommands` against the running bot). Supersedes FPLAN-0289
+"attach-not-spawn" for explicit control verbs (guard stays for plain
+messages). Live phone test passed: kill/start "like a switch". 857/857 TG +
+1109/1109 skills tests, seedgo 100%. Built by @skills (FPLAN-0360),
+design DPLAN-0270, devpulse-landed.
+
+**fix(prax)** — `prax_registry.json` torn-write corruption
+(`registry/save.py`): the shared module registry was written with plain
+`open('w')+json.dump` by every prax-initialized process (each telegram bot,
+each branch process, plus the ecosystem-wide file watcher they all run) —
+concurrent truncate-and-write races interleaved and left trailing garbage
+("Extra data: line 21 column 2", 109 load-failure spams in the base bot log).
+Now atomic: temp file + fsync + `os.replace`, matching `json_handler.py`'s
+proven pattern. 1067/1067 prax tests green, 2 regression tests added (no
+leftover tmp files; 20x sequential saves all parseable). Built by @prax
+(FPLAN-0358), devpulse-landed. (`heal_registry.py`, wired into
+the normal registry scan): plan-number conflicts now resolve themselves —
+number collisions (a different live file squatting on a closed row's number),
+unregistered plan files, and wrong-prefix ghost rows (the FPLAN-0011 recovery
+class) all heal by renumber-and-register. Original registry rows are never
+touched, `.md` files never renamed. Path-level idempotency index prevents the
+same squatter re-registering under a fresh number every scan (caught live:
+first version minted 3 duplicate opens per cadence cycle; twice-run proof now
+in the test suite — second scan must heal zero). `dropbox` added to
+IGNORE_FOLDERS (exact-match, received-files dirs never auto-register — 802
+plans under `.backup` were already correctly ignored) and the ignore policy
+is documented in flow's README. Live results: healed the 0165 collision +
+0175 unregistered file Patrick's plan audit surfaced, plus 2 more of the same
+classes found on its own. 763 tests green, seedgo 100%. Doctrine per Patrick:
+flow always auto-heals — never manual registry resolution (compass #186/#190).
+
+## [2026-07-28] — post-v2.7.5
+
+**fix(skills)** — Telegram `base_bot` error-classification: 409 conflict
+handling (v1.4.1) + 429 rate-limit backoff (v1.4.2). A 429 was previously
+unclassified — generic branch, zero delay, tight re-poll loop against an
+API that just said back off. Now honors Telegram's `retry_after` from the
+response body (30s fallback via `_extract_retry_after`, same pattern as
+`_stream_edit`). 839/839 TG + 252/252 skills tests green. Built by
+@skills from medic threads a495228a/c042d846, devpulse-landed.
+
 ## [2026-07-28]
 
 **fix(ci)** — ruff config pinned against 0.16.0's default expansion

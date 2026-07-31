@@ -275,6 +275,7 @@ def handle_standard_command(
     session_name: str,
     branch_name: str,
     bot_name: str,
+    standard_commands: Optional[dict[str, dict[str, str]]] = None,
     custom_commands: Optional[dict[str, dict[str, str]]] = None,
     chat_id: Optional[str | int] = None,
     message_count: Optional[int] = None,
@@ -296,6 +297,7 @@ def handle_standard_command(
         session_name: tmux session name (e.g., "telegram-assistant").
         branch_name: Branch name (e.g., "assistant").
         bot_name: Display name of the bot.
+        standard_commands: Command registry dict. Defaults to STANDARD_COMMANDS.
         custom_commands: Optional bot-specific commands for help text.
         chat_id: Optional Telegram chat ID (for /status display).
         message_count: Optional message count (for /status display).
@@ -312,11 +314,12 @@ def handle_standard_command(
         return build_welcome_text(
             bot_name=bot_name,
             branch_name=branch_name,
+            standard_commands=standard_commands,
             custom_commands=custom_commands,
         )
 
     if command == "help":
-        return build_help_text(custom_commands=custom_commands)
+        return build_help_text(standard_commands=standard_commands, custom_commands=custom_commands)
 
     if command == "new":
         response_text = f"Session cleared for @{branch_name}. Next message starts fresh."

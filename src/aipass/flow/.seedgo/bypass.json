@@ -114,6 +114,12 @@
       "reason": "Cross-handler import of plan_type_loader \u2014 registry loader needs type discovery for auto-healing orphaned entries"
     },
     {
+      "file": "apps/handlers/registry/heal_registry.py",
+      "standard": "handlers",
+      "category": "architectural",
+      "reason": "Cross-handler imports of close_helpers (_self_heal_unregistered_plan, _find_relocated_plan) and registry_routing (_load_template_registry) \u2014 doctrine heal deliberately reuses the already-tested close-path self-heal mechanic instead of forking a second copy of it"
+    },
+    {
       "file": "apps/modules/create_plan.py",
       "standard": "naming",
       "category": "false_positive",
@@ -415,6 +421,18 @@
     },
     {
       "file": "tests/test_monitor_registry.py",
+      "standard": "encapsulation",
+      "category": "false_positive",
+      "reason": "Unit tests import handlers directly to test implementation functions in isolation"
+    },
+    {
+      "file": "tests/test_heal_registry.py",
+      "standard": "architecture",
+      "category": "false_positive",
+      "reason": "Test files live in tests/ by convention, not in the apps/ 3-layer structure"
+    },
+    {
+      "file": "tests/test_heal_registry.py",
       "standard": "encapsulation",
       "category": "false_positive",
       "reason": "Unit tests import handlers directly to test implementation functions in isolation"

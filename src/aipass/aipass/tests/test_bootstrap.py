@@ -640,6 +640,105 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# update_project — claudeMdExcludes retrofit (nested projects/<name> fence)
+# ---------------------------------------------------------------------------
+
+
+def _make_nested_project(tmp_path):
+    """<host>/projects/<name> with registries at both levels (is_projects_child == True)."""
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "HOST_REGISTRY.json").write_text("{}", encoding="utf-8")
+    projects = host / "projects"
+    projects.mkdir()
+    target = projects / "myapp"
+    target.mkdir()
+    (target / "MYAPP_REGISTRY.json").write_text("{}", encoding="utf-8")
+    return host, target
+
+
+def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_path, monkeypatch):
+    """update_project adds claudeMdExcludes to an existing settings.local.json that only has env.AIPASS_HOME.
+
+    Real-world case: a nested project created before the fence feature shipped
+    has env.AIPASS_HOME but no claudeMdExcludes — running update_project must
+    retrofit the fence without disturbing the existing env block.
+    """
+    from aipass.aipass.apps.handlers.init import bootstrap
+
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+
+    claude_dir = target / ".claude"
+    claude_dir.mkdir()
+    local_settings_path = claude_dir / "settings.local.json"
+    local_settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(host)}}, indent=2) + "\n", encoding="utf-8")
+
+    result = bootstrap.update_project(target)
+
+    data = json.loads(local_settings_path.read_text(encoding="utf-8"))
+    assert data["env"]["AIPASS_HOME"] == str(host)
+    assert data["claudeMdExcludes"] == [(host / "CLAUDE.md").as_posix(), (host / ".claude" / "CLAUDE.md").as_posix()]
+    assert str(local_settings_path) in result["updated_files"]
+
+
+def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):
+    """Running update_project a second time after the retrofit reports no further changes."""
+    from aipass.aipass.apps.handlers.init import bootstrap
+
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+
+    claude_dir = target / ".claude"
+    claude_dir.mkdir()
+    local_settings_path = claude_dir / "settings.local.json"
+    local_settings_path.write_text(json.dumps({"env": {"AIPASS_HOME": str(host)}}, indent=2) + "\n", encoding="utf-8")
+
+    result1 = bootstrap.update_project(target)
+    before = local_settings_path.read_text(encoding="utf-8")
+    result2 = bootstrap.update_project(target)
+    after = local_settings_path.read_text(encoding="utf-8")
+
+    assert str(local_settings_path) in result1["updated_files"]
+    assert str(local_settings_path) in result2["already_current"]
+    assert str(local_settings_path) not in result2["updated_files"]
+    assert before == after
+
+
+def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, monkeypatch):
+    """update_project unions in the official fence entries without dropping a user's hand-added ones."""
+    from aipass.aipass.apps.handlers.init import bootstrap
+
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+
+    claude_dir = target / ".claude"
+    claude_dir.mkdir()
+    local_settings_path = claude_dir / "settings.local.json"
+    custom_entry = "/custom/extra/CLAUDE.md"
+    local_settings_path.write_text(
+        json.dumps(
+            {"env": {"AIPASS_HOME": str(host)}, "claudeMdExcludes": [custom_entry]},
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bootstrap.update_project(target)
+
+    data = json.loads(local_settings_path.read_text(encoding="utf-8"))
+    assert data["claudeMdExcludes"] == [
+        custom_entry,
+        (host / "CLAUDE.md").as_posix(),
+        (host / ".claude" / "CLAUDE.md").as_posix(),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # DPLAN-0190: hooks.json + /memo tests
 # ---------------------------------------------------------------------------
 

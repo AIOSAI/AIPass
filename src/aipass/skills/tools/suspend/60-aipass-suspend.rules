@@ -1,0 +1,21 @@
+// AIPass /suspend control verb — DPLAN-0270 P5.
+// Installed to /etc/polkit-1/rules.d/60-aipass-suspend.rules (root:root 0644).
+//
+// Grants org.freedesktop.login1.suspend to exactly one user (patrick) on
+// this single-user personal laptop. Needed because the telegram bot runs
+// as a systemd --user service, not attached to Patrick's active logind
+// session — polkit's implicit defaults for this action are
+// "implicit active: yes" but "implicit any/inactive: auth_admin_keep"
+// (confirmed via `pkaction --action-id org.freedesktop.login1.suspend
+// --verbose`), so a --user-service-invoked suspend would otherwise be
+// treated as non-active and fail non-interactively without this rule.
+//
+// Deliberately scoped to ONLY org.freedesktop.login1.suspend — NOT
+// org.freedesktop.login1.suspend-multiple-sessions, which is out of scope
+// for a single-user machine.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.login1.suspend" &&
+        subject.user == "patrick") {
+        return polkit.Result.YES;
+    }
+});
