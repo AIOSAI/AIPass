@@ -9,7 +9,20 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-07-31] — post-v2.7.5
+## [2026-07-31] — v2.7.6
+
+**fix(tests)** — random-test audit hardening, three branches. A usefulness
+audit (random sampling across all suites) found brittleness in good tests, not
+junk: drone's commit test-gate tests stubbed `subprocess.run` with ordered
+canned results that could misalign silently if the pipeline gained a call — now
+a `_assert_ordered_calls` helper verifies each recorded argv matches the step
+its canned result was written for (applied to all 6 ordered-stub tests, guard
+proven against synthetic misalignment). trigger's SIGTERM shutdown test traded
+its flaky fixed 50ms sleep for a deadline poll. ai_mail's `on_email_delivered`
+dropped 4 dead parameters — a legacy hook shape; its `update_central()` rescans
+inboxes itself, so per-delivery counts were never part of the contract (both
+call sites + 5 tests updated). Fixes built by the owning branches on dispatch,
+devpulse-verified.
 
 **feat(aipass)** — CLAUDE.md fence for nested projects + return-path breadcrumb
 (DPLAN-0247 follow-through). Root cause found via Patrick's cold `aipass new`

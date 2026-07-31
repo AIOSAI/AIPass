@@ -58,7 +58,8 @@ drone @git fix                       # fix broken states
  - After completing work, `drone @git status`. Suggest a commit if coherent — don't force.
  - Before any drone write-op (push, merge, mail, PR), weigh reversibility + blast radius — approval once is not approval forever; act within the scope given.
  - Workflow: commit → dev-pr → suggest we check CI once the run is complete. Every commit must be pushed; local-only commits are invisible. After fixing CI, push immediately (dev-pr "PR already open" = pushed).
- - CHANGELOG: update `CHANGELOG.md` when committing — one entry per merge under the current dated section, as work lands, not batched. Merge to main at users request + tag on demand.
+ - CHANGELOG: update `CHANGELOG.md` when committing — one entry per merge under the current dated section, as work lands, not batched.
+ - **EVERY dev→main merge runs the merge playbook — no exceptions, unprompted.** Stamp BEFORE merging: `drone @flow create . "Merge train PR#N — summary" merge pplan`, work its checklist top to bottom (version bump + release tag are STANDING steps — PATCH every merge, S318), fill Run Summary, close it. Never `drone @git merge` with no open merge PPLAN. Patrick test-caught a raw merge 2026-07-31 — he should never have to remind you.
  - Never `docker cp` into containers unless asked by user. Merge PR → pull → test.
 
 # Dispatch — fresh vs continue

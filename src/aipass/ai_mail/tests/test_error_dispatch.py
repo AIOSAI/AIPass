@@ -158,23 +158,22 @@ def test_dispatch_send_error_passes_correct_email_data(monkeypatch):
 def test_on_email_delivered_with_central_callback():
     """Central callback is invoked when provided."""
     update_fn = MagicMock()
-    branch_path = "/some/path"
 
-    on_email_delivered(branch_path, 3, 1, 10, update_central_fn=update_fn)
+    on_email_delivered(update_central_fn=update_fn)
 
     update_fn.assert_called_once_with()
 
 
 def test_on_email_delivered_with_none_callbacks():
     """No error when callback is None."""
-    on_email_delivered("/some/path", 3, 1, 10, None)
+    on_email_delivered(None)
 
 
 def test_on_email_delivered_central_failure_does_not_raise():
     """Central update failure is caught silently."""
     update_fn = MagicMock(side_effect=RuntimeError("central broken"))
 
-    on_email_delivered("/some/path", 3, 1, 10, update_central_fn=update_fn)
+    on_email_delivered(update_central_fn=update_fn)
 
     update_fn.assert_called_once()
 
@@ -183,6 +182,6 @@ def test_on_email_delivered_central_fail_no_exception():
     """Central callback failing does not raise any exception."""
     update_fn = MagicMock(side_effect=RuntimeError("update fail"))
 
-    on_email_delivered("/some/path", 3, 1, 10, update_central_fn=update_fn)
+    on_email_delivered(update_central_fn=update_fn)
 
     update_fn.assert_called_once()

@@ -284,13 +284,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     _repo_root = find_repo_root()
 
     def _delivery_callback(branch_path, new_count, opened_count, total):
-        on_email_delivered(
-            branch_path,
-            new_count,
-            opened_count,
-            total,
-            update_central_fn=update_central,
-        )
+        on_email_delivered(update_central_fn=update_central)
 
     try:
         user_info = resolve_sender_info(from_branch, _repo_root, _ai_mail_dir, get_branch_by_email, get_current_user)

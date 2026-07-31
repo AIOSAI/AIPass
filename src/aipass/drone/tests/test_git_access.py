@@ -317,6 +317,36 @@ class TestStageBranchDir:
         assert "failed" in result["message"].lower()
 
 
+def _assert_ordered_calls(mock_run: MagicMock, expected: list[tuple[tuple[str, ...], tuple[str, ...]]]) -> None:
+    """Assert subprocess.run's recorded calls match expected (required, forbidden) argv markers, in order.
+
+    An ordered side_effect list feeds canned results by position, not by argv match. If
+    commit_handler gains, drops, or reorders a subprocess call, a canned result silently
+    feeds the wrong step and the test can keep passing while testing nonsense. This checks
+    the real argv at each position against the step it was written for.
+    """
+    calls = mock_run.call_args_list
+    assert len(calls) == len(expected), (
+        f"expected {len(expected)} subprocess.run calls, got {len(calls)}: {[c.args[0] for c in calls]}"
+    )
+    for call, (required, forbidden) in zip(calls, expected):
+        argv = call.args[0]
+        for marker in required:
+            assert marker in argv, f"expected {marker!r} in argv {argv!r} (call order mismatch?)"
+        for marker in forbidden:
+            assert marker not in argv, f"unexpected {marker!r} in argv {argv!r} (call order mismatch?)"
+
+
+_RUFF_FIX = (("check", "--fix"), ())
+_RUFF_FORMAT = (("format",), ("--fix",))
+_RUFF_GATE = (("check",), ("--fix",))
+_GIT_STATUS = (("status", "--porcelain"), ())
+_PYTEST = (("-m", "pytest"), ())
+_GIT_ADD_ALL = (("add", "-A"), ())
+_GIT_DIFF_CACHED = (("diff", "--cached"), ())
+_GIT_COMMIT = (("commit", "-m"), ())
+
+
 class TestCommitChanges:
     """Commit handler tests."""
 
@@ -327,11 +357,12 @@ class TestCommitChanges:
         with patch(
             "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
             side_effect=[mock_diff, mock_commit],
-        ):
+        ) as mock_run:
             result = commit_changes("test commit")
 
         assert result["exit_code"] == 0
         assert "abc123" in result["stdout"]
+        _assert_ordered_calls(mock_run, [_GIT_DIFF_CACHED, _GIT_COMMIT])
 
     def test_commit_nothing_staged(self, repo_dir: Path) -> None:
         mock_diff = MagicMock(returncode=0, stdout="", stderr="")
@@ -366,11 +397,15 @@ class TestCommitChanges:
                     mock_diff,
                     mock_commit,
                 ],
-            ),
+            ) as mock_run,
         ):
             result = commit_changes("all commit", branch_dir=branch_dir, all_files=True)
 
         assert result["exit_code"] == 0
+        _assert_ordered_calls(
+            mock_run,
+            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+        )
 
     def test_commit_all_blocks_on_test_failure(self, repo_dir: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
@@ -398,13 +433,14 @@ class TestCommitChanges:
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[mock_ruff_fix, mock_ruff_format, mock_ruff_gate, mock_status, mock_pytest],
-            ),
+            ) as mock_run,
         ):
             result = commit_changes("fail commit", all_files=True)
 
         assert result["exit_code"] == 1
         assert "Test failures" in result["stderr"]
         assert "drone" in result["stderr"]
+        _assert_ordered_calls(mock_run, [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST])
 
     def test_commit_all_passes_with_green_tests(self, repo_dir: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
@@ -440,11 +476,15 @@ class TestCommitChanges:
                     mock_diff,
                     mock_commit,
                 ],
-            ),
+            ) as mock_run,
         ):
             result = commit_changes("green commit", all_files=True)
 
         assert result["exit_code"] == 0
+        _assert_ordered_calls(
+            mock_run,
+            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+        )
 
     def test_commit_all_skips_branches_without_tests(self, repo_dir: Path) -> None:
         mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
@@ -472,11 +512,15 @@ class TestCommitChanges:
                     mock_diff,
                     mock_commit,
                 ],
-            ),
+            ) as mock_run,
         ):
             result = commit_changes("no tests commit", all_files=True)
 
         assert result["exit_code"] == 0
+        _assert_ordered_calls(
+            mock_run,
+            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+        )
 
     def test_commit_os_error(self, repo_dir: Path) -> None:
         mock_diff = MagicMock(returncode=1, stdout="", stderr="")
@@ -484,11 +528,12 @@ class TestCommitChanges:
         with patch(
             "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
             side_effect=[mock_diff, OSError("git not found")],
-        ):
+        ) as mock_run:
             result = commit_changes("test commit")
 
         assert result["exit_code"] == 1
         assert "failed" in result["stderr"].lower()
+        _assert_ordered_calls(mock_run, [_GIT_DIFF_CACHED, _GIT_COMMIT])
 
 
 # ===========================================================================
