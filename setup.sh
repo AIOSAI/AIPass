@@ -391,24 +391,26 @@ GIT_NAME=$(git config --global user.name 2>/dev/null || true)
 if [ -z "$GIT_EMAIL" ] || [ -z "$GIT_NAME" ]; then
     echo ""
     echo "Git identity not configured — commits will fail without it."
-    DEFAULT_EMAIL="aipass.system@gmail.com"
-    DEFAULT_NAME="AIOSAI"
     if [ -t 0 ]; then
-        # Interactive — prompt with defaults
-        read -r -p "  Git user.email [$DEFAULT_EMAIL]: " INPUT_EMAIL
-        read -r -p "  Git user.name  [$DEFAULT_NAME]: " INPUT_NAME
-        GIT_EMAIL="${INPUT_EMAIL:-$DEFAULT_EMAIL}"
-        GIT_NAME="${INPUT_NAME:-$DEFAULT_NAME}"
+        # Interactive — no defaults. Git needs a real identity, not ours.
+        echo "  Git needs a name and email to attribute commits to you — this is yours, not ours."
+        while [ -z "$GIT_EMAIL" ]; do
+            read -r -p "  Git user.email: " GIT_EMAIL
+            [ -z "$GIT_EMAIL" ] && echo "  Can't be blank — git needs an email to attribute commits."
+        done
+        while [ -z "$GIT_NAME" ]; do
+            read -r -p "  Git user.name: " GIT_NAME
+            [ -z "$GIT_NAME" ] && echo "  Can't be blank — git needs a name to attribute commits."
+        done
+        git config --global user.email "$GIT_EMAIL"
+        git config --global user.name "$GIT_NAME"
+        git config --global pull.rebase true
+        echo "  Git identity set: $GIT_NAME <$GIT_EMAIL>"
     else
-        # Non-interactive — use defaults
-        GIT_EMAIL="$DEFAULT_EMAIL"
-        GIT_NAME="$DEFAULT_NAME"
-        echo "  Non-interactive mode — using defaults ($GIT_EMAIL / $GIT_NAME)"
+        # Non-interactive — never guess an identity. Skip and warn.
+        echo "  Non-interactive mode — skipping. Run 'git config --global user.email \"you@example.com\"'"
+        echo "  and 'git config --global user.name \"Your Name\"' yourself before committing."
     fi
-    git config --global user.email "$GIT_EMAIL"
-    git config --global user.name "$GIT_NAME"
-    git config --global pull.rebase true
-    echo "  Git identity set: $GIT_NAME <$GIT_EMAIL>"
 else
     echo "Git identity: $GIT_NAME <$GIT_EMAIL>"
 fi
@@ -464,12 +466,16 @@ fi
 echo ""
 echo "Bootstrapping branch identity files ..."
 
+BRANCH_COUNT=0
+
 bootstrap_branch() {
     local name="$1"
     local path="$2"
     local citizen_class="$3"
     local role="$4"
     local created=0
+
+    BRANCH_COUNT=$((BRANCH_COUNT + 1))
 
     # .trinity/passport.json + local.json + observations.json
     # DPLAN-0263 P2: rendered from spawn's own aipass_framework/manager templates
@@ -577,7 +583,7 @@ bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "
 # once claimed backup/commons/daemon/skills were external — they returned to core
 # long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
 
-echo "  13 branches bootstrapped"
+echo "  $BRANCH_COUNT branches bootstrapped"
 
 # --- Seed branch config files from .example defaults ---
 # Some branches need a config file that's gitignored (contains local state).
@@ -1117,6 +1123,7 @@ if [ "$FAIL" -eq 0 ]; then
             PROJECT_DIR="$INIT_PROJECT"
             if [ -z "$PROJECT_DIR" ] && [ "$INIT_HEADLESS" -eq 0 ] && [ -t 0 ]; then
                 echo "AIPass projects live in their own directory, never inside the engine repo."
+                echo "  Press Enter to set one up now (recommended), or type n to skip."
                 read -r -p "Set up your first project now? [Y/n]: " INIT_REPLY
                 case "$INIT_REPLY" in
                     [nN]*)
@@ -1124,8 +1131,15 @@ if [ "$FAIL" -eq 0 ]; then
                         echo "  Skipped. Run 'aipass init run' in a fresh directory when ready."
                         ;;
                     *)
+                        echo "  Press Enter to accept the safe default path shown below, or type a"
+                        echo "  name/path to use instead — a bare name is created under $HOME, never here."
                         read -r -p "  Project directory [$DEFAULT_PROJECT_DIR]: " INIT_INPUT
-                        PROJECT_DIR="${INIT_INPUT:-$DEFAULT_PROJECT_DIR}"
+                        INIT_INPUT="${INIT_INPUT:-$DEFAULT_PROJECT_DIR}"
+                        case "$INIT_INPUT" in
+                            /*) PROJECT_DIR="$INIT_INPUT" ;;
+                            "~"|"~/"*) PROJECT_DIR="${INIT_INPUT/#\~/$HOME}" ;;
+                            *) PROJECT_DIR="$HOME/$INIT_INPUT" ;;
+                        esac
                         ;;
                 esac
             elif [ -z "$PROJECT_DIR" ]; then

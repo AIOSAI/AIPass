@@ -58,6 +58,8 @@ cd AIPass
 
 One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet, then walks you through a guided init — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report in hand: it welcomes you, asks your name once, shows you around, and checks what your machine still needs — every machine is different.
 
+Along the way, in an interactive shell, expect two prompts: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so there's no default to accept) and your **first project's directory** (Enter accepts the safe default under your home directory; typing a bare name creates it there too, never in the cloned repo).
+
 Come back tomorrow, say "hi", and it picks up exactly where you left off. That's the whole interface.
 
 <!-- GIF SLOT 2 — memory payoff (~15s): close the terminal, reopen, "hi", the agent recalls yesterday.

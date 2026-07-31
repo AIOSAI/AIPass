@@ -279,19 +279,35 @@ def _check_and_fix_owner(home: Path) -> None:
         logger.warning("[install] owner check skipped: %s", exc)
 
 
+def _anchor_project_dir(raw: str) -> Path:
+    """Resolve typed project-dir input — bare/relative names anchor to home, never CWD.
+
+    CWD during install is the cloned engine repo, not the user's home — a bare
+    name like ``dockertest`` must become ``~/dockertest``, not ``<engine>/dockertest``
+    (which trips init's own-tree preflight guard).
+    """
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (DEFAULT_PROJECT.parent / candidate).resolve()
+
+
 def _resolve_project_dir(project: str | None, non_interactive: bool) -> Path | None:
     """Resolve the first-project directory — --project / prompt / DEFAULT_PROJECT."""
     if project:
         return Path(project).expanduser().resolve()
     if non_interactive:
         return DEFAULT_PROJECT.resolve()
+    console.print(
+        f"  [dim]Enter = use the path shown below, or type a name to create it under {DEFAULT_PROJECT.parent}[/dim]"
+    )
     try:
         raw = _prompt("Project directory for your first project", str(DEFAULT_PROJECT))
     except KeyboardInterrupt:
         logger.info("[install] init handoff cancelled by user")
         console.print()
         return None
-    return Path(raw).expanduser().resolve()
+    return _anchor_project_dir(raw)
 
 
 def run_install(

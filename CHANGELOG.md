@@ -9,6 +9,43 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — v2.7.7
+
+**fix(prax)** — event-queue self-feeding warning firehose (live-caught at 3
+cores burned). When the monitoring queue fills, every dropped event logged a
+warning into `event_queue.log` — a log prax itself watches — so each warning
+spawned a new `type=log, branch=PRAX` event that also failed to enqueue:
+20–80 warnings/sec sustained, log rotating in seconds, log_watcher at 88%
+CPU, prax monitor at 65%, four Telegram bots at ~25% each. Fix: drop warnings
+are rate-limited to one per 30s carrying a dropped-count, the exception now
+renders with `!r` (`queue.Full` has an empty `str()`, which is why the log
+showed a blank reason), and `event_queued` operations are recorded only for
+events that actually queued (was: every attempt, another per-event write into
+a watched log). Proven: 500 forced drops → exactly 1 warning; post-restart
+CPU settled 88%→0% / 65%→2%, bots to idle. Devpulse surgical fix, @prax
+notified for the deeper design pass (drop-oldest policy, why the queue filled).
+
+**fix(onboarding)** — Docker cold-install test findings, five UX fixes
+(DPLAN-0274). Patrick ran the fresh-user journey (clean Ubuntu container, no
+AIPass state, README only) and first-project setup failed twice identically.
+Fixes: (1) a typed bare project name anchored to CWD — the cloned engine repo —
+and tripped init's own-tree guard; both the setup.sh handoff (the path a fresh
+clone actually runs) and install.py's mirrored copy now anchor non-absolute
+input to `$HOME`, never CWD. (2) Both prompts now say explicitly what Enter
+does vs typing a name (stranger test: zero-context users must be able to tell).
+(3) Git-identity defaults were OUR identity — a stranger pressing Enter became
+`AIOSAI <aipass.system@gmail.com>`; defaults removed, interactive re-prompts
+until real values, non-interactive skips with a warning instead of guessing.
+(4) Bootstrap summary hardcoded "13 branches" while 17 bootstrap; now a live
+counter. (5) Preflight errors distinguish the engine repo from a real project
+and hints carry real paths; README now names both prompts ahead of time.
+Built by @aipass on dispatch (832 tests, seedgo 100%), devpulse-verified:
+both anchor implementations proven against bare/absolute/tilde/relative
+inputs. Companion: `Dockerfile.test` now installs bubblewrap, ripgrep, and
+`@anthropic-ai/sandbox-runtime` so Claude Code can sandbox in-container.
+
+---
+
 ## [2026-07-31] — v2.7.6
 
 **fix(tests)** — random-test audit hardening, three branches. A usefulness
