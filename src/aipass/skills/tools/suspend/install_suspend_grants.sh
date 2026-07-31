@@ -46,7 +46,10 @@ echo "Installing spurious-wake-source masking script + boot unit..."
 install -D -o root -g root -m 0755 "$SRC_DIR/aipass-wake-sources.sh" /usr/local/sbin/aipass-wake-sources.sh
 install -D -o root -g root -m 0644 "$SRC_DIR/aipass-wake-sources.service" /etc/systemd/system/aipass-wake-sources.service
 systemctl daemon-reload
-systemctl enable --now aipass-wake-sources.service
+systemctl enable aipass-wake-sources.service
+# restart, not `enable --now`: --now won't re-run an already-active unit, so a
+# re-install would deploy a fixed script without executing it (live-caught)
+systemctl restart aipass-wake-sources.service
 
 echo "Done. No suspend was triggered — this only installed the grants."
 echo "Live-test sequence:"

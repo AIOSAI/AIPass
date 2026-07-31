@@ -24,7 +24,10 @@ WAKEUP_FILE="/proc/acpi/wakeup"
 WAKE_DEVICES=(XHC1 RP01 RP02 RP03 RP05 RP06)
 
 if [ -w "$GPE_FILE" ]; then
-    if grep -q "masked" "$GPE_FILE"; then
+    # -w: the unmasked state's line contains "unmasked", which a plain
+    # substring match also hits (live-caught on the first post-install boot:
+    # the guard skipped masking a fresh, unmasked GPE)
+    if grep -qw "masked" "$GPE_FILE"; then
         echo "$GPE_FILE already masked — skipping"
     else
         echo mask > "$GPE_FILE"
