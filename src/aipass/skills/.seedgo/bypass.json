@@ -211,8 +211,8 @@
     {
       "file": "lib/telegram/apps/handlers/base_bot.py",
       "standard": "unused_function",
-      "functions": ["chunk_text", "on_response", "_read_transcript_tail", "_extract_assistant_text"],
-      "reason": "DPLAN-0220/DPLAN-0226 — chunk_text + on_response are ported-but-unwired (Dev-Pass). _read_transcript_tail + _extract_assistant_text are DPLAN-0226 OUT relay infrastructure: built and tested, wiring pending end-to-end integration."
+      "functions": ["on_response", "_read_transcript_tail"],
+      "reason": "DPLAN-0220/DPLAN-0226 — on_response is ported-but-unwired (Dev-Pass, Wave-2 design call). _read_transcript_tail is DPLAN-0226 OUT relay infrastructure: built and tested, wiring pending end-to-end integration. chunk_text and _extract_assistant_text removed from this bypass — both now wired (chunk_text: scheduler_bot.py; _extract_assistant_text: base_bot.py)."
     },
     {
       "file": "lib/telegram/apps/handlers/bot_operations.py",

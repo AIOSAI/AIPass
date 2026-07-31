@@ -11,6 +11,19 @@ PyPI version — not the changelog header.
 
 ## [2026-07-30] — post-v2.7.5
 
+**docs(skills)** — telegram SKILL.md refreshed v1.0.0 → 1.4.0 against shipped
+reality (Patrick flagged it stale; every claim verified against source, not the
+brief): control verbs + control-center concept, /suspend modes + grants package
+(honestly marked code-only pending DPLAN-0270's T3 deploy), streaming replies
+as a live-edit layer on the Stop-hook flow, user_message_relay's
+dual-registration requirement (hooks.json enable + provider bridge entry,
+`drone @hooks verify` — the half-registration that kept the mirror dead since
+07-14, found and wired live tonight, DPLAN-0272 P0/P2), offline 409/429
+backoffs. Ported-but-unwired table + seedgo bypass reconciled both directions:
+chunk_text/_extract_assistant_text now wired (removed), tmux_manager helpers
+confirmed still unwired (control verbs call tmux directly). Doc + bypass.json
+only — no code, no deploys, freeze intact. Built @skills, devpulse-landed.
+
 **feat(skills)** — /suspend hardening after live phone testing (CODE ONLY —
 deliberately not deployed; Patrick's slow-down ruling, deploy happens in a
 planned test session): (1) resume detection rewritten — wall-clock jump in
