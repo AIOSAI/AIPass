@@ -9,6 +9,25 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — v2.7.8
+
+**feat(onboarding)** — the cold install now ends in a conversation, not
+project creation (DPLAN-0274, Patrick's ruling: "end with in a chat with
+@aipass to welcome the new user"). A fresh clone's `./aipass install` execs
+`setup.sh`, which never had the v2.7.3 chat machinery — it dead-ended in a
+first-project prompt instead. setup.sh's tail now routes into the existing
+handoff (`aipass install --chat-only --path <repo>` → `_build_install_prompt`
++ `launch_inline`), so the welcome prompt is composed in exactly one place;
+nothing is duplicated in bash. Project creation is removed from the cold
+install on BOTH paths (setup.sh first-project block, install.py
+`_handoff_to_init` chain + `--project`/`--no-init`/`--with-init` flags —
+replaced by `--no-chat`/`--chat-only`); `aipass init run` stays the separate,
+later step the concierge points users at. Truth pass on the root launcher
+help, `aipass install` help, README (the v2.7.7 "first project's directory"
+prompt line is gone — the only install prompt left is git identity), and
+CONTRIBUTING. TTY/CI-gated: headless shells print a run-`claude`-later
+breadcrumb and exit 0. 831 aipass tests green.
+
 ## [2026-07-31] — v2.7.7
 
 **fix(prax)** — event-queue self-feeding warning firehose (live-caught at 3

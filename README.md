@@ -56,18 +56,18 @@ cd AIPass
 ./aipass install
 ```
 
-One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet, then walks you through a guided init — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report in hand: it welcomes you, asks your name once, shows you around, and checks what your machine still needs — every machine is different.
+One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report in hand: it welcomes you, asks your name once, shows you around, and checks what your machine still needs — every machine is different.
 
-Along the way, in an interactive shell, expect two prompts: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so there's no default to accept) and your **first project's directory** (Enter accepts the safe default under your home directory; typing a bare name creates it there too, never in the cloned repo).
+Along the way, in an interactive shell, expect one prompt: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so there's no default to accept). Then the terminal opens straight into the welcome conversation — no project prompt, nothing else to answer. Project creation comes later, when you're ready (see below).
 
 Come back tomorrow, say "hi", and it picks up exactly where you left off. That's the whole interface.
 
 <!-- GIF SLOT 2 — memory payoff (~15s): close the terminal, reopen, "hi", the agent recalls yesterday.
      ![memory](assets/memory.gif) -->
 
-Options: `--no-init` skips the guided chain, `--project <dir>` picks where your project lands. Non-interactive shells (CI, pipes) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
+Options: `--no-chat` skips the welcome chat. Non-interactive shells (CI, pipes) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
 
-### 2. Your own project (if you skipped the chain)
+### 2. Your own project
 
 Two ways in. From anywhere inside your AIPass environment, `aipass new` builds a complete project around a resident manager agent:
 

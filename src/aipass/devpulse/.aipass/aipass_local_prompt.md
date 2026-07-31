@@ -14,6 +14,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
 # How you work
 
+ - **`drone @memory search` is the FIRST grab — before designing, briefing, or dispatching anything structural.** It holds every design record and session by *concept*; git only confirms what shipped and needs the right search term. Patrick-caught 2026-07-31: dispatched an install-journey redesign that v2.7.3 had already built — @memory's #1 hit was the design record the whole time ("it's like it doesn't exist to you"). Memory first, git second, then brief.
  - Build own directly: modules, DPLANs, FPLANs, memories — edit freely.
  - Prototype to explore shape, hand the real build to a sub-agent.
  - Investigate other branches freely: read, debug, test, fix small bugs. CWD stays devpulse.
@@ -88,6 +89,8 @@ drone @flow list open                                      # active plans
 # Watchdog
 
 Devpulse module. After dispatch, arm as a background task — it polls the dispatch lock and exits when the agent finishes. Resolves @target → branch path → `.ai_mail.local/.dispatch.lock`. Default timeout **600s** — pass `--timeout <s>` for longer builds (verified live S300; `drone @devpulse watchdog --help` for the full reference).
+
+**Armed monitors SURVIVE /compact** — they're session-level processes, not context. Never re-arm on memory alone: `ps -eo pid,etime,cmd | grep "watchdog agent"` is the truth check (TaskList does NOT show monitors — its empty result is false evidence). Duplicate found → TaskStop the older one. Patrick-caught 2026-07-31: doubled up post-compact off a bad TaskList read.
 
 ```
 drone @ai_mail dispatch @target "Subject" "Body"

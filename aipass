@@ -36,9 +36,8 @@ fi
 cat <<'HELP'
 AIPass is not set up yet.
 
-  ./aipass install                # set up AIPass (venv + deps + hooks)
-  ./aipass install --no-init      # set up without the guided first-project setup
-  ./aipass install --project DIR  # set the first-project directory
+  ./aipass install                # set up AIPass (venv + deps + hooks), ends in a welcome chat
+  ./aipass install --no-chat      # set up only, skip the welcome chat
 
 After setup, all aipass commands become available:
   ./aipass doctor    # system health

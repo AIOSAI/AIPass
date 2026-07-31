@@ -15,19 +15,18 @@ import pytest
 
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
-    DEFAULT_PROJECT,
     TOTAL_STEPS,
     _build_install_prompt,
     _clone_repo,
-    _handoff_to_init,
+    _end_in_chat,
     _looks_like_aipass_tree,
+    _print_next_steps,
     _resolve_home,
-    _resolve_project_dir,
     _run_setup,
-    _should_run_init,
     handle_command,
     print_help,
     print_introspection,
+    run_chat_only,
     run_install,
 )
 
@@ -206,74 +205,11 @@ class TestRunInstall:
             patch(f"{_MOD}._run_setup", return_value=True),
             patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
             patch(f"{_MOD}._check_and_fix_owner"),
-            patch(f"{_MOD}._handoff_to_init") as nxt,
+            patch(f"{_MOD}._end_in_chat") as nxt,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
         assert rc == 0
         nxt.assert_called_once()
-
-
-class TestShouldRunInit:
-    """Deciding whether the install chains into init."""
-
-    def test_no_init_skips(self) -> None:
-        """--no-init disables the handoff."""
-        assert _should_run_init(no_init=True) is False
-
-    def test_default_chains(self) -> None:
-        """Default: always chain into init."""
-        assert _should_run_init(no_init=False) is True
-
-
-class TestResolveProjectDir:
-    """Resolving where the first project scaffolds."""
-
-    def test_explicit_project(self, tmp_path: Path) -> None:
-        """An explicit --project is expanded and resolved."""
-        target = tmp_path / "proj"
-        assert _resolve_project_dir(str(target), non_interactive=True) == target.resolve()
-
-    def test_headless_defaults(self) -> None:
-        """Headless with no --project falls back to DEFAULT_PROJECT."""
-        assert _resolve_project_dir(None, non_interactive=True) == DEFAULT_PROJECT.resolve()
-
-
-class TestHandoffToInit:
-    """The init handoff step."""
-
-    def test_skips_when_not_running(self, tmp_path: Path) -> None:
-        """run_it=False prints next steps and launches nothing."""
-        with patch(f"{_MOD}.subprocess.run") as run:
-            _handoff_to_init(tmp_path, "/x/aipass", non_interactive=True, dry_run=False, project=None, run_it=False)
-        run.assert_not_called()
-
-    def test_dry_run_no_subprocess(self, tmp_path: Path) -> None:
-        """Dry-run announces the launch but does not spawn init."""
-        with patch(f"{_MOD}.subprocess.run") as run:
-            _handoff_to_init(
-                tmp_path, "/x/aipass", non_interactive=True, dry_run=True, project=str(tmp_path / "p"), run_it=True
-            )
-        run.assert_not_called()
-
-    def test_launches_init_headless(self, tmp_path: Path) -> None:
-        """A real headless handoff launches `aipass init run --non-interactive` in the project dir."""
-        project = tmp_path / "proj"
-        with patch(f"{_MOD}.subprocess.run") as run:
-            _handoff_to_init(
-                tmp_path, "/x/aipass", non_interactive=True, dry_run=False, project=str(project), run_it=True
-            )
-        run.assert_called_once()
-        cmd = run.call_args.args[0]
-        assert cmd == ["/x/aipass", "init", "run", "--non-interactive"]
-        assert run.call_args.kwargs["cwd"] == str(project)
-
-    def test_missing_binary_warns_not_crashes(self, tmp_path: Path) -> None:
-        """No aipass binary → warn, don't launch, don't raise."""
-        with patch(f"{_MOD}.subprocess.run") as run:
-            _handoff_to_init(
-                tmp_path, None, non_interactive=True, dry_run=False, project=str(tmp_path / "p"), run_it=True
-            )
-        run.assert_not_called()
 
 
 class TestHandleCommand:
@@ -309,15 +245,26 @@ class TestHandleCommand:
         assert kwargs["path"] == target
         assert kwargs["non_interactive"] is True
 
-    def test_passes_init_flags(self) -> None:
-        """--with-init / --no-init / --project are threaded into run_install."""
+    def test_passes_no_chat_flag(self) -> None:
+        """--no-chat is threaded into run_install."""
         with patch(f"{_MOD}.run_install", return_value=0) as run:
             with pytest.raises(SystemExit):
-                handle_command("install", ["--with-init", "--no-init", "--project", "/x/proj"])
+                handle_command("install", ["--no-chat"])
         _, kwargs = run.call_args
-        assert kwargs["with_init"] is True
-        assert kwargs["no_init"] is True
-        assert kwargs["project"] == "/x/proj"
+        assert kwargs["no_chat"] is True
+
+    def test_chat_only_routes_to_run_chat_only(self) -> None:
+        """--chat-only routes to run_chat_only instead of run_install."""
+        with (
+            patch(f"{_MOD}.run_chat_only", return_value=0) as chat_only,
+            patch(f"{_MOD}.run_install") as install,
+        ):
+            with pytest.raises(SystemExit) as exc:
+                handle_command("install", ["--chat-only", "--here"])
+        assert exc.value.code == 0
+        chat_only.assert_called_once()
+        install.assert_not_called()
+        assert chat_only.call_args.kwargs["here"] is True
 
 
 class TestBuildInstallPrompt:
@@ -346,47 +293,101 @@ class TestBuildInstallPrompt:
         assert "?" in prompt
 
 
-class TestInstallChatHandoff:
-    """Install-to-chat handoff launches @aipass after init on TTY."""
+class TestEndInChat:
+    """The Step 4 welcome-chat ending — TTY-gated, no project creation."""
+
+    _BINS = {"drone": "/x/drone", "aipass": "/x/aipass"}
 
     def test_tty_launches_inline(self) -> None:
-        """Interactive TTY install launches the @aipass concierge after init."""
+        """Interactive TTY launches the @aipass concierge with the install prompt."""
         home = Path("/fake/AIPass")
         with (
-            patch(f"{_MOD}._resolve_home", return_value=home),
-            patch(f"{_MOD}.is_throwaway_path", return_value=False),
-            patch(f"{_MOD}._clone_repo", return_value=True),
-            patch(f"{_MOD}._run_setup", return_value=True),
-            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
-            patch(f"{_MOD}._check_and_fix_owner"),
-            patch(f"{_MOD}._handoff_to_init"),
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
         ):
             mock_stdin.isatty.return_value = True
-            run_install(non_interactive=False, dry_run=False)
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
         mock_launch.assert_called_once()
         prompt_arg = mock_launch.call_args[0][1]
         assert "Fresh AIPass install" in prompt_arg
 
     def test_no_tty_skips_launch(self) -> None:
-        """Non-TTY install skips the chat handoff."""
+        """Non-TTY skips the chat launch."""
         home = Path("/fake/AIPass")
         with (
-            patch(f"{_MOD}._resolve_home", return_value=home),
-            patch(f"{_MOD}.is_throwaway_path", return_value=False),
-            patch(f"{_MOD}._clone_repo", return_value=True),
-            patch(f"{_MOD}._run_setup", return_value=True),
-            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
-            patch(f"{_MOD}._check_and_fix_owner"),
-            patch(f"{_MOD}._handoff_to_init"),
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
         ):
             mock_stdin.isatty.return_value = False
-            rc = run_install(non_interactive=True, dry_run=False)
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
         mock_launch.assert_not_called()
+
+    def test_no_chat_skips_launch_even_on_tty(self) -> None:
+        """--no-chat skips the launch even when the shell is interactive."""
+        home = Path("/fake/AIPass")
+        with (
+            patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
+        ):
+            mock_stdin.isatty.return_value = True
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=True)
+        mock_launch.assert_not_called()
+
+    def test_dry_run_skips_launch(self) -> None:
+        """Dry-run announces the launch but never calls it."""
+        home = Path("/fake/AIPass")
+        with (
+            patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
+        ):
+            mock_stdin.isatty.return_value = True
+            _end_in_chat(home, self._BINS, dry_run=True, no_chat=False)
+        mock_launch.assert_not_called()
+
+
+class TestPrintNextSteps:
+    """The installed banner shown before the welcome chat."""
+
+    def test_runs_without_error(self, tmp_path: Path) -> None:
+        """Renders without raising for a real path."""
+        _print_next_steps(tmp_path)
+
+
+class TestRunChatOnly:
+    """setup.sh's tail calls into `aipass install --chat-only` for this."""
+
+    def test_resolves_home_and_ends_in_chat(self, tmp_path: Path) -> None:
+        """Resolves the already-built home and hands off to _end_in_chat."""
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=tmp_path),
+            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
+            patch(f"{_MOD}._end_in_chat") as end_chat,
+        ):
+            rc = run_chat_only(non_interactive=True, here=True)
         assert rc == 0
+        end_chat.assert_called_once()
+        assert end_chat.call_args[0][0] == tmp_path
+
+    def test_dry_run_skips_binary_verification(self, tmp_path: Path) -> None:
+        """Dry-run doesn't shell out to verify binaries."""
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=tmp_path),
+            patch(f"{_MOD}._verify_binaries") as verify,
+            patch(f"{_MOD}._end_in_chat"),
+        ):
+            rc = run_chat_only(non_interactive=True, dry_run=True)
+        assert rc == 0
+        verify.assert_not_called()
+
+    def test_cancelled_returns_1(self, tmp_path: Path) -> None:
+        """Ctrl-C during home resolution is reported, not raised."""
+        with (
+            patch(f"{_MOD}._resolve_home", side_effect=KeyboardInterrupt),
+            patch(f"{_MOD}._end_in_chat") as end_chat,
+        ):
+            rc = run_chat_only(non_interactive=True)
+        assert rc == 1
+        end_chat.assert_not_called()
 
 
 class TestSmoke:
@@ -422,7 +423,7 @@ class TestThrowawayGate:
             ),
             patch("aipass.aipass.apps.modules.install.sys.argv", ["aipass", "install"]),
         ):
-            result = run_install(non_interactive=True, no_init=True)
+            result = run_install(non_interactive=True)
         assert result == 1
 
     def test_force_flag_overrides(self, tmp_path) -> None:
@@ -448,10 +449,10 @@ class TestThrowawayGate:
                 "aipass.aipass.apps.modules.install._verify_binaries",
                 return_value={"drone": "x", "aipass": "x"},
             ),
-            patch("aipass.aipass.apps.modules.install._handoff_to_init"),
+            patch("aipass.aipass.apps.modules.install._end_in_chat"),
             patch("aipass.aipass.apps.modules.install._check_and_fix_owner"),
         ):
-            result = run_install(non_interactive=True, no_init=True)
+            result = run_install(non_interactive=True)
         assert result == 0
 
 

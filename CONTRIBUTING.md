@@ -19,7 +19,7 @@ Changes under `src/aipass/spawn/templates/` also need the template registry rege
 - Python 3.10+
 - Tests: `pytest` (4,900+ tests across the project)
 - Quality: AIPass uses its own standards system ([seedgo](src/aipass/seedgo/README.md)) for automated audits
-- Run `./aipass install --no-init` to bootstrap the full environment (contributors work in the engine repo itself — no first-project scaffold needed)
+- Run `./aipass install --no-chat` to bootstrap the full environment without launching the welcome chat (contributors work in the engine repo itself)
 
 ## Questions?
 

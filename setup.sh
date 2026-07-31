@@ -2,13 +2,12 @@
 #
 # AIPass setup script
 # Creates a venv, installs the package in editable mode, and verifies CLI entry points.
-# On interactive terminals it then chains into `aipass init run` to scaffold a first
-# project (DPLAN-0234: one command does setup + init).
+# On interactive terminals it then ends in a conversation with the AIPass concierge —
+# the cold install ends in chat, not project creation (DPLAN-0274). Project creation
+# stays a separate, later step: `aipass init run`.
 #
-# Usage: ./setup.sh [--no-init] [--with-init] [--project <dir>] [--no-symlink] [--force-symlink]
-#   --no-init        skip the first-project init chain
-#   --with-init      force the init chain even headless (init runs --non-interactive)
-#   --project <dir>  first-project directory (default: ~/aipass-project)
+# Usage: ./setup.sh [--no-chat] [--no-symlink] [--force-symlink]
+#   --no-chat        skip the welcome-chat ending (build only)
 #   --no-symlink     do not create/modify global drone/aipass CLI symlinks
 #   --force-symlink  repoint a global symlink even if it points at a different install (#660)
 #
@@ -37,26 +36,16 @@ case "${OSTYPE:-}" in
 esac
 
 # --- Args ---
-# Mirrors the `aipass install` handoff rules: --no-init wins, --with-init forces,
-# default (auto) chains into init on interactive terminals only — CI/headless skip.
-RUN_INIT="auto"
-INIT_PROJECT=""
+# Mirrors the `aipass install` handoff: --no-chat skips the welcome chat,
+# default (auto) ends in chat on interactive terminals only — CI/headless skip.
+RUN_CHAT="auto"
 SKIP_SYMLINK="no"
 FORCE_SYMLINK="no"
-PREV_ARG=""
 for arg in "$@"; do
-    if [ "$PREV_ARG" = "--project" ]; then
-        INIT_PROJECT="$arg"
-        PREV_ARG=""
-        continue
-    fi
     case "$arg" in
-        --no-init)       RUN_INIT="no" ;;
-        --with-init)     RUN_INIT="yes" ;;
+        --no-chat)       RUN_CHAT="no" ;;
         --no-symlink)    SKIP_SYMLINK="yes" ;;
         --force-symlink) FORCE_SYMLINK="yes" ;;
-        --project=*)     INIT_PROJECT="${arg#--project=}" ;;
-        --project)       PREV_ARG="--project" ;;
         *) echo "WARN: unknown argument '$arg' (ignored)" ;;
     esac
 done
@@ -1084,11 +1073,11 @@ if [ "$FAIL" -eq 0 ]; then
     command -v codex &>/dev/null && echo "  Codex CLI:   hooks at .codex/hooks.json + config at ~/.codex/config.toml"
     echo ""
 
-    # --- Chain into first-project init (DPLAN-0234: one command does setup + init) ---
-    # `aipass init` refuses to run inside the engine tree, so it always targets a
-    # sibling directory — never the repo itself. Decision mirrors install.py:
-    # --no-init wins, --with-init forces (headless chains --non-interactive),
-    # default = interactive terminals only (CI and piped shells skip).
+    # --- End in a welcome chat (DPLAN-0274: cold install ends in a conversation,
+    # not project creation — commit 71e5198d / TDPLAN-0014 built the chat machinery
+    # this reuses: `aipass install --chat-only` composes the same prompt via
+    # install.py's _build_install_prompt and launches it via launch_inline. Nothing
+    # is recomposed here in bash, no prompt text is duplicated.
     AIPASS_BIN=""
     if [ "$IS_WINDOWS" -eq 1 ] && [ -f "$SCRIPT_DIR/.venv/Scripts/aipass.exe" ]; then
         AIPASS_BIN="$SCRIPT_DIR/.venv/Scripts/aipass.exe"
@@ -1100,67 +1089,16 @@ if [ "$FAIL" -eq 0 ]; then
         AIPASS_BIN="$(command -v aipass)"
     fi
 
-    LAUNCH_INIT=0
-    INIT_HEADLESS=0
-    if [ "$RUN_INIT" = "no" ]; then
-        echo "Skipping first-project init (--no-init). Run 'aipass init run' in a fresh directory when ready."
-    elif [ "$RUN_INIT" = "yes" ]; then
-        LAUNCH_INIT=1
-        if [ ! -t 0 ]; then
-            INIT_HEADLESS=1
-        fi
-    elif [ -t 0 ] && [ -z "${CI:-}" ]; then
-        LAUNCH_INIT=1
+    if [ "$RUN_CHAT" = "no" ]; then
+        echo "Skipping the welcome chat (--no-chat). Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
+    elif [ -z "$AIPASS_BIN" ]; then
+        echo "WARN: aipass binary not found — open a new terminal and run 'aipass install --chat-only --path $SCRIPT_DIR'."
+    elif [ ! -t 0 ] || [ -n "${CI:-}" ]; then
+        echo "Non-interactive shell — skipping the welcome chat. Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
     else
-        echo "Non-interactive shell — skipping first-project init. Run 'aipass init run' in a fresh directory when ready."
-    fi
-
-    if [ "$LAUNCH_INIT" -eq 1 ]; then
-        if [ -z "$AIPASS_BIN" ]; then
-            echo "WARN: aipass binary not found — open a new terminal and run 'aipass init run' in a fresh directory."
-        else
-            DEFAULT_PROJECT_DIR="$HOME/aipass-project"
-            PROJECT_DIR="$INIT_PROJECT"
-            if [ -z "$PROJECT_DIR" ] && [ "$INIT_HEADLESS" -eq 0 ] && [ -t 0 ]; then
-                echo "AIPass projects live in their own directory, never inside the engine repo."
-                echo "  Press Enter to set one up now (recommended), or type n to skip."
-                read -r -p "Set up your first project now? [Y/n]: " INIT_REPLY
-                case "$INIT_REPLY" in
-                    [nN]*)
-                        PROJECT_DIR="-"
-                        echo "  Skipped. Run 'aipass init run' in a fresh directory when ready."
-                        ;;
-                    *)
-                        echo "  Press Enter to accept the safe default path shown below, or type a"
-                        echo "  name/path to use instead — a bare name is created under $HOME, never here."
-                        read -r -p "  Project directory [$DEFAULT_PROJECT_DIR]: " INIT_INPUT
-                        INIT_INPUT="${INIT_INPUT:-$DEFAULT_PROJECT_DIR}"
-                        case "$INIT_INPUT" in
-                            /*) PROJECT_DIR="$INIT_INPUT" ;;
-                            "~"|"~/"*) PROJECT_DIR="${INIT_INPUT/#\~/$HOME}" ;;
-                            *) PROJECT_DIR="$HOME/$INIT_INPUT" ;;
-                        esac
-                        ;;
-                esac
-            elif [ -z "$PROJECT_DIR" ]; then
-                PROJECT_DIR="$DEFAULT_PROJECT_DIR"
-            fi
-
-            if [ "$PROJECT_DIR" != "-" ]; then
-                mkdir -p "$PROJECT_DIR"
-                INIT_CMD=("$AIPASS_BIN" init run)
-                if [ "$INIT_HEADLESS" -eq 1 ]; then
-                    INIT_CMD+=(--non-interactive)
-                fi
-                echo ""
-                echo "Launching guided setup in $PROJECT_DIR ..."
-                if (cd "$PROJECT_DIR" && "${INIT_CMD[@]}"); then
-                    echo "First project initialized at $PROJECT_DIR"
-                else
-                    echo "Init didn't complete — run 'aipass init run' in $PROJECT_DIR when ready."
-                fi
-            fi
-        fi
+        # --path (not --here): setup.sh can be invoked from any CWD, but the home
+        # it built is always its own directory.
+        "$AIPASS_BIN" install --chat-only --path "$SCRIPT_DIR"
     fi
 else
     echo "=== Setup finished with errors ==="

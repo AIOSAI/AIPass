@@ -15,22 +15,23 @@ this command materializes a working, writable AIPass home and wires it up:
     1. Resolve where AIPass should live (default ~/AIPass; --here / --path to steer).
     2. Fetch the framework there (git clone of the public repo) if not already present.
     3. Run the canonical setup.sh (venv, editable install, provider-hook wiring, binaries).
-    4. Verify drone/aipass are on PATH, then hand off into `aipass init run` to
-       scaffold a first project (interactive default; --no-init to skip, --with-init
-       to force even headless). Init targets a sibling dir, never the engine tree.
+    4. End in a conversation: the @aipass concierge opens in this terminal with the
+       install report in hand (interactive default; --no-chat to skip). Project
+       creation is NOT part of install — the concierge points users at
+       `aipass init run` for that, whenever they're ready.
 
 Each step prints a Step k/N progress header. Streaming subprocesses (git, setup.sh)
 show a header + their own output + a result line — no spinner (the two renderers
 fight, per ui/progress.activity_spinner).
 
 Usage:
-    aipass install                       # interactive, then launches init
-    aipass install --non-interactive     # CI/headless (~/AIPass), stops before init
-    aipass install --with-init           # headless AND chain into init --non-interactive
-    aipass install --no-init             # install the engine only, skip the handoff
+    aipass install                       # interactive, ends in a welcome chat
+    aipass install --non-interactive     # CI/headless (~/AIPass), no chat
+    aipass install --no-chat             # install the engine only, skip the chat
     aipass install --path ~/tools/aipass # explicit home
-    aipass install --project ~/proj      # where the first project scaffolds
     aipass install --here                # install into the current directory
+    aipass install --chat-only           # skip the build, just the welcome chat
+                                          # (used by setup.sh's own tail)
     aipass install --dry-run             # walk all steps, no clone/setup/launch
 """
 
@@ -54,9 +55,6 @@ COMMAND = "install"
 TOTAL_STEPS = 4
 REPO_URL = "https://github.com/AIOSAI/AIPass.git"
 DEFAULT_HOME = Path.home() / "AIPass"
-# `aipass init` refuses to run inside the engine tree (its pre-flight blocks on a
-# parent registry), so the auto-handoff scaffolds the first project in a sibling.
-DEFAULT_PROJECT = Path.home() / "aipass-project"
 
 # Clone can be slow on a cold network; setup.sh compiles a venv + installs deps.
 _CLONE_TIMEOUT = 600
@@ -124,10 +122,10 @@ def _clone_repo(home: Path, dry_run: bool) -> bool:
 def _run_setup(home: Path, dry_run: bool, no_symlink: bool = False, force_symlink: bool = False) -> bool:
     """Run the repo's setup.sh (venv + editable install + hook wiring + binaries)."""
     setup = home / "setup.sh"
-    # --no-init: install owns the init handoff (_handoff_to_init) — without it,
-    # setup.sh's own init chain (DPLAN-0234) would scaffold the project twice.
+    # --no-chat: install owns the welcome-chat ending (_end_in_chat) — without it,
+    # setup.sh's own chat ending would launch (and exit-replace this process) twice.
     # --no-symlink / --force-symlink (#660) pass through to setup.sh's CLI-symlink guard.
-    setup_args = ["bash", str(setup), "--no-init"]
+    setup_args = ["bash", str(setup), "--no-chat"]
     if no_symlink:
         setup_args.append("--no-symlink")
     if force_symlink:
@@ -191,26 +189,8 @@ def _build_install_prompt(home: Path, bins: dict) -> str:
     return " ".join(parts)
 
 
-def _should_run_init(no_init: bool) -> bool:
-    """Decide whether to auto-launch init. --no-init skips; default = always chain."""
-    return not no_init
-
-
-def _handoff_to_init(
-    home: Path,
-    aipass_bin: str | None,
-    non_interactive: bool,
-    dry_run: bool,
-    project: str | None,
-    run_it: bool,
-) -> None:
-    """Print the installed banner, then (optionally) launch init for a first project.
-
-    `aipass init` scaffolds a *new* project and refuses to run inside the engine
-    tree (pre-flight blocks on a parent registry), so init targets a sibling
-    directory (``--project`` or DEFAULT_PROJECT), never ``home``. When install ran
-    headless, init is launched headless too so the whole chain stays non-blocking.
-    """
+def _print_next_steps(home: Path) -> None:
+    """Print the installed banner + a few commands to try next."""
     console.print()
     success(f"AIPass is installed at {home}")
     console.print()
@@ -219,31 +199,34 @@ def _handoff_to_init(
     console.print("  [cyan]aipass init run[/cyan]   [dim]# scaffold your first project on AIPass[/dim]")
     console.print()
 
-    if not run_it:
-        console.print("[dim]Run 'aipass init run' in a fresh directory to start your first project.[/dim]")
-        return
 
-    project_dir = _resolve_project_dir(project, non_interactive)
-    if project_dir is None:
-        return
+def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
+    """End the install in a conversation with the @aipass concierge (TTY only).
 
+    Project creation is NOT part of install — ``aipass init run`` stays a
+    separate, later step; the concierge points users there when they're ready.
+    ``launch_inline`` replaces this process and never returns when it fires.
+    """
+    _print_next_steps(home)
+
+    if no_chat:
+        console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")
+        return
     if dry_run:
-        console.print(f"[yellow]\\[dry-run][/yellow] would launch: aipass init run in {project_dir}")
+        console.print("[yellow]\\[dry-run][/yellow] would launch the AIPass concierge welcome chat.")
         return
-    if not aipass_bin:
-        warning("Can't find the aipass binary yet — open a new terminal and run 'aipass init run'.")
+    if not sys.stdin.isatty():
+        console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
         return
 
-    project_dir.mkdir(parents=True, exist_ok=True)
-    console.print(f"[cyan]Launching guided setup[/cyan] [dim]in {project_dir}…[/dim]")
-    cmd = [aipass_bin, "init", "run"]
-    if non_interactive:
-        cmd.append("--non-interactive")
-    try:
-        subprocess.run(cmd, cwd=str(project_dir))
-    except (FileNotFoundError, OSError) as exc:
-        logger.warning("[install] could not launch init: %s", exc)
-        warning(f"Could not launch init: {exc}. Run 'aipass init run' in {project_dir} yourself.")
+    prompt = _build_install_prompt(home, bins)
+    aipass_branch = str(Path(__file__).resolve().parents[2])
+    console.print()
+    console.print("[dim]Launching the AIPass concierge — Ctrl-C to stay in the shell[/dim]")
+    console.print()
+    from aipass.aipass.apps.handlers.handoff_platform import launch_inline
+
+    launch_inline("claude", prompt, aipass_branch)
 
 
 def _check_and_fix_owner(home: Path) -> None:
@@ -279,35 +262,29 @@ def _check_and_fix_owner(home: Path) -> None:
         logger.warning("[install] owner check skipped: %s", exc)
 
 
-def _anchor_project_dir(raw: str) -> Path:
-    """Resolve typed project-dir input — bare/relative names anchor to home, never CWD.
+def run_chat_only(
+    non_interactive: bool = False,
+    path: str | None = None,
+    here: bool = False,
+    dry_run: bool = False,
+    no_chat: bool = False,
+) -> int:
+    """End-in-chat only — no clone/setup/verify. Used by setup.sh's own tail.
 
-    CWD during install is the cloned engine repo, not the user's home — a bare
-    name like ``dockertest`` must become ``~/dockertest``, not ``<engine>/dockertest``
-    (which trips init's own-tree preflight guard).
+    setup.sh already built the environment in bash; this just resolves the
+    home it built and reuses ``_build_install_prompt``/``launch_inline`` so
+    the welcome chat is composed in exactly one place.
     """
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        return candidate.resolve()
-    return (DEFAULT_PROJECT.parent / candidate).resolve()
-
-
-def _resolve_project_dir(project: str | None, non_interactive: bool) -> Path | None:
-    """Resolve the first-project directory — --project / prompt / DEFAULT_PROJECT."""
-    if project:
-        return Path(project).expanduser().resolve()
-    if non_interactive:
-        return DEFAULT_PROJECT.resolve()
-    console.print(
-        f"  [dim]Enter = use the path shown below, or type a name to create it under {DEFAULT_PROJECT.parent}[/dim]"
-    )
     try:
-        raw = _prompt("Project directory for your first project", str(DEFAULT_PROJECT))
+        home = _resolve_home(path, here, non_interactive)
     except KeyboardInterrupt:
-        logger.info("[install] init handoff cancelled by user")
+        logger.info("[install] chat-only handoff cancelled by user")
         console.print()
-        return None
-    return _anchor_project_dir(raw)
+        warning("Cancelled.")
+        return 1
+    bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
+    _end_in_chat(home, bins, dry_run, no_chat)
+    return 0
 
 
 def run_install(
@@ -315,9 +292,7 @@ def run_install(
     path: str | None = None,
     here: bool = False,
     dry_run: bool = False,
-    with_init: bool = False,
-    no_init: bool = False,
-    project: str | None = None,
+    no_chat: bool = False,
     no_symlink: bool = False,
     force_symlink: bool = False,
 ) -> int:
@@ -374,29 +349,18 @@ def run_install(
     if not dry_run:
         _check_and_fix_owner(home)
 
-    # Step 4 — hand off into init (or print next steps)
+    # Step 4 — end in a welcome chat (no project creation — see module docstring)
     console.print()
-    console.print(render_step_header(4, TOTAL_STEPS, "First project"))
-    run_it = _should_run_init(no_init)
-    _handoff_to_init(home, bins.get("aipass"), non_interactive, dry_run, project, run_it)
+    console.print(render_step_header(4, TOTAL_STEPS, "Welcome"))
 
-    # Log BEFORE exec — launch_inline replaces the process and never returns
+    # Log BEFORE exec — launch_inline (inside _end_in_chat) replaces the process
+    # and never returns when it fires.
     json_handler.log_operation(
         "aipass_install",
-        {"home": str(home), "non_interactive": non_interactive, "dry_run": dry_run, "init": run_it},
+        {"home": str(home), "non_interactive": non_interactive, "dry_run": dry_run, "chat": not no_chat},
     )
 
-    # Install-to-chat handoff — launch @aipass concierge in same terminal
-    if run_it and not dry_run and sys.stdin.isatty():
-        prompt = _build_install_prompt(home, bins)
-        aipass_branch = str(Path(__file__).resolve().parents[2])
-        console.print()
-        console.print("[dim]Launching the AIPass concierge — Ctrl-C to stay in the shell[/dim]")
-        console.print()
-        from aipass.aipass.apps.handlers.handoff_platform import launch_inline
-
-        launch_inline("claude", prompt, aipass_branch)
-
+    _end_in_chat(home, bins, dry_run, no_chat)
     return 0
 
 
@@ -406,19 +370,20 @@ def print_help() -> None:
     console.print("[bold cyan]aipass install[/bold cyan] — one-command bootstrap of AIPass")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [green]aipass install[/green]                      [dim]# interactive, then launches init[/dim]")
-    console.print("  [green]aipass install --non-interactive[/green]    [dim]# CI/headless (~/AIPass), no init[/dim]")
+    console.print("  [green]aipass install[/green]                      [dim]# interactive, ends in a chat[/dim]")
+    console.print("  [green]aipass install --non-interactive[/green]    [dim]# CI/headless (~/AIPass), no chat[/dim]")
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
-    console.print("  [green]aipass install --no-init[/green]            [dim]# install only, skip init[/dim]")
-    console.print("  [green]aipass install --with-init[/green]          [dim]# force init even when headless[/dim]")
+    console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
-    console.print("  [green]aipass install --project DIR[/green]        [dim]# where the first project scaffolds[/dim]")
+    console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
     console.print("  [green]aipass install --force-global-home[/green]  [dim]# allow install into /tmp (unsafe)[/dim]")
     console.print("  [green]aipass install --dry-run[/green]            [dim]# walk steps, no side effects[/dim]")
     console.print()
-    console.print("[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> launch init")
+    console.print("[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> welcome chat")
+    console.print()
+    console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
     console.print()
 
 
@@ -458,26 +423,32 @@ def handle_command(command: str, args: list[str]) -> bool:
     non_interactive = "--non-interactive" in run_args
     dry_run = "--dry-run" in run_args
     here = "--here" in run_args
-    with_init = "--with-init" in run_args
-    no_init = "--no-init" in run_args
+    no_chat = "--no-chat" in run_args
+    chat_only = "--chat-only" in run_args
     no_symlink = "--no-symlink" in run_args
     force_symlink = "--force-symlink" in run_args
     path = _flag_value("--path")
-    project = _flag_value("--project")
 
-    result = run_install(
-        non_interactive=non_interactive,
-        path=path,
-        here=here,
-        dry_run=dry_run,
-        with_init=with_init,
-        no_init=no_init,
-        project=project,
-        no_symlink=no_symlink,
-        force_symlink=force_symlink,
-    )
+    if chat_only:
+        result = run_chat_only(
+            non_interactive=non_interactive,
+            path=path,
+            here=here,
+            dry_run=dry_run,
+            no_chat=no_chat,
+        )
+    else:
+        result = run_install(
+            non_interactive=non_interactive,
+            path=path,
+            here=here,
+            dry_run=dry_run,
+            no_chat=no_chat,
+            no_symlink=no_symlink,
+            force_symlink=force_symlink,
+        )
     json_handler.log_operation(
         "install_run",
-        {"non_interactive": non_interactive, "dry_run": dry_run, "with_init": with_init, "exit": result},
+        {"non_interactive": non_interactive, "dry_run": dry_run, "chat_only": chat_only, "exit": result},
     )
     sys.exit(result)
