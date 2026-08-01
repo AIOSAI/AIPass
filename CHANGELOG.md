@@ -36,6 +36,16 @@ were machine boilerplate, evicting real memories ~1.7× faster).
 **fix(drone)** — memory-branch `rollover` command gets a 100s executor timeout
 override (was killed at the 30s default twice in 3 days mid-archive).
 
+**fix(hooks-tests)** — the "ghost re-arm" solved: `test_compact.py` invoked the
+compact handler with no cadence isolation, so every pytest run of it minted a
+real regroup token into the developer's own live session state file
+(`/tmp/aipass-cadence-<session>.json`, session id inherited from the
+environment) — and pytest's log capture swallowed the arm line, making the
+subsequent backstop fire look sourceless. One suite run = one ghost re-ground
+(~24KB injected); a test-heavy session saw 16+. Fixed with an autouse fixture
+pinning `_GUARD_DIR` to tmp_path and a fake session id; verified by running
+the full hooks suite and confirming the live state file stays unarmed.
+
 **chore(hooks)** — provider manifest ↔ live settings reconciled both
 directions (manifest gained `PreCompact:auto_process`; live PostToolUse
 matcher gained `Read|Grep|Glob|Task` so the backstop sees read-tools);
