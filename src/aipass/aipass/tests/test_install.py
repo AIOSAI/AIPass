@@ -16,6 +16,7 @@ import pytest
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
     TOTAL_STEPS,
+    _ask_permission_mode,
     _build_install_prompt,
     _clone_repo,
     _end_in_chat,
@@ -303,6 +304,7 @@ class TestEndInChat:
         home = Path("/fake/AIPass")
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch(f"{_MOD}._ask_permission_mode", return_value="default"),
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
         ):
             mock_stdin.isatty.return_value = True
@@ -310,6 +312,18 @@ class TestEndInChat:
         mock_launch.assert_called_once()
         prompt_arg = mock_launch.call_args[0][1]
         assert "Fresh AIPass install" in prompt_arg
+
+    def test_permission_choice_threads_into_launch(self) -> None:
+        """Choosing bypass permissions launches claude with the skip-permissions variant."""
+        home = Path("/fake/AIPass")
+        with (
+            patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch(f"{_MOD}._ask_permission_mode", return_value="skip-permissions"),
+            patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
+        ):
+            mock_stdin.isatty.return_value = True
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
+        assert mock_launch.call_args[0][3] == "skip-permissions"
 
     def test_no_tty_skips_launch(self) -> None:
         """Non-TTY skips the chat launch."""
@@ -343,6 +357,30 @@ class TestEndInChat:
             mock_stdin.isatty.return_value = True
             _end_in_chat(home, self._BINS, dry_run=True, no_chat=False)
         mock_launch.assert_not_called()
+
+
+class TestAskPermissionMode:
+    """The launch-mode selector shown before the concierge chat."""
+
+    def test_choice_2_is_bypass(self) -> None:
+        """Typing 2 selects the skip-permissions launch variant."""
+        with patch(f"{_MOD}._prompt", return_value="2"):
+            assert _ask_permission_mode() == "skip-permissions"
+
+    def test_enter_defaults_to_accept_edits(self) -> None:
+        """Enter (the prompt default) keeps the plain launch."""
+        with patch(f"{_MOD}._prompt", return_value="1"):
+            assert _ask_permission_mode() == "default"
+
+    def test_garbage_defaults_to_accept_edits(self) -> None:
+        """Anything that isn't 2 keeps the safe default."""
+        with patch(f"{_MOD}._prompt", return_value="yes please"):
+            assert _ask_permission_mode() == "default"
+
+    def test_ctrl_c_defaults_to_accept_edits(self) -> None:
+        """Ctrl-C / EOF at the selector keeps the safe default, no raise."""
+        with patch(f"{_MOD}._prompt", side_effect=KeyboardInterrupt):
+            assert _ask_permission_mode() == "default"
 
 
 class TestPrintNextSteps:

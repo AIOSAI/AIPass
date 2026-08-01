@@ -200,6 +200,26 @@ def _print_next_steps(home: Path) -> None:
     console.print()
 
 
+def _ask_permission_mode() -> str:
+    """Ask how the concierge session should run. Returns a launch flag_variant.
+
+    The repo ships ``defaultMode: acceptEdits`` in ``.claude/settings.json``, so
+    a plain launch asks before system-changing commands. The stranger deserves
+    the choice up front instead of inheriting it silently; any non-answer
+    (Enter, Ctrl-C, EOF) keeps the safe default.
+    """
+    console.print("How should the concierge session run?")
+    console.print("  [cyan]1.[/cyan] Accept edits [dim](default — asks before system-changing commands)[/dim]")
+    console.print("  [cyan]2.[/cyan] Bypass permissions [dim](full autonomy — no permission prompts)[/dim]")
+    try:
+        choice = _prompt("Choice", "1")
+    except KeyboardInterrupt:
+        logger.info("[install] permission-mode selector cancelled — keeping accept-edits default")
+        console.print()
+        return "default"
+    return "skip-permissions" if choice.strip() == "2" else "default"
+
+
 def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     """End the install in a conversation with the @aipass concierge (TTY only).
 
@@ -219,6 +239,8 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
         console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
         return
 
+    console.print()
+    flag_variant = _ask_permission_mode()
     prompt = _build_install_prompt(home, bins)
     aipass_branch = str(Path(__file__).resolve().parents[2])
     console.print()
@@ -226,7 +248,7 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     console.print()
     from aipass.aipass.apps.handlers.handoff_platform import launch_inline
 
-    launch_inline("claude", prompt, aipass_branch)
+    launch_inline("claude", prompt, aipass_branch, flag_variant)
 
 
 def _check_and_fix_owner(home: Path) -> None:

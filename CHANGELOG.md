@@ -9,6 +9,17 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — post-v2.7.8 (no version bump, Patrick's call)
+
+**fix(onboarding)** — the concierge welcome chat silently inherited
+`defaultMode: acceptEdits` from the repo's shipped `.claude/settings.json`,
+with no way to choose otherwise (Patrick live-caught on the v2.7.8 walk). The
+install's chat ending now asks how the session should run — 1) accept edits
+(default, Enter/Ctrl-C keep it) or 2) bypass permissions — and threads the
+choice into the existing `launch_inline` flag variant (`skip-permissions` →
+`--dangerously-skip-permissions`, machinery already in `build_cli_cmd`, never
+offered until now). Headless/dry-run paths unchanged.
+
 ## [2026-07-31] — v2.7.8
 
 **feat(onboarding)** — the cold install now ends in a conversation, not
