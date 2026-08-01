@@ -137,6 +137,21 @@
       "reason": "No JSON operations - reads the system clock and outputs text. Wired in UserPromptSubmit.temporal (FPLAN-0348)."
     },
     {
+      "file": "apps/modules/grounding_content.py",
+      "standard": "json_structure",
+      "reason": "Shared loader for kernel/navmap/branch/identity content (DPLAN-0276) — uses stdlib json.loads to read passport.json and reads markdown files. No JSON file ops needing json_handler, same profile as identity.py/tier0_kernel.py/navmap.py/branch_loader.py which it consolidates."
+    },
+    {
+      "file": "apps/modules/grounding_content.py",
+      "standard": "modules",
+      "reason": "Shared content-loading service consumed by 4 UserPromptSubmit handlers (identity, tier0_kernel, navmap, branch_loader) and the PostToolUse post_compact_regrounding backstop — module IS the loader service, same pattern as cadence.py."
+    },
+    {
+      "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
+      "standard": "json_structure",
+      "reason": "Uses stdlib json.dumps for hookSpecificOutput.additionalContext hook protocol responses — same profile as auto_watchdog.py — no JSON file ops needing json_handler."
+    },
+    {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "dead_code",
       "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.edit_gate.handle' — not statically imported by design. Verified wired in PreToolUse.pre_edit_gate + fires in engine.jsonl."

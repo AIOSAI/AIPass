@@ -71,6 +71,7 @@ src/aipass/hooks/
 │   │   ├── cc_sessions.py       # CC-native session file reader (~/.claude/sessions/<pid>.json)
 │   │   ├── engine.py            # Core dispatch — routes events to handlers
 │   │   ├── feedback.py          # Feedback pulse toggle (drone @hooks feedback on/off)
+│   │   ├── grounding_content.py # Shared kernel/navmap/branch/identity content loaders (DPLAN-0276)
 │   │   ├── hooksound.py         # Sound control (drone @hooks hooksound on/off)
 │   │   ├── hookstatus.py        # Config viewer (drone @hooks status)
 │   │   ├── alert_dismiss.py      # Dismiss alerts (drone @hooks dismiss <id>)
@@ -101,6 +102,7 @@ src/aipass/hooks/
 │   │   │   ├── auto_fix.py      #   Post-edit diagnostics (ruff, pyright, py_compile)
 │   │   │   ├── auto_watchdog.py #   Watchdog arming after dispatch
 │   │   │   ├── compact.py       #   Pre-compact memory archival
+│   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction (PostToolUse, DPLAN-0276)
 │   │   │   ├── pre_compact_prep.py # Mechanical AUTO-COMPACT SNAPSHOT stamp (fill %, git, locks, plans)
 │   │   │   ├── rollover.py      #   Pre-compact memory rollover
 │   │   │   └── session_start.py #   Cadence reset on new chat / clear (SessionStart)
@@ -115,7 +117,7 @@ src/aipass/hooks/
 │       └── diagnostics.py       # JSONL logging for hook execution
 ├── logs/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-└── tests/                       # 1249 tests across 43 test files
+└── tests/                       # 1298 tests across 44 test files
 ```
 
 ## How It Works

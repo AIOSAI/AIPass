@@ -112,6 +112,12 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle",
       "matcher": "Bash"
+    },
+    "post_compact_regrounding": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding.handle",
+      "matcher": "",
+      "timeout": 30
     }
   },
 

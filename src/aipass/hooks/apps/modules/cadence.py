@@ -258,7 +258,7 @@ def reset_counter(hook_data: dict | None = None) -> None:
                 logger.info("[HOOKS] cadence: reset read old state failed: %s", exc)
         fd.seek(0)
         fd.truncate()
-        fd.write(json.dumps({"turn": -1, "token": -1}))
+        fd.write(json.dumps({"turn": -1, "token": -1, "regroup_pending": True}))
         fd.flush()
         _close_fd(fd)
         fd = None
@@ -271,6 +271,58 @@ def reset_counter(hook_data: dict | None = None) -> None:
         logger.info("[HOOKS] cadence: reset write FAILED session=%s: %s", session_short, exc)
         if fd is not None:
             _close_fd(fd)
+
+
+def consume_regroup_pending(hook_data: dict | None = None) -> bool:
+    """Atomically check-and-clear the post-compact regrounding flag.
+
+    Set by reset_counter() on every PreCompact. Returns True at most once per
+    compact — the caller (a PostToolUse backstop, DPLAN-0276) fires grounding
+    content directly since PostToolUse's additionalContext reaches Claude even
+    when no UserPromptSubmit arrives to let cadence's normal turn-0 path fire.
+    """
+    path = _state_path()
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+
+    if path is None and hook_data:
+        fallback_id = hook_data.get("session_id", "")
+        if fallback_id:
+            path = _GUARD_DIR / f"aipass-cadence-{fallback_id}.json"
+            session_id = fallback_id
+
+    session_short = session_id[:8] if session_id else "none"
+
+    if path is None or not path.exists():
+        return False
+
+    fd = None
+    try:
+        fd = open(path, "a+")  # noqa: SIM115
+        _lock(fd)
+        fd.seek(0)
+        content = fd.read()
+        data = json.loads(content) if content.strip() else {}
+        pending = bool(data.get("regroup_pending", False))
+
+        if pending:
+            data["regroup_pending"] = False
+            fd.seek(0)
+            fd.truncate()
+            fd.write(json.dumps(data))
+            fd.flush()
+
+        _close_fd(fd)
+        fd = None
+
+        if pending:
+            logger.info("[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) session=%s", session_short)
+        return pending
+
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.info("[HOOKS] cadence: consume_regroup_pending failed session=%s: %s", session_short, exc)
+        if fd is not None:
+            _close_fd(fd)
+        return False
 
 
 # =============================================================================

@@ -19,17 +19,23 @@ from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
+    BG_TASKS_MARKER,
     MAX_WAKE_DEPTH,
     _check_jsonl_activity,
     _check_rate_limited,
+    _cleanup_own_lock,
     _get_jsonl_projects_dir,
     _is_sandbox_enabled,
     _kill_process,
     _log_wake_result,
     _make_fresh_cmd,
+    _parse_result_json,
+    _read_stderr_segment,
+    _rotate_attempt_stdout,
     _run_with_startup_check,
     _send_bounce,
     _snapshot_jsonl_sizes,
+    _summarize_result_json,
     _wake_sender,
     _wrap_for_sandbox,
     main,
@@ -813,6 +819,348 @@ def test_lock_cleanup_on_failure(monkeypatch, main_argv):
         main()
 
     assert not lock_file.exists()
+
+
+# --- _rotate_attempt_stdout tests --------------------------------------
+
+
+def test_rotate_attempt_stdout_moves_file(tmp_path):
+    """Non-empty stdout log is preserved as dispatch_stdout.attempt-N.log."""
+    stdout_log = tmp_path / "dispatch_stdout.log"
+    stdout_log.write_text('{"is_error":true}', encoding="utf-8")
+
+    _rotate_attempt_stdout(str(stdout_log), 1)
+
+    preserved = tmp_path / "dispatch_stdout.attempt-1.log"
+    assert not stdout_log.exists()
+    assert preserved.exists()
+    assert preserved.read_text(encoding="utf-8") == '{"is_error":true}'
+
+
+def test_rotate_attempt_stdout_skips_empty(tmp_path):
+    """Empty stdout log is left in place — nothing worth preserving."""
+    stdout_log = tmp_path / "dispatch_stdout.log"
+    stdout_log.write_text("", encoding="utf-8")
+
+    _rotate_attempt_stdout(str(stdout_log), 1)
+
+    assert stdout_log.exists()
+    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+
+
+def test_rotate_attempt_stdout_missing_file_no_raise(tmp_path):
+    """Missing stdout log does not raise."""
+    _rotate_attempt_stdout(str(tmp_path / "nope.log"), 2)
+
+    assert not (tmp_path / "dispatch_stdout.attempt-2.log").exists()
+
+
+# --- _parse_result_json / _summarize_result_json tests ------------------
+
+
+def test_parse_result_json_whole_file(tmp_path):
+    """Single JSON object filling the file parses directly."""
+    log = tmp_path / "stdout.log"
+    log.write_text('{"is_error": true, "api_error_status": 529}', encoding="utf-8")
+
+    result = _parse_result_json(str(log))
+
+    assert result == {"is_error": True, "api_error_status": 529}
+
+
+def test_parse_result_json_last_line_fallback(tmp_path):
+    """Result JSON on the last line is found when earlier output precedes it."""
+    log = tmp_path / "stdout.log"
+    log.write_text('some banner text\n{"is_error": false, "result": "done"}\n', encoding="utf-8")
+
+    result = _parse_result_json(str(log))
+
+    assert result == {"is_error": False, "result": "done"}
+
+
+def test_parse_result_json_garbage_returns_empty(tmp_path):
+    """Non-JSON content returns {}."""
+    log = tmp_path / "stdout.log"
+    log.write_text("not json at all\nstill not json", encoding="utf-8")
+
+    assert _parse_result_json(str(log)) == {}
+
+
+def test_parse_result_json_missing_file_returns_empty(tmp_path):
+    """Missing file returns {}."""
+    assert _parse_result_json(str(tmp_path / "nope.log")) == {}
+
+
+def test_summarize_result_json_includes_error_fields(tmp_path):
+    """Summary names is_error, subtype, api_error_status and the result snippet."""
+    log = tmp_path / "stdout.log"
+    log.write_text(
+        '{"is_error": true, "subtype": "error_during_execution", "api_error_status": 529, "result": "API overload"}',
+        encoding="utf-8",
+    )
+
+    summary = _summarize_result_json(str(log))
+
+    assert "is_error=True" in summary
+    assert "subtype=error_during_execution" in summary
+    assert "api_error_status=529" in summary
+    assert "API overload" in summary
+
+
+def test_summarize_result_json_no_file(tmp_path):
+    """Missing result JSON produces the explicit placeholder."""
+    assert _summarize_result_json(str(tmp_path / "nope.log")) == "(no result JSON captured)"
+
+
+# --- _read_stderr_segment tests -----------------------------------------
+
+
+def test_read_stderr_segment_returns_content_after_offset(tmp_path):
+    """Only content written after the byte offset is returned."""
+    log = tmp_path / "stderr.log"
+    log.write_text("old attempt output\n", encoding="utf-8")
+    offset = log.stat().st_size
+    with open(log, "a", encoding="utf-8") as f:
+        f.write("new attempt output\n")
+
+    segment = _read_stderr_segment(str(log), offset)
+
+    assert segment == "new attempt output\n"
+    assert "old attempt" not in segment
+
+
+def test_read_stderr_segment_missing_file(tmp_path):
+    """Missing stderr log returns empty string."""
+    assert _read_stderr_segment(str(tmp_path / "nope.log"), 0) == ""
+
+
+# --- _cleanup_own_lock tests ---------------------------------------------
+
+
+def test_cleanup_own_lock_deletes_when_owner(tmp_path):
+    """Lock holding our PID is deleted."""
+    lock = tmp_path / ".dispatch.lock"
+    lock.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert not lock.exists()
+
+
+def test_cleanup_own_lock_leaves_foreign_pid(tmp_path):
+    """Lock owned by another PID (successor monitor) is left in place."""
+    lock = tmp_path / ".dispatch.lock"
+    lock.write_text(json.dumps({"pid": 999999999}), encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert lock.exists()
+
+
+def test_cleanup_own_lock_leaves_unreadable(tmp_path):
+    """Unparseable lock is left for stale-lock cleanup, not deleted blind."""
+    lock = tmp_path / ".dispatch.lock"
+    lock.write_text("not json{{{", encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert lock.exists()
+
+
+def test_cleanup_own_lock_missing_noop(tmp_path):
+    """Missing lock file is a no-op."""
+    _cleanup_own_lock(str(tmp_path / ".dispatch.lock"))  # must not raise
+
+
+# --- Forensics + incomplete-detection main() tests ------------------------
+
+
+def test_main_attempt_exit_lines_in_stderr(monkeypatch, main_argv):
+    """Each attempt's exit code lands in the dispatch stderr log itself."""
+    argv, lock_file, stderr_log = main_argv
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (1, False), (0, False)]))
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    content = stderr_log.read_text(encoding="utf-8")
+    assert "--- Attempt 1/3 exited: code=-3 (startup timeout) ---" in content
+    assert "--- Attempt 2/3 exited: code=1 ---" in content
+    assert "--- Attempt 3/3 exited: code=0 ---" in content
+
+
+def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
+    """A failed attempt's stdout is preserved before the retry truncates it."""
+    argv, lock_file, stderr_log = main_argv
+    logs_dir = tmp_path / "branch" / "logs"
+
+    call_count = {"n": 0}
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        call_count["n"] += 1
+        Path(stdout_log).write_text(f'{{"is_error": true, "attempt": {call_count["n"]}}}', encoding="utf-8")
+        return (1, False) if call_count["n"] == 1 else (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    preserved = logs_dir / "dispatch_stdout.attempt-1.log"
+    assert preserved.exists()
+    assert '"attempt": 1' in preserved.read_text(encoding="utf-8")
+    assert '"attempt": 2' in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+
+
+def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
+    """A previous run's attempt-N stdout files are shifted aside at startup."""
+    argv, lock_file, stderr_log = main_argv
+    logs_dir = tmp_path / "branch" / "logs"
+    stale = logs_dir / "dispatch_stdout.attempt-2.log"
+    stale.write_text("previous run", encoding="utf-8")
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert not stale.exists()
+    assert (logs_dir / "dispatch_stdout.attempt-2.log.1").read_text(encoding="utf-8") == "previous run"
+
+
+def test_main_bounce_includes_result_json(monkeypatch, main_argv, tmp_path):
+    """Total failure bounce carries the last attempt's parsed result JSON."""
+    argv, lock_file, stderr_log = main_argv
+    logs_dir = tmp_path / "branch" / "logs"
+    mock_bounce = MagicMock()
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        Path(stdout_log).write_text(
+            '{"is_error": true, "api_error_status": 529, "result": "API Error: overloaded"}', encoding="utf-8"
+        )
+        return (1, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    mock_bounce.assert_called_once()
+    reason = mock_bounce.call_args[0][1]
+    assert "api_error_status=529" in reason
+    assert "API Error: overloaded" in reason
+    # attempt-3 stdout stays in place; attempts 1-2 preserved for forensics
+    assert (logs_dir / "dispatch_stdout.attempt-1.log").exists()
+    assert (logs_dir / "dispatch_stdout.attempt-2.log").exists()
+
+
+def test_main_bg_orphaned_treated_as_incomplete(monkeypatch, main_argv):
+    """Exit 0 + 'Background tasks still running' marker => bounce + exit 1."""
+    argv, lock_file, stderr_log = main_argv
+    mock_bounce = MagicMock()
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        with open(stderr_log, "a", encoding="utf-8") as f:
+            f.write(f"{BG_TASKS_MARKER} after 600s; terminating.\n")
+        return (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    mock_bounce.assert_called_once()
+    reason = mock_bounce.call_args[0][1]
+    assert "background tasks were still running" in reason
+    assert not lock_file.exists()  # cleanup still runs on incomplete
+
+
+def test_main_bg_marker_from_previous_run_ignored(monkeypatch, main_argv):
+    """A BG marker already in the stderr log from a PREVIOUS run is not counted."""
+    argv, lock_file, stderr_log = main_argv
+    stderr_log.write_text(f"{BG_TASKS_MARKER} after 600s; terminating.\n", encoding="utf-8")
+    mock_bounce = MagicMock()
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    mock_bounce.assert_not_called()
+
+
+def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv):
+    """A lock re-created by a successor monitor (different PID) is not deleted."""
+    argv, lock_file, stderr_log = main_argv
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        # Simulate a successor monitor taking over the lock mid-run
+        lock_file.write_text(json.dumps({"pid": 999999999}), encoding="utf-8")
+        return (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert lock_file.exists()
+    assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == 999999999
 
 
 # --- Environment variable setup tests ---------------------------------
@@ -2159,3 +2507,323 @@ class TestWakeBackIntegration:
         assert sender == "@sender"
         assert exit_code == 0
         assert result == "success"
+
+
+# --- Fix 1: per-attempt stdout preservation ---------------------------
+
+
+def test_rotate_attempt_stdout_preserves_content(tmp_path):
+    """A non-empty stdout log is renamed to dispatch_stdout.attempt-N.log."""
+    stdout_log = tmp_path / "dispatch_stdout.log"
+    stdout_log.write_text('{"result": "boom"}', encoding="utf-8")
+
+    _rotate_attempt_stdout(str(stdout_log), 2)
+
+    assert not stdout_log.exists()
+    preserved = tmp_path / "dispatch_stdout.attempt-2.log"
+    assert preserved.read_text(encoding="utf-8") == '{"result": "boom"}'
+
+
+def test_rotate_attempt_stdout_empty_file_noop(tmp_path):
+    """An empty stdout log is left alone -- nothing worth preserving."""
+    stdout_log = tmp_path / "dispatch_stdout.log"
+    stdout_log.write_text("", encoding="utf-8")
+
+    _rotate_attempt_stdout(str(stdout_log), 1)
+
+    assert stdout_log.exists()
+    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+
+
+def test_rotate_attempt_stdout_missing_file_noop(tmp_path):
+    """No error when there's no stdout log yet."""
+    _rotate_attempt_stdout(str(tmp_path / "missing.log"), 1)
+    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+
+
+def test_stdout_preserved_across_retries(monkeypatch, main_argv):
+    """Each failed attempt's stdout survives as dispatch_stdout.attempt-N.log
+    instead of being silently truncated by the next attempt -- the result
+    JSON is the only artifact naming why an attempt failed."""
+    argv, lock_file, stderr_log = main_argv
+    logs_dir = lock_file.parent.parent / "logs"
+
+    calls = {"n": 0}
+
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+        calls["n"] += 1
+        Path(stdout_path).write_text(f'{{"result": "attempt-{calls["n"]}-failure"}}', encoding="utf-8")
+        return (1, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert "attempt-1-failure" in (logs_dir / "dispatch_stdout.attempt-1.log").read_text(encoding="utf-8")
+    assert "attempt-2-failure" in (logs_dir / "dispatch_stdout.attempt-2.log").read_text(encoding="utf-8")
+    # Final (3rd) attempt's stdout is left in place, unrotated, for post-processing
+    assert "attempt-3-failure" in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+
+
+# --- Fix 2: per-attempt exit codes in the branch-local stderr log -----
+
+
+def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv):
+    """Each attempt's exit code lands in dispatch_stderr.log itself, not just prax."""
+    argv, lock_file, stderr_log = main_argv
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    content = Path(stderr_log).read_text(encoding="utf-8")
+    assert "Attempt 1/3 exited: code=1" in content
+    assert "Attempt 2/3 exited: code=0" in content
+
+
+def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv):
+    """A startup-timeout attempt is distinguished from a plain exit code in the log."""
+    argv, lock_file, stderr_log = main_argv
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (0, False)]))
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    content = Path(stderr_log).read_text(encoding="utf-8")
+    assert "Attempt 1/3 exited: code=-3 (startup timeout)" in content
+
+
+# --- Fix 3: parsed stdout result JSON reaches the bounce reason -------
+
+
+def test_parse_result_json_from_whole_file(tmp_path):
+    """The whole stdout file parses as the print-mode result object."""
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text('{"is_error": true, "result": "boom"}', encoding="utf-8")
+    assert _parse_result_json(str(stdout_log)) == {"is_error": True, "result": "boom"}
+
+
+def test_parse_result_json_last_line_when_output_precedes_it(tmp_path):
+    """When earlier stdout precedes the JSON, only the last line is the result object."""
+    stdout_log = tmp_path / "stdout.log"
+    stdout_log.write_text('some banner text\n{"is_error": false, "result": "ok"}', encoding="utf-8")
+    assert _parse_result_json(str(stdout_log)) == {"is_error": False, "result": "ok"}
+
+
+def test_parse_result_json_empty_or_missing_returns_empty_dict(tmp_path):
+    """Missing or empty stdout log parses to {} rather than raising."""
+    assert _parse_result_json(str(tmp_path / "missing.log")) == {}
+    empty = tmp_path / "empty.log"
+    empty.write_text("", encoding="utf-8")
+    assert _parse_result_json(str(empty)) == {}
+
+
+def test_summarize_result_json_no_capture():
+    """No result JSON captured is reported explicitly, not as a blank string."""
+    assert _summarize_result_json("/nonexistent/path.log") == "(no result JSON captured)"
+
+
+def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv):
+    """Bounce reason names the actual failure cause from the result JSON,
+    not just the bare exit code."""
+    argv, lock_file, stderr_log = main_argv
+
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+        Path(stdout_path).write_text(
+            '{"is_error": true, "subtype": "error_during_execution", "result": "boom detail"}',
+            encoding="utf-8",
+        )
+        return (1, False)
+
+    mock_bounce = MagicMock()
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    mock_bounce.assert_called_once()
+    reason = mock_bounce.call_args[0][1]
+    assert "boom detail" in reason
+    assert "is_error=True" in reason
+
+
+# --- Fix 4: lock-ownership-verified cleanup ----------------------------
+
+
+def test_cleanup_own_lock_deletes_when_pid_matches(tmp_path):
+    """Lock is deleted when its recorded pid matches this process."""
+    lock = tmp_path / ".dispatch.lock"
+    lock.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert not lock.exists()
+
+
+def test_cleanup_own_lock_preserves_foreign_pid(tmp_path):
+    """A lock re-owned by a successor monitor (different PID) is left alone --
+    unconditional unlink previously let one monitor steal a successor's lock."""
+    lock = tmp_path / ".dispatch.lock"
+    foreign_pid = os.getpid() + 1
+    lock.write_text(json.dumps({"pid": foreign_pid}), encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert lock.exists()
+    assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == foreign_pid
+
+
+def test_cleanup_own_lock_missing_file_noop(tmp_path):
+    """No error when the lock file doesn't exist."""
+    _cleanup_own_lock(str(tmp_path / ".dispatch.lock"))
+
+
+def test_cleanup_own_lock_unreadable_json_preserved(tmp_path):
+    """Corrupt lock content is left in place rather than blindly deleted."""
+    lock = tmp_path / ".dispatch.lock"
+    lock.write_text("not json", encoding="utf-8")
+
+    _cleanup_own_lock(str(lock))
+
+    assert lock.exists()
+
+
+def test_main_does_not_steal_successor_lock(monkeypatch, main_argv):
+    """If a successor monitor re-owns the lock mid-run, this monitor's
+    end-of-run cleanup must not delete it out from under the successor."""
+    argv, lock_file, stderr_log = main_argv
+    successor_pid = os.getpid() + 999
+
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+        lock_file.write_text(json.dumps({"pid": successor_pid}), encoding="utf-8")
+        return (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert lock_file.exists()
+    assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == successor_pid
+
+
+# --- Fix 5: orphaned background tasks are not a silent success --------
+
+
+def test_read_stderr_segment_only_after_offset(tmp_path):
+    """Only content written after the given byte offset is returned."""
+    log = tmp_path / "stderr.log"
+    log.write_text("before\n", encoding="utf-8")
+    offset = log.stat().st_size
+    with open(log, "a", encoding="utf-8") as f:
+        f.write("after\n")
+
+    segment = _read_stderr_segment(str(log), offset)
+
+    assert "after" in segment
+    assert "before" not in segment
+
+
+def test_bg_tasks_still_running_treated_as_incomplete(monkeypatch, main_argv):
+    """Exit 0 with the print-mode bg-wait-ceiling marker in this attempt's
+    stderr is NOT a silent success -- it bounces and exits nonzero."""
+    argv, lock_file, stderr_log = main_argv
+
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+        with open(stderr_log, "a", encoding="utf-8") as f:
+            f.write(f"{BG_TASKS_MARKER} after 600s; terminating.\n")
+        return (0, False)
+
+    mock_bounce = MagicMock()
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    mock_bounce.assert_called_once()
+    reason = mock_bounce.call_args[0][1]
+    assert "background tasks" in reason.lower()
+
+
+def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, main_argv):
+    """The bg-orphan check only looks at THIS attempt's stderr slice --
+    a marker from an earlier, unrelated failure must not taint a later
+    clean success."""
+    argv, lock_file, stderr_log = main_argv
+    calls = {"n": 0}
+
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            with open(stderr_log, "a", encoding="utf-8") as f:
+                f.write(f"unrelated crash trace mentioning {BG_TASKS_MARKER} in passing\n")
+            return (1, False)
+        return (0, False)
+
+    mock_bounce = MagicMock()
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    mock_bounce.assert_not_called()

@@ -9,7 +9,11 @@
 
 """Tests for handlers/prompt/tier0_kernel.py."""
 
+import importlib
 from unittest.mock import patch, MagicMock
+
+_real_import_module = importlib.import_module
+_CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
 def _mock_cadence(fires: bool = True):
@@ -17,6 +21,20 @@ def _mock_cadence(fires: bool = True):
     mock = MagicMock()
     mock.should_fire.return_value = fires
     return mock
+
+
+def _patch_cadence(cadence_mock=None, error=None):
+    """Patch only the cadence import — load_content's own importlib.import_module
+    call (for grounding_content) must still resolve to the real module."""
+
+    def _side_effect(name, *args, **kwargs):
+        if name == _CADENCE_MODULE:
+            if error is not None:
+                raise error
+            return cadence_mock
+        return _real_import_module(name, *args, **kwargs)
+
+    return patch("importlib.import_module", side_effect=_side_effect)
 
 
 class TestTier0KernelHandler:
@@ -30,7 +48,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", return_value=_mock_cadence(True)):
+            with _patch_cadence(_mock_cadence(True)):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -43,7 +61,7 @@ class TestTier0KernelHandler:
 
         monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", return_value=_mock_cadence(True)):
+            with _patch_cadence(_mock_cadence(True)):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -59,7 +77,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", return_value=_mock_cadence(True)):
+            with _patch_cadence(_mock_cadence(True)):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -74,7 +92,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", return_value=_mock_cadence(False)):
+            with _patch_cadence(_mock_cadence(False)):
                 result = handle({})
 
         assert result["stdout"] == ""
@@ -90,7 +108,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", side_effect=ImportError("no cadence")):
+            with _patch_cadence(error=ImportError("no cadence")):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -107,7 +125,7 @@ class TestTier0KernelHandler:
         monkeypatch.chdir(project)
 
         with patch.dict("os.environ", {"AIPASS_HOME": "/some/other/path"}):
-            with patch("importlib.import_module", return_value=_mock_cadence(True)):
+            with _patch_cadence(_mock_cadence(True)):
                 result = handle({})
 
         assert result["exit_code"] == 0
@@ -121,7 +139,7 @@ class TestTier0KernelHandler:
         mock = _mock_cadence(False)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
-            with patch("importlib.import_module", return_value=mock):
+            with _patch_cadence(mock):
                 handle({"some": "data"})
 
         mock.should_fire.assert_called_once_with("tier0", {"some": "data"})

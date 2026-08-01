@@ -18,7 +18,7 @@
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:temporal", "event": "UserPromptSubmit"},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:user_message_relay", "event": "UserPromptSubmit"},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreToolUse", "event": "PreToolUse", "matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task"},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PostToolUse", "event": "PostToolUse", "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"},
+        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PostToolUse", "event": "PostToolUse", "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task"},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SubagentStop", "event": "SubagentStop"},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Stop", "event": "Stop"},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py Notification", "event": "Notification"},

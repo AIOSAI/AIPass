@@ -112,3 +112,17 @@ def test_prepend_dispatch_header_result_is_header_plus_message():
     message = "Exact concatenation test."
     result = mod.prepend_dispatch_header(message, no_memory_save=False)
     assert result == mod.DISPATCH_HEADER + message
+
+
+def test_dispatch_header_instructs_synchronous_subagents():
+    """Standard header tells agents to run sub-agents synchronously —
+    headless sessions are never re-invoked when background tasks finish."""
+    assert "SYNCHRONOUSLY" in mod.DISPATCH_HEADER
+    assert "run_in_background: false" in mod.DISPATCH_HEADER
+    assert "BEFORE ending your turn" in mod.DISPATCH_HEADER
+
+
+def test_no_memory_save_header_instructs_synchronous_subagents():
+    """No-memory-save variant carries the same sync sub-agents warning."""
+    assert "SYNCHRONOUSLY" in mod.NO_MEMORY_SAVE_HEADER
+    assert "run_in_background: false" in mod.NO_MEMORY_SAVE_HEADER

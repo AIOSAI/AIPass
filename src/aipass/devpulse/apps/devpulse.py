@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-05-15
+# Modified: 2026-07-31
 # =============================================
 
 """

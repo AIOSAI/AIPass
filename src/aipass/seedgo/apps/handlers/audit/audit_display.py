@@ -200,8 +200,9 @@ def print_branch_summary(
     files_checked = audit_result.get("files_checked", 0)
 
     # Branch header - always show files checked
+    cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
     console.print()
-    console.print(f"[bold cyan]{branch['name']}[/bold cyan] [dim]({files_checked} files checked)[/dim]")
+    console.print(f"[bold cyan]{branch['name']}[/bold cyan] [dim]({files_checked} files checked)[/dim]{cached_tag}")
 
     # Scores in a grid
     score_items = list(scores.items())
@@ -277,6 +278,7 @@ def print_system_summary(audit_results: List[Dict]):
     excellent = sum(1 for r in audit_results if r["average"] >= 90)
     good = sum(1 for r in audit_results if 75 <= r["average"] < 90)
     needs_work = sum(1 for r in audit_results if r["average"] < 75)
+    cache_served = sum(1 for r in audit_results if r.get("_cache_hit"))
 
     # Calculate total type errors
     total_type_errors = sum(r.get("type_errors", 0) for r in audit_results)
@@ -294,6 +296,8 @@ def print_system_summary(audit_results: List[Dict]):
         console.print(f"  Type errors:           {total_type_errors} ({branches_with_type_errors} branches)")
     else:
         console.print("  Type errors:           0")
+    if cache_served:
+        console.print(f"  Cache-served:          {cache_served}/{total_branches} branches (unchanged, skipped re-scan)")
     console.print()
 
     # Calculate standard averages

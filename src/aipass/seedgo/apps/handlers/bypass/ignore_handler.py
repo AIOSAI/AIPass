@@ -68,7 +68,9 @@ AUDIT_IGNORE_PATTERNS = [
 
 # Patterns that have been removed from the system
 # Used by standards_verify.py to detect leftover usage
-DEPRECATED_PATTERNS = {"--verbose": "removed from audit (v0.4.0)", "--full": "removed from audit (v0.4.0)"}
+# Note: --full was reinstated by DPLAN-0275 (force a full re-scan, bypassing
+# the incremental audit cache) — no longer deprecated.
+DEPRECATED_PATTERNS = {"--verbose": "removed from audit (v0.4.0)"}
 
 # =============================================
 # HELPER FUNCTIONS

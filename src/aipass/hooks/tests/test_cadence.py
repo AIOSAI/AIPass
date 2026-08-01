@@ -310,6 +310,83 @@ class TestResetCounter:
         assert json.loads(state_file.read_text())["turn"] == -1
 
 
+class TestConsumeRegroupPending:
+    """DPLAN-0276: PostToolUse backstop consumes the flag reset_counter() sets."""
+
+    def setup_method(self):
+        _reset_module_globals()
+
+    def test_returns_false_when_no_state_file(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+        ):
+            assert consume_regroup_pending() is False
+
+    def test_returns_true_once_after_reset(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+        ):
+            reset_counter()
+            assert consume_regroup_pending() is True
+            assert consume_regroup_pending() is False
+
+    def test_survives_multiple_back_to_back_resets_still_fires_once(self, tmp_path):
+        """Replays the incident: several PreCompacts fire with no intervening
+        UserPromptSubmit. The flag must still be pending exactly once total,
+        not once per reset."""
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+        ):
+            reset_counter()
+            reset_counter()
+            reset_counter()
+            assert consume_regroup_pending() is True
+            assert consume_regroup_pending() is False
+
+    def test_fallback_to_hook_data_session_id(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            env = dict(__import__("os").environ)
+            env.pop("CLAUDE_CODE_SESSION_ID", None)
+            with patch.dict("os.environ", env, clear=True):
+                reset_counter(hook_data={"session_id": "fallback-id"})
+                assert consume_regroup_pending(hook_data={"session_id": "fallback-id"}) is True
+                assert consume_regroup_pending(hook_data={"session_id": "fallback-id"}) is False
+
+    def test_real_turn_after_reset_implicitly_clears_pending(self, tmp_path):
+        """Once a real UserPromptSubmit turn fires (turn 0), _load_and_increment
+        overwrites state without regroup_pending — so a late-arriving normal turn
+        clears the backstop flag too, even if PostToolUse never consumed it."""
+        from aipass.hooks.apps.modules.cadence import consume_regroup_pending, reset_counter, should_fire
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            reset_counter()
+
+        _reset_module_globals()
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            assert should_fire("global") is True
+            assert consume_regroup_pending() is False
+
+
 class TestConfig:
     def setup_method(self):
         _reset_module_globals()

@@ -56,9 +56,9 @@ cd AIPass
 ./aipass install
 ```
 
-One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report in hand: it welcomes you, asks your name once, shows you around, and checks what your machine still needs — every machine is different.
+One command does it all: builds the environment, puts `aipass` + `drone` on your PATH, bootstraps the 17-agent reference fleet, runs a health check (`aipass doctor --fix` — heals what it can, automatically) — and ends **in a conversation**. The AIPass concierge opens right in your terminal with your install report and health verdict in hand: it greets you by name, shows you around, and walks you through what your machine still needs — every machine is different.
 
-Along the way, in an interactive shell, expect two quick prompts: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so skip is always an option, and a bad address is never silently stored) and your **name**, so the concierge knows what to call you. Anything skipped or still missing gets collected into one "action needed" summary at the end, right before the welcome conversation opens — no project prompt, nothing else to answer. Project creation comes later, when you're ready (see below).
+Along the way, in an interactive shell, expect three quick prompts: your **git identity** (name + email, if not already configured globally — this is yours, not ours, so skip is always an option, and a bad address is never silently stored), your **name**, so the concierge knows what to call you, and **how the session should run** (asks before system-changing commands by default, or full autonomy). Anything skipped or still missing gets collected into one "action needed" summary at the end, right before the welcome conversation opens — no project prompt, nothing else to answer. Project creation comes later, when you're ready (see below).
 
 Come back tomorrow, say "hi", and it picks up exactly where you left off. That's the whole interface.
 
@@ -206,7 +206,6 @@ devpulse (orchestrator)
 | Version | See [git tags](https://github.com/AIOSAI/AIPass/tags) |
 | Agents | 17 core + user-created |
 | Quality | Automated standards enforced across every agent |
-| Coverage | [![codecov](https://codecov.io/gh/AIOSAI/AIPass/graph/badge.svg)](https://codecov.io/gh/AIOSAI/AIPass) — 75% minimum, CI-gated |
 | Tests | Extensive — every agent ships its own suite |
 
 Each agent documents its own operational status in its branch README — what works, what doesn't, and why.

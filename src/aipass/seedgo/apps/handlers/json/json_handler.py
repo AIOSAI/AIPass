@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
-import inspect
 
 from aipass.prax import logger
 
@@ -28,16 +27,18 @@ def _get_caller_module_name() -> str:
         Module name (e.g., "imports_standard" from imports_standard.py)
     """
 
-    stack = inspect.stack()
-    # Skip frames: [0]=this function, [1]=log_operation, [2]=actual caller
-    if len(stack) > 2:
-        caller_frame = stack[2]
-        caller_path = Path(caller_frame.filename)
-        module_name = caller_path.stem
+    # sys._getframe is O(1); inspect.stack() reads source for every frame and
+    # at one call per checker per file it froze fresh audits (~5k calls/branch).
+    try:
+        caller_frame = sys._getframe(2)
+    except ValueError as e:
+        logger.info("[json_handler] Caller frame unavailable: %s", e)
+        return "unknown"
+    module_name = Path(caller_frame.f_code.co_filename).stem
 
-        # Validate module name
-        if module_name and not module_name.startswith("_"):
-            return module_name
+    # Validate module name
+    if module_name and not module_name.startswith("_"):
+        return module_name
 
     # Fallback
     return "unknown"
