@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -38,6 +39,7 @@ from aipass.drone.apps.modules.git_module import (
     get_introspective,
     handle_command,
 )
+from aipass.trigger.apps.modules import core as trigger_core
 
 
 # ===========================================================================
@@ -1043,6 +1045,12 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
+        # Pin module identity: create_pr lazily does `from ...core import trigger`,
+        # which resolves via sys.modules — patch through the file-top module object
+        # and pin that same object into sys.modules so both paths agree even if an
+        # earlier test on this worker disturbed trigger's module state.
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
+        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_created_success):
             with patch(
@@ -1050,8 +1058,7 @@ class TestTriggerFireIntegration:
                 return_value={"success": True, "message": "ok"},
             ):
                 with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
-                    with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
-                        result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
+                    result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
 
         assert result["success"] is True
         mock_trigger.fire.assert_any_call("pr_created", branch="api", pr_url="https://github.com/org/repo/pull/99")
@@ -1064,6 +1071,8 @@ class TestTriggerFireIntegration:
 
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
+        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_trigger_resilience):
             with patch(
@@ -1071,8 +1080,7 @@ class TestTriggerFireIntegration:
                 return_value={"success": True, "message": "ok"},
             ):
                 with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
-                    with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
-                        result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")
+                    result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")
 
         assert result["success"] is True  # PR still succeeds despite trigger failure
 
@@ -1085,12 +1093,13 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
+        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch(
             "aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run", side_effect=_run_merge_success
         ):
-            with patch("aipass.trigger.apps.modules.core.trigger", mock_trigger):
-                result = merge_pr("42", "devpulse")
+            result = merge_pr("42", "devpulse")
 
         assert result["success"] is True
         mock_trigger.fire.assert_any_call("pr_merged", pr_number="42", title="Fix the thing")

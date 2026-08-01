@@ -47,6 +47,19 @@ tmp-path assertions failed serially while xdist dodged it (the reloader and
 the victims land on different workers). Proven both modes: 12,296/0 serial
 and xdist.
 
+**fix(ci)** — Python 3.10-only xdist flake in drone's
+`TestTriggerFireIntegration`: the tests string-patched
+`aipass.trigger.apps.modules.core.trigger` while `create_pr`/`merge_pr`
+lazily import that module at call time. On 3.10, `mock.patch` resolves the
+string via a getattr chain over parent-package attributes, so after a
+neighbor test evicts `core` from `sys.modules` the mock lands on the stale
+module held by the parent attr while production re-imports a fresh one — and
+the handlers swallow trigger errors by design, so the miss is silent
+("fire call not found"). 3.11+ use `pkgutil.resolve_name` (sys.modules-backed)
+and converge; that's why only the 3.10 leg flaked. Fixed by importing `core`
+once at file top, pinning it into `sys.modules`, and patching through the
+module object — deterministic on every version.
+
 ## [2026-08-01] — CI wall-time phase 1a (DPLAN-0277)
 
 **ci(speed)** — measured on PR#723: the suite ran 7x per push and every job
