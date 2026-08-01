@@ -9,6 +9,22 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — srt resolver: candidate-list prefix discovery + honest exit codes (DPLAN-0279, @hooks scope)
+
+**fix(hooks)** — `_srt_resolve.mjs` derived npm's global prefix from node's
+install location (`dirname(dirname(process.execPath))`). On Debian/Ubuntu apt
+layouts and official node Docker images node lives in `/usr` while npm installs
+globals to `/usr/local` — srt was reported missing while correctly installed,
+and the advised `npm install -g` could never satisfy the check. With the
+sandbox flag ON that layout fail-closed every dispatch. Now: candidate-list
+discovery (`npm_config_prefix` env → `npm root -g` → `/usr/local` → `/usr` →
+execPath derivation), dynamic `import()`+`pathToFileURL` preserved per the ESM
+constraint. The silent exit-0-on-failure path (uncaught top-level rejection) is
+fixed — non-zero exit with tried candidates on stderr — and a new `--resolve`
+CLI mode gives doctor/setup a resolve-only contract (path on stdout, exit 0/1).
+5 new subprocess tests incl. the Debian split-prefix layout; found by the
+fresh-eyes container agent during the round-3 install walk.
+
 ## [2026-08-01] — setup.sh hook-block drift: PostToolUse matcher + dead Write() ask rules (round-3 walk)
 
 **fix(setup)** — setup.sh's hand-rolled hook block shipped the pre-v2.7.10
