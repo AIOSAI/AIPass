@@ -9,6 +9,22 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — CI wall-time phase 1a (DPLAN-0277)
+
+**ci(speed)** — measured on PR#723: the suite ran 7x per push and every job
+ran TWICE (push + pull_request both firing on dev). Shipped the zero-risk
+half: heavy workflows (ci/windows/macos) now trigger on PRs + push-to-main
+only (dev work is PR'd within minutes, so dev-push runs were pure
+duplicates); `concurrency` cancel-in-progress so a re-push kills the stale
+run; the coverage job no longer `needs: [test]` (it re-runs the suite itself
+— chaining it after the matrix serialized the two longest jobs into a
+~13-min critical path); the 4 test-matrix legs drop their `coverage run`
+wrapper whose data was never collected. `pytest-xdist` added to the dev
+extra. Parallel execution itself (`-n auto`) is staged as phase 1b: a local
+proof run found 19 tests with shared-state hygiene issues (sys.modules
+reimport tests, json_handler template files, flow plan-data writes, seedgo
+bypass.json) — inventory + fix plan in DPLAN-0277.
+
 ## [2026-08-01] — night train (v2.7.10)
 
 **fix(setup)** — cold install died silently right after the "What should we

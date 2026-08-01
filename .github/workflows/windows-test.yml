@@ -2,14 +2,20 @@ name: Windows Test
 
 on:
   workflow_dispatch:
-  # Run on every push/PR to main/dev — NOT path-filtered. This is a branch-
-  # protection *required* check; a path filter makes it skip on unrelated PRs,
-  # which GitHub then parks as "Expected — waiting for status" forever, blocking
-  # the merge. Required checks must run on every PR to report a status.
+  # Runs on every PR (required check) + push to main (post-merge validation).
+  # NOT path-filtered: a path filter makes a required check skip on unrelated
+  # PRs, which GitHub parks as "Expected — waiting for status" forever,
+  # blocking the merge. Dev-push was dropped 2026-08-01: dev work is PR'd
+  # within minutes, so push+PR double-ran every job for nothing.
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main, dev]
+
+# A new push to the same ref cancels the stale in-flight run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
