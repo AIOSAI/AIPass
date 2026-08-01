@@ -9,6 +9,21 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — setup.sh hook-block drift: PostToolUse matcher + dead Write() ask rules (round-3 walk)
+
+**fix(setup)** — setup.sh's hand-rolled hook block shipped the pre-v2.7.10
+PostToolUse matcher (`Bash|Edit|MultiEdit|Write|NotebookEdit`); doctor then
+wired the manifest's widened matcher (`…|Read|Grep|Glob|Task`, the DPLAN-0276
+regroup backstop) alongside it. Both matched on any Bash/Edit call — the hook
+bridge fired **twice per tool call** on fresh installs, and setup's
+strip-and-readd merge resurrected the stale entry on every re-run. Matcher now
+mirrors `provider_manifest.json` exactly, so doctor's dedup recognizes it.
+Also dropped the `Write(~/.claude/**)` ask rules setup shipped — Claude Code
+never matches `Write(path)` rules (only `Edit(path)` covers file-editing
+tools) and warned about them at every launch. Found live during the round-3
+container walk. PreCompact "duplicates" investigated same pass: false alarm —
+manual/auto matcher pairs are by design.
+
 ## [2026-08-01] — Compact fixes: regroup double-arm, newest-first memory enforcement (DPLAN-0278)
 
 **fix(hooks)** — the DPLAN-0276 post-compact re-ground backstop fired up to 17×

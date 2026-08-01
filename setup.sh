@@ -756,7 +756,7 @@ aipass_hooks = {
          "hooks": [{"type": "command", "command": f"{bridge} PreToolUse"}]},
     ],
     "PostToolUse": [
-        {"matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
+        {"matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task",
          "hooks": [{"type": "command", "command": f"{bridge} PostToolUse"}]},
     ],
     "SubagentStop": [
@@ -856,11 +856,12 @@ permissions["deny"] = deny
 
 ask = permissions.get("ask", [])
 home = os.path.expanduser("~")
+# Edit(path) rules cover ALL file-editing tools (Edit, Write, NotebookEdit).
+# Write(path) rules are never matched by file permission checks — Claude Code
+# warns about them at launch. Ship Edit() only.
 ask_rules = [
     f"Edit({home}/.claude/**)",
-    f"Write({home}/.claude/**)",
     "Edit(~/.claude/**)",
-    "Write(~/.claude/**)",
 ]
 for rule in ask_rules:
     if rule not in ask:
