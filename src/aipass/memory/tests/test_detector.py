@@ -371,6 +371,93 @@ class TestCheckSingleFile:
         assert "config gap" in result.get("v2_reason", "")
 
 
+class TestSessionAutoCompactBudget:
+    """auto-compact snapshots get their own cap and don't inflate the regular session count."""
+
+    def test_auto_compact_cap_triggers_independently_of_session_count(self, tmp_path: Path, monkeypatch):
+        """3 auto-compact entries hitting cap=3 trigger even with regular sessions well under count."""
+        mem_file = tmp_path / "MEMORY.local.json"
+        data = {
+            "document_metadata": {"schema_version": "3.0.0"},
+            "sessions": [
+                {"id": "regular-1", "status": "completed"},
+                {"id": "auto-1", "status": "auto-compact"},
+                {"id": "auto-2", "status": "auto-compact"},
+                {"id": "auto-3", "status": "auto-compact"},
+            ],
+        }
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(
+            detector.config_loader,
+            "section",
+            lambda name: {
+                "per_branch": {"memory": {"local": {"sessions": {"count": 15, "auto_compact_cap": 3}}}},
+                "defaults": {},
+            },
+        )
+
+        result = detector.check_single_file(mem_file)
+
+        assert result["success"] is True
+        assert result["should_rollover"] is True
+        assert result["trigger"].v2_reason == "3/3 auto-compact snapshots"
+
+    def test_auto_compact_entries_excluded_from_regular_session_count(self, tmp_path: Path, monkeypatch):
+        """Auto-compact entries must not count toward the regular sessions/count trigger."""
+        mem_file = tmp_path / "MEMORY.local.json"
+        data = {
+            "document_metadata": {"schema_version": "3.0.0"},
+            "sessions": (
+                [{"id": f"regular-{i}", "status": "completed"} for i in range(2)]
+                + [{"id": f"auto-{i}", "status": "auto-compact"} for i in range(5)]
+            ),
+        }
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(
+            detector.config_loader,
+            "section",
+            lambda name: {
+                "per_branch": {"memory": {"local": {"sessions": {"count": 10, "auto_compact_cap": 20}}}},
+                "defaults": {},
+            },
+        )
+
+        result = detector.check_single_file(mem_file)
+
+        # 2 regular sessions (well under count=10), 5 auto-compact (well under cap=20)
+        assert result["success"] is True
+        assert result["should_rollover"] is False
+
+    def test_regular_session_count_still_triggers_without_auto_compact_cap(self, tmp_path: Path, monkeypatch):
+        """Branches without auto_compact_cap configured keep triggering on raw session count."""
+        mem_file = tmp_path / "MEMORY.local.json"
+        data = {
+            "document_metadata": {"schema_version": "3.0.0"},
+            "sessions": [{"id": f"s{i}", "status": "completed"} for i in range(12)],
+        }
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(
+            detector.config_loader,
+            "section",
+            lambda name: {"per_branch": {"memory": {"local": {"sessions": {"count": 10}}}}, "defaults": {}},
+        )
+
+        result = detector.check_single_file(mem_file)
+
+        assert result["success"] is True
+        assert result["should_rollover"] is True
+        assert "12/10 sessions" in result["trigger"].v2_reason
+
+
 # ===========================================================================
 # _read_registry
 # ===========================================================================

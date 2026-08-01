@@ -83,8 +83,10 @@ class TestSessionStartHandler:
         data = json.loads(state_file.read_text())
         assert data["turn"] == 7
 
-    def test_compact_source_resets(self, tmp_path):
-        """source=compact is idempotent with PreCompact — allowed."""
+    def test_compact_source_skips_reset(self, tmp_path):
+        """source=compact is skipped — PreCompact (compact.py) already reset for the
+        same boundary. A duplicate reset here re-arms the regroup token a second
+        time per compact (DPLAN-0278 over-fire mechanism)."""
         from aipass.hooks.apps.handlers.lifecycle.session_start import handle
 
         state_file = _write_state(tmp_path, turn=5)
@@ -97,7 +99,7 @@ class TestSessionStartHandler:
 
         assert result["exit_code"] == 0
         data = json.loads(state_file.read_text())
-        assert data["turn"] == -1
+        assert data["turn"] == 5
 
     def test_empty_source_resets(self, tmp_path):
         from aipass.hooks.apps.handlers.lifecycle.session_start import handle

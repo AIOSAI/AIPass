@@ -27,6 +27,7 @@ All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -698,6 +699,197 @@ class TestExtractWithMetadata:
         assert result["success"] is True
         # Either skipped=True (passthrough) or entries is empty (wrapped)
         assert result.get("skipped") is True or result.get("count", 0) == 0
+
+
+# ===========================================================================
+# Tests: rollover/extractor.py -- safety valve + auto-compact snapshot budget
+# ===========================================================================
+
+
+class TestRolloverSafetyValve:
+    """Entries dated today or numbered above the head must never be archived as 'oldest'."""
+
+    def test_skips_archiving_entry_dated_today(self, monkeypatch, tmp_path):
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 4, "date": "2026-01-04", "summary": "newest", "status": "completed"},
+                {"number": 3, "date": "2026-01-03", "summary": "second", "status": "completed"},
+                {"number": 1, "date": today, "summary": "fresh-write-at-tail", "status": "completed"},
+                {"number": 2, "date": "2026-01-01", "summary": "oldest-real", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 2}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True
+        archived_summaries = [e["summary"] for e in result["extracted"]]
+        assert "fresh-write-at-tail" not in archived_summaries
+        assert "oldest-real" in archived_summaries
+        remaining_summaries = [e["summary"] for e in data["sessions"]]
+        assert "fresh-write-at-tail" in remaining_summaries
+
+    def test_skips_archiving_entry_numbered_above_head(self, monkeypatch, tmp_path):
+        """A tail entry numbered higher than the head is a misplaced write, not oldest history."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 5, "date": "2026-01-05", "summary": "newest", "status": "completed"},
+                {"number": 4, "date": "2026-01-04", "summary": "second", "status": "completed"},
+                {"number": 9, "date": "2020-01-01", "summary": "misplaced-high-number", "status": "completed"},
+                {"number": 3, "date": "2026-01-01", "summary": "oldest-real", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 2}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True
+        archived_summaries = [e["summary"] for e in result["extracted"]]
+        assert "misplaced-high-number" not in archived_summaries
+        assert "oldest-real" in archived_summaries
+        remaining_summaries = [e["summary"] for e in data["sessions"]]
+        assert "misplaced-high-number" in remaining_summaries
+
+    def test_archives_genuinely_old_entry_normally(self, monkeypatch, tmp_path):
+        """Sanity check: a plain old-dated, correctly-numbered tail entry still archives."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 3, "date": "2026-01-03", "summary": "newest", "status": "completed"},
+                {"number": 2, "date": "2026-01-02", "summary": "middle", "status": "completed"},
+                {"number": 1, "date": "2026-01-01", "summary": "oldest", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 2}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        archived_summaries = [e["summary"] for e in result["extracted"]]
+        assert archived_summaries == ["oldest"]
+
+
+class TestAutoCompactSnapshotBudget:
+    """AUTO-COMPACT SNAPSHOT entries get a small dedicated cap, separate from the session keep budget."""
+
+    def test_auto_compact_entries_capped_independently(self, monkeypatch, tmp_path):
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        # 4 auto-compact snapshots (cap 3) + 2 regular sessions (count limit 10, well under)
+        sessions = [
+            {"number": 6, "date": "2026-01-06", "summary": "AUTO-COMPACT SNAPSHOT: d", "status": "auto-compact"},
+            {"number": 5, "date": "2026-01-05", "summary": "regular newest", "status": "completed"},
+            {"number": 4, "date": "2026-01-04", "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 3, "date": "2026-01-03", "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 2, "date": "2026-01-02", "summary": "regular oldest", "status": "completed"},
+            {"number": 1, "date": "2026-01-01", "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
+        ]
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": sessions,
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {
+                branch_key: {"local": {"sessions": {"count": 10, "auto_compact_cap": 3}}},
+            },
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        archived_summaries = {e["summary"] for e in result["extracted"]}
+        # Only the single oldest auto-compact snapshot beyond the cap of 3 is archived
+        assert archived_summaries == {"AUTO-COMPACT SNAPSHOT: a"}
+        # Regular sessions untouched (well under count limit of 10)
+        remaining_summaries = {e["summary"] for e in data["sessions"]}
+        assert "regular newest" in remaining_summaries
+        assert "regular oldest" in remaining_summaries
+
+    def test_auto_compact_entries_do_not_count_against_regular_budget(self, monkeypatch, tmp_path):
+        """Auto-compact snapshots must not push regular sessions out early."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        # 2 regular sessions (count limit 2 -- triggers) + 3 auto-compact (well under cap 5)
+        sessions = [
+            {"number": 5, "date": "2026-01-05", "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 4, "date": "2026-01-04", "summary": "regular newest", "status": "completed"},
+            {"number": 3, "date": "2026-01-03", "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 2, "date": "2026-01-02", "summary": "regular oldest", "status": "completed"},
+            {"number": 1, "date": "2026-01-01", "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
+        ]
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": sessions,
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {
+                branch_key: {"local": {"sessions": {"count": 2, "auto_compact_cap": 5}}},
+            },
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        archived_summaries = {e["summary"] for e in result["extracted"]}
+        # Regular budget (count=2) triggers on 2 regular entries >= 2 -> archives the oldest regular one only
+        assert archived_summaries == {"regular oldest"}
+        remaining_summaries = {e["summary"] for e in data["sessions"]}
+        assert "AUTO-COMPACT SNAPSHOT: a" in remaining_summaries
+        assert "AUTO-COMPACT SNAPSHOT: b" in remaining_summaries
+        assert "AUTO-COMPACT SNAPSHOT: c" in remaining_summaries
+        assert "regular newest" in remaining_summaries
 
 
 # ===========================================================================

@@ -12,15 +12,21 @@
 
 Fires on source=startup (new chat) and source=clear (/clear).
 Skips source=resume — restored context already carries grounding.
-source=compact is already handled by PreCompact; a duplicate reset is
-harmless (idempotent), so we allow it rather than adding a fragile gate.
+
+Also skips source=compact: PreCompact (compact.py) already reset for the
+same boundary. This was previously treated as a harmless duplicate, but it
+is not — it re-arms the PostToolUse regroup token (DPLAN-0276) a second
+time per compact, and was the confirmed over-fire mechanism in DPLAN-0278
+(one session saw 16 regroup fires with no matching PreCompact reset logged
+in between). cadence.reset_counter() also debounces same-boundary re-arms
+as defense in depth, but the redundant call itself serves no purpose here.
 """
 
 import importlib
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-_SKIP_SOURCES = frozenset({"resume"})
+_SKIP_SOURCES = frozenset({"resume", "compact"})
 
 
 def handle(hook_data: dict) -> dict:
@@ -33,7 +39,7 @@ def handle(hook_data: dict) -> dict:
 
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        cadence.reset_counter(hook_data=hook_data)
+        cadence.reset_counter(hook_data=hook_data, caller="session_start")
         logger.info("[HOOKS] session_start: cadence reset (source=%s)", source)
     except Exception as exc:
         logger.info("[HOOKS] session_start: cadence reset failed: %s", exc)

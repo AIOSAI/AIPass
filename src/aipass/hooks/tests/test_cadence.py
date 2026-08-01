@@ -796,7 +796,7 @@ class TestPostCompactDeterminism:
             mock_cadence = mock_import.return_value
             result = handle(hook_data)
 
-        mock_cadence.reset_counter.assert_called_once_with(hook_data=hook_data)
+        mock_cadence.reset_counter.assert_called_once_with(hook_data=hook_data, caller="compact")
         assert result["exit_code"] == 0
 
     def test_double_reset_is_idempotent(self, tmp_path):

@@ -9,6 +9,40 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — Compact fixes: regroup double-arm, newest-first memory enforcement (DPLAN-0278)
+
+**fix(hooks)** — the DPLAN-0276 post-compact re-ground backstop fired up to 17×
+per session (~400KB injected, plausibly *causing* extra compactions). Root
+cause: `session_start.py` called `cadence.reset_counter()` on `source=compact`
+on top of `compact.py`'s own PreCompact reset — double-arming `regroup_pending`
+every compact boundary. Fixed (compact added to `_SKIP_SOURCES`) and hardened:
+the boolean flag is now a one-shot per-arm token with timestamp, consumed
+atomically; duplicate resets within 30s reuse the existing token; every arm
+logs caller+PID. Also: the re-ground payload now teaches the memory-file shape
+(`.trinity` arrays are newest-first — insert at index 0, number = max+1), the
+recovery text's `key_learnings[-10:]` inversion became `[:10]`, and
+`edit_gate` mechanically rejects `.trinity` session/learning edits that append
+at the tail or regress the number field. Background: a post-compact agent that
+lost the newest-first convention wrote fresh entries at the array tail, where
+the next rollover archived them as "oldest" — memories silently eaten within
+the hour.
+
+**fix(memory)** — rollover safety valve: tail entries dated today or numbered
+above the array head are held back with a warning (misplaced fresh writes, not
+oldest history). AUTO-COMPACT SNAPSHOT entries get their own small cap
+(default 3) instead of consuming the 15-session budget (~40% of memory slots
+were machine boilerplate, evicting real memories ~1.7× faster).
+
+**fix(drone)** — memory-branch `rollover` command gets a 100s executor timeout
+override (was killed at the 30s default twice in 3 days mid-archive).
+
+**chore(hooks)** — provider manifest ↔ live settings reconciled both
+directions (manifest gained `PreCompact:auto_process`; live PostToolUse
+matcher gained `Read|Grep|Glob|Task` so the backstop sees read-tools);
+seedgo's provider-hooks snapshot baseline updated to match; navmap breadcrumb:
+a memory missing from `local.json` likely rolled over — `drone @memory search`
+finds it.
+
 ## [2026-08-01] — CI wall-time phase 1b: pytest-xdist (DPLAN-0277)
 
 **ci(speed)** — the test suite now runs `-n auto --dist loadscope` in the

@@ -62,6 +62,8 @@ def handle(hook_data: dict) -> dict:
             "[POST-COMPACT RE-GROUND — mid-turn backstop, DPLAN-0276]\n"
             "Compaction happened without a following UserPromptSubmit, so cadence-based "
             "grounding didn't fire yet. Re-grounding now via PostToolUse.\n"
+            "Reminder: .trinity sessions[]/key_learnings[] are NEWEST-FIRST — insert new "
+            "entries at index 0 with number = max existing + 1, never append at the tail.\n"
         )
         context = header + "\n\n".join(sections)
 

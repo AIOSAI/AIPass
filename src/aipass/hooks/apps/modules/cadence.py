@@ -227,59 +227,17 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     return fired
 
 
-def reset_counter(hook_data: dict | None = None) -> None:
-    """Reset counter to -1 so next turn reads 0 (all loaders fire). Called from PreCompact."""
-    path = _state_path()
-    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-
-    if path is None and hook_data:
-        fallback_id = hook_data.get("session_id", "")
-        if fallback_id:
-            path = _GUARD_DIR / f"aipass-cadence-{fallback_id}.json"
-            session_id = fallback_id
-
-    session_short = session_id[:8] if session_id else "none"
-
-    if path is None:
-        logger.info("[HOOKS] cadence: reset_counter SKIPPED — no session ID (env CLAUDE_CODE_SESSION_ID not set)")
-        return
-
-    fd = None
-    try:
-        fd = open(path, "a+")  # noqa: SIM115
-        _lock(fd)
-        fd.seek(0)
-        content = fd.read()
-        old_turn = -1
-        if content.strip():
-            try:
-                old_turn = json.loads(content).get("turn", -1)
-            except json.JSONDecodeError as exc:
-                logger.info("[HOOKS] cadence: reset read old state failed: %s", exc)
-        fd.seek(0)
-        fd.truncate()
-        fd.write(json.dumps({"turn": -1, "token": -1, "regroup_pending": True}))
-        fd.flush()
-        _close_fd(fd)
-        fd = None
-        logger.info(
-            "[HOOKS] cadence: counter reset for post-compact re-injection session=%s prev_turn=%d",
-            session_short,
-            old_turn,
-        )
-    except OSError as exc:
-        logger.info("[HOOKS] cadence: reset write FAILED session=%s: %s", session_short, exc)
-        if fd is not None:
-            _close_fd(fd)
+_REGROUP_DEBOUNCE_S = 30.0
 
 
-def consume_regroup_pending(hook_data: dict | None = None) -> bool:
-    """Atomically check-and-clear the post-compact regrounding flag.
+def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> None:
+    """Reset counter to -1 so next turn reads 0 (all loaders fire). Called from PreCompact.
 
-    Set by reset_counter() on every PreCompact. Returns True at most once per
-    compact — the caller (a PostToolUse backstop, DPLAN-0276) fires grounding
-    content directly since PostToolUse's additionalContext reaches Claude even
-    when no UserPromptSubmit arrives to let cadence's normal turn-0 path fire.
+    Also arms a one-shot regroup token for the PostToolUse re-ground backstop
+    (DPLAN-0276). A duplicate reset within _REGROUP_DEBOUNCE_S of the last arm
+    (e.g. two callers reacting to the same compact boundary, DPLAN-0278) reuses
+    the existing token instead of minting a new one — hard-caps the backstop to
+    at most one fire per compact regardless of how many callers reset here.
     """
     path = _state_path()
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -291,6 +249,94 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
             session_id = fallback_id
 
     session_short = session_id[:8] if session_id else "none"
+    pid = os.getpid()
+
+    if path is None:
+        logger.info(
+            "[HOOKS] cadence: reset_counter SKIPPED caller=%s pid=%d — no session ID (env var not set)",
+            caller,
+            pid,
+        )
+        return
+
+    fd = None
+    try:
+        fd = open(path, "a+")  # noqa: SIM115
+        _lock(fd)
+        fd.seek(0)
+        content = fd.read()
+        data: dict = {}
+        if content.strip():
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as exc:
+                logger.info("[HOOKS] cadence: reset read old state failed: %s", exc)
+        old_turn = data.get("turn", -1)
+        prior_armed_at = data.get("regroup_armed_at")
+        now = time.time()
+        elapsed = now - prior_armed_at if isinstance(prior_armed_at, (int, float)) else None
+
+        debounced = elapsed is not None and elapsed < _REGROUP_DEBOUNCE_S
+        if debounced:
+            token = data.get("regroup_token")
+            armed_at = prior_armed_at
+        else:
+            token = f"{int(now * 1000)}-{pid}"
+            armed_at = now
+
+        fd.seek(0)
+        fd.truncate()
+        fd.write(json.dumps({"turn": -1, "token": -1, "regroup_token": token, "regroup_armed_at": armed_at}))
+        fd.flush()
+        _close_fd(fd)
+        fd = None
+
+        if debounced:
+            logger.info(
+                "[HOOKS] cadence: regroup rearm debounced caller=%s pid=%d session=%s (%.1fs since last arm)",
+                caller,
+                pid,
+                session_short,
+                elapsed or 0.0,
+            )
+        else:
+            logger.info(
+                "[HOOKS] cadence: counter reset for post-compact re-injection caller=%s pid=%d token=%s "
+                "session=%s prev_turn=%d",
+                caller,
+                pid,
+                token,
+                session_short,
+                old_turn,
+            )
+    except OSError as exc:
+        logger.info(
+            "[HOOKS] cadence: reset write FAILED caller=%s pid=%d session=%s: %s", caller, pid, session_short, exc
+        )
+        if fd is not None:
+            _close_fd(fd)
+
+
+def consume_regroup_pending(hook_data: dict | None = None) -> bool:
+    """Atomically check-and-clear the post-compact regrounding token.
+
+    Set by reset_counter() on every PreCompact (armed once per compact — see
+    the debounce there). Returns True at most once per compact — the caller
+    (a PostToolUse backstop, DPLAN-0276) fires grounding content directly
+    since PostToolUse's additionalContext reaches Claude even when no
+    UserPromptSubmit arrives to let cadence's normal turn-0 path fire.
+    """
+    path = _state_path()
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+
+    if path is None and hook_data:
+        fallback_id = hook_data.get("session_id", "")
+        if fallback_id:
+            path = _GUARD_DIR / f"aipass-cadence-{fallback_id}.json"
+            session_id = fallback_id
+
+    session_short = session_id[:8] if session_id else "none"
+    pid = os.getpid()
 
     if path is None or not path.exists():
         return False
@@ -302,10 +348,11 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
         fd.seek(0)
         content = fd.read()
         data = json.loads(content) if content.strip() else {}
-        pending = bool(data.get("regroup_pending", False))
+        token = data.get("regroup_token")
+        pending = bool(token)
 
         if pending:
-            data["regroup_pending"] = False
+            data["regroup_token"] = None
             fd.seek(0)
             fd.truncate()
             fd.write(json.dumps(data))
@@ -315,7 +362,12 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
         fd = None
 
         if pending:
-            logger.info("[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) session=%s", session_short)
+            logger.info(
+                "[HOOKS] cadence: regroup_pending consumed (mid-turn backstop) pid=%d token=%s session=%s",
+                pid,
+                token,
+                session_short,
+            )
         return pending
 
     except (OSError, json.JSONDecodeError) as exc:
