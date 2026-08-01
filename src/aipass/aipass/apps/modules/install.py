@@ -214,6 +214,7 @@ def _ask_permission_mode() -> str:
     try:
         choice = _prompt("Choice", "1")
     except KeyboardInterrupt:
+        logger.info("[install] permission-mode selector cancelled — keeping accept-edits default")
         console.print()
         return "default"
     return "skip-permissions" if choice.strip() == "2" else "default"
