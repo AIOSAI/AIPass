@@ -480,7 +480,9 @@ resolve_user_name() {
             fi
         else
             read -r -p "What should we call you? (Enter to skip): " USER_NAME
-            [ "$USER_NAME" = "skip" ] && USER_NAME=""
+            # set -e trap: a bare `[ ... ] && ...` as the function's last command
+            # returns 1 when the test fails, killing the whole install silently.
+            if [ "$USER_NAME" = "skip" ]; then USER_NAME=""; fi
         fi
     fi
 }

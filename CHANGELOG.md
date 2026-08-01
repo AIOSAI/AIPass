@@ -9,7 +9,62 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-07-31] — round-2 walk train (v2.7.9)
+## [2026-08-01] — night train (v2.7.10)
+
+**fix(setup)** — cold install died silently right after the "What should we
+call you?" prompt on the git-identity-skipped path: the skip-normalization
+(`[ "$USER_NAME" = "skip" ] && USER_NAME=""`) was the last command in
+`resolve_user_name`, so any answer except the literal word "skip" — including
+the plain Enter the prompt itself advertises — returned 1 and `set -e` killed
+the whole script before registry/bootstrap/doctor/chat. Now a proper `if`.
+Live-caught by Patrick's round-3 container walk (DPLAN-0274); the only
+instance of the pattern in a kill position (all other `[ ... ] && ...` sites
+verified safe by direct `set -e` repro).
+
+**feat(hooks)** — post-compaction regrounding backstop (DPLAN-0276). Root
+cause of the confabulation incident: PreCompact's `reset_counter()` only arms
+cadence for the next UserPromptSubmit, an event that never fires during long
+tool-call-only autonomous stretches — agents ran ungrounded after compaction
+2+ (cadence.log: 6 back-to-back PreCompact resets, zero `should_fire`
+between). PostCompact stdout is never surfaced to Claude, so the fix is a
+PostToolUse backstop: `reset_counter()` sets a `regroup_pending` flag, new
+`lifecycle/post_compact_regrounding.py` atomically consumes it and injects
+kernel+navmap+branch+identity via `additionalContext` on the next tool call.
+The four prompt handlers' file-loading extracted into shared
+`modules/grounding_content.py` (one source of truth); provider-manifest
+PostToolUse matcher broadened (Read|Grep|Glob|Task — the narrow matcher was
+itself part of the dead zone). Fired live in production during the fixing
+session's own compaction; 11 regression tests replaying the incident; full
+suite 1298 passed.
+
+**feat(seedgo)** — incremental audits (DPLAN-0275): fingerprint cache
+(`audit/incremental_cache.py`) audits changed files only — full-fleet audit
+~5 min → ~3.6 s warm. Cache invalidates on edit, new violation, and file
+delete (live-tested); `--full` still forces a cold pass.
+
+**feat(skills)** — Telegram `/stop` verb: bot-side intercept (slash text
+injected into a TUI session fuzzy-morphs into different queued commands —
+verbs must never be injected), plus slash-command guard and a 600 s
+stuck-pending timeout that kills the Superseded spiral.
+
+**fix(ai_mail)** — dispatch-monitor forensics hardening (FPLAN-0371, the five
+monitor fixes from the seedgo-drops investigation) across
+`dispatch_monitor.py`, `wake.py`, and `header.py`, including the sync
+sub-agents rule in dispatch headers (headless dispatch reaps orphaned
+background work after 600 s).
+
+**fix(flow)** — `close_ops` template-detection could fast-delete real minimal
+FPLANs (57 lost, unrecoverable — never archived). Rule now absolute:
+detection may warn, never delete; archive-before-delete always (FPLAN-0372).
+
+**docs** — README truth-pass (root: codecov row, name-at-setup, the three
+install prompts; ai_mail + hooks READMEs updated to match their shipped
+behavior).
+
+**tests** — seedgo provider-hooks snapshot baseline re-blessed: it predated
+the 2026-07-30 TG mirror deploy (`user_message_relay` UserPromptSubmit hook)
+and had been failing locally since (CI skips these — no provider settings
+there).
 
 **feat(onboarding)** — Patrick's round-2 container walk + the in-container
 concierge's own field report, folded into one train (DPLAN-0274). Doctor now

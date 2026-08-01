@@ -1219,6 +1219,67 @@ class TestWakeBranch:
         prompt = claude_part[p_idx + 1]
         assert prompt.startswith("Hi. Run the audit")
 
+    def test_prompt_does_not_ask_agent_to_delete_lock(self, tmp_path, monkeypatch):
+        """Monitor owns lock cleanup — the prompt must not also tell the agent to delete it.
+
+        A dual-delete race let a second monitor spawn onto a lock the first
+        agent had already removed mid-run (lock-theft, observed 2026-07-31).
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+
+        captured_cmds: list = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr("subprocess.Popen", fake_popen)
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.notify.send_notification",
+            lambda *a, **kw: None,
+            raising=False,
+        )
+        status, ok = wake_branch("@testbranch")
+        assert ok is True
+        cmd = captured_cmds[0]
+        sep_idx = cmd.index("--")
+        claude_part = cmd[sep_idx + 1 :]
+        p_idx = claude_part.index("-p")
+        prompt = claude_part[p_idx + 1]
+        assert "delete" not in prompt.lower()
+        assert ".dispatch.lock" not in prompt
+
+    def test_prompt_instructs_synchronous_subagents(self, tmp_path, monkeypatch):
+        """Prompt tells the agent to run sub-agents in the foreground, not background.
+
+        Headless print-mode kills orphaned background tasks after 600s with
+        no reply sent — the agent needs to know not to background work.
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+
+        captured_cmds: list = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr("subprocess.Popen", fake_popen)
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.notify.send_notification",
+            lambda *a, **kw: None,
+            raising=False,
+        )
+        status, ok = wake_branch("@testbranch")
+        assert ok is True
+        cmd = captured_cmds[0]
+        sep_idx = cmd.index("--")
+        claude_part = cmd[sep_idx + 1 :]
+        p_idx = claude_part.index("-p")
+        prompt = claude_part[p_idx + 1]
+        assert "synchronously" in prompt.lower()
+
     # --- spawn errors ---
 
     def test_spawn_file_not_found(self, tmp_path, monkeypatch):

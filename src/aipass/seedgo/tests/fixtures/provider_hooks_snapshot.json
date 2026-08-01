@@ -98,6 +98,14 @@
           "timeout": 30
         }
       ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py UserPromptSubmit:user_message_relay"
+        }
+      ]
     }
   ],
   "Notification": [

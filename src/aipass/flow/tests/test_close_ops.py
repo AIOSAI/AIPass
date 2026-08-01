@@ -293,6 +293,56 @@ class TestClosePlanImplSuccess:
         deps["push_to_plans_central"].assert_called_once()
 
 
+class TestTemplateDetectionNeverDeletes:
+    """FPLAN-0370/0371 bug: is_template_content()==True must NOT fast-delete the
+    file or the registry row anymore -- it must close/archive exactly like any
+    other plan (full parity between template-flagged and real-content closes)."""
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess")
+    def test_template_flagged_plan_is_archived_not_deleted(self, mock_subprocess, _mock_find, _mock_resolve, tmp_path):
+        close_plan_impl = _import_close_plan_impl()
+
+        plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
+        plan_file.write_text("[What do you want to achieve? Specific end state.]", encoding="utf-8")
+
+        registry = {
+            "plans": {
+                "1": {
+                    "status": "open",
+                    "subject": "Test plan",
+                    "location": str(tmp_path),
+                    "file_path": str(plan_file),
+                }
+            }
+        }
+        deps = _make_deps(is_template_content=MagicMock(return_value=True))
+        deps["load_registry"].return_value = registry
+        deps["validate_plan_exists"].return_value = (True, None)
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler"),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
+        ):
+            result = close_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is True
+        # File was NOT unlinked directly -- archive_plan_fn is the only thing
+        # allowed to move/remove it, never a raw unlink() in close_ops itself.
+        assert plan_file.exists()
+        deps["archive_plan_fn"].assert_called_once_with(plan_file)
+        # Registry row survives (marked closed), never deleted outright.
+        assert "1" in registry["plans"]
+        assert registry["plans"]["1"]["status"] == "closed"
+        # Full pipeline parity: dashboards + CLOSED_PLANS append still ran.
+        deps["update_dashboard_local"].assert_called_once()
+        mock_append.assert_called_once()
+        assert any("empty template" in m.get("text", "").lower() for m in result["messages"])
+
+
 class TestSpawnBackgroundBehavior:
     """#662: spawn_background controls whether vectorization runs inline or in background."""
 

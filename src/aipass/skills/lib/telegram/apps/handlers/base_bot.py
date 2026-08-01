@@ -128,6 +128,8 @@ except ImportError:
 CC_SESSIONS_DIR = Path.home() / ".claude" / "sessions"
 PENDING_DIR = Path.home() / ".aipass" / "telegram_pending"
 PENDING_TTL = 3600  # 1 hour
+PENDING_STUCK_TIMEOUT_SECONDS = 600  # give up on an undelivered pending, don't spin "Processing..." forever
+DEFAULT_PASSTHROUGH_COMMANDS = ("clear", "compact", "prep", "memo")  # exact-match commands injected as-is
 TELEGRAM_CHAR_LIMIT = 4096
 RATE_LIMIT_MESSAGES = 5
 RATE_LIMIT_WINDOW = 60
@@ -795,6 +797,14 @@ class BaseBot:
             self._handle_control_suspend(chat_id, cmd_args)
             return True
 
+        # /stop — every bot, not just control bots (interrupts THIS bot's own
+        # mirrored session). Never let it fall through to raw injection: an
+        # unregistered slash command gets fuzzy-autocompleted by the TUI menu
+        # into an unrelated command (2026-07-31 live incident).
+        if cmd_name == "stop":
+            self._handle_control_stop(chat_id)
+            return True
+
         # Compute conversation uptime (resets on /new) and daemon uptime (since boot)
         conv_elapsed = time.time() - self.state.get("conversation_start", self.state["start_time"])
         conv_h, conv_rem = divmod(int(conv_elapsed), 3600)
@@ -860,6 +870,37 @@ class BaseBot:
     # MESSAGE HANDLING
     # =============================================
 
+    def _passthrough_commands(self) -> set[str]:
+        """Exact-match allowlist of slash commands injected as-is (config override, else default)."""
+        commands = DEFAULT_PASSTHROUGH_COMMANDS
+        try:
+            from .config import load_bot_config
+
+            config = load_bot_config(self.bot_id)
+            if config and isinstance(config.get("passthrough_commands"), list):
+                commands = config["passthrough_commands"]
+        except Exception as e:
+            logger.warning("Could not read passthrough_commands, using default: %s", e)
+        return {str(c).lower().lstrip("/") for c in commands}
+
+    def _guard_slash_injection(self, text: str) -> str:
+        """
+        Prevent an unregistered '/xyz' message from being injected as a raw slash command.
+
+        Telegram's own bot-command namespace (routed via _dispatch_command)
+        never reaches here. Anything else starting with '/' either matches
+        the exact-match passthrough allowlist (injected as-is, today's
+        behavior) or gets a leading space so the TUI treats it as plain text
+        instead of morphing it into an unrelated registered command.
+        """
+        parsed = parse_command(text)
+        if parsed is None:
+            return text
+        cmd_name, _ = parsed
+        if cmd_name in self._passthrough_commands():
+            return text
+        return f" {text}"
+
     def handle_message(self, chat_id: int, text: str, message: dict) -> None:
         """
         Handle a regular text message.
@@ -873,6 +914,11 @@ class BaseBot:
             message: Full message dict
         """
         message_id = message.get("message_id", 0)
+
+        # Slash guard: unregistered '/xyz' must not reach injection raw — the
+        # TUI slash menu fuzzy-autocompletes unknown commands into unrelated
+        # registered ones instead of failing loud.
+        text = self._guard_slash_injection(text)
 
         # Hook: pre-process message text
         prompt = self.on_message(text)
@@ -1769,6 +1815,60 @@ class BaseBot:
         logger.info("Control /kill: killed '%s' (session '%s')", branch, session_name)
         self.send_message(chat_id, f"killed {branch}")
 
+    def _handle_control_stop(self, chat_id: int) -> None:
+        """
+        /stop verb — interrupt the live session instead of injecting raw text.
+
+        Resolves this bot's own mirrored session (same CC-native discovery
+        handle_message uses) and sends a real Escape keypress — identical to
+        pressing Escape at the keyboard, cancels the in-flight tool/turn.
+        Unlike the /start /kill /suspend control verbs, /stop applies to
+        every bot (not just control bots): it interrupts THIS branch's
+        session, not a named aipass-<branch> control session.
+        """
+        if not self.ensure_tmux_session():
+            self.send_message(chat_id, "No live Claude session to stop.")
+            return
+
+        try:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", self.session_name, "Escape"],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                "Failed to send Escape to '%s': %s",
+                self.session_name,
+                e.stderr.decode() if e.stderr else str(e),
+            )
+            self.send_message(chat_id, "Failed to stop — see logs.")
+            return
+        except FileNotFoundError:
+            logger.error("tmux not found — cannot send /stop interrupt")
+            self.send_message(chat_id, "tmux not found on this machine.")
+            return
+
+        logger.info("Control /stop: sent Escape to '%s'", self.session_name)
+        self._settle_pending_on_stop()
+        self.send_message(chat_id, "stopped - session interrupted")
+
+    def _settle_pending_on_stop(self) -> None:
+        """Settle an in-flight pending placeholder after a /stop interrupt — never leave it spinning."""
+        self._stop_heartbeat()
+        if not self.pending_file.exists():
+            return
+        try:
+            prev = json.loads(self.pending_file.read_text(encoding="utf-8"))
+            if not prev.get("delivered"):
+                prev_proc_id = prev.get("processing_message_id")
+                prev_chat_id = prev.get("chat_id")
+                if prev_proc_id and prev_chat_id:
+                    self.edit_message(prev_chat_id, prev_proc_id, "⏹ Stopped by user")
+            self.pending_file.unlink(missing_ok=True)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to settle pending on /stop: %s", e)
+
     def _suspend_heartbeat_seconds(self) -> int:
         """Heartbeat interval for /suspend, in seconds — config override or hardcoded default."""
         minutes = SUSPEND_HEARTBEAT_DEFAULT_MINUTES
@@ -2499,6 +2599,10 @@ class BaseBot:
                     break
 
                 elapsed = time.time() - start
+                if elapsed > PENDING_STUCK_TIMEOUT_SECONDS:
+                    self._fail_stuck_pending(chat_id, processing_msg_id, elapsed)
+                    break
+
                 elapsed_str = self._format_elapsed(elapsed)
                 if self._is_pending_delivered() or self._heartbeat_gen != gen:
                     break
@@ -2506,6 +2610,12 @@ class BaseBot:
 
         self._heartbeat_thread = threading.Thread(target=_heartbeat_loop, daemon=True, name=f"heartbeat-{self.bot_id}")
         self._heartbeat_thread.start()
+
+    def _fail_stuck_pending(self, chat_id: int, processing_msg_id: int, elapsed: float) -> None:
+        """Give up on an undelivered pending — never spin 'Processing...' forever (PENDING_STUCK_TIMEOUT_SECONDS)."""
+        logger.warning("Pending stuck for %.0fs (processing_msg_id=%s) — marking failed", elapsed, processing_msg_id)
+        self.edit_message(chat_id, processing_msg_id, "⚠️ Not delivered — session busy or command swallowed.")
+        self.pending_file.unlink(missing_ok=True)
 
     def _stop_heartbeat(self) -> None:
         """Signal the heartbeat thread to stop and wait for it."""
@@ -3045,6 +3155,10 @@ class BaseBot:
             "monitor": {
                 "description": "Subscribe to system-wide log alerts — /monitor on, off, all, status",
                 "menu_text": "Log monitor",
+            },
+            "stop": {
+                "description": "Interrupt the live session — same as pressing Escape",
+                "menu_text": "Stop / interrupt",
             },
         }
         if self.branch_name is not None:

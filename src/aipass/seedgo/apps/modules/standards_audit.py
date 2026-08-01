@@ -40,7 +40,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit handlers (implementation)
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
-from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch
+from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
 from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
 
 # Bypass system
@@ -187,16 +187,21 @@ def handle_command(command: str, args: List[str]) -> bool:
     pack_name = None
     specific_branch = None
     show_bypasses = False
+    force_full = False
 
     positional = []
     for arg in args:
         if arg in ["--show-bypasses", "--bypasses", "-b"]:
             show_bypasses = True
-        elif arg in ["--help", "-h", "help"]:
+            continue
+        if arg == "--full":
+            force_full = True
+            continue
+        if arg in ["--help", "-h", "help"]:
             # Pack-specific help (placeholder)
             print_help()
             return True
-        elif not arg.startswith("-"):
+        if not arg.startswith("-"):
             positional.append(arg)
 
     if len(positional) >= 1:
@@ -263,7 +268,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             error(f"Branch '{specific_branch}' not found")
             return True
 
-    from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, SpinnerColumn
+    from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, SpinnerColumn
 
     is_compact = specific_branch is None  # Full audit = compact, single branch = detailed
 
@@ -280,7 +285,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TextColumn("{task.completed}/{task.total}"),
-        TimeRemainingColumn(),
+        # Elapsed ticks continuously — remaining-time estimates froze on the
+        # bimodal cache workload (12 branches at 0.2s, then a 40s fresh one).
+        TimeElapsedColumn(),
         console=console,
         transient=True,
     ) as progress:
@@ -294,7 +301,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             bypass_rules = load_bypass_rules(branch["path"])
 
             branch_start = time.monotonic()
-            result = audit_branch(branch, bypass_rules, pack_path=pack_path)
+            result = audit_branch_incremental(branch, bypass_rules, pack_path=pack_path, force_full=force_full)
             branch_elapsed = time.monotonic() - branch_start
 
             result["elapsed"] = branch_elapsed
@@ -303,9 +310,10 @@ def handle_command(command: str, args: List[str]) -> bool:
             # Print completed branch result (persists above progress bar)
             avg = result.get("average", 0)
             style = "green" if avg >= 90 else "yellow" if avg >= 75 else "red"
+            cached_tag = " [dim](cached)[/dim]" if result.get("_cache_hit") else ""
             progress.console.print(
                 f"  [dim][{idx}/{total_branches}][/dim] [cyan]{branch_name:<12}[/cyan]"
-                f" [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]"
+                f" [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]{cached_tag}"
             )
             progress.advance(task)
 
@@ -359,6 +367,7 @@ def print_help():
     console.print("  [green]drone @seedgo audit[/green]                      [dim]Show available packs[/dim]")
     console.print("  [green]drone @seedgo audit aipass[/green]               [dim]All branches, aipass pack[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]         [dim]Single branch[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --full[/green]        [dim]Force full re-scan[/dim]")
     console.print("  [green]drone @seedgo audit --help[/green]               [dim]This help message[/dim]")
     console.print()
 
@@ -368,6 +377,9 @@ def print_help():
     console.print()
     console.print("  [dim]# Audit specific branch[/dim]")
     console.print("  [green]drone @seedgo audit aipass @spawn[/green]")
+    console.print()
+    console.print("  [dim]# Force a full re-scan, bypassing the incremental fingerprint cache[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --full[/green]")
     console.print()
 
     console.print("[yellow]REFERENCE:[/yellow]")

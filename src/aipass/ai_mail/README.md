@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (34/34) | **Tests:** 712 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (34/34) | **Tests:** 826 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -171,7 +171,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Desktop notifications (dbus direct)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 712 tests across 16 test files
+└── tests/                      # 826 tests across 16 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-02
-# Modified: 2026-03-02
+# Modified: 2026-07-31
 # =============================================
 
 """
@@ -665,13 +665,19 @@ def wake_branch(
     # Pass model directly to CLI — aliases resolve latest-in-class automatically
     resolved_model = model or DEFAULT_MODEL
 
-    lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
     if custom_message:
         prompt = f"Hi. {custom_message} "
     else:
         prompt = f"{DEFAULT_PROMPT} "
-    # Monitor handles lock cleanup — agent doesn't need to know about it
-    prompt += f"IMPORTANT: When finished, delete the dispatch lock file at {lock_file_path}"
+    # Monitor owns lock cleanup end-to-end — telling the agent to delete it
+    # too let a second monitor spawn onto a "clear" lock while the first was
+    # still alive, then have its own unconditional cleanup steal the second
+    # monitor's lock out from under it (lock-theft, observed 2026-07-31).
+    prompt += (
+        "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
+        "finish before ending your turn — headless dispatch kills orphaned background "
+        "work after 600s with no reply sent."
+    )
 
     if fresh:
         claude_cmd = [
@@ -707,6 +713,7 @@ def wake_branch(
     log_dir = branch_path / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stderr_log = str(log_dir / "dispatch_stderr.log")
+    lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
     # Build monitor command
     monitor_cmd = [sys.executable, str(MONITOR_SCRIPT), email, lock_file_path, sender, stderr_log, "--", *claude_cmd]

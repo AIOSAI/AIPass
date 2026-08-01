@@ -229,7 +229,15 @@ def close_plan_impl(
                 logger.info(f"[{MODULE_NAME}] Relocated {plan_label}: {relocated}")
                 plan_file = relocated
 
-        # --- Step 1/5: Template check (may fast-delete) ---
+        # --- Step 1/5: Template check (informational only -- never deletes) ---
+        # Was previously a fast-delete branch (unlink + registry row removal). Removed:
+        # is_template_content() is a heuristic and can false-positive on real-but-minimal
+        # FPLANs (the template itself encourages short, disposable single-task plans), and
+        # a false positive there was destroying both the file and the registry row with no
+        # archive, no CLOSED_PLANS entry, and no vectorization -- unrecoverable data loss,
+        # and a violation of the house rule to never delete (archive instead). Empty templates
+        # now flow through the same close/archive/vectorize pipeline as everything else;
+        # cleanup_temp_files() already exists to prune the resulting low-value vector entries.
         messages.append({"type": "step", "text": "[1/5] Checking template status..."})
         try:
             with open(plan_file, "r", encoding="utf-8") as f:
@@ -237,30 +245,11 @@ def close_plan_impl(
 
             if is_template_content(content):
                 messages.append(
-                    {"type": "warning", "text": f"  {plan_label} is empty template - fast-deleting (not archiving)"}
+                    {
+                        "type": "warning",
+                        "text": f"  {plan_label} looks like an empty template — closing and archiving normally",
+                    }
                 )
-
-                # Delete the file
-                plan_file.unlink()
-                logger.info(f"[{MODULE_NAME}] Deleted empty template file: {plan_file}")
-
-                # Remove from registry and save to correct per-type registry
-                del registry["plans"][plan_key]
-                if reg_file:
-                    save_registry(registry, registry_file=reg_file)
-                else:
-                    save_registry(registry)
-                logger.info(f"[{MODULE_NAME}] Removed {plan_label} from registry")
-
-                messages.append(
-                    {"type": "success", "text": f"  Empty template deleted - {plan_label} removed from system"}
-                )
-                return {
-                    "success": True,
-                    "messages": messages,
-                    "plan_key": plan_key,
-                    "cancelled": False,
-                }
 
         except FileNotFoundError:
             logger.warning(f"[{MODULE_NAME}] Plan file not found at any location: {plan_file}")

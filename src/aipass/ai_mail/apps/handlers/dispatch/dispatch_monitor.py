@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-02
-# Modified: 2026-04-02
+# Modified: 2026-07-31
 # =============================================
 
 """
@@ -11,10 +11,17 @@ Agent Lifecycle Monitor
 
 Wraps a Claude agent spawn. Instead of fire-and-forget Popen, this process:
 1. Runs claude with startup health check (90s timeout)
-2. Auto-retries on failure (3 strikes: resume, resume, fresh)
-3. Checks exit code
-4. On failure: sends return-to-sender bounce email
-5. Always cleans up the dispatch lock
+2. Auto-retries on failure (3 strikes: resume, resume, fresh) — each
+   attempt's stdout is preserved to dispatch_stdout.attempt-N.log before
+   the next attempt truncates it, and each attempt's exit code is logged
+   to the branch-local dispatch_stderr.log, not just prax
+3. Checks exit code AND whether background tasks were still running at
+   the headless print-mode's 600s wait ceiling (exit 0 there is not a
+   real success — the CLI gave up waiting, work may be incomplete)
+4. On failure: sends return-to-sender bounce email (with the attempt's
+   result JSON parsed from stdout for diagnostics)
+5. Cleans up the dispatch lock it owns (PID-verified — a successor
+   monitor's lock is never deleted)
 
 Spawned by wake.py in place of claude directly. The lock PID points to
 the monitor (which stays alive as long as claude does), so lock validity
@@ -234,6 +241,109 @@ def _check_rate_limited(stderr_log: str) -> bool:
 def _make_fresh_cmd(claude_cmd: list) -> list:
     """Remove -c flag from claude command to force fresh start."""
     return [arg for arg in claude_cmd if arg != "-c"]
+
+
+# CLI stderr marker: agent ended its turn with background tasks still alive,
+# and the print-mode ceiling terminated them. Exit code is 0 but any work
+# those tasks carried (including the reply) is gone — incomplete, not success.
+BG_TASKS_MARKER = "Background tasks still running"
+
+
+def _rotate_attempt_stdout(stdout_log: str, attempt: int) -> None:
+    """Preserve a failed attempt's stdout as dispatch_stdout.attempt-N.log.
+
+    The result JSON in stdout is the only artifact naming the failure cause —
+    the next attempt truncates the file, destroying that evidence.
+    """
+    try:
+        src = Path(stdout_log)
+        if src.exists() and src.stat().st_size > 0:
+            src.replace(src.parent / f"dispatch_stdout.attempt-{attempt}.log")
+    except OSError as e:
+        logger.warning("[monitor] Failed to preserve attempt %d stdout: %s", attempt, e)
+
+
+def _parse_result_json(stdout_log: str) -> dict:
+    """Parse the print-mode result JSON from an attempt's stdout log.
+
+    Tries the whole file first, then the last non-empty line (the result
+    object is the final line when earlier output precedes it). Returns {}
+    when the file is missing, empty, or holds no JSON object.
+    """
+    try:
+        content = Path(stdout_log).read_text(encoding="utf-8").strip()
+    except OSError as e:
+        logger.info("[monitor] No stdout log to parse at %s: %s", stdout_log, e)
+        return {}
+    if not content:
+        return {}
+    lines = [ln for ln in content.splitlines() if ln.strip()]
+    for candidate in (content, lines[-1] if lines else ""):
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            logger.info("[monitor] Result JSON candidate parse failed — trying next form")
+            continue
+    return {}
+
+
+def _summarize_result_json(stdout_log: str) -> str:
+    """One-line diagnostic summary of the result JSON for bounce emails."""
+    data = _parse_result_json(stdout_log)
+    if not data:
+        return "(no result JSON captured)"
+    snippet = str(data.get("result", ""))[:400]
+    return (
+        f"is_error={data.get('is_error')}, subtype={data.get('subtype')}, "
+        f"api_error_status={data.get('api_error_status')}, result: {snippet}"
+    )
+
+
+def _read_stderr_segment(stderr_log: str, offset: int) -> str:
+    """Read stderr content written after byte offset (one attempt's slice).
+
+    The stderr log is shared append-mode across runs — scanning the whole
+    file would match markers from previous attempts or previous runs.
+    """
+    try:
+        with open(stderr_log, "r", encoding="utf-8") as f:
+            f.seek(offset)
+            return f.read()
+    except OSError as e:
+        logger.warning("[monitor] Failed reading stderr segment of %s: %s", stderr_log, e)
+        return ""
+
+
+def _cleanup_own_lock(lock_file: str) -> None:
+    """Delete the dispatch lock only if this monitor still owns it.
+
+    A successor monitor may have re-created the lock while our agent was
+    draining background tasks past its reply — unconditional unlink would
+    strip the successor's occupancy protection (seen live 2026-07-31,
+    seedgo double-spawn). Unreadable locks are left for stale-lock cleanup.
+    """
+    lock_path = Path(lock_file)
+    if not lock_path.exists():
+        return
+    try:
+        lock_pid = json.loads(lock_path.read_text(encoding="utf-8")).get("pid")
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("[monitor] Lock %s unreadable (%s) — leaving it in place", lock_file, e)
+        return
+    if lock_pid != os.getpid():
+        logger.warning(
+            "[monitor] Lock %s owned by PID %s, not us (%d) — leaving it in place",
+            lock_file,
+            lock_pid,
+            os.getpid(),
+        )
+        return
+    try:
+        lock_path.unlink()
+    except OSError:
+        logger.info("[monitor] Failed to clean up lock file %s", lock_file)
 
 
 def _get_jsonl_projects_dir(cwd: str) -> Path:
@@ -476,6 +586,10 @@ def main():
         if stdout_path.exists() and stdout_path.stat().st_size > 512_000:
             rotated = stdout_path.with_suffix(".log.1")
             stdout_path.replace(rotated)
+        # Shift the previous run's per-attempt stdout logs aside so this
+        # run's attempt files can't be confused with stale ones
+        for stale in logs_dir.glob("dispatch_stdout.attempt-*.log"):
+            stale.replace(stale.with_suffix(".log.1"))
     except OSError as e:
         logger.warning("[monitor] Failed to rotate stdout log: %s", e)
 
@@ -492,6 +606,7 @@ def main():
     # Strike 3: fresh start (remove -c, abandon potentially corrupted session)
     attempts = []
     exit_code = -1
+    bg_orphaned = False
     has_resume = "-c" in claude_cmd
 
     for attempt in range(1, 4):
@@ -538,9 +653,13 @@ def main():
                 attempts.append({"attempt": attempt, "exit_code": exit_code, "startup_failed": False, "mode": mode})
                 break
 
+        # Track where this attempt's stderr starts — append mode means
+        # tell() after flush is the real end-of-file
+        attempt_stderr_offset = None
         if stderr_fh is not None:
             stderr_fh.write(f"\n--- Attempt {attempt}/3 ({mode}) at {time.strftime('%H:%M:%S')} ---\n")
             stderr_fh.flush()
+            attempt_stderr_offset = stderr_fh.tell()
 
         exit_code, startup_failed = _run_with_startup_check(
             run_cmd,
@@ -560,8 +679,23 @@ def main():
 
         attempts.append({"attempt": attempt, "exit_code": exit_code, "startup_failed": startup_failed, "mode": mode})
 
-        # Success — done
+        # Record each attempt's outcome in the dispatch stderr log itself —
+        # per-attempt exit codes otherwise only reach prax logs
+        if stderr_fh is not None:
+            try:
+                note = " (startup timeout)" if startup_failed else ""
+                stderr_fh.write(f"--- Attempt {attempt}/3 exited: code={exit_code}{note} ---\n")
+                stderr_fh.flush()
+            except OSError:
+                logger.info("[monitor] Failed to write attempt exit line")
+
+        # Success — done, unless the CLI terminated still-running background
+        # tasks at the print-mode ceiling (exit 0 but work incomplete)
         if exit_code == 0:
+            if attempt_stderr_offset is not None and BG_TASKS_MARKER in _read_stderr_segment(
+                stderr_log, attempt_stderr_offset
+            ):
+                bg_orphaned = True
             if attempt > 1:
                 logger.info("[monitor] %s succeeded on attempt %d/3", branch_email, attempt)
             break
@@ -580,6 +714,10 @@ def main():
         # No more retries
         if attempt >= 3:
             break
+
+        # Preserve this attempt's stdout (its result JSON is the failure
+        # evidence) before the next attempt truncates the file
+        _rotate_attempt_stdout(stdout_log, attempt)
 
         # Rate limit — longer delay before retry
         if _check_rate_limited(stderr_log):
@@ -607,6 +745,8 @@ def main():
     if stderr_fh is not None:
         try:
             suffix = " [MAX TURNS HIT]" if max_turns_hit else ""
+            if bg_orphaned:
+                suffix += " [BG TASKS TERMINATED — INCOMPLETE]"
             retry_note = f" (took {len(attempts)} attempts)" if len(attempts) > 1 else ""
             stderr_fh.write(f"\n--- Agent exited: code={exit_code}, duration={duration}s{suffix}{retry_note} ---\n")
             stderr_fh.flush()
@@ -637,18 +777,33 @@ def main():
         elif "overloaded" in content.lower() or "529" in content:
             reason = f"API overloaded (all {len(attempts)} attempts failed, {duration}s)"
 
+        # Attach the last attempt's parsed result JSON — names the actual
+        # failure cause instead of just the exit code
+        reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log)}"
+
+        _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
+    elif bg_orphaned:
+        # Exit 0 but the CLI killed still-running background tasks — the
+        # agent's deferred work (possibly including its reply) never ran
+        logger.warning(
+            "[monitor] %s exited 0 but background tasks were still running — treating as INCOMPLETE", branch_email
+        )
+        reason = (
+            f"Agent exited 0 after {duration}s but background tasks were still running and were "
+            f"terminated at the headless print-mode ceiling. Work handed to those tasks is gone "
+            f"and no reply may have been sent — re-dispatch if the task is not complete.\n\n"
+            f"Result JSON: {_summarize_result_json(stdout_log)}"
+        )
         _send_bounce(branch_email, reason, sender, lock_file, stderr_log)
 
-    # Always clean up lock file — monitor handles this, agent doesn't need to
-    try:
-        if os.path.exists(lock_file):
-            os.unlink(lock_file)
-    except OSError:
-        logger.info("[monitor] Failed to clean up lock file %s", lock_file)
+    # Clean up the lock — PID-verified, never a successor monitor's lock
+    _cleanup_own_lock(lock_file)
 
     # Log completion to Prax
     branch_name = branch_email.lstrip("@")
     status = "completed" if exit_code == 0 else f"FAILED (code {exit_code})"
+    if bg_orphaned:
+        status = f"INCOMPLETE (bg tasks terminated, {duration}s)"
     if max_turns_hit:
         status = f"MAX TURNS HIT ({duration}s)"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
@@ -657,7 +812,7 @@ def main():
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        icon = "dialog-information" if exit_code == 0 else "dialog-warning"
+        icon = "dialog-information" if exit_code == 0 and not bg_orphaned else "dialog-warning"
         send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, icon=icon)
     except Exception:
         logger.info("[monitor] Desktop notification unavailable")
@@ -666,7 +821,7 @@ def main():
     wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)
     _log_wake_result(branch_email, sender, exit_code, wake_result, lock_file)
 
-    sys.exit(0 if exit_code == 0 else 1)
+    sys.exit(0 if exit_code == 0 and not bg_orphaned else 1)
 
 
 if __name__ == "__main__":

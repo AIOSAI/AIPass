@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: header.py
 # Description: Email Header Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-04
-# Modified: 2026-02-04
+# Modified: 2026-07-31
 # =============================================
 
 
@@ -25,6 +25,10 @@ BEFORE YOU REPLY, YOU MUST:
 2. ✅ UPDATE YOUR MEMORIES (.local.json) - this is NOT optional
 3. ✅ Then reply with your completion summary
 
+⚠️ Run sub-agents SYNCHRONOUSLY (run_in_background: false). This is a headless
+session: background tasks are killed shortly after your turn ends and you are
+never re-invoked — finish all work and send your reply BEFORE ending your turn.
+
 Your memories are your presence. Skip the update = you never existed.
 
 ---
@@ -33,11 +37,16 @@ Your memories are your presence. Skip the update = you never existed.
 # Header override when --no-memory-save is set (private branch outbound)
 NO_MEMORY_SAVE_HEADER = """⚡ DISPATCH TASK - READ THIS FIRST ⚡
 
-MEMORY UPDATE: OPTIONAL — This dispatch was sent with --no-memory-save. Do NOT log this task in your memory files (.local.json). Execute the task and reply, but leave no trace in your memories.
+MEMORY UPDATE: OPTIONAL — This dispatch was sent with --no-memory-save. Do NOT log this task in
+your memory files (.local.json). Execute the task and reply, but leave no trace in your memories.
 
 BEFORE YOU REPLY, YOU MUST:
 1. ✅ Complete the task below
 2. ✅ Then reply with your completion summary
+
+⚠️ Run sub-agents SYNCHRONOUSLY (run_in_background: false). This is a headless
+session: background tasks are killed shortly after your turn ends and you are
+never re-invoked — finish all work and send your reply BEFORE ending your turn.
 
 ---
 """
