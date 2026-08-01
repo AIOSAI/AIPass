@@ -37,6 +37,16 @@ and fired on every 10th run. `--dist loadgroup` (branch-affinity) was
 evaluated and rejected: 9:26 vs 4:20 — one long-pole branch eats the
 parallelism.
 
+**fix(ci)** — follow-up caught by the PR's serial coverage job: the conftest
+guard's teardown must restore `log_operation` only when its own wrapper is
+still in place. A test that reloads a handler module mid-test (spawn's
+`test_reimport_after_mock`) rebinds every re-export to a fresh handler;
+blind-restoring the pre-reload bound method permanently split spawn's
+`log_operation` (old instance, real repo dir) from its siblings — 6
+tmp-path assertions failed serially while xdist dodged it (the reloader and
+the victims land on different workers). Proven both modes: 12,296/0 serial
+and xdist.
+
 ## [2026-08-01] — CI wall-time phase 1a (DPLAN-0277)
 
 **ci(speed)** — measured on PR#723: the suite ran 7x per push and every job

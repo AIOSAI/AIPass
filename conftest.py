@@ -53,7 +53,8 @@ def _guarded(mod: types.ModuleType, real):
 
 
 @pytest.fixture(autouse=True)
-def _no_shared_json_log_writes(monkeypatch):
+def _no_shared_json_log_writes():
+    wrapped = []
     for name, mod in list(sys.modules.items()):
         if not name.startswith("aipass.") or not name.endswith("json_handler"):
             continue
@@ -62,4 +63,17 @@ def _no_shared_json_log_writes(monkeypatch):
         real = getattr(mod, "log_operation", None)
         if real is None or not callable(real) or hasattr(real, "reset_mock"):
             continue  # absent, or already replaced by a test's mock
-        monkeypatch.setattr(mod, "log_operation", _guarded(mod, real))
+        wrapper = _guarded(mod, real)
+        setattr(mod, "log_operation", wrapper)
+        wrapped.append((mod, wrapper, real))
+    yield
+    for mod, wrapper, real in wrapped:
+        # Restore ONLY if our wrapper is still in place. If the test reloaded
+        # the module, log_operation was rebound to a fresh object consistent
+        # with the reloaded module — blind-restoring the pre-reload one would
+        # permanently split it from its siblings (spawn re-exports BOUND
+        # METHODS of a handler instance; the stale method keeps the old
+        # instance and its real repo dir forever). Live-caught on
+        # spawn/tests/test_contracts.py::test_reimport_after_mock.
+        if getattr(mod, "log_operation", None) is wrapper:
+            setattr(mod, "log_operation", real)
