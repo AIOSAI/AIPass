@@ -20,7 +20,6 @@ Covers 3 groups:
 import importlib
 import json
 import sys
-import types
 from pathlib import Path
 from typing import Any
 
@@ -29,17 +28,24 @@ import pytest
 
 BRANCH_MODULE = "api"
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
 _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
-
+# NOTE: the real handler package imports cleanly from inside this branch's own
+# tests (the cross-branch guard allows callers under /api/), so no sys.modules
+# stub is injected here. Injecting one at collection time leaked into every
+# other test running in the same process/xdist worker.
 _mod = importlib.import_module(_json_mod_path)
 json_handler = _mod
+
+# Snapshot the real module + its parent packages while they are still
+# registered. Sibling test modules elsewhere in the suite pop every
+# "*json_handler*" / "*handlers.json*" key out of sys.modules and never put
+# them back, which breaks importlib.reload() for anyone downstream.
+_MODULE_CHAIN: dict[str, Any] = {}
+for _i in range(len(_json_mod_path.split("."))):
+    _name = ".".join(_json_mod_path.split(".")[: _i + 1])
+    if _name in sys.modules:
+        _MODULE_CHAIN[_name] = sys.modules[_name]
 
 
 _JSON_DIR_ATTR: str | None = None
@@ -180,11 +186,15 @@ def test_data_has_date_keys(tmp_path: Path) -> None:
     assert "last_updated" in result
 
 
-def test_reimport_after_mock(tmp_path: Path) -> None:
+def test_reimport_after_mock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Module can be reloaded after mocking (reimport_after_mock contract)."""
-    import importlib
+    # importlib.reload() requires this module AND its parent package to be
+    # registered in sys.modules. Other test modules in the same worker pop those
+    # keys, so pin the whole chain via monkeypatch, which restores the previous
+    # state (value or absence) exactly on teardown.
+    for _name, _obj in _MODULE_CHAIN.items():
+        monkeypatch.setitem(sys.modules, _name, _obj)
 
-    # Reload the json_handler module to verify it survives reimport
     reloaded = importlib.reload(_mod)
     assert hasattr(reloaded, "load_json")
     assert hasattr(reloaded, "save_json")

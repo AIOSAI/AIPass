@@ -17,9 +17,35 @@ logic, not business logic.
 """
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# Bind the REAL module objects once, at collection time, before any test can
+# replace them in sys.modules. Other test modules in the suite install
+# MagicMock stand-ins under these sys.modules keys (e.g.
+# trigger/tests/test_memory_pool_handler.py) and never restore them, so any
+# string-path patch or in-test `from ... import x` would otherwise resolve to
+# a mock on an xdist worker that ran the polluter first.
+from aipass.ai_mail.apps.modules import email as email_mod
+from aipass.ai_mail.apps.modules import email_send as email_send_mod
+
+
+# ---------------------------------------------------------------------------
+# Autouse fixture: pin the real modules into sys.modules for the test duration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_real_modules(monkeypatch):
+    """Guarantee string-path patches resolve to the real modules, not stubs.
+
+    monkeypatch.setitem restores the previous sys.modules value exactly on
+    teardown, so this never leaks in either direction.
+    """
+    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email", email_mod)
+    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_send_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -31,8 +57,8 @@ from unittest.mock import MagicMock, patch
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
     with (
-        patch("aipass.ai_mail.apps.modules.email.json_handler") as mock_email_jh,
-        patch("aipass.ai_mail.apps.modules.email_send.json_handler") as mock_send_jh,
+        patch.object(email_mod, "json_handler") as mock_email_jh,
+        patch.object(email_send_mod, "json_handler") as mock_send_jh,
     ):
         mock_email_jh.log_operation.return_value = True
         mock_send_jh.log_operation.return_value = True
@@ -1449,14 +1475,9 @@ class TestDeliveryCallback:
             """Capture on_email_delivered arguments."""
             delivered_args.append({"update_central_fn": update_central_fn})
 
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.on_email_delivered",
-            mock_on_delivered,
-        )
+        monkeypatch.setattr(email_send_mod, "on_email_delivered", mock_on_delivered)
 
-        from aipass.ai_mail.apps.modules.email_send import _delivery_callback
-
-        _delivery_callback("/some/path", 3, 2, 5)
+        email_send_mod._delivery_callback("/some/path", 3, 2, 5)
         assert len(delivered_args) == 1
 
 
@@ -1590,11 +1611,9 @@ class TestFireDispatchTrigger:
         """Exception in trigger.fire is logged but does not propagate."""
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.trigger", mock_trigger)
+        monkeypatch.setattr(email_send_mod, "trigger", mock_trigger)
 
-        from aipass.ai_mail.apps.modules.email_send import _fire_dispatch_trigger
-
-        _fire_dispatch_trigger("@target", "Test Subject")
+        email_send_mod._fire_dispatch_trigger("@target", "Test Subject")
         mock_trigger.fire.assert_called_once_with("email_dispatched", to="@target", subject="Test Subject")
 
 
@@ -1681,11 +1700,9 @@ class TestEmailSendIntrospection:
         printed: list[str] = []
         mock_console = MagicMock()
         mock_console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
+        monkeypatch.setattr(email_send_mod, "console", mock_console)
 
-        from aipass.ai_mail.apps.modules.email_send import print_introspection
-
-        print_introspection()
+        email_send_mod.print_introspection()
         combined = "\n".join(printed)
         assert "email_send Module" in combined
         assert "handle_send" in combined
@@ -1705,11 +1722,13 @@ class TestSendInteractiveExtended:
     def test_send_interactive_complete_path(self, monkeypatch):
         """User provides input successfully, send proceeds."""
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.get_all_branches",
+            email_send_mod,
+            "get_all_branches",
             lambda: [{"name": "ALPHA", "email": "@alpha"}],
         )
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.collect_interactive_input",
+            email_send_mod,
+            "collect_interactive_input",
             lambda branches: {
                 "to": "@alpha",
                 "subject": "Hi",
@@ -1717,26 +1736,22 @@ class TestSendInteractiveExtended:
             },
         )
         monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.resolve_sender_info",
+            email_send_mod,
+            "resolve_sender_info",
             lambda fb, rr, amd, gbe, gcu: {
                 "email_address": "@ai_mail",
                 "display_name": "AI_MAIL",
                 "mailbox_path": "/tmp/mailbox",
             },
         )
-        monkeypatch.setattr(
-            "aipass.ai_mail.apps.modules.email_send.send_to_single",
-            lambda *a, **kw: (True, None),
-        )
+        monkeypatch.setattr(email_send_mod, "send_to_single", lambda *a, **kw: (True, None))
         printed: list[str] = []
         mock_console = MagicMock()
         mock_console.print = lambda msg, **kw: printed.append(str(msg))
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.console", mock_console)
-        monkeypatch.setattr("aipass.ai_mail.apps.modules.email_send.error", lambda msg: None)
+        monkeypatch.setattr(email_send_mod, "console", mock_console)
+        monkeypatch.setattr(email_send_mod, "error", lambda msg: None)
 
-        from aipass.ai_mail.apps.modules.email_send import _send_interactive
-
-        result = _send_interactive()
+        result = email_send_mod._send_interactive()
         assert result is True
         assert any("@alpha" in p for p in printed)
         assert any("sent" in p.lower() for p in printed)

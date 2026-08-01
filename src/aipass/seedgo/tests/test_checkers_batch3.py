@@ -22,6 +22,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+# Pre-warm the REAL bypass submodules the checkers import, BEFORE the fixture
+# below replaces ``aipass.seedgo.apps.handlers.bypass`` with a MagicMock. Once
+# the parent is a MagicMock it is no longer a package, so any submodule that is
+# not already a loaded module object fails with
+# "'aipass.seedgo.apps.handlers.bypass' is not a package" on a cold process.
+from aipass.seedgo.apps.handlers.bypass import ignore_handler as _real_ignore_handler
+from aipass.seedgo.apps.handlers.bypass import utils as _real_bypass_utils
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -50,17 +58,36 @@ def _mock_infrastructure(monkeypatch):
 
     # -- bypass utils (used by checkers for is_bypassed) --------------------
     # Use real is_bypassed — it only does string matching and calls
-    # json_handler.log_operation (already mocked above).
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
+    # json_handler.log_operation (already mocked above). readme_check also
+    # imports the real ignore_handler, so the faked ``bypass`` package has to
+    # expose the pre-warmed real submodule objects.
+    # The real is_bypassed resolves json_handler from its own module globals,
+    # which sys.modules patching does not reach — point it at the mock so these
+    # tests never write to the shared seedgo_json/utils_log.json (a repo file
+    # that xdist workers would otherwise race on).
+    monkeypatch.setattr(_real_bypass_utils, "json_handler", json_mod)
 
     bypass_pkg = MagicMock()
     bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
+    bypass_utils.is_bypassed = _real_bypass_utils.is_bypassed
     bypass_pkg.utils = bypass_utils
+    bypass_pkg.ignore_handler = _real_ignore_handler
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
+    monkeypatch.setitem(
+        sys.modules,
+        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
+        _real_ignore_handler,
+    )
 
-    # Force re-imports of all 8 checkers
+    # Force genuine re-imports of all 8 checkers.
+    # Dropping the sys.modules entry alone is NOT enough: ``from pkg import mod``
+    # short-circuits on the parent package attribute, handing back a stale module
+    # object still bound to whatever mocks a neighbouring test file installed.
+    # Drop the attribute too — monkeypatch restores both on teardown, so this
+    # file neither inherits nor leaves behind poisoned checker modules.
+    from aipass.seedgo.apps.handlers import aipass_standards as standards_pkg
+
     checker_modules = [
         "aipass.seedgo.apps.handlers.aipass_standards.log_structure_check",
         "aipass.seedgo.apps.handlers.aipass_standards.log_visibility_check",
@@ -73,6 +100,7 @@ def _mock_infrastructure(monkeypatch):
     ]
     for mod_name in checker_modules:
         monkeypatch.delitem(sys.modules, mod_name, raising=False)
+        monkeypatch.delattr(standards_pkg, mod_name.rsplit(".", 1)[1], raising=False)
 
 
 # ---------------------------------------------------------------------------

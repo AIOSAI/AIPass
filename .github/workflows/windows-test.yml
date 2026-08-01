@@ -48,7 +48,7 @@ jobs:
         run: |
           source .venv/Scripts/activate
           export PYTHONUTF8=1
-          pytest -v --tb=short --rootdir=. 2>&1 | tee pytest-output.txt
+          pytest -v --tb=short --rootdir=. -n auto --dist loadscope 2>&1 | tee pytest-output.txt
           echo "EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: Upload test results

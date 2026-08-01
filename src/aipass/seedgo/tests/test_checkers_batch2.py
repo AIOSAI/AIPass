@@ -15,7 +15,11 @@ Each checker gets 3 tests: clean pass, violation caught, bypass respected.
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
+
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 from aipass.seedgo.apps.handlers.aipass_standards.error_handling_check import (
     check_module as check_error_handling,
 )
@@ -40,6 +44,26 @@ from aipass.seedgo.apps.handlers.aipass_standards.log_handler_check import (
 from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
     check_module as check_log_level,
 )
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
+
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module — xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ---------------------------------------------------------------------------

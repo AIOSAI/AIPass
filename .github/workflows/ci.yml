@@ -52,10 +52,11 @@ jobs:
       # workflow — they are not part of the fast unit lane.
       # Plain pytest: this job's old `coverage run` wrapper produced data that
       # was never reported anywhere (the coverage job collects its own) — it
-      # only slowed all four matrix legs. xdist parallelism is staged as phase
-      # 1b (DPLAN-0277) — 19 tests fail under -n auto until their shared-state
-      # hygiene is fixed.
-      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e
+      # only slowed all four matrix legs.
+      # xdist (DPLAN-0277 phase 1b): loadscope keeps each test class on one
+      # worker. The suite's shared-state hygiene was fixed for this — see the
+      # repo-root conftest.py guard — and proven over repeated full runs.
+      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope
 
   standards:
     name: seedgo-audit

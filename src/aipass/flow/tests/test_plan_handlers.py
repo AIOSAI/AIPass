@@ -23,7 +23,18 @@ from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_rel
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
 from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plans
 from aipass.flow.apps.handlers.plan.get_closed_plans import get_closed_plans
-from aipass.flow.apps.handlers.json.json_handler import update_data_metrics
+
+# Bind the json_handler MODULE object once, here at import time.
+# Do NOT `from ... import update_data_metrics` and do NOT patch by string path:
+# a neighbour test that evicts `aipass.flow.apps.handlers.json[.json_handler]`
+# from sys.modules (patch.dict restore semantics, _fresh_import helpers, ...)
+# makes a later string-path patch resolve to a *different*, freshly-imported
+# module object than the one backing this file's function reference. The patch
+# then lands on the new module while the called function still reads the real
+# FLOW_JSON_DIR / real load_json -> silent writes to the repo's flow_json/.
+# Holding the module object and calling through it keeps patch target and
+# callee on the same globals dict no matter what neighbours do.
+from aipass.flow.apps.handlers.json import json_handler as flow_json_handler
 
 
 # =========================================================================
@@ -466,38 +477,43 @@ class TestGetClosedPlans:
 
 
 class TestUpdateDataMetrics:
-    """Tests for update_data_metrics() in json_handler."""
+    """Tests for update_data_metrics() in json_handler.
 
-    def test_updates_single_metric(self, tmp_path: Path):
-        with patch(
-            "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-            tmp_path,
-        ):
-            # Seed the data file with the minimum required structure
-            data_file = tmp_path / "testmod_data.json"
-            data_file.write_text(
-                json.dumps({"created": "2026-01-01", "last_updated": "2026-01-01"}),
-                encoding="utf-8",
-            )
+    Every test here redirects FLOW_JSON_DIR with
+    ``monkeypatch.setattr(flow_json_handler, ...)`` on the module object bound
+    at the top of this file, and calls the function through that same object.
+    This keeps the patched globals and the executing function on one dict, so
+    the tests stay correct even if a neighbour test reimports the handler
+    package (see the import-site comment). String-path patching must not be
+    reintroduced here.
+    """
 
-            result = update_data_metrics("testmod", total_plans=42)
+    def test_updates_single_metric(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(flow_json_handler, "FLOW_JSON_DIR", tmp_path)
+
+        # Seed the data file with the minimum required structure
+        data_file = tmp_path / "testmod_data.json"
+        data_file.write_text(
+            json.dumps({"created": "2026-01-01", "last_updated": "2026-01-01"}),
+            encoding="utf-8",
+        )
+
+        result = flow_json_handler.update_data_metrics("testmod", total_plans=42)
 
         assert result is True
         saved = json.loads(data_file.read_text(encoding="utf-8"))
         assert saved["total_plans"] == 42
 
-    def test_updates_multiple_metrics(self, tmp_path: Path):
-        with patch(
-            "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-            tmp_path,
-        ):
-            data_file = tmp_path / "testmod_data.json"
-            data_file.write_text(
-                json.dumps({"created": "2026-01-01", "last_updated": "2026-01-01"}),
-                encoding="utf-8",
-            )
+    def test_updates_multiple_metrics(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(flow_json_handler, "FLOW_JSON_DIR", tmp_path)
 
-            result = update_data_metrics("testmod", open=5, closed=3, total=8)
+        data_file = tmp_path / "testmod_data.json"
+        data_file.write_text(
+            json.dumps({"created": "2026-01-01", "last_updated": "2026-01-01"}),
+            encoding="utf-8",
+        )
+
+        result = flow_json_handler.update_data_metrics("testmod", open=5, closed=3, total=8)
 
         assert result is True
         saved = json.loads(data_file.read_text(encoding="utf-8"))
@@ -505,55 +521,44 @@ class TestUpdateDataMetrics:
         assert saved["closed"] == 3
         assert saved["total"] == 8
 
-    def test_returns_false_when_data_load_fails(self, tmp_path: Path):
-        with (
-            patch(
-                "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-                tmp_path / "nonexistent",
-            ),
-            patch(
-                "aipass.flow.apps.handlers.json.json_handler.load_json",
-                return_value=None,
-            ),
-        ):
-            result = update_data_metrics("broken_mod", x=1)
+    def test_returns_false_when_data_load_fails(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(flow_json_handler, "FLOW_JSON_DIR", tmp_path / "nonexistent")
+        monkeypatch.setattr(flow_json_handler, "load_json", lambda *args, **kwargs: None)
+
+        result = flow_json_handler.update_data_metrics("broken_mod", x=1)
 
         assert result is False
 
-    def test_overwrites_existing_metric(self, tmp_path: Path):
-        with patch(
-            "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-            tmp_path,
-        ):
-            data_file = tmp_path / "testmod_data.json"
-            data_file.write_text(
-                json.dumps(
-                    {
-                        "created": "2026-01-01",
-                        "last_updated": "2026-01-01",
-                        "counter": 10,
-                    }
-                ),
-                encoding="utf-8",
-            )
+    def test_overwrites_existing_metric(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(flow_json_handler, "FLOW_JSON_DIR", tmp_path)
 
-            update_data_metrics("testmod", counter=20)
+        data_file = tmp_path / "testmod_data.json"
+        data_file.write_text(
+            json.dumps(
+                {
+                    "created": "2026-01-01",
+                    "last_updated": "2026-01-01",
+                    "counter": 10,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        flow_json_handler.update_data_metrics("testmod", counter=20)
 
         saved = json.loads(data_file.read_text(encoding="utf-8"))
         assert saved["counter"] == 20
 
-    def test_updates_last_updated_field(self, tmp_path: Path):
-        with patch(
-            "aipass.flow.apps.handlers.json.json_handler.FLOW_JSON_DIR",
-            tmp_path,
-        ):
-            data_file = tmp_path / "testmod_data.json"
-            data_file.write_text(
-                json.dumps({"created": "2026-01-01", "last_updated": "2020-01-01"}),
-                encoding="utf-8",
-            )
+    def test_updates_last_updated_field(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(flow_json_handler, "FLOW_JSON_DIR", tmp_path)
 
-            update_data_metrics("testmod", score=99)
+        data_file = tmp_path / "testmod_data.json"
+        data_file.write_text(
+            json.dumps({"created": "2026-01-01", "last_updated": "2020-01-01"}),
+            encoding="utf-8",
+        )
+
+        flow_json_handler.update_data_metrics("testmod", score=99)
 
         saved = json.loads(data_file.read_text(encoding="utf-8"))
         assert saved["last_updated"] != "2020-01-01"

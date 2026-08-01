@@ -9,6 +9,34 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — CI wall-time phase 1b: pytest-xdist (DPLAN-0277)
+
+**ci(speed)** — the test suite now runs `-n auto --dist loadscope` in the
+ci.yml matrix and the Windows/macOS workflows (locally: ~5:10 serial-era
+xdist attempt failed 19-27 tests; now 12,296 pass in ~4:20 across 3
+consecutive full runs). Two classes of shared-state disease were fixed,
+tests-only: (1) sys.modules poisoning — tests that faked packages with
+MagicMocks, force-"reimported" modules (a no-op: `from pkg import mod`
+short-circuits on the parent attr), string-path-patched a module a neighbor
+had evicted (the patch lands on a NEW instance while the test calls the old
+one), or left raw unrestored sys.modules writes — fixed across
+seedgo/aipass/ai_mail/api/daemon/flow/trigger test files by pre-warming real
+imports before faking, patching and calling through one module object, and
+monkeypatch-routing every mutation. (2) shared-file races — every branch's
+templated `json_handler.log_operation` does an unlocked read-modify-write on
+real `<branch>_json/*_log.json` files; under loadscope two classes of the
+same branch land on different workers and race (empty-read JSONDecodeError),
+and a torn write leaves debris that breaks later runs. A repo-root
+`conftest.py` guard now skips any `log_operation` whose `*JSON_DIR*`
+resolves inside the repo (tmp-redirected handlers keep full behavior), which
+also stops test debris in real branch json dirs. Bonus catches: a telegram
+backoff test asserting exactly-once on a process-global `time.sleep` mock
+(leaked watchdog threads hit it 17k times), and a feedback_pulse test whose
+"no session id" path fell back to the live `CLAUDE_CODE_SESSION_ID` env var
+and fired on every 10th run. `--dist loadgroup` (branch-affinity) was
+evaluated and rejected: 9:26 vs 4:20 — one long-pole branch eats the
+parallelism.
+
 ## [2026-08-01] — CI wall-time phase 1a (DPLAN-0277)
 
 **ci(speed)** — measured on PR#723: the suite ran 7x per push and every job

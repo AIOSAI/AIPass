@@ -26,8 +26,44 @@ from aipass.ai_mail.apps.handlers.json_utils.json_handler import (
     ensure_module_jsons,
 )
 
+# The functions imported above are bound to ``jh_mod``'s namespace, so every
+# patch in this file must target ``jh_mod`` itself.  Under pytest-xdist another
+# test on the same worker can evict this key from sys.modules; a re-import would
+# then create a second, divergent module instance and any test that reloads or
+# mocks via sys.modules would leave the shared object stale.
+_MODULE_KEY = jh_mod.__name__
+
+
+def _module_chain(module) -> dict:
+    """Map the module *and every ancestor package* to the objects imported here.
+
+    importlib.reload() needs both ``sys.modules[module.__name__] is module`` and
+    ``sys.modules[parent_package]`` (it reads ``parent.__path__``), so pinning
+    only the leaf is not enough.
+    """
+    parts = module.__name__.split(".")
+    chain = {".".join(parts[:i]): sys.modules[".".join(parts[:i])] for i in range(1, len(parts))}
+    chain[module.__name__] = module
+    return chain
+
+
+_MODULE_CHAIN = _module_chain(jh_mod)
+
 
 # ---- Fixtures --------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _pin_module_identity():
+    """Keep sys.modules pointing at the module objects this file imported.
+
+    Restores the exact pre-test objects on both sides of every test so
+    importlib.reload() and the monkeypatch.setattr calls below always act on
+    the same instances, whatever a neighbouring test did to sys.modules.
+    """
+    sys.modules.update(_MODULE_CHAIN)
+    yield
+    sys.modules.update(_MODULE_CHAIN)
 
 
 @pytest.fixture(autouse=True)
@@ -238,24 +274,24 @@ def test_ensure_module_jsons_returns_true(config_template, data_template, log_te
 # ---- Infrastructure mocking tests -----------------------------------
 
 
-def test_sys_modules_mock_json_handler():
+def test_sys_modules_mock_json_handler(monkeypatch):
     """Verify json_handler can be mocked via sys.modules for import isolation."""
     mock_mod = MagicMock()
-    original = sys.modules.get("aipass.ai_mail.apps.handlers.json_utils.json_handler")
-    sys.modules["aipass.ai_mail.apps.handlers.json_utils.json_handler"] = mock_mod
-    try:
-        # After mocking sys.modules, reimport_after_mock with importlib.reload
-        # would pick up the mock (we just verify the mechanism works)
-        assert "aipass.ai_mail.apps.handlers.json_utils.json_handler" in sys.modules
-    finally:
-        if original is not None:
-            sys.modules["aipass.ai_mail.apps.handlers.json_utils.json_handler"] = original
-        else:
-            del sys.modules["aipass.ai_mail.apps.handlers.json_utils.json_handler"]
+    # monkeypatch.setitem restores the entry automatically; the manual
+    # try/finally this replaced deleted the key outright whenever the module
+    # was already missing, leaving every later test without it.
+    monkeypatch.setitem(sys.modules, _MODULE_KEY, mock_mod)
+    # After mocking sys.modules, reimport_after_mock with importlib.reload
+    # would pick up the mock (we just verify the mechanism works)
+    assert sys.modules[_MODULE_KEY] is mock_mod
 
 
 def test_reimport_after_mock():
     """importlib.reload restores module after mock replacement."""
-    # Just verify reload() works on the module without error
-    importlib.reload(jh_mod)
+    # _pin_module_identity guarantees sys.modules holds this exact object, which
+    # is what reload() requires; reload re-executes in place so the module
+    # identity every other test module holds stays valid.
+    assert sys.modules[_MODULE_KEY] is jh_mod
+    reloaded = importlib.reload(jh_mod)
+    assert reloaded is jh_mod
     assert hasattr(jh_mod, "get_json_path")

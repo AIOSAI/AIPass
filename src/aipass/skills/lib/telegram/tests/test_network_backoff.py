@@ -245,7 +245,11 @@ class TestPollUpdatesErrorClassification:
         ):
             result = bot.poll_updates(0)
         assert result == []
-        mock_sleep.assert_called_once_with(12)
+        # time.sleep is a process-global patch target — a leaked background
+        # thread (e.g. a watchdog observer) can hit the mock with float sleeps,
+        # so count only this backoff's integer call instead of exactly-once.
+        backoff_calls = [c.args[0] for c in mock_sleep.call_args_list if isinstance(c.args[0], int)]
+        assert backoff_calls == [12]
         mock_logger.error.assert_not_called()
         mock_logger.warning.assert_called_once()
 
@@ -260,7 +264,9 @@ class TestPollUpdatesErrorClassification:
         ):
             result = bot.poll_updates(0)
         assert result == []
-        mock_sleep.assert_called_once_with(30)
+        # Same process-global patch-target caveat as above.
+        backoff_calls = [c.args[0] for c in mock_sleep.call_args_list if isinstance(c.args[0], int)]
+        assert backoff_calls == [30]
 
     def test_unexpected_exception_logs_error(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)

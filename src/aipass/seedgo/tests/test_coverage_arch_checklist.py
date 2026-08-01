@@ -73,11 +73,16 @@ def _mock_infrastructure(monkeypatch):
     bypass_pkg.ignore_handler = bypass_ignore
 
     # Use real is_bypassed — it only does string matching and calls
-    # json_handler.log_operation (already mocked above).
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
+    # json_handler.log_operation. That call resolves json_handler from the real
+    # utils module globals, which sys.modules patching does not reach, so point
+    # it at the mock explicitly — otherwise these tests write to the shared
+    # seedgo_json/utils_log.json that xdist workers would race on.
+    from aipass.seedgo.apps.handlers.bypass import utils as real_bypass_utils
+
+    monkeypatch.setattr(real_bypass_utils, "json_handler", json_mod)
 
     bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
+    bypass_utils.is_bypassed = real_bypass_utils.is_bypassed
     bypass_pkg.utils = bypass_utils
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(
@@ -113,12 +118,34 @@ def _mock_infrastructure(monkeypatch):
         branch_audit_mod,
     )
 
-    # Force re-imports so modules pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.architecture_check",
-        "aipass.seedgo.apps.modules.checklist",
-    ]:
+    # Force genuine re-imports so modules pick up fresh mocks.
+    # Dropping the sys.modules entry alone is NOT enough: ``from pkg import mod``
+    # short-circuits on the parent package attribute, handing back a stale module
+    # object still bound to whatever mocks a neighbouring test file installed.
+    # Drop the attribute too — monkeypatch restores both on teardown.
+    from aipass.seedgo.apps import modules as seedgo_modules_pkg
+    from aipass.seedgo.apps.handlers import aipass_standards as standards_pkg
+
+    for pkg, mod_name in (
+        (standards_pkg, "aipass.seedgo.apps.handlers.aipass_standards.architecture_check"),
+        (seedgo_modules_pkg, "aipass.seedgo.apps.modules.checklist"),
+    ):
         monkeypatch.delitem(sys.modules, mod_name, raising=False)
+        monkeypatch.delattr(pkg, mod_name.rsplit(".", 1)[1], raising=False)
+
+
+def _pin_checklist_gates(checklist, monkeypatch):
+    """Pin run_checklist's early-return gates so results never depend on test order.
+
+    ``is_throwaway_path`` matches pytest's own tmp_path, ``is_prototype_file``
+    reads the filesystem and ``_resolve_branch_path`` hits the real branch
+    registry (which then feeds ``is_seedgo_ignored``). Each resolves differently
+    depending on what a neighbouring test happened to import first, so every test
+    that drives run_checklist has to pin them explicitly.
+    """
+    monkeypatch.setattr(checklist, "is_throwaway_path", lambda _path: False)
+    monkeypatch.setattr(checklist, "is_prototype_file", lambda _path: False)
+    monkeypatch.setattr(checklist, "_resolve_branch_path", lambda _path: None)
 
 
 # ===========================================================================
@@ -1206,12 +1233,10 @@ class TestResolvePackPath:
         """run_checklist returns error when pack is not found."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
+
+        _pin_checklist_gates(checklist, monkeypatch)
 
         # Make _resolve_pack_path return None
         monkeypatch.setattr(checklist, "_resolve_pack_path", lambda name: None)
@@ -1368,12 +1393,10 @@ class TestRunChecklistCheckerException:
         """Checker that raises exception is captured as a failed result."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
+
+        _pin_checklist_gates(checklist, monkeypatch)
 
         # Create a mock checker that raises
         bad_checker = MagicMock()
@@ -1407,12 +1430,10 @@ class TestRunChecklistCheckerException:
         """Checker returning passed=False has detail populated from _format_failure."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
+
+        _pin_checklist_gates(checklist, monkeypatch)
 
         fail_checker = MagicMock()
         fail_checker.AUDIT_SCOPE = "all_files"
@@ -1442,12 +1463,10 @@ class TestRunChecklistCheckerException:
         """When no checkers are applicable, returns skip result."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
+
+        _pin_checklist_gates(checklist, monkeypatch)
 
         entry_only_checker = MagicMock()
         entry_only_checker.AUDIT_SCOPE = "entry_point"
@@ -1473,12 +1492,10 @@ class TestRunChecklistCheckerException:
         """When discover_checkers returns empty dict, returns error."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
         monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
         from aipass.seedgo.apps.modules import checklist
+
+        _pin_checklist_gates(checklist, monkeypatch)
 
         monkeypatch.setattr(
             checklist,
