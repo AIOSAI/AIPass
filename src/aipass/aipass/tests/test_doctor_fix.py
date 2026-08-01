@@ -96,9 +96,9 @@ class TestGenerateRemediation:
         assert items == []
 
     def test_pollution_is_critical(self, tmp_path: Path) -> None:
-        """Duplicate registry_id produces critical severity."""
+        """Duplicate branch name produces critical severity."""
         _make_agent(tmp_path, "orig", "uuid-dup")
-        _make_agent(tmp_path, "copy", "uuid-dup", subdir="pkg")
+        _make_agent(tmp_path, "orig", "uuid-other", subdir="pkg")
         _make_registry(tmp_path, [])
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         items = generate_remediation(tmp_path)
@@ -109,7 +109,7 @@ class TestGenerateRemediation:
     def test_pollution_command_uses_clean(self, tmp_path: Path) -> None:
         """Pollution fix command uses --clean-pollution."""
         _make_agent(tmp_path, "orig", "uuid-dup")
-        _make_agent(tmp_path, "copy", "uuid-dup", subdir="pkg")
+        _make_agent(tmp_path, "orig", "uuid-other", subdir="pkg")
         _make_registry(tmp_path, [], prefix="COMPASS")
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         items = generate_remediation(tmp_path)

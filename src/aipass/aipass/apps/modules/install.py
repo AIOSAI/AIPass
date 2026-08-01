@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 from typing import Dict
 
-from aipass.cli.apps.modules import console, success, warning
+from aipass.cli.apps.modules import console, error, success, warning
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
@@ -177,12 +177,44 @@ def _verify_binaries(home: Path) -> Dict[str, str | None]:
     return {"drone": drone, "aipass": aipass}
 
 
-def _build_install_prompt(home: Path, bins: dict) -> str:
-    """Compose the authored first prompt for the post-install @aipass chat."""
+def _registry_user_name(home: Path) -> str:
+    """Best-effort read of the user's name setup.sh stored in AIPASS_REGISTRY.json."""
+    data = json_handler.load_path(home / "AIPASS_REGISTRY.json")
+    if not data:
+        return ""
+    return str(data.get("metadata", {}).get("user", "") or "").strip()
+
+
+def _build_install_prompt(home: Path, bins: dict, doctor_action_items: list[str] | None = None) -> str:
+    """Compose the authored first prompt for the post-install @aipass chat.
+
+    Enriched with whatever setup.sh learned about the machine (round-2 install
+    UX, a0f2351e/43ff5873): the user's name (persisted in the registry, so it
+    survives independent of this one run) and any ACTION NEEDED items / a
+    skipped git identity, passed through env vars by setup.sh's own
+    ``--chat-only`` handoff. Also enriched with the doctor preflight verdict
+    (round-2 addendum 2, Patrick's ruling: doctor runs before hello, and a
+    still-broken hook wiring is P1 — passed in as ``doctor_action_items`` so
+    it leads the machine-still-needs list). Composition stays here, in this
+    one function.
+    """
     parts = [f"Fresh AIPass install completed at {home}."]
     for name, path in bins.items():
         if path:
             parts.append(f"{name}: {path}.")
+
+    user_name = _registry_user_name(home)
+    if user_name:
+        parts.append(f"The user's name is {user_name} — greet them by name.")
+
+    if os.environ.get("AIPASS_IDENTITY_SKIPPED") == "1":
+        parts.append("Git identity was skipped during setup — commits will fail until it's configured.")
+
+    action_needed = list(doctor_action_items or [])
+    action_needed += [line for line in os.environ.get("AIPASS_ACTION_NEEDED", "").splitlines() if line.strip()]
+    if action_needed:
+        parts.append("The machine still needs: " + "; ".join(action_needed) + ".")
+
     parts.append(
         "This is my first time here — what can I do with AIPass? Show me a few things to try, with the exact commands."
     )
@@ -220,6 +252,31 @@ def _ask_permission_mode() -> str:
     return "skip-permissions" if choice.strip() == "2" else "default"
 
 
+def _run_doctor_preflight() -> list[str]:
+    """Run 'aipass doctor --fix' before the concierge says hello (Patrick's ruling,
+    round-2 addendum 2): heals what it can, then reports what's still broken.
+
+    Hook wiring is P1 — a still-broken result is printed as a loud, highlighted
+    top line, and returned so ``_build_install_prompt`` leads with it too.
+    """
+    from aipass.aipass.apps.modules.doctor import run_doctor_preflight
+
+    try:
+        _error_count, hook_action_items = run_doctor_preflight(fix=True)
+    except Exception as exc:
+        logger.warning("[install] doctor preflight crashed: %s", exc)
+        warning("Health check could not run — run 'aipass doctor --fix' manually.")
+        return ["doctor preflight crashed — run 'aipass doctor --fix' manually and check hook wiring"]
+
+    if hook_action_items:
+        error("ACTION NEEDED — hooks are not fully wired:")
+        for item in hook_action_items:
+            console.print(f"  • {item}")
+        console.print()
+
+    return hook_action_items
+
+
 def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     """End the install in a conversation with the @aipass concierge (TTY only).
 
@@ -239,9 +296,11 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
         console.print(f"[dim]Run 'claude' in {home} when you're ready to meet the AIPass concierge.[/dim]")
         return
 
+    hook_action_items = _run_doctor_preflight()
+
     console.print()
     flag_variant = _ask_permission_mode()
-    prompt = _build_install_prompt(home, bins)
+    prompt = _build_install_prompt(home, bins, doctor_action_items=hook_action_items)
     aipass_branch = str(Path(__file__).resolve().parents[2])
     console.print()
     console.print("[dim]Launching the AIPass concierge — Ctrl-C to stay in the shell[/dim]")

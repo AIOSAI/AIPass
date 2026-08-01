@@ -50,6 +50,38 @@ for arg in "$@"; do
     esac
 done
 
+# --- Collected action-needed items (round-2 install UX: a0f2351e Catch 2) ---
+# Anything printed mid-run that needs a follow-up command gets appended here,
+# then re-printed as ONE highlighted block right before the welcome chat —
+# scrolling output buries sudo hints and skipped-identity notices otherwise.
+ACTION_NEEDED=()
+
+print_action_needed() {
+    [ ${#ACTION_NEEDED[@]} -eq 0 ] && return
+    echo ""
+    if [ -t 1 ]; then
+        echo -e "\033[1;33m▲ ACTION NEEDED — before you dive in:\033[0m"
+    else
+        echo "=== ACTION NEEDED — before you dive in: ==="
+    fi
+    for item in "${ACTION_NEEDED[@]}"; do
+        echo "  - $item"
+    done
+    echo ""
+}
+
+# local@domain.tld — no whitespace, an @, a dot in the domain. Literal 'skip'
+# handled by the caller before this ever runs (never store junk as an email).
+is_valid_git_email() {
+    [[ "$1" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+}
+
+# Own function (not an inline `[ -t 0 ]`) so tests can override it after
+# sourcing and drive the interactive prompts below without a real tty.
+is_interactive() {
+    [ -t 0 ]
+}
+
 echo "=== AIPass Setup ==="
 echo "Repo root: $SCRIPT_DIR"
 echo ""
@@ -265,6 +297,7 @@ else
         echo "  bwrap     ... MISSING"
         echo "    sudo apt install bubblewrap"
         SB_MISSING+=("bwrap")
+        ACTION_NEEDED+=("bwrap missing — run: sudo apt install bubblewrap")
     fi
 
     # node
@@ -274,6 +307,7 @@ else
         echo "  node      ... MISSING"
         echo "    Install Node.js: https://nodejs.org/"
         SB_MISSING+=("node")
+        ACTION_NEEDED+=("node missing — install from https://nodejs.org/")
     fi
 
     # npm (needed for srt install)
@@ -282,6 +316,7 @@ else
     else
         echo "  npm       ... MISSING"
         SB_MISSING+=("npm")
+        ACTION_NEEDED+=("npm missing — install Node.js (includes npm) from https://nodejs.org/")
     fi
 
     # @anthropic-ai/sandbox-runtime — resolve same way as _srt_resolve.mjs
@@ -306,15 +341,18 @@ else
                     echo "    Install failed (may need sudo). Run manually:"
                     echo "      sudo npm install -g @anthropic-ai/sandbox-runtime"
                     SB_MISSING+=("srt")
+                    ACTION_NEEDED+=("srt missing — run: sudo npm install -g @anthropic-ai/sandbox-runtime")
                 fi
             else
                 echo "    Install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime"
                 SB_MISSING+=("srt")
+                ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
             fi
         fi
     else
         echo "  srt       ... skipped (no node)"
         SB_MISSING+=("srt")
+        ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
     fi
 
     # rg (ripgrep)
@@ -326,6 +364,7 @@ else
         echo "  rg        ... MISSING"
         echo "    sudo apt install ripgrep"
         SB_MISSING+=("rg")
+        ACTION_NEEDED+=("rg missing — run: sudo apt install ripgrep")
     fi
 
     if [ ${#SB_MISSING[@]} -eq 0 ]; then
@@ -375,44 +414,88 @@ if [ ! -f "$SECRETS_DIR/.env" ] && [ -f ".env.example" ]; then
 fi
 
 # --- Git identity (commits fail without user.email / user.name) ---
-GIT_EMAIL=$(git config --global user.email 2>/dev/null || true)
-GIT_NAME=$(git config --global user.name 2>/dev/null || true)
-if [ -z "$GIT_EMAIL" ] || [ -z "$GIT_NAME" ]; then
-    echo ""
-    echo "Git identity not configured — commits will fail without it."
-    if [ -t 0 ]; then
-        # Interactive — no defaults. Git needs a real identity, not ours.
-        echo "  Git needs a name and email to attribute commits to you — this is yours, not ours."
-        while [ -z "$GIT_EMAIL" ]; do
-            read -r -p "  Git user.email: " GIT_EMAIL
-            [ -z "$GIT_EMAIL" ] && echo "  Can't be blank — git needs an email to attribute commits."
-        done
-        while [ -z "$GIT_NAME" ]; do
-            read -r -p "  Git user.name: " GIT_NAME
-            [ -z "$GIT_NAME" ] && echo "  Can't be blank — git needs a name to attribute commits."
-        done
-        git config --global user.email "$GIT_EMAIL"
-        git config --global user.name "$GIT_NAME"
-        git config --global pull.rebase true
-        echo "  Git identity set: $GIT_NAME <$GIT_EMAIL>"
+resolve_git_identity() {
+    GIT_EMAIL=$(git config --global user.email 2>/dev/null || true)
+    GIT_NAME=$(git config --global user.name 2>/dev/null || true)
+    GIT_IDENTITY_SKIPPED="no"
+    if [ -z "$GIT_EMAIL" ] || [ -z "$GIT_NAME" ]; then
+        echo ""
+        echo "Git identity not configured — commits will fail without it."
+        if is_interactive; then
+            # Interactive — no defaults. Git needs a real identity, not ours.
+            echo "  Git needs a name and email to attribute commits to you — this is yours, not ours."
+            echo "  Enter (or type 'skip') to skip for now and set it up later."
+            while true; do
+                read -r -p "  Git user.email: " GIT_EMAIL
+                if [ -z "$GIT_EMAIL" ] || [ "$GIT_EMAIL" = "skip" ]; then
+                    GIT_EMAIL=""
+                    GIT_IDENTITY_SKIPPED="yes"
+                    break
+                fi
+                if is_valid_git_email "$GIT_EMAIL"; then
+                    break
+                fi
+                echo "  Doesn't look like an email — needs an @ and a dot in the domain (or Enter/'skip' to skip)."
+            done
+            if [ "$GIT_IDENTITY_SKIPPED" = "no" ]; then
+                while [ -z "$GIT_NAME" ]; do
+                    read -r -p "  Git user.name: " GIT_NAME
+                    [ -z "$GIT_NAME" ] && echo "  Can't be blank — git needs a name to attribute commits."
+                done
+                git config --global user.email "$GIT_EMAIL"
+                git config --global user.name "$GIT_NAME"
+                git config --global pull.rebase true
+                echo "  Git identity set: $GIT_NAME <$GIT_EMAIL>"
+            else
+                echo "  Skipped. Set it later with:"
+                echo "    git config --global user.email \"you@example.com\""
+                echo "    git config --global user.name \"Your Name\""
+                ACTION_NEEDED+=("Git identity not set — run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\"")
+            fi
+        else
+            # Non-interactive — never guess an identity. Skip and warn.
+            echo "  Non-interactive mode — skipping. Run 'git config --global user.email \"you@example.com\"'"
+            echo "  and 'git config --global user.name \"Your Name\"' yourself before committing."
+            GIT_IDENTITY_SKIPPED="yes"
+            ACTION_NEEDED+=("Git identity not set (non-interactive) — run: git config --global user.email \"you@example.com\" && git config --global user.name \"Your Name\"")
+        fi
     else
-        # Non-interactive — never guess an identity. Skip and warn.
-        echo "  Non-interactive mode — skipping. Run 'git config --global user.email \"you@example.com\"'"
-        echo "  and 'git config --global user.name \"Your Name\"' yourself before committing."
+        echo "Git identity: $GIT_NAME <$GIT_EMAIL>"
     fi
-else
-    echo "Git identity: $GIT_NAME <$GIT_EMAIL>"
-fi
+}
+resolve_git_identity
+
+# --- User's display name (round-2 install UX, 43ff5873: collected once here so
+# the registry — and later the concierge greeting — already has it; the chat's
+# own name-ask becomes a fallback for whenever this is skipped or empty) ---
+resolve_user_name() {
+    USER_NAME=""
+    if is_interactive; then
+        if [ -n "$GIT_NAME" ]; then
+            read -r -p "What should we call you? [$GIT_NAME] (Enter to accept, or 'skip'): " USER_NAME
+            if [ -z "$USER_NAME" ]; then
+                USER_NAME="$GIT_NAME"
+            elif [ "$USER_NAME" = "skip" ]; then
+                USER_NAME=""
+            fi
+        else
+            read -r -p "What should we call you? (Enter to skip): " USER_NAME
+            [ "$USER_NAME" = "skip" ] && USER_NAME=""
+        fi
+    fi
+}
+resolve_user_name
 
 # --- Generate branch registry ---
 if [ ! -f "AIPASS_REGISTRY.json" ]; then
     echo "Generating AIPASS_REGISTRY.json ..."
-    python3 - "$SCRIPT_DIR" << 'PYEOF'
+    python3 - "$SCRIPT_DIR" "$USER_NAME" << 'PYEOF'
 import json, sys, os, uuid
 from pathlib import Path
 from datetime import date
 
 repo_root = sys.argv[1]
+user_name = sys.argv[2] if len(sys.argv) > 2 else ""
 src_dir = Path(repo_root) / "src" / "aipass"
 today = date.today().isoformat()
 
@@ -439,6 +522,7 @@ registry = {
         "version": "1.0.0",
         "last_updated": today,
         "total_branches": len(branches),
+        "user": user_name,
     },
     "branches": branches,
 }
@@ -573,6 +657,25 @@ bootstrap_branch "skills"   "$SCRIPT_DIR/src/aipass/skills" "aipass_framework" "
 # long ago; the drift canary caught the gap on the Windows runner, DPLAN-0262.)
 
 echo "  $BRANCH_COUNT branches bootstrapped"
+
+# --- Reconcile registry owner + per-citizen identity ---
+# setup.sh's registry generation above lists branches with no owner seat and no
+# per-branch registry_id (only metadata.id + passports get one, all sharing the
+# same value by design). Without this step, a newcomer's FIRST doctor run reads
+# 19 stale-bookkeeping errors (entry_rid_stale x17, no_owner) on a healthy install
+# — sync-registry --fix carries this exact machinery, it just never ran here.
+echo ""
+echo "Reconciling registry owner + identity ..."
+"$VENV_PYTHON" - << 'PYEOF'
+from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+
+result = fix_owner_identity(dry_run=False)
+if result["actions"]:
+    for action in result["actions"]:
+        print(f"  {action}")
+else:
+    print("  already clean")
+PYEOF
 
 # --- Seed branch config files from .example defaults ---
 # Some branches need a config file that's gitignored (contains local state).
@@ -1048,6 +1151,7 @@ if [ "$SYMLINK_SKIPPED" -gt 0 ]; then
     echo ""
     echo "  NOTE: $SYMLINK_SKIPPED global symlink(s) left untouched (pointed at a different install)."
     echo "        Your existing 'drone'/'aipass' still work. Use --force-symlink to repoint them here."
+    ACTION_NEEDED+=("$SYMLINK_SKIPPED global symlink(s) left untouched — rerun with --force-symlink to repoint them here")
 fi
 
 # --- Result ---
@@ -1073,6 +1177,10 @@ if [ "$FAIL" -eq 0 ]; then
     command -v codex &>/dev/null && echo "  Codex CLI:   hooks at .codex/hooks.json + config at ~/.codex/config.toml"
     echo ""
 
+    # Last thing on screen before the chat launches — everything collected
+    # above (sudo hints, skipped identity, untouched symlinks) in one place.
+    print_action_needed
+
     # --- End in a welcome chat (DPLAN-0274: cold install ends in a conversation,
     # not project creation — commit 71e5198d / TDPLAN-0014 built the chat machinery
     # this reuses: `aipass install --chat-only` composes the same prompt via
@@ -1097,7 +1205,16 @@ if [ "$FAIL" -eq 0 ]; then
         echo "Non-interactive shell — skipping the welcome chat. Run 'claude' in $SCRIPT_DIR when ready, or 'aipass init run' in a fresh directory to start a project."
     else
         # --path (not --here): setup.sh can be invoked from any CWD, but the home
-        # it built is always its own directory.
+        # it built is always its own directory. ACTION_NEEDED items + the
+        # identity-skip flag pass through as env vars — composition of the
+        # concierge's opener stays in install.py's _build_install_prompt, the
+        # ONE place that builds it (round-2 install UX, a0f2351e/43ff5873).
+        if [ ${#ACTION_NEEDED[@]} -eq 0 ]; then
+            export AIPASS_ACTION_NEEDED=""
+        else
+            export AIPASS_ACTION_NEEDED="$(printf '%s\n' "${ACTION_NEEDED[@]}")"
+        fi
+        [ "$GIT_IDENTITY_SKIPPED" = "yes" ] && export AIPASS_IDENTITY_SKIPPED="1"
         "$AIPASS_BIN" install --chat-only --path "$SCRIPT_DIR"
     fi
 else

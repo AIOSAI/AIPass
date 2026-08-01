@@ -10,13 +10,15 @@ echo "  AIPass Fresh-Clone Test"
 echo "========================================="
 echo ""
 
-# --- Phase 1: Copy repo (simulates git clone) ---
-echo "--- Phase 1: Simulating git clone ---"
+# --- Phase 1: Clone repo ---
+# Real git clone, not cp -r: a copy drags gitignored local state (real
+# .trinity/ passports, venvs) into the "fresh" tree and fakes clone results.
+echo "--- Phase 1: Cloning repo ---"
 rm -rf ~/workspace/AIPass
-cp -r /repo ~/workspace/AIPass
+git clone --quiet /repo ~/workspace/AIPass
 cd ~/workspace/AIPass
 
-echo "  Repo copied to ~/workspace/AIPass"
+echo "  Repo cloned to ~/workspace/AIPass"
 echo "  Python: $(python3 --version)"
 echo "  Git: $(git --version)"
 echo ""

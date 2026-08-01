@@ -22,6 +22,7 @@ from aipass.aipass.apps.modules.install import (
     _end_in_chat,
     _looks_like_aipass_tree,
     _print_next_steps,
+    _registry_user_name,
     _resolve_home,
     _run_setup,
     handle_command,
@@ -293,6 +294,79 @@ class TestBuildInstallPrompt:
         prompt = _build_install_prompt(Path("/h"), {})
         assert "?" in prompt
 
+    def test_includes_user_name_from_registry(self, tmp_path: Path) -> None:
+        """A name stored in AIPASS_REGISTRY.json's metadata.user is greeted by name."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(
+            '{"metadata": {"user": "tom"}, "branches": []}', encoding="utf-8"
+        )
+        prompt = _build_install_prompt(tmp_path, {})
+        assert "tom" in prompt
+
+    def test_omits_user_name_when_registry_absent(self, tmp_path: Path) -> None:
+        """No registry file — no name-related sentence is fabricated."""
+        prompt = _build_install_prompt(tmp_path, {})
+        assert "greet them by name" not in prompt
+
+    def test_includes_identity_skipped_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AIPASS_IDENTITY_SKIPPED=1 surfaces a note that commits will fail."""
+        monkeypatch.setenv("AIPASS_IDENTITY_SKIPPED", "1")
+        prompt = _build_install_prompt(tmp_path, {})
+        assert "identity" in prompt.lower()
+
+    def test_includes_action_needed_items(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AIPASS_ACTION_NEEDED items (newline-joined by setup.sh) land in the prompt."""
+        monkeypatch.setenv("AIPASS_ACTION_NEEDED", "srt missing — run: sudo npm install -g srt\nrg missing")
+        prompt = _build_install_prompt(tmp_path, {})
+        assert "srt missing" in prompt
+        assert "rg missing" in prompt
+
+    def test_omits_action_needed_when_env_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An empty/unset AIPASS_ACTION_NEEDED adds nothing to the prompt."""
+        monkeypatch.delenv("AIPASS_ACTION_NEEDED", raising=False)
+        prompt = _build_install_prompt(tmp_path, {})
+        assert "machine still needs" not in prompt.lower()
+
+    def test_includes_doctor_action_items(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Hook-wiring failures found by the doctor preflight land in the prompt."""
+        monkeypatch.delenv("AIPASS_ACTION_NEEDED", raising=False)
+        prompt = _build_install_prompt(tmp_path, {}, doctor_action_items=["hooks: 2 hook(s) missing"])
+        assert "hooks: 2 hook(s) missing" in prompt
+        assert "machine still needs" in prompt.lower()
+
+    def test_omits_doctor_action_items_when_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An empty/None doctor_action_items list is omitted cleanly, same as no env var."""
+        monkeypatch.delenv("AIPASS_ACTION_NEEDED", raising=False)
+        prompt = _build_install_prompt(tmp_path, {}, doctor_action_items=[])
+        assert "machine still needs" not in prompt.lower()
+        prompt_default = _build_install_prompt(tmp_path, {})
+        assert prompt == prompt_default
+
+    def test_doctor_action_items_lead_env_action_items(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Doctor findings are listed ahead of AIPASS_ACTION_NEEDED env items."""
+        monkeypatch.setenv("AIPASS_ACTION_NEEDED", "rg missing")
+        prompt = _build_install_prompt(tmp_path, {}, doctor_action_items=["hooks: 2 hook(s) missing"])
+        assert prompt.index("hooks: 2 hook(s) missing") < prompt.index("rg missing")
+
+
+class TestRegistryUserName:
+    """Best-effort read of the name setup.sh stored in the registry."""
+
+    def test_reads_user_from_registry(self, tmp_path: Path) -> None:
+        """metadata.user comes back as-is."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(
+            '{"metadata": {"user": "patrick"}, "branches": []}', encoding="utf-8"
+        )
+        assert _registry_user_name(tmp_path) == "patrick"
+
+    def test_missing_registry_returns_empty(self, tmp_path: Path) -> None:
+        """No registry file — empty string, not an exception."""
+        assert _registry_user_name(tmp_path) == ""
+
+    def test_missing_user_field_returns_empty(self, tmp_path: Path) -> None:
+        """A registry without metadata.user (older installs) returns empty, not None/error."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+        assert _registry_user_name(tmp_path) == ""
+
 
 class TestEndInChat:
     """The Step 4 welcome-chat ending — TTY-gated, no project creation."""
@@ -305,6 +379,7 @@ class TestEndInChat:
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch(f"{_MOD}._ask_permission_mode", return_value="default"),
+            patch(f"{_MOD}._run_doctor_preflight", return_value=[]),
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
         ):
             mock_stdin.isatty.return_value = True
@@ -319,11 +394,27 @@ class TestEndInChat:
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch(f"{_MOD}._ask_permission_mode", return_value="skip-permissions"),
+            patch(f"{_MOD}._run_doctor_preflight", return_value=[]),
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
         ):
             mock_stdin.isatty.return_value = True
             _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
         assert mock_launch.call_args[0][3] == "skip-permissions"
+
+    def test_doctor_preflight_runs_before_launch(self) -> None:
+        """The doctor-before-hello pass runs, and its findings reach the prompt."""
+        home = Path("/fake/AIPass")
+        with (
+            patch(f"{_MOD}.sys.stdin") as mock_stdin,
+            patch(f"{_MOD}._ask_permission_mode", return_value="default"),
+            patch(f"{_MOD}._run_doctor_preflight", return_value=["hooks: 2 hook(s) missing"]) as preflight,
+            patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
+        ):
+            mock_stdin.isatty.return_value = True
+            _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
+        preflight.assert_called_once()
+        prompt_arg = mock_launch.call_args[0][1]
+        assert "hooks: 2 hook(s) missing" in prompt_arg
 
     def test_no_tty_skips_launch(self) -> None:
         """Non-TTY skips the chat launch."""
@@ -357,6 +448,52 @@ class TestEndInChat:
             mock_stdin.isatty.return_value = True
             _end_in_chat(home, self._BINS, dry_run=True, no_chat=False)
         mock_launch.assert_not_called()
+
+
+class TestRunDoctorPreflightWrapper:
+    """The install-tail wrapper around doctor.run_doctor_preflight."""
+
+    def test_returns_hook_action_items(self) -> None:
+        from aipass.aipass.apps.modules.install import _run_doctor_preflight
+
+        with patch(
+            "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
+            return_value=(0, ["hooks: 2 hook(s) missing"]),
+        ):
+            result = _run_doctor_preflight()
+        assert result == ["hooks: 2 hook(s) missing"]
+
+    def test_prints_loud_block_when_items_present(self, capsys) -> None:
+        from aipass.aipass.apps.modules.install import _run_doctor_preflight
+
+        with patch(
+            "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
+            return_value=(1, ["hooks: 2 hook(s) missing"]),
+        ):
+            _run_doctor_preflight()
+        captured = capsys.readouterr()
+        assert "ACTION NEEDED" in captured.out + captured.err
+        assert "hooks: 2 hook(s) missing" in captured.out
+
+    def test_no_block_printed_when_hooks_clean(self, capsys) -> None:
+        from aipass.aipass.apps.modules.install import _run_doctor_preflight
+
+        with patch("aipass.aipass.apps.modules.doctor.run_doctor_preflight", return_value=(0, [])):
+            result = _run_doctor_preflight()
+        captured = capsys.readouterr()
+        assert result == []
+        assert "ACTION NEEDED" not in captured.out
+
+    def test_exception_surfaces_manual_run_action_item(self) -> None:
+        from aipass.aipass.apps.modules.install import _run_doctor_preflight
+
+        with patch(
+            "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = _run_doctor_preflight()
+        assert len(result) == 1
+        assert "aipass doctor --fix" in result[0]
 
 
 class TestAskPermissionMode:

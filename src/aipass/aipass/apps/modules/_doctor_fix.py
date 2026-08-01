@@ -80,10 +80,7 @@ def _build_pollution_items(agents: list, project: str) -> List[RemediationItem]:
             RemediationItem(
                 severity="critical",
                 category="pollution",
-                description=(
-                    f"Registry pollution: {len(hit.locations)} copies of "
-                    f"{hit.agent_name} share registry_id {hit.registry_id}"
-                ),
+                description=(f"Registry pollution: {hit.agent_name} found at {len(hit.locations)} locations"),
                 fix_command=f"drone @spawn repair @{project} --clean-pollution --apply",
             )
         )
@@ -152,12 +149,19 @@ def generate_remediation(project_root: Path) -> List[RemediationItem]:
 
     for hit in check_root_artifacts(project_root):
         severity = "info" if hit.severity == "info" else "warning"
+        if hit.name == ".venv":
+            # Wired hooks reference AIPASS_HOME/.venv/bin/python3 by absolute path —
+            # --relocate-root would move it and break every hook. Not implemented
+            # in spawn repair for this reason; surface a manual-review note instead.
+            fix_command = "Manual review only — relocating .venv breaks hooks wired to AIPASS_HOME/.venv/bin/python3"
+        else:
+            fix_command = f"drone @spawn repair @{project} --relocate-root {hit.name} --apply"
         items.append(
             RemediationItem(
                 severity=severity,
                 category="root_artifact",
                 description=f"{hit.description}: {hit.name}/",
-                fix_command=f"drone @spawn repair @{project} --relocate-root {hit.name} --apply",
+                fix_command=fix_command,
             )
         )
 

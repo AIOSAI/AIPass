@@ -543,6 +543,60 @@ class TestProviderManifest:
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
 
+    def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
+        """Command already shaped like 'event:label' must not get the event prefixed twice."""
+        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
+
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        cmd = "$AIPASS_HOME/bin/hook-bridge.py UserPromptSubmit:presence_gate"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [{"command": cmd, "event": "UserPromptSubmit"}]}}}),
+            encoding="utf-8",
+        )
+        provider_settings = tmp_path / ".claude" / "settings.json"
+        provider_settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
+            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+        ):
+            results = _check_provider_manifest()
+        hooks_result = [r for r in results if r.label == "hooks"][0]
+        assert "UserPromptSubmit:UserPromptSubmit" not in hooks_result.detail
+        assert "UserPromptSubmit:presence_gate" in hooks_result.detail
+
+    def test_missing_hook_duplicate_matchers_deduped(self, tmp_path) -> None:
+        """Same command missing under two matchers must appear once in the report, not twice."""
+        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
+
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        cmd = "$AIPASS_HOME/bin/hook-bridge PreCompact:pre_compact_prep"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "cli": {
+                        "claude": {
+                            "hooks": [
+                                {"command": cmd, "event": "PreCompact", "matcher": "manual"},
+                                {"command": cmd, "event": "PreCompact", "matcher": "auto"},
+                            ]
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        provider_settings = tmp_path / ".claude" / "settings.json"
+        provider_settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
+            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+        ):
+            results = _check_provider_manifest()
+        hooks_result = [r for r in results if r.label == "hooks"][0]
+        assert hooks_result.detail.count("PreCompact:pre_compact_prep") == 1
+
     def test_env_vars_all_present(self, tmp_path) -> None:
         """All manifest env vars present in provider settings → PASS."""
         from aipass.aipass.apps.modules.doctor import _check_provider_manifest
@@ -644,6 +698,54 @@ class TestHooksJsonCheck:
         assert len(hooks_results) == 1
         assert hooks_results[0].glyph == GLYPH_WARN
         assert "init update" in hooks_results[0].remediation
+
+
+# =============================================================================
+# TestPassportRole
+# =============================================================================
+
+
+class TestPassportRole:
+    """Tests for the passport role read in _check_identity (round-2 addendum: identity.role, not top-level)."""
+
+    def _run_with_passport(self, tmp_path, passport_data):
+        from aipass.aipass.apps.modules.doctor import _check_identity
+
+        registry = tmp_path / "TEST_REGISTRY.json"
+        registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps(passport_data), encoding="utf-8")
+
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=registry),
+            patch("aipass.aipass.apps.modules.doctor._BRANCH_ROOT", tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._check_owner_seating", return_value=[]),
+        ):
+            return _check_identity()
+
+    def test_nested_identity_role_read(self, tmp_path) -> None:
+        """Role nested under identity.role is read correctly, not reported as unknown."""
+        results = self._run_with_passport(tmp_path, {"identity": {"role": "citizen"}})
+
+        passport_results = [r for r in results if r.label == "passport"]
+        assert len(passport_results) == 1
+        assert passport_results[0].glyph == GLYPH_PASS
+        assert passport_results[0].detail == "role: citizen"
+
+    def test_missing_identity_role_defaults_unknown(self, tmp_path) -> None:
+        """A passport with no identity.role at all still defaults to 'unknown'."""
+        results = self._run_with_passport(tmp_path, {"identity": {}})
+
+        passport_results = [r for r in results if r.label == "passport"]
+        assert passport_results[0].detail == "role: unknown"
+
+    def test_top_level_role_is_ignored(self, tmp_path) -> None:
+        """A stray top-level 'role' key (wrong schema) must not be read — only identity.role counts."""
+        results = self._run_with_passport(tmp_path, {"role": "wrong-schema-value", "identity": {}})
+
+        passport_results = [r for r in results if r.label == "passport"]
+        assert passport_results[0].detail == "role: unknown"
 
 
 # =============================================================================
@@ -1113,3 +1215,65 @@ class TestFixOwnerSeating:
             results = _fix_owner_seating()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
+
+
+# =============================================================================
+# TestRunDoctorPreflight
+# =============================================================================
+
+
+class TestRunDoctorPreflight:
+    """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
+
+    def test_returns_error_count_and_empty_items_when_hooks_wired(self) -> None:
+        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
+
+        groups = {
+            "System": [],
+            "Identity": [],
+            "Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")],
+            "Community": [],
+            "Structure": [],
+            "Sandbox": [],
+        }
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            error_count, hook_action_items = run_doctor_preflight()
+        assert error_count == 0
+        assert hook_action_items == []
+
+    def test_still_broken_hooks_surfaced_as_action_items(self) -> None:
+        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
+
+        groups = {
+            "Services": [
+                CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing from provider settings: Stop, Notification", ""),
+                CheckResult("wire verify", GLYPH_FAIL, "verify failed", ""),
+            ],
+        }
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            _error_count, hook_action_items = run_doctor_preflight()
+        assert any("hooks:" in item for item in hook_action_items)
+        assert any("wire verify:" in item for item in hook_action_items)
+
+    def test_passing_checks_excluded_from_action_items(self) -> None:
+        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
+
+        groups = {"Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")]}
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            _error_count, hook_action_items = run_doctor_preflight()
+        assert hook_action_items == []
+
+    def test_fix_true_passed_through_to_compute_groups(self) -> None:
+        from aipass.aipass.apps.modules.doctor import run_doctor_preflight
+
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
+            run_doctor_preflight(fix=True)
+        mock_compute.assert_called_once_with(fix=True)
+
+    def test_error_count_reflects_fail_glyphs(self) -> None:
+        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
+
+        groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}
+        with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
+            error_count, _hook_action_items = run_doctor_preflight()
+        assert error_count == 1

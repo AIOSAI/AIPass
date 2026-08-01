@@ -332,7 +332,7 @@ def _check_identity() -> List[CheckResult]:
         try:
             with open(passport, "r", encoding="utf-8") as f:
                 pdata = json.load(f)
-            role = pdata.get("role", "unknown")
+            role = pdata.get("identity", {}).get("role", "unknown")
             results.append(CheckResult("passport", GLYPH_PASS, f"role: {role}", ""))
         except Exception as exc:
             logger.warning("[doctor] passport read error: %s", exc)
@@ -419,7 +419,11 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
         )
         if not found:
             label = command.rsplit(" ", 1)[-1] if " " in command else command
+            if label.startswith(f"{event}:"):
+                label = label[len(event) + 1 :]
             missing_hooks.append(f"{event}:{label}")
+
+    missing_hooks = list(dict.fromkeys(missing_hooks))
 
     if not missing_hooks:
         results.append(CheckResult("hooks", GLYPH_PASS, f"{len(manifest_hooks)} provider hooks wired", ""))
@@ -662,7 +666,7 @@ def _check_structure() -> List[CheckResult]:
                     f"pollution: {hit.agent_name}",
                     GLYPH_FAIL,
                     f"{len(hit.locations)} copies",
-                    f"Duplicate registry_id at: {locs}",
+                    f"Duplicate branch name at: {locs}",
                 )
             )
     else:
@@ -1008,12 +1012,10 @@ def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
 # --- Main doctor run ---
 
 
-def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = False) -> int:
-    """Run all six groups and print results. Returns error count."""
-    console.print()
-    console.print("[bold cyan]aipass doctor[/bold cyan]")
-    console.print()
-
+def _compute_doctor_groups(
+    verbose: bool = False, interactive: bool = False, fix: bool = False
+) -> Dict[str, List[CheckResult]]:
+    """Run all six check groups (optionally auto-fixing). Returns them by group name."""
     group_specs = [
         ("System", _check_system),
         ("Identity", _check_identity),
@@ -1050,6 +1052,11 @@ def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = Fal
         identity = groups.get("Identity", [])
         groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
 
+    return groups
+
+
+def _print_doctor_groups(groups: Dict[str, List[CheckResult]]) -> tuple[int, int, int]:
+    """Print each group's checks. Returns (pass_count, warn_count, error_count)."""
     pass_count = 0
     warn_count = 0
     error_count = 0
@@ -1075,9 +1082,47 @@ def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = Fal
     ]
     console.print("  " + "  ".join(summary_parts))
     console.print()
+    return pass_count, warn_count, error_count
+
+
+def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = False) -> int:
+    """Run all six groups and print results. Returns error count."""
+    console.print()
+    console.print("[bold cyan]aipass doctor[/bold cyan]")
+    console.print()
+
+    groups = _compute_doctor_groups(verbose=verbose, interactive=interactive, fix=fix)
+    pass_count, warn_count, error_count = _print_doctor_groups(groups)
 
     logger.info("[doctor] run complete — pass=%d warn=%d error=%d", pass_count, warn_count, error_count)
     return error_count
+
+
+def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
+    """Run doctor automatically in the install tail, before the concierge says hello.
+
+    Patrick's ruling (round-2 addendum 2): doctor must run as part of install,
+    not be offered later as a chat option — and hook wiring is P1, so a
+    still-broken hooks/wire-verify result is surfaced separately for the
+    caller to put at the TOP of the ACTION NEEDED block.
+
+    Returns (error_count, hook_action_items) — hook_action_items is empty
+    when provider hooks are fully wired after the fix pass.
+    """
+    console.print()
+    console.print("[bold cyan]Running aipass doctor...[/bold cyan]")
+    console.print()
+
+    groups = _compute_doctor_groups(fix=fix)
+    _pass_count, _warn_count, error_count = _print_doctor_groups(groups)
+
+    logger.info("[doctor] preflight complete — errors=%d", error_count)
+
+    hook_labels = {"hooks", "wire verify"}
+    hook_action_items = [
+        f"{r.label}: {r.detail}" for r in groups.get("Services", []) if r.label in hook_labels and r.glyph != GLYPH_PASS
+    ]
+    return error_count, hook_action_items
 
 
 # --- Output formatting ---
