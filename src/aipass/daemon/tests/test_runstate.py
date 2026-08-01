@@ -1,10 +1,11 @@
 """Tests for daemon runstate tracking and due-logic."""
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
     save_runstate,
@@ -23,6 +24,18 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
 
 
 # ── Fixtures ──────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _mute_log_operation(monkeypatch):
+    """Keep every test here off the real daemon_json log file.
+
+    update_job_runstate/record_job_failure call json_handler.log_operation,
+    which read-modify-writes a shared repo file — xdist workers racing on it
+    produce empty-read JSONDecodeError flakes. Patched on the runstate module
+    object so the functions imported above resolve the mock via their globals.
+    """
+    monkeypatch.setattr(runstate_mod, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
 
 @pytest.fixture

@@ -220,14 +220,19 @@ def _get_real_json_handler(tmp_path, monkeypatch):
     import importlib
     import sys
 
-    # Remove ALL json_handler mocks/caches so a fresh import is forced
-    keys_to_remove = [k for k in sys.modules if "json_handler" in k or "handlers.json" in k]
+    # Evict seedgo's own json_handler entries (mock or cached) so a fresh
+    # import is forced. Must stay scoped to aipass.seedgo and go through
+    # monkeypatch: the old version popped every "json_handler"-ish key
+    # suite-wide with no restore, emptying OTHER branches' json_handler
+    # modules for the rest of the xdist worker.
+    keys_to_remove = [
+        k for k in sys.modules if k.startswith("aipass.seedgo") and ("json_handler" in k or "handlers.json" in k)
+    ]
     for key in keys_to_remove:
-        sys.modules.pop(key, None)
+        monkeypatch.delitem(sys.modules, key, raising=False)
 
-    # Ensure prax logger mock is in place for the real module
-    prax = MagicMock()
-    sys.modules["aipass.prax"] = prax
+    # The real module wants a prax logger — pin a mock, restored on teardown
+    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
 
     # Fresh import of the real module
     jh_mod = importlib.import_module("aipass.seedgo.apps.handlers.json.json_handler")

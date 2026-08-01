@@ -9,6 +9,73 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — CI wall-time phase 1b: pytest-xdist (DPLAN-0277)
+
+**ci(speed)** — the test suite now runs `-n auto --dist loadscope` in the
+ci.yml matrix and the Windows/macOS workflows (locally: ~5:10 serial-era
+xdist attempt failed 19-27 tests; now 12,296 pass in ~4:20 across 3
+consecutive full runs). Two classes of shared-state disease were fixed,
+tests-only: (1) sys.modules poisoning — tests that faked packages with
+MagicMocks, force-"reimported" modules (a no-op: `from pkg import mod`
+short-circuits on the parent attr), string-path-patched a module a neighbor
+had evicted (the patch lands on a NEW instance while the test calls the old
+one), or left raw unrestored sys.modules writes — fixed across
+seedgo/aipass/ai_mail/api/daemon/flow/trigger test files by pre-warming real
+imports before faking, patching and calling through one module object, and
+monkeypatch-routing every mutation. (2) shared-file races — every branch's
+templated `json_handler.log_operation` does an unlocked read-modify-write on
+real `<branch>_json/*_log.json` files; under loadscope two classes of the
+same branch land on different workers and race (empty-read JSONDecodeError),
+and a torn write leaves debris that breaks later runs. A repo-root
+`conftest.py` guard now skips any `log_operation` whose `*JSON_DIR*`
+resolves inside the repo (tmp-redirected handlers keep full behavior), which
+also stops test debris in real branch json dirs. Bonus catches: a telegram
+backoff test asserting exactly-once on a process-global `time.sleep` mock
+(leaked watchdog threads hit it 17k times), and a feedback_pulse test whose
+"no session id" path fell back to the live `CLAUDE_CODE_SESSION_ID` env var
+and fired on every 10th run. `--dist loadgroup` (branch-affinity) was
+evaluated and rejected: 9:26 vs 4:20 — one long-pole branch eats the
+parallelism.
+
+**fix(ci)** — follow-up caught by the PR's serial coverage job: the conftest
+guard's teardown must restore `log_operation` only when its own wrapper is
+still in place. A test that reloads a handler module mid-test (spawn's
+`test_reimport_after_mock`) rebinds every re-export to a fresh handler;
+blind-restoring the pre-reload bound method permanently split spawn's
+`log_operation` (old instance, real repo dir) from its siblings — 6
+tmp-path assertions failed serially while xdist dodged it (the reloader and
+the victims land on different workers). Proven both modes: 12,296/0 serial
+and xdist.
+
+**fix(ci)** — Python 3.10-only xdist flake in drone's
+`TestTriggerFireIntegration`: the tests string-patched
+`aipass.trigger.apps.modules.core.trigger` while `create_pr`/`merge_pr`
+lazily import that module at call time. On 3.10, `mock.patch` resolves the
+string via a getattr chain over parent-package attributes, so after a
+neighbor test evicts `core` from `sys.modules` the mock lands on the stale
+module held by the parent attr while production re-imports a fresh one — and
+the handlers swallow trigger errors by design, so the miss is silent
+("fire call not found"). 3.11+ use `pkgutil.resolve_name` (sys.modules-backed)
+and converge; that's why only the 3.10 leg flaked. Fixed by importing `core`
+once at file top, pinning it into `sys.modules`, and patching through the
+module object — deterministic on every version.
+
+## [2026-08-01] — CI wall-time phase 1a (DPLAN-0277)
+
+**ci(speed)** — measured on PR#723: the suite ran 7x per push and every job
+ran TWICE (push + pull_request both firing on dev). Shipped the zero-risk
+half: heavy workflows (ci/windows/macos) now trigger on PRs + push-to-main
+only (dev work is PR'd within minutes, so dev-push runs were pure
+duplicates); `concurrency` cancel-in-progress so a re-push kills the stale
+run; the coverage job no longer `needs: [test]` (it re-runs the suite itself
+— chaining it after the matrix serialized the two longest jobs into a
+~13-min critical path); the 4 test-matrix legs drop their `coverage run`
+wrapper whose data was never collected. `pytest-xdist` added to the dev
+extra. Parallel execution itself (`-n auto`) is staged as phase 1b: a local
+proof run found 19 tests with shared-state hygiene issues (sys.modules
+reimport tests, json_handler template files, flow plan-data writes, seedgo
+bypass.json) — inventory + fix plan in DPLAN-0277.
+
 ## [2026-08-01] — night train (v2.7.10)
 
 **fix(setup)** — cold install died silently right after the "What should we

@@ -21,7 +21,6 @@ Covers tests across 4 groups:
 import importlib
 import json
 import sys
-import types
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch, MagicMock
@@ -34,20 +33,27 @@ BRANCH_MODULE = "daemon"
 # =======================================
 
 # ---------------------------------------------------------------------------
-# Dynamic import with cross-branch guard bypass
+# Dynamic import of the branch json_handler
 # ---------------------------------------------------------------------------
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
 _json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
-    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
-
+# NOTE: the real handler package imports cleanly from inside this branch's own
+# tests (the cross-branch guard allows callers under /daemon/), so no sys.modules
+# stub is injected here. Injecting one at collection time leaked into every
+# other test running in the same process/xdist worker.
 _mod = importlib.import_module(_json_mod_path)
 json_handler = _mod
+
+# Snapshot the real module + its parent packages while they are still
+# registered. Sibling test modules elsewhere in the suite pop every
+# "*json_handler*" / "*handlers.json*" key out of sys.modules and never put
+# them back, which breaks importlib.reload() for anyone downstream.
+_MODULE_CHAIN: dict[str, Any] = {}
+for _i in range(len(_json_mod_path.split("."))):
+    _name = ".".join(_json_mod_path.split(".")[: _i + 1])
+    if _name in sys.modules:
+        _MODULE_CHAIN[_name] = sys.modules[_name]
 
 
 # ---------------------------------------------------------------------------
@@ -294,17 +300,32 @@ def test_log_operation_mocked(tmp_path: Path) -> None:
         assert result is True
 
 
-def test_sys_modules_mock() -> None:
+def test_sys_modules_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     """sys_modules_mock: json_handler module is accessible via sys.modules."""
-    mod_key = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
-    assert mod_key in sys.modules, f"{mod_key} must be in sys.modules"
-    loaded = sys.modules[mod_key]
+    # Import explicitly instead of assuming a warm import cache: a cold xdist
+    # worker (or a sibling test that popped the key) leaves sys.modules empty
+    # for this path, and the contract under test is "importable + registered".
+    # The monkeypatch pin makes whatever this import (re)registers roll back to
+    # the pre-test state on teardown, so nothing leaks to other tests.
+    for _name, _obj in _MODULE_CHAIN.items():
+        monkeypatch.setitem(sys.modules, _name, _obj)
+
+    loaded = importlib.import_module(_json_mod_path)
+    assert _json_mod_path in sys.modules, f"{_json_mod_path} must be in sys.modules"
+    assert sys.modules[_json_mod_path] is loaded
     assert hasattr(loaded, "load_json"), "Module must have load_json function"
     assert hasattr(loaded, "save_json"), "Module must have save_json function"
 
 
-def test_reimport_after_mock(tmp_path: Path) -> None:
+def test_reimport_after_mock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """reimport_after_mock: module can be reloaded cleanly."""
-    handler_module = sys.modules.get(f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler")
-    if handler_module:
-        importlib.reload(handler_module)
+    # importlib.reload() requires this module AND its parent package to be
+    # registered in sys.modules. Other test modules in the same worker pop those
+    # keys, so pin the whole chain via monkeypatch, which restores the previous
+    # state (value or absence) exactly on teardown.
+    for _name, _obj in _MODULE_CHAIN.items():
+        monkeypatch.setitem(sys.modules, _name, _obj)
+
+    reloaded = importlib.reload(_mod)
+    assert hasattr(reloaded, "load_json")
+    assert hasattr(reloaded, "save_json")

@@ -23,7 +23,12 @@ class TestFeedbackPulseHandler:
 
         return handle
 
-    def test_no_session_id_returns_empty(self):
+    def test_no_session_id_returns_empty(self, monkeypatch):
+        # _state_path falls back to CLAUDE_CODE_SESSION_ID — set when the suite
+        # runs inside a Claude Code session, which pointed this test at a REAL
+        # /tmp counter that fired the pulse every 10th run. Clear it so "no
+        # session id" is actually true.
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
         result = self._handler()({"session_id": ""})
         assert result["stdout"] == ""
         assert result["exit_code"] == 0

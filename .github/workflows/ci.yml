@@ -1,10 +1,18 @@
 name: CI
 
 on:
+  # push fires on main only (post-merge validation). Dev work is always PR'd
+  # within minutes, so push+pull_request on dev double-ran every job — the PR
+  # event alone carries the required checks.
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main, dev]
+
+# A new push to the same ref cancels the stale in-flight run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -42,7 +50,13 @@ jobs:
           pip install -e ".[dev]"
       # tests/e2e build a wheel + clean venv per the dedicated e2e-wheel.yml
       # workflow — they are not part of the fast unit lane.
-      - run: coverage run -m pytest -v --tb=short --rootdir=. --ignore=tests/e2e
+      # Plain pytest: this job's old `coverage run` wrapper produced data that
+      # was never reported anywhere (the coverage job collects its own) — it
+      # only slowed all four matrix legs.
+      # xdist (DPLAN-0277 phase 1b): loadscope keeps each test class on one
+      # worker. The suite's shared-state hygiene was fixed for this — see the
+      # repo-root conftest.py guard — and proven over repeated full runs.
+      - run: pytest -v --tb=short --rootdir=. --ignore=tests/e2e -n auto --dist loadscope
 
   standards:
     name: seedgo-audit
@@ -73,7 +87,8 @@ jobs:
 
   coverage:
     name: coverage
-    needs: [test]
+    # No `needs: [test]` — it re-runs the suite itself, so chaining it after
+    # the matrix only serialized the two longest jobs (~13 min critical path).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -8,21 +8,47 @@
 
 """Tests for json_handler — default_factory, validate, get_path, ensure_exists, load, save, ensure_module."""
 
+import importlib
 import json
+import sys
 
 import pytest
 from unittest.mock import patch
 
-from aipass.aipass.apps.handlers.json.json_handler import (
-    AIPASS_JSON_DIR,
-    ensure_json_exists,
-    ensure_module_jsons,
-    get_json_path,
-    load_json,
-    load_path,
-    save_json,
-    validate_json_structure,
-)
+import aipass.aipass.apps.handlers.json.json_handler as jh_mod
+
+# Every test patches AND calls through this single module object.  Under
+# pytest-xdist another test on the same worker can evict the handler from
+# sys.modules; a string patch target ("pkg.mod.ATTR") would then re-import it
+# and patch a *second*, divergent module instance while the functions under
+# test still live on the first one -- writes land in the real json dir and the
+# tmp_path assertions fail.  Binding both sides to ``jh_mod`` removes that
+# window entirely.
+_MODULE_KEY = jh_mod.__name__
+
+
+def _module_chain(module) -> dict:
+    """Map the module *and every ancestor package* to the objects imported here.
+
+    importlib.reload() needs both ``sys.modules[module.__name__] is module`` and
+    ``sys.modules[parent_package]`` (it reads ``parent.__path__``), so pinning
+    only the leaf is not enough.
+    """
+    parts = module.__name__.split(".")
+    chain = {".".join(parts[:i]): sys.modules[".".join(parts[:i])] for i in range(1, len(parts))}
+    chain[module.__name__] = module
+    return chain
+
+
+_MODULE_CHAIN = _module_chain(jh_mod)
+
+
+@pytest.fixture(autouse=True)
+def _pin_module_identity():
+    """Keep sys.modules pointing at the module objects this file imported."""
+    sys.modules.update(_MODULE_CHAIN)
+    yield
+    sys.modules.update(_MODULE_CHAIN)
 
 
 # =============================================================================
@@ -35,8 +61,8 @@ class TestDefaultFactory:
 
     def test_config_template(self, tmp_path):
         """Config template includes module_name, version, config, created."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            ensure_json_exists("test_mod", "config")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            jh_mod.ensure_json_exists("test_mod", "config")
             result = json.loads((tmp_path / "test_mod_config.json").read_text())
         assert result["module_name"] == "test_mod"
         assert result["version"] == "1.0.0"
@@ -45,25 +71,23 @@ class TestDefaultFactory:
 
     def test_data_template(self, tmp_path):
         """Data template includes created and last_updated."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            ensure_json_exists("test_mod", "data")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            jh_mod.ensure_json_exists("test_mod", "data")
             result = json.loads((tmp_path / "test_mod_data.json").read_text())
         assert "created" in result
         assert "last_updated" in result
 
     def test_log_template(self, tmp_path):
         """Log template is an empty list."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            ensure_json_exists("test_mod", "log")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            jh_mod.ensure_json_exists("test_mod", "log")
             result = json.loads((tmp_path / "test_mod_log.json").read_text())
         assert result == []
 
     def test_unknown_type_raises(self):
         """Unknown json_type raises ValueError."""
-        from aipass.aipass.shared.json_handler import JsonHandler
-
         with pytest.raises(ValueError):
-            JsonHandler._create_default("unknown_type", "test_mod")
+            jh_mod.JsonHandler._create_default("unknown_type", "test_mod")
 
 
 # =============================================================================
@@ -77,37 +101,37 @@ class TestValidate:
     def test_valid_config(self):
         """Valid config structure passes validation."""
         data = {"module_name": "x", "version": "1.0.0", "config": {}}
-        assert validate_json_structure(data, "config") is True
+        assert jh_mod.validate_json_structure(data, "config") is True
 
     def test_invalid_config_missing_key(self):
         """Config missing required keys fails validation."""
         data = {"module_name": "x"}
-        assert validate_json_structure(data, "config") is False
+        assert jh_mod.validate_json_structure(data, "config") is False
 
     def test_config_not_dict(self):
         """Non-dict config fails validation."""
-        assert validate_json_structure([], "config") is False
+        assert jh_mod.validate_json_structure([], "config") is False
 
     def test_valid_data(self):
         """Valid data structure passes validation."""
         data = {"created": "2026-01-01", "last_updated": "2026-01-01"}
-        assert validate_json_structure(data, "data") is True
+        assert jh_mod.validate_json_structure(data, "data") is True
 
     def test_invalid_data(self):
         """Data missing last_updated fails validation."""
-        assert validate_json_structure({"created": "x"}, "data") is False
+        assert jh_mod.validate_json_structure({"created": "x"}, "data") is False
 
     def test_valid_log(self):
         """Empty list is valid log structure."""
-        assert validate_json_structure([], "log") is True
+        assert jh_mod.validate_json_structure([], "log") is True
 
     def test_invalid_log(self):
         """Non-list log fails validation."""
-        assert validate_json_structure({}, "log") is False
+        assert jh_mod.validate_json_structure({}, "log") is False
 
     def test_unknown_type(self):
         """Unknown json_type fails validation."""
-        assert validate_json_structure({}, "bogus") is False
+        assert jh_mod.validate_json_structure({}, "bogus") is False
 
 
 # =============================================================================
@@ -120,13 +144,13 @@ class TestGetPath:
 
     def test_returns_correct_path(self):
         """Path resolves to AIPASS_JSON_DIR/module_type.json."""
-        path = get_json_path("doctor", "config")
-        assert path == AIPASS_JSON_DIR / "doctor_config.json"
+        path = jh_mod.get_json_path("doctor", "config")
+        assert path == jh_mod.AIPASS_JSON_DIR / "doctor_config.json"
 
     def test_different_types(self):
         """All json_types produce correctly named paths."""
         for json_type in ("config", "data", "log"):
-            path = get_json_path("mymod", json_type)
+            path = jh_mod.get_json_path("mymod", json_type)
             assert path.name == f"mymod_{json_type}.json"
 
 
@@ -140,8 +164,8 @@ class TestEnsureExists:
 
     def test_creates_missing_file(self, tmp_path):
         """Missing file is created from template."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = ensure_json_exists("newmod", "config")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.ensure_json_exists("newmod", "config")
             assert result is True
             created = tmp_path / "newmod_config.json"
             assert created.exists()
@@ -153,16 +177,16 @@ class TestEnsureExists:
         target = tmp_path / "existing_config.json"
         content = {"module_name": "existing", "version": "1.0.0", "config": {}, "created": "2026-01-01"}
         target.write_text(json.dumps(content))
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = ensure_json_exists("existing", "config")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.ensure_json_exists("existing", "config")
             assert result is True
 
     def test_corrupted_file_regenerated(self, tmp_path):
         """Corrupted file is regenerated from template."""
         target = tmp_path / "bad_config.json"
         target.write_text("not json at all")
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = ensure_json_exists("bad", "config")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.ensure_json_exists("bad", "config")
             assert result is True
             data = json.loads(target.read_text())
             assert data["module_name"] == "bad"
@@ -180,14 +204,14 @@ class TestLoad:
         """Existing valid file loads correctly."""
         target = tmp_path / "mod_log.json"
         target.write_text(json.dumps([{"op": "test"}]))
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = load_json("mod", "log")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.load_json("mod", "log")
             assert result == [{"op": "test"}]
 
     def test_load_missing_creates(self, tmp_path):
         """Missing file is auto-created then loaded."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = load_json("fresh", "log")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.load_json("fresh", "log")
             assert result == []
 
 
@@ -201,27 +225,27 @@ class TestSave:
 
     def test_save_valid(self, tmp_path):
         """Valid structure saves successfully."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
             data = {"module_name": "s", "version": "1.0.0", "config": {}, "created": "2026-01-01"}
-            result = save_json("s", "config", data)
+            result = jh_mod.save_json("s", "config", data)
             assert result is True
             saved = json.loads((tmp_path / "s_config.json").read_text())
             assert saved["module_name"] == "s"
 
     def test_save_invalid_structure_rejected(self, tmp_path):
         """Invalid structure raises ValueError."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
             with pytest.raises(ValueError):
-                save_json("s", "config", {"bad": True})
+                jh_mod.save_json("s", "config", {"bad": True})
 
     def test_save_unknown_returns_false(self, tmp_path):
         """save_json returns False when write fails (e.g. read-only dir)."""
         ro_dir = tmp_path / "readonly"
         ro_dir.mkdir()
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", ro_dir):
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", ro_dir):
             data = {"module_name": "s", "version": "1.0.0", "config": {}, "created": "2026-01-01"}
-            with patch("aipass.aipass.shared.json_handler.JsonHandler.write_json", return_value=False):
-                result = save_json("s", "config", data)
+            with patch.object(jh_mod.JsonHandler, "write_json", return_value=False):
+                result = jh_mod.save_json("s", "config", data)
                 assert result is False
 
 
@@ -235,8 +259,8 @@ class TestEnsureModule:
 
     def test_creates_all_three(self, tmp_path):
         """All three json types (config, data, log) are created."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = ensure_module_jsons("trio")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.ensure_module_jsons("trio")
             assert result is True
             assert (tmp_path / "trio_config.json").exists()
             assert (tmp_path / "trio_data.json").exists()
@@ -255,26 +279,26 @@ class TestLoadPath:
         """Valid JSON file loads as dict."""
         f = tmp_path / "test.json"
         f.write_text(json.dumps({"key": "value"}))
-        result = load_path(f)
+        result = jh_mod.load_path(f)
         assert result == {"key": "value"}
 
     def test_unknown_file_returns_none(self, tmp_path):
         """Missing file returns None."""
-        result = load_path(tmp_path / "nope.json")
+        result = jh_mod.load_path(tmp_path / "nope.json")
         assert result is None
 
     def test_load_invalid_json(self, tmp_path):
         """Invalid JSON content returns None."""
         f = tmp_path / "bad.json"
         f.write_text("not json")
-        result = load_path(f)
+        result = jh_mod.load_path(f)
         assert result is None
 
     def test_load_empty_file(self, tmp_path):
         """Empty file returns None."""
         f = tmp_path / "empty.json"
         f.write_text("")
-        result = load_path(f)
+        result = jh_mod.load_path(f)
         assert result is None
 
 
@@ -290,8 +314,8 @@ class TestErrorResilience:
         """Empty JSON file is regenerated from template."""
         target = tmp_path / "empty_config.json"
         target.write_text("")
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            result = ensure_json_exists("empty", "config")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            result = jh_mod.ensure_json_exists("empty", "config")
             assert result is True
             data = json.loads(target.read_text())
             assert data["module_name"] == "empty"
@@ -346,13 +370,13 @@ class TestExceptionContracts:
 
     def test_invalid_mode_raises(self, tmp_path):
         """save_json with invalid structure raises ValueError."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
             with pytest.raises(ValueError):
-                save_json("x", "config", [])
+                jh_mod.save_json("x", "config", [])
             with pytest.raises(ValueError):
-                save_json("x", "data", "string")
+                jh_mod.save_json("x", "data", "string")
             with pytest.raises(ValueError):
-                save_json("x", "log", {"not": "a list"})
+                jh_mod.save_json("x", "log", {"not": "a list"})
 
 
 # =============================================================================
@@ -365,14 +389,18 @@ class TestInfrastructureMocking:
 
     def test_reimport_after_mock(self, tmp_path):
         """json_handler functions work after mock is torn down."""
-        with patch("aipass.aipass.apps.handlers.json.json_handler.AIPASS_JSON_DIR", tmp_path):
-            ensure_module_jsons("reimport_test")
+        with patch.object(jh_mod, "AIPASS_JSON_DIR", tmp_path):
+            jh_mod.ensure_module_jsons("reimport_test")
             assert (tmp_path / "reimport_test_config.json").exists()
 
-        import importlib
-        import aipass.aipass.apps.handlers.json.json_handler as jh_mod
-
-        importlib.reload(jh_mod)
+        # Reload the *pinned* module object (never a fresh import): reload
+        # re-executes in place, so every reference held by this and any other
+        # test module stays valid instead of going stale against a new
+        # instance.  _pin_module_identity guarantees sys.modules[name] is
+        # jh_mod, which is what importlib.reload requires.
+        assert sys.modules[_MODULE_KEY] is jh_mod
+        reloaded = importlib.reload(jh_mod)
+        assert reloaded is jh_mod
         assert callable(jh_mod.load_json)
         assert callable(jh_mod.save_json)
         assert callable(jh_mod.load_path)
@@ -385,4 +413,4 @@ class TestInfrastructureMocking:
 
 def test_unknown_returns_false():
     """validate_json_structure returns False for unrecognized json_type."""
-    assert validate_json_structure({}, "bogus") is False
+    assert jh_mod.validate_json_structure({}, "bogus") is False

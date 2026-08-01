@@ -201,7 +201,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
 class TestEventRegistration:
     """Tests for event registration in the event system."""
 
-    def test_event_registered_and_discoverable(self) -> None:
+    def test_event_registered_and_discoverable(self, monkeypatch) -> None:
         """memory_pool_auto_processed is registered in the handler registry."""
         import sys
         from unittest.mock import MagicMock
@@ -209,16 +209,17 @@ class TestEventRegistration:
         mock_trigger = MagicMock()
         mock_trigger.on = MagicMock()
 
-        sys.modules.pop("aipass.trigger.apps.handlers.events.registry", None)
-        sys.modules.pop("aipass.trigger.apps.modules.core", None)
-
+        # setup_handlers resolves core/email_send at CALL time, so pinning the
+        # sys.modules entries is enough — no registry re-import needed. The old
+        # raw assignments here were never restored and left MagicMocks in
+        # sys.modules for every later import on the same xdist worker.
         core_mod = MagicMock()
         core_mod.trigger = mock_trigger
-        sys.modules["aipass.trigger.apps.modules.core"] = core_mod
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
 
         mock_mail = MagicMock()
         mock_mail.deliver_email_to_branch = MagicMock(return_value=(True, None))
-        sys.modules["aipass.ai_mail.apps.modules.email_send"] = mock_mail
+        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", mock_mail)
 
         from aipass.trigger.apps.handlers.events.registry import setup_handlers
 
