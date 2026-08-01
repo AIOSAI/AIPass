@@ -277,26 +277,37 @@ class TestPackageAwarePlacement:
 
 class TestDetectPollution:
     def test_no_duplicates(self, tmp_path: Path) -> None:
-        """Unique registry_ids produce no pollution hits."""
-        _make_agent(tmp_path, "a", "uuid-1")
-        _make_agent(tmp_path, "b", "uuid-2", subdir="pkg")
+        """Distinct branch names produce no pollution hits, even sharing a registry_id.
+
+        citizenship.registry_id is intentionally shared by every citizen in a
+        healthy install (spawn's fix_owner_identity shared-project-credential
+        model) — it must never be the pollution key.
+        """
+        _make_agent(tmp_path, "a", "uuid-shared")
+        _make_agent(tmp_path, "b", "uuid-shared", subdir="pkg")
         agents = scan_agents(tmp_path)
         hits = detect_pollution(agents)
         assert hits == []
 
     def test_duplicate_detected(self, tmp_path: Path) -> None:
-        """Same registry_id at two locations is flagged."""
+        """Same branch name at two locations is flagged."""
         _make_agent(tmp_path, "original", "uuid-dup")
-        _make_agent(tmp_path, "copy", "uuid-dup", subdir="pkg")
+        _make_agent(tmp_path, "original", "uuid-other", subdir="pkg")
         agents = scan_agents(tmp_path)
         hits = detect_pollution(agents)
         assert len(hits) == 1
         assert len(hits[0].locations) == 2
-        assert hits[0].registry_id == "uuid-dup"
+        assert hits[0].agent_name == "original"
 
-    def test_empty_registry_id_ignored(self, tmp_path: Path) -> None:
-        """Agents without registry_id are skipped."""
-        _make_agent(tmp_path, "noid", "")
+    def test_empty_branch_name_ignored(self, tmp_path: Path) -> None:
+        """Agents without a branch name are skipped."""
+        agent_dir = tmp_path / "src" / "noname"
+        trinity = agent_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": ""}, "citizenship": {"registry_id": "uuid-1"}}),
+            encoding="utf-8",
+        )
         agents = scan_agents(tmp_path)
         hits = detect_pollution(agents)
         assert hits == []
@@ -482,9 +493,9 @@ class TestCheckStructureIntegration:
         assert root_results[0].glyph == GLYPH_WARN
 
     def test_pollution_reported(self, tmp_path: Path) -> None:
-        """Duplicate registry_id shows up as FAIL in structure check."""
+        """Duplicate branch name shows up as FAIL in structure check."""
         _make_agent(tmp_path, "orig", "uuid-dup")
-        _make_agent(tmp_path, "copy", "uuid-dup", subdir="pkg")
+        _make_agent(tmp_path, "orig", "uuid-other", subdir="pkg")
         _make_registry(tmp_path, [])
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):

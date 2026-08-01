@@ -9,6 +9,49 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-07-31] — round-2 walk train (v2.7.9)
+
+**feat(onboarding)** — Patrick's round-2 container walk + the in-container
+concierge's own field report, folded into one train (DPLAN-0274). Doctor now
+runs automatically in the install tail — after setup, before the concierge
+says hello (Patrick's ruling: "it should run before aipass say helo") — with
+the safe `--fix` pass; hook wiring is P1, and a still-broken result lands as
+a loud ACTION NEEDED headline plus the top of the concierge's greeting
+(`run_doctor_preflight` in doctor.py, wired via `install --chat-only` so both
+cold-clone and re-run paths get it; a crashed preflight says so instead of
+passing silently). Git identity prompt is now skippable (blank Enter or
+literal "skip", stated up front), validates email shape, and never silently
+stores garbage — skips print the exact `git config` commands to run later.
+The install asks the user's name once ("What should we call you?", git name
+as default) and stores it in untracked `AIPASS_REGISTRY.json → metadata.user`
+— the concierge greets by name; the git-tracked CLAUDE.md placeholder stays
+un-personalized. Everything skipped or still broken collects into one
+highlighted ACTION NEEDED block printed last, right before the chat opens
+(sudo/srt requirements were scrolling past unseen). README install story
+updated to match.
+
+**fix(registry)** — the fresh-install "19 doctor errors" root-caused
+(@spawn FPLAN-0367): passports were NEVER git-tracked at any tag — the
+missing piece was stamping at install. setup.sh now reconciles registry
+owner + citizen identity right after bootstrap (`fix_owner_identity`), and
+`detect_pollution` was re-keyed to branch_name — every citizen in a project
+sharing one `registry_id` is the intentional shared-project-credential
+model, which the old detector itself flagged as pollution. Doctor's
+duplicate wording follows the same re-key, passport role reads its real
+nested path (`identity.role` — every passport printed "unknown"), the
+missing-hooks list no longer doubles event prefixes or repeats entries, and
+`--fix` refuses to suggest relocating `.venv` (it would break hooks wired to
+`$AIPASS_HOME/.venv`). `.claude/provider_manifest.json` dropped the two
+stale `rm` deny rules that `provider_reconcile` strips on sight — the
+mathematically unclearable doctor warning is gone (@hooks).
+
+**fix(tests)** — `tests/docker_clone_test.sh` seeded its "fresh clone" with
+`cp -r`, dragging gitignored local state (real passports included) into the
+tree and faking clone results — now a real `git clone`. `Dockerfile.test`
+gains tmux so the concierge's tmux path has something to run on. New
+`tests/setup_identity_test.sh` (27 assertions) covers the identity/skip/name
+flow against the real setup.sh functions. 862 aipass tests green.
+
 ## [2026-07-31] — post-v2.7.8 (no version bump, Patrick's call)
 
 **fix(onboarding)** — the concierge welcome chat silently inherited

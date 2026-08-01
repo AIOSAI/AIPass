@@ -42,9 +42,8 @@ class PlacementIssue(NamedTuple):
 
 
 class PollutionHit(NamedTuple):
-    """Same registry_id found at multiple locations."""
+    """Same branch name found at multiple locations."""
 
-    registry_id: str
     agent_name: str
     locations: List[str]
 
@@ -254,24 +253,29 @@ def check_placement(agents: List[AgentInfo], project_root: Path) -> List[Placeme
 
 
 def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
-    """Find duplicate registry_ids — same agent found at multiple locations.
+    """Find duplicate branch names — same agent found at multiple locations.
+
+    Keys on branch_name, not citizenship.registry_id: registry_id is
+    intentionally shared by every citizen in a healthy install (the
+    shared-project-credential model in spawn's fix_owner_identity), so
+    grouping by it flags every healthy multi-branch project as "polluted".
+    branch_name is the field that's actually meant to be unique per agent.
 
     Returns:
-        List of PollutionHit for each duplicated registry_id.
+        List of PollutionHit for each branch name found at >1 path.
     """
-    id_to_locations: Dict[str, List[AgentInfo]] = {}
+    name_to_locations: Dict[str, List[AgentInfo]] = {}
     for agent in agents:
-        if not agent.registry_id:
+        if not agent.name:
             continue
-        id_to_locations.setdefault(agent.registry_id, []).append(agent)
+        name_to_locations.setdefault(agent.name, []).append(agent)
 
     hits: List[PollutionHit] = []
-    for rid, group in id_to_locations.items():
+    for name, group in name_to_locations.items():
         if len(group) > 1:
             hits.append(
                 PollutionHit(
-                    registry_id=rid,
-                    agent_name=group[0].name,
+                    agent_name=name,
                     locations=[str(a.path) for a in group],
                 )
             )
