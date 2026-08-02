@@ -11,7 +11,7 @@
 
 Default Flow Plans (FPLANs) are **building** - autonomous construction: systems, features, modules.
 
-**FPLANs are disposable.** Exist exactly one task. When task complete, close this plan immediately -- do not leave open. Open FPLANs mean unfinished work. Work done = plan done: `drone @flow close {plan_number}` The plan is never lost. It is strored into our locl and global ,chroma vector db.
+**FPLANs are disposable.** Exist exactly one task. When task complete, close this plan immediately -- do not leave open. Open FPLANs mean unfinished work. Work done = plan done: `drone @flow close {plan_number}`. The plan is never lost -- closing archives and vectorizes it to @memory.
 
 **This is NOT for:**
 - Research or exploration (use DPLANs and APLANs directly)
@@ -22,7 +22,7 @@ Default Flow Plans (FPLANs) are **building** - autonomous construction: systems,
 - Building features or modules
 - Single focused construction tasks
 - Sub-plans within master plan
-- Mostly use for sub-agents, in some cases may be issued to Agents citizens. Judjmemts calls. 
+- Mostly used by sub-agents; sometimes issued to citizen agents. Judgment call.
 
 ---
 
@@ -35,7 +35,7 @@ Default Flow Plans (FPLANs) are **building** - autonomous construction: systems,
 | Quick build | Multi-session project |
 | One phase of master | Entire branch/system build |
 
-**Need master plan?** `drone @flow create "subject" master`
+**Need master plan?** `drone @flow create . "subject" master`
 
 ---
 
@@ -50,7 +50,6 @@ Use dedicated directories - don't scatter files:
 | `tools/` | Utility scripts |
 | `artifacts/` | Agent outputs |
 | `docs/` | Documentation |
-| `Sub-agents/`|Projects/AIPass/src/aipass/flow/docs.local/sub_agent_drops|
 
 ---
 
@@ -58,7 +57,7 @@ Use dedicated directories - don't scatter files:
 
 **You are orchestrator, not builder.**
 
-Your 200k context is precious. Burning it on file reads + code writing risks compaction tool early during autonomous work. Agents have clean context - use them for
+Your context is finite -- spend it on orchestration, not file dumps. Agents have clean context - use them for the heavy lifting.
 
 | You Do (Orchestrator) | Agents Do (Builders) |
 |-----------------------|----------------------|
@@ -79,7 +78,7 @@ Don't figure everything out alone. Other branches are domain experts - ask them 
 
 **Before building anything touching another branch's domain:**
 ```bash
-ai_mail email @branch "Question: [topic]" "I'm working on X and need guidance on Y. What's the best approach?"
+drone @ai_mail email @branch "Question: [topic]" "I'm working on X and need guidance on Y. What's the best approach?"
 ```
 
 **Common examples:**
@@ -118,7 +117,7 @@ drone @flow --help                     # Full help
 
 # Seedgo - Quality gates
 drone @seedgo checklist <file>           # 10-point check on file
-drone @seedgo audit @branch              # Full branch audit
+drone @seedgo audit aipass @branch       # Full branch audit
 drone @seedgo --help                     # Full help
 
 # AI_Mail - Status updates

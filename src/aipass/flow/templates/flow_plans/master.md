@@ -48,9 +48,9 @@ Master Plan (roadmap)
 **How to start:**
 1. User provides planning doc DPLAN or instructions (coordinate @devpulse)
 2. Branch manager reads + understands scope
-3. Branch manager creates master plan: `drone @flow create "Build X" master`
+3. Branch manager creates master plan: `drone @flow create . "Build X" master`
 4. Branch manager fills phases, then executes autonomously
-5. Devepulse mayprovide a complete plan to you. Always confirm, Alwayd confirm the plan is sound, acucurate
+5. Devpulse may provide a complete plan to you. Always confirm the plan is sound and accurate.
 
 ---
 
@@ -58,7 +58,7 @@ Master Plan (roadmap)
 
 **You are ORCHESTRATOR, not builder.**
 
-Your 200k context is precious. Burning it on file reads + code writing risks auto compaction during autonomous work. Agents have clean context - use them for ALL building. Only devpulse is this accempion, user decideds when to compact. no auto compct for devpulse. 
+Your context is finite -- spend it on orchestration, not building. Agents have clean context - use them for ALL building. Auto-compact is survivable by design (PreCompact injects recovery state), but context burned on solo building is context lost to coordination.
 
 | You Do (Orchestrator) | Agents Do (Builders) |
 |-----------------------|----------------------|
@@ -81,7 +81,7 @@ Don't figure everything out alone. Other branches are domain experts - ask them 
 
 **Before building anything touching another branch's domain:**
 ```bash
-ai_mail email @branch "Question: [topic]" "I'm working on X and need guidance on Y. What's the best approach?"
+drone @ai_mail email @branch "Question: [topic]" "I'm working on X and need guidance on Y. What's the best approach?"
 ```
 
 **Common examples:**
@@ -122,12 +122,11 @@ drone @flow create . "Phase X: subject"      # Create sub-plan (. = current dir)
 drone @flow create . "subject" master        # Create master plan
 drone @flow close {prefix}-XXXX           # Close plan
 drone @flow list open                  # List active plans
-drone @flow status                     # Plan status
 drone @flow --help                     # Full help
 
 # Seedgo - Quality gates
 drone @seedgo checklist <file>           # 10-point check on file
-drone @seedgo audit @branch              # Full branch audit (before master close)
+drone @seedgo audit aipass @branch       # Full branch audit (before master close)
 drone @seedgo --help                     # Full help
 
 # AI_Mail - Status updates
@@ -324,7 +323,7 @@ Quick status checks + debugging, these resources available:
 | Resource | Location | Purpose |
 |----------|----------|---------|
 | Branch logs | `logs/` directory | Local execution logs |
-| JSON tree | `apps/json_templates/` | Module firing status |
+| JSON tree | `<branch>_json/` | Module firing status |
 | Prax monitor | `drone @prax monitor` | Real-time system events |
 | Seedgo audit | `drone @seedgo audit @branch` | Code quality check |
 
@@ -489,7 +488,7 @@ Track issues here as encountered. Don't fix during build - log + continue.
 - [ ] All phases complete
 - [ ] All sub-plans closed
 - [ ] Issues Log reviewed - High/Med issues addressed
-- [ ] Full branch audit: `drone @seedgo audit @branch`
+- [ ] Full branch audit: `drone @seedgo audit aipass @branch`
 - [ ] Branch memories updated:
   - [ ] `BRANCH.local.json` - full session log
   - [ ] `BRANCH.observations.json` - patterns learned

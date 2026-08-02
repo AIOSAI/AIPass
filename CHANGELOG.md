@@ -9,6 +9,20 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — flow plan templates truth-pass
+
+**fix(flow)** — template review caught commands that misfire when agents
+copy-paste them and doctrine that reality reversed. FPLAN default + master:
+`ai_mail email` gains its `drone @` prefix, `seedgo audit` gains the `aipass`
+pack arg, nonexistent `drone @flow status` removed, `flow create` examples gain
+the location arg, the "no auto-compact for devpulse" line replaced with the
+current calm-compact doctrine (auto-compact is survivable by design), typo
+garble cleaned, a leftover flow-internal path row dropped. Playbook default:
+PBPLAN → PPLAN, add-a-SOP command now shows template-before-type. Merge SOP:
+hardcoded "13 branches" → the script's live count. Prompt-change SOP: seed
+propagation rewritten for manifest-driven hook wiring (provider_manifest.json
+is the single source since FPLAN-0374 — setup.sh reads it, no second list).
+
 ## [2026-08-01] — dispatch default model: opus (Patrick ruling)
 
 **chore(ai_mail)** — `DEFAULT_MODEL` in dispatch wake flips sonnet → opus:

@@ -78,7 +78,7 @@ just that one merge commit — **cosmetic and trivially resolved**.
 
 ## 2. Verify, commit, CHANGELOG
 
-- [ ] **Run the CI audit gate LOCALLY before pushing** (local == CI, S199 parity — catches red before the PR): `cd <repo-root> && .venv/bin/python .github/scripts/seedgo_audit.py` → expect all 13 branches `>=100%`, exit 0. Uses a relative `src/aipass` path, so run from the repo **root**, not a branch dir.
+- [ ] **Run the CI audit gate LOCALLY before pushing** (local == CI, S199 parity — catches red before the PR): `cd <repo-root> && .venv/bin/python .github/scripts/seedgo_audit.py` → expect **all** branches `>=100%`, exit 0 (the script prints the live count — don't trust a hardcoded number). Uses a relative `src/aipass` path, so run from the repo **root**, not a branch dir.
 - [ ] Update `CHANGELOG.md` — add entries under a dated section header `## [YYYY-MM-DD]` (the merge date), one section per merge. Sort into Added / Changed / Fixed.
 - [ ] Commit: `drone @git commit "msg" --all` (from a branch dir, e.g. devpulse). New/untracked files (e.g. new templates) — confirm they got staged: `git ls-files <path>` after; `--all` may not pick up untracked.
 - [ ] All commits are auto-SSH-signed via repo-level git config (key `~/.ssh/aipass_signing`, wired 2026-07-15). Nothing manual required; verify with `git log --show-signature -1` if in doubt.
