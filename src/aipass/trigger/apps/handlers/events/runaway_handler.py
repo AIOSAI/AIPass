@@ -22,8 +22,20 @@ Event payload from prax:
 
 Gating:
     - Per-file cooldown (30min default) — independent of medic circuit breaker
-    - Branch mute check (reuses TTL mute infrastructure from trigger_config.json)
+    - VOLUME mute check (volume_muted_branches in trigger_config.json)
     - UNKNOWN/missing branch → dispatch to @prax as fallback
+
+Mute classes are deliberately separate. Medic CONTENT mutes (muted_branches)
+never gate runaway alerts: every dispatch checklist tells agents to medic-mute
+before build/edit work, which is exactly when log floods happen, so gating on
+the content mute made this channel structurally dead in its own peak window.
+A volume mute must be set deliberately, and CRITICAL runaways bypass even that
+— a machine-eating flood is never something you asked to silence.
+
+Every gating decision is appended to logs/runaway_suppressed.jsonl with an
+`outcome` field ("suppressed" or "delivered") so suppressed-by-design and
+delivered-by-bypass are distinguishable in the trail. Entries written before
+this field existed are all suppressions.
 
 Alerts written to .aipass/alerts.json expire after 24h by default (same TTL
 convention as medic_state.py's DEFAULT_MUTE_SECONDS) — pass forever=True to
@@ -46,6 +58,10 @@ except Exception:
     _append_jsonl = None
 
 _HANDLER_LOG = TRIGGER_ROOT / "logs" / "runaway_handler.jsonl"
+DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
+
+# Volume mutes are a separate class from medic's content mutes (muted_branches).
+VOLUME_MUTE_KEY = "volume_muted_branches"
 
 
 def _log_warning(message: str) -> None:
@@ -126,46 +142,54 @@ def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
     return datetime.fromisoformat(expires_at) > now
 
 
-def _is_branch_muted(branch_name: str) -> bool:
-    """Check if a branch is muted for dispatch.
+def _is_branch_volume_muted(branch_name: str) -> bool:
+    """Check if a branch is VOLUME-muted for runaway dispatch.
 
-    Reads muted_branches from trigger_config.json. Supports both
+    Reads volume_muted_branches from trigger_config.json — deliberately NOT
+    muted_branches, which is the medic content-mute list. Supports both
     plain-string entries (permanent) and dict entries with TTL.
 
     Args:
         branch_name: Branch name (case-insensitive)
 
     Returns:
-        True if branch is actively muted
+        True if branch is actively volume-muted
     """
     try:
         if not TRIGGER_CONFIG_FILE.exists():
             return False
         data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
-        muted = data.get("config", {}).get("muted_branches", [])
+        muted = data.get("config", {}).get(VOLUME_MUTE_KEY, [])
         branch_lower = branch_name.lower()
         now = datetime.now()
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
     except Exception as exc:
-        _log_warning(f"_is_branch_muted config read failed: {exc}")
+        _log_warning(f"_is_branch_volume_muted config read failed: {exc}")
         return False
 
 
-def _write_suppression_log(reason: str, file_path: str, branch: str) -> None:
-    """Write a line to the runaway suppression log."""
+def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) -> None:
+    """Write a gating decision to the runaway decision trail.
+
+    Args:
+        outcome: "suppressed" (alert dropped) or "delivered" (alert sent anyway)
+        reason: Machine-readable cause, e.g. "cooldown", "volume_muted"
+        file_path: Path to the runaway log file
+        branch: Responsible branch name
+    """
     if _append_jsonl is None:
         return
     try:
-        suppressed_log = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
         entry = {
             "ts": datetime.now().isoformat(),
+            "outcome": outcome,
             "reason": reason,
             "file": file_path,
             "branch": branch,
         }
-        _append_jsonl(suppressed_log, entry)
+        _append_jsonl(DECISION_LOG, entry)
     except Exception as exc:
-        _log_warning(f"suppression log write failed ({reason}): {exc}")
+        _log_warning(f"decision log write failed ({outcome}/{reason}): {exc}")
 
 
 def _write_alert(
@@ -235,15 +259,19 @@ def handle_runaway_log_detected(
             return
 
         if _is_file_on_cooldown(file_path):
-            _write_suppression_log("cooldown", file_path, branch or "UNKNOWN")
+            _write_decision_log("suppressed", "cooldown", file_path, branch or "UNKNOWN")
             return
 
         is_unknown = not branch or branch.upper() == "UNKNOWN"
         target_branch = branch or "UNKNOWN"
+        is_critical = severity.lower() == "critical"
 
-        if not is_unknown and _is_branch_muted(target_branch):
-            _write_suppression_log("branch_muted", file_path, target_branch)
-            return
+        if not is_unknown and _is_branch_volume_muted(target_branch):
+            if not is_critical:
+                _write_decision_log("suppressed", "volume_muted", file_path, target_branch)
+                return
+            # A machine-eating flood is never something you asked to silence.
+            _write_decision_log("delivered", "bypass_critical", file_path, target_branch)
 
         if _send_email is None:
             _log_warning("No email callback — cannot dispatch runaway alert")

@@ -39,8 +39,10 @@ drone @trigger errors --help                # Error subcommand help
 drone @trigger medic on                     # Enable auto-dispatch
 drone @trigger medic off                    # Disable auto-dispatch
 drone @trigger medic status                 # Medic state + suppression stats
-drone @trigger medic mute @branch           # Suppress dispatch to a branch
-drone @trigger medic unmute @branch         # Resume dispatch to a branch
+drone @trigger medic mute @branch           # Suppress error dispatch to a branch
+drone @trigger medic unmute @branch         # Resume error dispatch to a branch
+drone @trigger medic volume-mute @branch    # Suppress runaway alerts for a branch
+drone @trigger medic volume-unmute @branch  # Resume runaway alerts for a branch
 drone @trigger medic --help                 # Medic subcommand help
 
 # Log watchers
@@ -101,7 +103,7 @@ result = report_error(
 | `cli_header_displayed` | `cli.py` | CLI displays headers | Registration hook |
 | `pr_created` | `pr_status_sync.py` | PR opened on GitHub | ~~Runs `drone @prax status sync`~~ **Decommissioned** (TDPLAN-0007) |
 | `pr_merged` | `pr_status_sync.py` | PR merged on GitHub | ~~Runs `drone @prax status sync`~~ **Decommissioned** (TDPLAN-0007) |
-| `runaway_log_detected` | `runaway_handler.py` | Prax rate tracker detects sustained high log volume | Per-file cooldown dispatch to responsible branch; UNKNOWN attribution falls back to @prax; writes alert to `.aipass/alerts.json` |
+| `runaway_log_detected` | `runaway_handler.py` | Prax rate tracker detects sustained high log volume | Per-file cooldown dispatch to responsible branch; gated by VOLUME mutes only (CRITICAL bypasses); UNKNOWN attribution falls back to @prax; writes alert to `.aipass/alerts.json` |
 | `memory_pool_auto_processed` | `memory_pool.py` | Hook engine runs `auto_process()` | Logs result; on failure fires `error_detected` for Medic dispatch |
 
 ## Medic
@@ -120,6 +122,17 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 8. **Rate limit** — prevents dispatch floods
 
 On successful dispatch: sends email via `deliver_email_to_branch()` then calls `wake_branch()` to spawn an agent in the target branch immediately.
+
+**Two mute classes, deliberately independent:**
+
+| Class | Config key | Gates | Set with |
+|---|---|---|---|
+| CONTENT | `muted_branches` | `error_detected` dispatch | `medic mute @branch` |
+| VOLUME | `volume_muted_branches` | `runaway_log_detected` alerts | `medic volume-mute @branch` |
+
+A content mute means "expect error lines from me while I build" — it says nothing about log volume. Because every dispatch checklist tells agents to medic-mute *before* build/edit work, and build windows are exactly when floods happen, gating runaway alerts on the content mute made that channel structurally dead in its own peak window (31/31 suppressions in `logs/runaway_suppressed.jsonl` were `branch_muted`). Volume mutes must be set deliberately, and CRITICAL runaways bypass even those.
+
+Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` field (`suppressed` / `delivered`), so suppressed-by-design and delivered-by-bypass are distinguishable. Entries predating that field are all suppressions.
 
 **Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Starts both branch and system watchers, handles SIGTERM/SIGINT for clean shutdown.
 

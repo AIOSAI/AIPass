@@ -940,3 +940,112 @@ class TestWriteConfigCleansMutes:
         muted = written["config"]["muted_branches"]
         assert len(muted) == 1
         assert muted[0]["name"] == "drone"
+
+    def test_write_config_cleans_expired_volume_mutes(self, state_mod):
+        """write_config expires volume mutes too, not just content mutes."""
+        from datetime import datetime, timedelta
+
+        expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
+        future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
+
+        data = {
+            "config": {
+                "volume_muted_branches": [
+                    {"name": "api", "expires_at": expired_ts},
+                    {"name": "drone", "expires_at": future_ts},
+                ]
+            }
+        }
+
+        state_mod.write_config(data)
+
+        config_file = state_mod.TRIGGER_CONFIG_FILE
+        written = json.loads(config_file.read_text(encoding="utf-8"))
+        muted = written["config"]["volume_muted_branches"]
+        assert len(muted) == 1
+        assert muted[0]["name"] == "drone"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- volume mutes are an independent class from content mutes
+# ---------------------------------------------------------------------------
+
+
+class TestVolumeMutes:
+    """Volume mutes write their own list and never touch the content list."""
+
+    def test_volume_mute_writes_separate_key(self, state_mod):
+        """mute_branch_volume stores under volume_muted_branches."""
+        state_mod.mute_branch_volume("api")
+
+        data = json.loads(state_mod.TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        assert data["config"]["volume_muted_branches"] == [{"name": "api", "expires_at": None}]
+        assert not data["config"].get("muted_branches")
+
+    def test_content_mute_does_not_volume_mute(self, state_mod):
+        """mute_branch leaves the volume list untouched."""
+        state_mod.mute_branch("api")
+
+        assert state_mod.get_muted_branches() == ["api"]
+        assert state_mod.get_volume_muted_branches() == []
+
+    def test_volume_mute_does_not_content_mute(self, state_mod):
+        """mute_branch_volume leaves the content list untouched."""
+        state_mod.mute_branch_volume("api")
+
+        assert state_mod.get_volume_muted_branches() == ["api"]
+        assert state_mod.get_muted_branches() == []
+
+    def test_volume_mute_with_ttl(self, state_mod):
+        """mute_branch_volume honours a TTL like the content mute does."""
+        from datetime import datetime, timedelta
+
+        before = datetime.now()
+        state_mod.mute_branch_volume("api", duration_seconds=3600)
+        after = datetime.now()
+
+        data = json.loads(state_mod.TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        entry = data["config"]["volume_muted_branches"][0]
+        expires = datetime.fromisoformat(entry["expires_at"])
+        assert expires >= before + timedelta(seconds=3600)
+        assert expires <= after + timedelta(seconds=3600)
+
+    def test_volume_unmute_removes_entry(self, state_mod):
+        """unmute_branch_volume clears the branch from the volume list."""
+        state_mod.mute_branch_volume("api")
+        assert state_mod.get_volume_muted_branches() == ["api"]
+
+        state_mod.unmute_branch_volume("api")
+        assert state_mod.get_volume_muted_branches() == []
+
+    def test_volume_unmute_leaves_content_mute_intact(self, state_mod):
+        """Volume-unmuting a branch does not lift its content mute."""
+        state_mod.mute_branch("api")
+        state_mod.mute_branch_volume("api")
+
+        state_mod.unmute_branch_volume("api")
+
+        assert state_mod.get_volume_muted_branches() == []
+        assert state_mod.get_muted_branches() == ["api"]
+
+    def test_volume_muted_detail_reports_expiry(self, state_mod):
+        """get_volume_muted_branches_detail exposes name and expires_at."""
+        state_mod.mute_branch_volume("api", duration_seconds=3600)
+
+        detail = state_mod.get_volume_muted_branches_detail()
+        assert len(detail) == 1
+        assert detail[0]["name"] == "api"
+        assert detail[0]["expires_at"] is not None
+
+    def test_volume_mute_filters_expired_on_read(self, state_mod):
+        """An expired volume mute is not reported as active."""
+        from datetime import datetime, timedelta
+
+        expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
+        state_mod.TRIGGER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state_mod.TRIGGER_CONFIG_FILE.write_text(
+            json.dumps({"config": {"volume_muted_branches": [{"name": "api", "expires_at": expired_ts}]}}),
+            encoding="utf-8",
+        )
+
+        assert state_mod.get_volume_muted_branches() == []

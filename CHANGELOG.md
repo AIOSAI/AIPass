@@ -9,6 +9,21 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — medic mutes no longer swallow runaway alerts
+
+**fix(trigger)** — medic content-mutes silently suppressed runaway-log alerts
+(31/31 suppression-log entries were `branch_muted`, and dispatch SOP mutes
+branches exactly when build-time floods happen — the alert channel was
+structurally dead during active work). Mute classes are now split: content
+mutes gate error-content events only; a new `volume_muted_branches` class
+gates runaway alerts, with `severity=critical` bypassing even a deliberate
+volume mute as a safety floor. Decision trail upgraded from suppression-only
+to outcome-labelled (`delivered/bypass_critical` vs `suppressed/volume_muted`).
+New `medic volume-mute / volume-unmute @branch` operator commands; `status`
+shows both lists. 638 trigger tests green (+16), incl. the regression: a
+content-muted branch still receives a runaway alert. Live-verified against
+the real 5-branches-muted config with transport stubbed.
+
 ## [2026-08-02] — runaway detector: rotation reset the counters; relay pidfile: boot identity
 
 **fix(prax)** — the runaway-log detector could mathematically never fire on a
