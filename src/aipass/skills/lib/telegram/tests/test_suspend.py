@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_suspend.py
 # Description: Tests for the /suspend control verb + resume-heartbeat logic — DPLAN-0270 P5
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-30
 # Modified: 2026-08-02
 # =============================================
@@ -26,6 +26,7 @@ All subprocess calls are mocked — no real systemctl/rtcwake/sudo ever runs.
 """
 
 import json
+import os
 import subprocess
 import time
 from unittest.mock import call, patch, MagicMock
@@ -86,6 +87,42 @@ def _make_bot(tmp_path, _patch_base_bot_deps, branch_name=None):
 
 def _cpe(cmd, stderr=b""):
     return subprocess.CalledProcessError(1, cmd, stderr=stderr)
+
+
+# The resolver matches sessions against our own uid, so build the fixtures from it
+# rather than hard-coding 1000 — CI does not run as Patrick.
+_UID = str(os.getuid())
+
+
+def _loginctl_stub(*, sessions="3 …\n", props=None, list_error=None, lock_error=None, dbus_error=None):
+    """
+    subprocess.run side_effect covering the whole /lock command tree.
+
+    Fakes `loginctl list-sessions`, per-session `show-session`, `lock-session`
+    and the `gdbus` screensaver fallback, so a test can fail any one of them
+    independently without the others going missing.
+    """
+    if props is None:
+        props = {"3": {"Type": "wayland", "State": "active", "User": _UID}}
+
+    def _run(cmd, **kwargs):
+        if cmd[:2] == ["loginctl", "list-sessions"]:
+            if list_error:
+                raise list_error
+            return MagicMock(stdout=sessions)
+        if cmd[:2] == ["loginctl", "show-session"]:
+            return MagicMock(stdout="".join(f"{k}={v}\n" for k, v in props.get(cmd[2], {}).items()))
+        if cmd[:2] == ["loginctl", "lock-session"]:
+            if lock_error:
+                raise lock_error
+            return MagicMock(returncode=0)
+        if cmd[0] == "gdbus":
+            if dbus_error:
+                raise dbus_error
+            return MagicMock(returncode=0)
+        raise AssertionError(f"unexpected command in the /lock path: {cmd}")
+
+    return _run
 
 
 class _SteppedClock:
@@ -1065,41 +1102,127 @@ class TestAdaptiveHeartbeatCadence:
 
 
 class TestLockVerb:
-    def test_lock_calls_loginctl_and_confirms(self, tmp_path, _patch_base_bot_deps):
+    def test_lock_resolves_the_graphical_session_and_locks_it_by_id(self, tmp_path, _patch_base_bot_deps):
+        """
+        The bot runs as a `systemd --user` service with no XDG_SESSION_ID, so a
+        bare `loginctl lock-session` has no ambient session to resolve. Naming
+        the session explicitly is what makes the verb work from that context.
+        """
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
 
-        with patch("subprocess.run") as mock_run:
+        with patch("subprocess.run", side_effect=_loginctl_stub()) as mock_run:
             bot._handle_control_lock(chat_id=1)
 
-        mock_run.assert_called_once_with(["loginctl", "lock-session"], check=True, capture_output=True)
-        bot.send_message.assert_called_once_with(1, "🔒 Screen locked — agents still running.")  # type: ignore[union-attr]
+        assert call(["loginctl", "lock-session", "3"], check=True, capture_output=True) in mock_run.call_args_list
+        bot.send_message.assert_called_once_with(1, "🔒 Locked — agents stay awake.")  # type: ignore[union-attr]
+
+    def test_lock_picks_the_x11_session_too(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stub = _loginctl_stub(props={"7": {"Type": "x11", "State": "active", "User": _UID}}, sessions="7 …\n")
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert call(["loginctl", "lock-session", "7"], check=True, capture_output=True) in mock_run.call_args_list
+
+    def test_lock_skips_tty_and_inactive_sessions(self, tmp_path, _patch_base_bot_deps):
+        """A headless tty login and a backgrounded graphical session must not win."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stub = _loginctl_stub(
+            sessions="1 …\n2 …\n3 …\n",
+            props={
+                "1": {"Type": "tty", "State": "active", "User": _UID},
+                "2": {"Type": "wayland", "State": "online", "User": _UID},
+                "3": {"Type": "wayland", "State": "active", "User": _UID},
+            },
+        )
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert call(["loginctl", "lock-session", "3"], check=True, capture_output=True) in mock_run.call_args_list
+
+    def test_lock_ignores_another_users_graphical_session(self, tmp_path, _patch_base_bot_deps):
+        """Never lock someone else's desktop — with no session of ours, fall back to the bare call."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        other_uid = str(int(_UID) + 1)
+        stub = _loginctl_stub(props={"3": {"Type": "wayland", "State": "active", "User": other_uid}})
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert call(["loginctl", "lock-session"], check=True, capture_output=True) in mock_run.call_args_list
+        for call_args in mock_run.call_args_list:
+            assert "lock-session" not in call_args.args[0] or len(call_args.args[0]) == 2
+
+    def test_lock_falls_back_to_bare_call_when_listing_fails(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stub = _loginctl_stub(list_error=_cpe(["loginctl"], stderr=b"boom"))
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert call(["loginctl", "lock-session"], check=True, capture_output=True) in mock_run.call_args_list
+        bot.send_message.assert_called_once_with(1, "🔒 Locked — agents stay awake.")  # type: ignore[union-attr]
+
+    def test_lock_survives_blank_lines_in_session_listing(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", side_effect=_loginctl_stub(sessions="\n\n3 …\n\n")) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert call(["loginctl", "lock-session", "3"], check=True, capture_output=True) in mock_run.call_args_list
+
+    def test_lock_falls_back_to_dbus_when_loginctl_refuses(self, tmp_path, _patch_base_bot_deps):
+        """Refusal from the service context is exactly the case the D-Bus path exists for."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stub = _loginctl_stub(lock_error=_cpe(["loginctl"], stderr=b"Interactive authentication required."))
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        dbus_calls = [c for c in mock_run.call_args_list if c.args[0][0] == "gdbus"]
+        assert len(dbus_calls) == 1
+        assert "org.gnome.ScreenSaver.Lock" in dbus_calls[0].args[0]
+        bot.send_message.assert_called_once_with(1, "🔒 Locked — agents stay awake.")  # type: ignore[union-attr]
+
+    def test_lock_falls_back_to_dbus_when_loginctl_is_missing(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        # loginctl absent entirely — both the listing and the lock raise.
+        stub = _loginctl_stub(list_error=FileNotFoundError(), lock_error=FileNotFoundError())
+
+        with patch("subprocess.run", side_effect=stub) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        assert any(c.args[0][0] == "gdbus" for c in mock_run.call_args_list)
+        bot.send_message.assert_called_once_with(1, "🔒 Locked — agents stay awake.")  # type: ignore[union-attr]
+
+    def test_lock_reports_honestly_when_both_paths_fail(self, tmp_path, _patch_base_bot_deps):
+        """No silent success — a screen that never locked must not be acked as locked."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stub = _loginctl_stub(
+            lock_error=_cpe(["loginctl"], stderr=b"refused"),
+            dbus_error=_cpe(["gdbus"], stderr=b"no session bus"),
+        )
+
+        with patch("subprocess.run", side_effect=stub):
+            bot._handle_control_lock(chat_id=1)
+
+        bot.send_message.assert_called_once_with(  # type: ignore[union-attr]
+            1, "Could not lock the screen — loginctl and the D-Bus fallback both failed."
+        )
 
     def test_lock_needs_no_root_or_rtcwake(self, tmp_path, _patch_base_bot_deps):
         """No sudo, no rtcwake, no systemctl — that's the whole point of the verb."""
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
 
-        with patch("subprocess.run") as mock_run:
+        with patch("subprocess.run", side_effect=_loginctl_stub()) as mock_run:
             bot._handle_control_lock(chat_id=1)
 
         for call_args in mock_run.call_args_list:
             assert call_args.args[0][0] not in ("sudo", "systemctl")
             assert RTCWAKE_BIN not in call_args.args[0]
-
-    def test_lock_loginctl_missing(self, tmp_path, _patch_base_bot_deps):
-        bot = _make_bot(tmp_path, _patch_base_bot_deps)
-
-        with patch("subprocess.run", side_effect=FileNotFoundError):
-            bot._handle_control_lock(chat_id=1)
-
-        bot.send_message.assert_called_once_with(1, "loginctl not found on this machine.")  # type: ignore[union-attr]
-
-    def test_lock_failure_reports(self, tmp_path, _patch_base_bot_deps):
-        bot = _make_bot(tmp_path, _patch_base_bot_deps)
-
-        with patch("subprocess.run", side_effect=_cpe(["loginctl"], stderr=b"no session")):
-            bot._handle_control_lock(chat_id=1)
-
-        bot.send_message.assert_called_once_with(1, "Failed to lock the screen — see logs.")  # type: ignore[union-attr]
 
     def test_lock_does_not_touch_suspend_state(self, tmp_path, _patch_base_bot_deps):
         """Locking must never disturb an active heartbeat — they're independent verbs."""
@@ -1107,11 +1230,21 @@ class TestLockVerb:
         bot._suspend_heartbeat_active = True
         bot._suspend_alarm_at = 2500.0
 
-        with patch("subprocess.run"):
+        with patch("subprocess.run", side_effect=_loginctl_stub()):
             bot._handle_control_lock(chat_id=1)
 
         assert bot._suspend_heartbeat_active is True
         assert bot._suspend_alarm_at == 2500.0
+
+    def test_lock_never_suspends(self, tmp_path, _patch_base_bot_deps):
+        """Ruling #217: the machine stays awake. /lock must not sleep anything."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", side_effect=_loginctl_stub()) as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        for call_args in mock_run.call_args_list:
+            assert "suspend" not in " ".join(call_args.args[0])
 
     def test_lock_routed_for_control_bot(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)

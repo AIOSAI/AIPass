@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.5.0
+version: 1.5.1
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]
@@ -13,7 +13,7 @@ has_handler: true
 
 # Telegram Bridge
 
-Multi-bot personal-assistant bridge: long-polling listener routes user Telegram messages into Claude tmux sessions. The base reply flow is Claude's Stop hook writing a pending file, which the bot picks up and sends back to Telegram; bots opting into streaming (below) also live-edit a "Processing..." placeholder while the reply is still being generated. A control-center bot exposes /start, /kill, /suspend to wake, kill, and sleep terminal sessions by branch, and a separate hook mirrors terminal-typed messages into the same TG chat so the conversation reads as one continuous thread regardless of which door you type in.
+Multi-bot personal-assistant bridge: long-polling listener routes user Telegram messages into Claude tmux sessions. The base reply flow is Claude's Stop hook writing a pending file, which the bot picks up and sends back to Telegram; bots opting into streaming (below) also live-edit a "Processing..." placeholder while the reply is still being generated. A control-center bot exposes /start, /kill, /lock, /suspend to wake, kill, and lock or sleep terminal sessions by branch, and a separate hook mirrors terminal-typed messages into the same TG chat so the conversation reads as one continuous thread regardless of which door you type in.
 
 ## Architecture
 
@@ -57,7 +57,11 @@ The command menu is re-registered via BotFather's `setMyCommands` on every start
 
 ## /lock
 
-Control-bot-only. Runs `loginctl lock-session` — password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. This is the verb for what `/suspend` was actually being used for; reach for `/suspend` only when the goal is genuinely saving battery.
+Control-bot-only. Password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. Per Patrick's ruling #217 this is the daily-driver verb: the machine stays awake 24/7 and `/suspend` is retired from routine use.
+
+The bot runs as a `systemd --user` service, **outside the graphical session scope** — it has no `XDG_SESSION_ID`, so a bare `loginctl lock-session` has no ambient session to resolve and can refuse. `_resolve_graphical_session()` therefore walks `loginctl list-sessions` and picks the session whose `Type` is `wayland` or `x11`, `State=active`, and `User` equals the bot's own uid (never another user's desktop), then locks it by id. If that path fails or `loginctl` is missing, it falls back to the GNOME ScreenSaver `Lock` method on the session bus via `gdbus`. Only if both fail does it report the failure — a screen that never locked is never acked as locked.
+
+**Live-verified 2026-08-02** from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset (the service context): resolver returned session `3` (`Type=wayland`, `State=active`, uid 1000), `loginctl lock-session 3` succeeded, `LockedHint` went `no` → `yes`. The `gdbus` fallback is covered by mocked tests only — it has not needed to fire on this machine.
 
 ## /suspend (DPLAN-0270 P5)
 

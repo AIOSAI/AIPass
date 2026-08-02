@@ -30,6 +30,16 @@ on this hardware the spurious wakes are the product — they keep agents
 running behind the locked screen. test_suspend.py 26→70; 944 telegram + 252
 skills green; verb stays grounded until the post-reboot soak.
 
+**feat(skills)** — `/lock` control verb hardened for the service context
+(base_bot v1.5.1). The live soak settled the deployment model (compass #217,
+supersedes #216): even a correctly-working suspend disconnects the agents, so
+the machine stays awake 24/7 and `/lock` replaces `/suspend` for daily use —
+instant password wall + dark screen, nothing sleeps. Session resolution walks
+`loginctl list-sessions` for the caller's own active wayland/x11 session
+(uid-matched — never locks another user's desktop) with a GNOME ScreenSaver
+D-Bus fallback and an honest failure if both refuse; live-proved from a
+session-less env (LockedHint no→yes). test_suspend.py 70→77; 1211 green.
+
 ## [2026-08-02] — medic mutes no longer swallow runaway alerts
 
 **fix(trigger)** — medic content-mutes silently suppressed runaway-log alerts
