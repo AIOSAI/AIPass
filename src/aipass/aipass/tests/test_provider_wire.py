@@ -89,7 +89,9 @@ class TestStripAndReaddHooks:
         assert len(merged["Stop"]) == 1
         stop_dump = json.dumps(merged["Stop"])
         assert old_cmd not in stop_dump
-        assert new_cmd in stop_dump
+        # expected through the write-time OS transform — on Windows the fresh
+        # entry is written with Scripts/python.exe, by design
+        assert _platform_bridge_command(new_cmd) in stop_dump
         assert any("Refreshed Stop" in action for action in actions)
 
     def test_user_wired_hook_preserved(self) -> None:
@@ -143,7 +145,7 @@ class TestRefreshProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert new_cmd in stop_dump
+        assert _platform_bridge_command(new_cmd) in stop_dump
 
     def test_manifest_unreadable_raises_and_settings_untouched(self, tmp_path) -> None:
         """Missing/unreadable manifest raises and settings.json is left byte-for-byte unchanged."""
@@ -194,7 +196,7 @@ class TestAutoWireProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert new_cmd in stop_dump
+        assert _platform_bridge_command(new_cmd) in stop_dump
 
     def test_env_and_permissions_remain_additive(self, tmp_path) -> None:
         """Env vars and permission rules are added, never removed/overwritten — unchanged behavior."""
