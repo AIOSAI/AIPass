@@ -8,12 +8,14 @@
 
 """provider_wire — auto-wire provider settings.
 
-Implements the additive merge of manifest into ~/.claude/settings.json.
+Hooks use manifest-driven strip-and-readd (removes stale AIPass bridge entries);
+env vars and permissions remain additive-only merges into ~/.claude/settings.json.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,16 +43,102 @@ ENV_DESCRIPTIONS: Dict[str, str] = {
     "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "prevents conflict with .trinity/ memory system",
 }
 
+BRIDGE_MARKER = "bridges/claude.py"
+
 
 # =============================================================================
 # AUTO-WIRE
 # =============================================================================
 
 
+def _platform_bridge_command(command: str) -> str:
+    """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical)."""
+    # DPLAN-0234 Strand C: CC on Windows runs hooks via Git Bash so $AIPASS_HOME expansion still
+    # works, but the venv interpreter itself lives at .venv/Scripts/python.exe there, not .venv/bin/python3.
+    if os.name == "nt":
+        return command.replace("/.venv/bin/python3", "/.venv/Scripts/python.exe")
+    return command
+
+
+def _build_manifest_hook_entries(manifest_hooks: List[dict]) -> Dict[str, List[dict]]:
+    """Build the settings.json hook-entry shape per event from manifest hook rows."""
+    fresh: Dict[str, List[dict]] = {}
+    for hook in manifest_hooks:
+        command = _platform_bridge_command(hook.get("command", ""))
+        event = hook.get("event", "")
+        if not command or not event:
+            continue
+        cmd_entry: Dict[str, object] = {"type": "command", "command": command}
+        if hook.get("timeout"):
+            cmd_entry["timeout"] = hook["timeout"]
+        wrapper: Dict[str, object] = {}
+        if hook.get("matcher"):
+            wrapper["matcher"] = hook["matcher"]
+        wrapper["hooks"] = [cmd_entry]
+        fresh.setdefault(event, []).append(wrapper)
+    return fresh
+
+
+def _strip_and_readd_hooks(
+    existing_hooks: Dict[str, list], manifest_hooks: List[dict]
+) -> "tuple[Dict[str, list], List[str]]":
+    """Strip every AIPass bridge-marked hook entry, then re-add the manifest's current set.
+
+    Prevents a stale bridge entry (old matcher/command shape from a prior manifest
+    version) from surviving alongside a fresh one after an upgrade — the additive-merge
+    double-fire bug (DPLAN-0279). User-wired (non-bridge) hooks in any event are always
+    preserved untouched.
+    """
+    fresh = _build_manifest_hook_entries(manifest_hooks)
+    actions: List[str] = []
+    merged: Dict[str, list] = {}
+    for event in sorted(set(existing_hooks) | set(fresh)):
+        stale_count = sum(1 for e in existing_hooks.get(event, []) if BRIDGE_MARKER in json.dumps(e))
+        user_entries = [e for e in existing_hooks.get(event, []) if BRIDGE_MARKER not in json.dumps(e)]
+        event_fresh = fresh.get(event, [])
+        combined = event_fresh + user_entries
+        if not combined:
+            actions.append(f"Dropped orphaned hook event (no live entries): {event}")
+            continue
+        merged[event] = combined
+        if event_fresh:
+            note = f" (replaced {stale_count} stale)" if stale_count else ""
+            actions.append(f"Refreshed {event}: {len(event_fresh)} bridge hook(s){note}")
+    return merged, actions
+
+
+def refresh_provider_hooks(manifest_path: Path) -> List[str]:
+    """Strip-and-readd AIPass bridge hooks from manifest into ~/.claude/settings.json.
+
+    The single source of truth for hook wiring — setup.sh and `doctor --fix` both
+    end up calling this (the latter via auto_wire_provider) so upgrades never leave
+    a stale bridge entry from an old manifest version alongside the current one.
+
+    Fails honestly: raises if the manifest can't be read/parsed rather than silently
+    leaving stale wiring in place.
+    """
+    manifest = json_handler.load_path(manifest_path)
+    if manifest is None:
+        raise FileNotFoundError(f"provider manifest unreadable: {manifest_path}")
+    manifest_hooks = manifest.get("cli", {}).get("claude", {}).get("hooks", [])
+
+    settings_path = Path.home() / ".claude" / "settings.json"
+    settings = (json_handler.load_path(settings_path) if settings_path.exists() else {}) or {}
+
+    merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
+    settings["hooks"] = merged_hooks
+
+    json_handler.save_path(settings_path, settings)
+    actions.append("Updated ~/.claude/settings.json (hooks)")
+    json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
+    return actions
+
+
 def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[str]:
     """Auto-wire provider settings from manifest into ~/.claude/settings.json.
 
-    Additive merge only — never removes or overwrites existing keys/values.
+    Hooks: manifest-driven strip-and-readd (removes stale AIPass bridge entries).
+    Env vars and permissions: additive merge only — never removed or overwritten.
     Returns list of action descriptions (for logging/display).
     """
     actions: List[str] = []
@@ -75,41 +163,9 @@ def auto_wire_provider(manifest_path: Path, interactive: bool = True) -> List[st
         actions.append(f"Backed up settings to {backup_path.name}")
 
     manifest_hooks = claude_section.get("hooks", [])
-
-    for hook in manifest_hooks:
-        command = hook.get("command", "")
-        event = hook.get("event", "")
-        if not command or not event:
-            continue
-
-        if "hooks" not in settings:
-            settings["hooks"] = {}
-        if event not in settings["hooks"]:
-            settings["hooks"][event] = []
-        event_hooks = settings["hooks"][event]
-        if not isinstance(event_hooks, list):
-            event_hooks = [event_hooks]
-            settings["hooks"][event] = event_hooks
-
-        hook_matcher = hook.get("matcher", "")
-        already_wired = any(
-            isinstance(h, dict) and command in json.dumps(h) and h.get("matcher", "") == hook_matcher
-            for h in event_hooks
-        )
-        if not already_wired:
-            cmd_entry: Dict[str, object] = {
-                "type": "command",
-                "command": command,
-            }
-            if hook.get("timeout"):
-                cmd_entry["timeout"] = hook["timeout"]
-            wrapper: Dict[str, object] = {}
-            if hook.get("matcher"):
-                wrapper["matcher"] = hook["matcher"]
-            wrapper["hooks"] = [cmd_entry]
-            event_hooks.append(wrapper)
-            label = command.rsplit(" ", 1)[-1] if " " in command else command
-            actions.append(f"Wired hook {label} -> {event}")
+    merged_hooks, hook_actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
+    settings["hooks"] = merged_hooks
+    actions.extend(hook_actions)
 
     manifest_env = claude_section.get("env", {})
     if manifest_env:

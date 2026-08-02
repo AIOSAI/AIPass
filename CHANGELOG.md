@@ -9,6 +9,26 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — setup.sh hook wiring: manifest is the single source, no doctor-heal dependency
+
+**fix(aipass)** — fresh installs wired only 6/13 UserPromptSubmit bridge hooks
+and missed `pre_compact_prep`: setup.sh's inline hook dict was a hand-maintained
+second copy of `provider_manifest.json` and had drifted (found in the
+`aipass-dev` container walk; `doctor --fix` healed it, but Patrick's ruling —
+setup must be right on its own). New `refresh_provider_hooks()` in
+provider_wire.py does manifest-driven strip-and-readd of bridge-marked entries
+(user hooks always preserved); `auto_wire_provider()` and doctor `--fix` consume
+the same helper, and setup.sh shells into it via the venv python — the hardcoded
+dict is deleted, failures abort the install loudly. Also fixes the upgrade
+double-fire class: stale bridge entries are replaced, not duplicated beside new
+ones. Reverse drift caught too: the manifest itself was missing
+`SessionStart:cadence_reset` (verified against the seedgo golden fixture).
+Devpulse review caught a Windows gap pre-commit: manifest commands hardcode
+`.venv/bin/python3`, which doesn't exist in Windows venvs —
+`_platform_bridge_command()` now swaps to `Scripts/python.exe` at write time
+(manifest stays POSIX-canonical) and doctor's compare normalizes through the
+same function. 12 new tests, 892 green, fresh-container walk re-verified.
+
 ## [2026-08-01] — Windows CI green: POSIX-only skips on the new DPLAN-0279 tests
 
 **fix(ci)** — the srt-resolver subprocess tests and doctor's /proc-fallback

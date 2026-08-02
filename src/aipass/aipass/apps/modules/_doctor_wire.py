@@ -13,7 +13,7 @@ Extracted from doctor.py to keep module sizes manageable.
 Provides:
   - HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS — human-readable hook/env purpose
   - Bridge pattern — hooks wired as $AIPASS_HOME bridge commands (no script copying)
-  - _auto_wire_provider()  — additive merge of manifest into ~/.claude/settings.json
+  - _auto_wire_provider()  — hooks: manifest-driven strip-and-readd; env/permissions: additive merge
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def print_introspection() -> None:
     console.print("[yellow]Provides:[/yellow]")
     console.print("  [dim]- HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS[/dim]")
     console.print("  [dim]- Bridge pattern — hooks wired as $AIPASS_HOME bridge commands[/dim]")
-    console.print("  [dim]- _auto_wire_provider() — additive merge into settings[/dim]")
+    console.print("  [dim]- _auto_wire_provider() — hooks: strip-and-readd; env/permissions: additive merge[/dim]")
     console.print()
 
 

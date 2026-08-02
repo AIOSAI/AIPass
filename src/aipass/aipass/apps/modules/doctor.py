@@ -36,6 +36,7 @@ from aipass.aipass.apps.handlers.cross_os import (
 from aipass.aipass.apps.handlers.cross_os import run_e2e as run_e2e_preflight
 from aipass.aipass.apps.handlers.cross_os.preflight import E2E_UNRUNNABLE_PREFIX
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.provider_wire import _platform_bridge_command
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
     check_bwrap_functional,
@@ -407,7 +408,8 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
 
     missing_hooks = []
     for hook in manifest_hooks:
-        command = hook.get("command", "")
+        # Same OS transform provider_wire applies at write time, so verify agrees with write (DPLAN-0234).
+        command = _platform_bridge_command(hook.get("command", ""))
         event = hook.get("event", "")
         if not command or not event:
             continue

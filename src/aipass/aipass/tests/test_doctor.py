@@ -661,6 +661,36 @@ class TestProviderManifest:
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
 
+    def test_windows_scripts_path_command_recognized_as_wired(self, tmp_path) -> None:
+        """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
+        the POSIX-canonical manifest — write (_platform_bridge_command) and verify must agree
+        (DPLAN-0234 Strand C)."""
+        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
+
+        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [{"command": posix_cmd, "event": "Stop"}]}}}),
+            encoding="utf-8",
+        )
+        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
+        provider_settings = tmp_path / ".claude" / "settings.json"
+        provider_settings.write_text(
+            json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}),
+            encoding="utf-8",
+        )
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
+            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"),
+        ):
+            results = _check_provider_manifest()
+        hooks_result = [r for r in results if r.label == "hooks"][0]
+        assert hooks_result.glyph == GLYPH_PASS
+        assert "1" in hooks_result.detail
+        assert "missing" not in hooks_result.detail
+
     def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
         """Command already shaped like 'event:label' must not get the event prefixed twice."""
         from aipass.aipass.apps.modules.doctor import _check_provider_manifest
