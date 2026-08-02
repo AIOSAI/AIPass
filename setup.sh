@@ -319,22 +319,18 @@ else
         ACTION_NEEDED+=("npm missing — install Node.js (includes npm) from https://nodejs.org/")
     fi
 
-    # @anthropic-ai/sandbox-runtime — resolve same way as _srt_resolve.mjs
-    if command -v node &>/dev/null; then
-        SRT_PATH=$(node -e "
-            const p = require('path');
-            const fs = require('fs');
-            const prefix = p.dirname(p.dirname(process.execPath));
-            const entry = p.join(prefix, 'lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js');
-            if (fs.existsSync(entry)) process.stdout.write(entry);
-            else process.exit(1);
-        " 2>/dev/null) || SRT_PATH=""
+    # @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
+    # the hooks branch, handles node-prefix != npm-prefix layouts, DPLAN-0279)
+    SRT_RESOLVER="$SCRIPT_DIR/src/aipass/hooks/apps/modules/_srt_resolve.mjs"
+    if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
+        SRT_PATH=$(node "$SRT_RESOLVER" --resolve 2>/dev/null) || SRT_PATH=""
         if [ -n "$SRT_PATH" ]; then
             echo "  srt       ... $SRT_PATH"
         else
             echo "  srt       ... MISSING"
             if command -v npm &>/dev/null; then
-                echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime"
+                NPM_PREFIX=$(npm root -g 2>/dev/null)
+                echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
                 if npm install -g @anthropic-ai/sandbox-runtime 2>/dev/null; then
                     echo "    srt       ... installed"
                 else
@@ -349,10 +345,14 @@ else
                 ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
             fi
         fi
-    else
+    elif ! command -v node &>/dev/null; then
         echo "  srt       ... skipped (no node)"
         SB_MISSING+=("srt")
         ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
+    else
+        echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
+        SB_MISSING+=("srt")
+        ACTION_NEEDED+=("srt check skipped — resolver script missing, reinstall/repair the repo")
     fi
 
     # rg (ripgrep)

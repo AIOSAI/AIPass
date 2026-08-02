@@ -344,13 +344,22 @@ _ROOT_ARTIFACTS = {
 }
 
 
-def check_root_artifacts(project_root: Path) -> List[RootArtifact]:
+def check_root_artifacts(project_root: Path, aipass_home: Path | str | None = None) -> List[RootArtifact]:
     """Detect branch-level files/dirs sitting at project root instead of inside branches.
+
+    Args:
+        project_root: Project root being scanned.
+        aipass_home: AIPass installation root, if known. setup.sh creates a real
+            (non-symlink) .venv at the AIPASS_HOME repo root as the standard
+            install layout — when project_root IS the AIPASS_HOME root, that
+            .venv is expected and should not be flagged as a redundant venv.
 
     Returns:
         List of RootArtifact for each misplaced item found.
     """
     hits: List[RootArtifact] = []
+
+    resolved_home = Path(aipass_home).resolve() if aipass_home else None
 
     for dirname, (artifact_type, severity, description) in _ROOT_ARTIFACTS.items():
         candidate = project_root / dirname
@@ -363,6 +372,16 @@ def check_root_artifacts(project_root: Path) -> List[RootArtifact]:
                     artifact_type=artifact_type,
                     severity="pass",
                     description=f"Linked to AIPass runtime ({candidate.resolve()})",
+                )
+            )
+            continue
+        if dirname == ".venv" and resolved_home is not None and project_root.resolve() == resolved_home:
+            hits.append(
+                RootArtifact(
+                    name=dirname,
+                    artifact_type=artifact_type,
+                    severity="pass",
+                    description="Standard AIPass runtime venv (AIPASS_HOME root)",
                 )
             )
             continue

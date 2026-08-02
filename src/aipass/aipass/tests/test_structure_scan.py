@@ -447,6 +447,38 @@ class TestCheckRootArtifacts:
         hits = check_root_artifacts(tmp_path)
         assert all(h.name != "logs" for h in hits)
 
+    def test_venv_at_aipass_home_root_is_pass(self, tmp_path: Path) -> None:
+        """.venv at project_root == aipass_home (setup.sh's standard layout) is not flagged."""
+        (tmp_path / ".venv").mkdir()
+        hits = check_root_artifacts(tmp_path, aipass_home=tmp_path)
+        assert len(hits) == 1
+        assert hits[0].name == ".venv"
+        assert hits[0].severity == "pass"
+
+    def test_venv_at_aipass_home_root_accepts_str(self, tmp_path: Path) -> None:
+        """aipass_home may be passed as a str, not just a Path."""
+        (tmp_path / ".venv").mkdir()
+        hits = check_root_artifacts(tmp_path, aipass_home=str(tmp_path))
+        assert len(hits) == 1
+        assert hits[0].severity == "pass"
+
+    def test_venv_in_nested_project_still_flagged(self, tmp_path: Path) -> None:
+        """.venv in a nested project dir (not == aipass_home) is still flagged as redundant."""
+        nested = tmp_path / "projects" / "nested-app"
+        nested.mkdir(parents=True)
+        (nested / ".venv").mkdir()
+        hits = check_root_artifacts(nested, aipass_home=tmp_path)
+        assert len(hits) == 1
+        assert hits[0].name == ".venv"
+        assert hits[0].severity == "info"
+
+    def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path) -> None:
+        """Without aipass_home, .venv still flags as info (no special-casing possible)."""
+        (tmp_path / ".venv").mkdir()
+        hits = check_root_artifacts(tmp_path)
+        assert len(hits) == 1
+        assert hits[0].severity == "info"
+
 
 # =============================================================================
 # TestCheckStructureIntegration
@@ -491,6 +523,21 @@ class TestCheckStructureIntegration:
         root_results = [r for r in results if "root:" in r.label]
         assert len(root_results) >= 1
         assert root_results[0].glyph == GLYPH_WARN
+
+    def test_venv_at_aipass_home_root_not_flagged_via_check_structure(self, tmp_path: Path) -> None:
+        """_check_structure threads aipass_home through so root .venv == aipass_home is PASS not WARN."""
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        (tmp_path / ".venv").mkdir()
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
+        ):
+            results = _check_structure()
+        venv_results = [r for r in results if r.label == "root: .venv"]
+        assert len(venv_results) == 1
+        assert venv_results[0].glyph == GLYPH_PASS
 
     def test_pollution_reported(self, tmp_path: Path) -> None:
         """Duplicate branch name shows up as FAIL in structure check."""

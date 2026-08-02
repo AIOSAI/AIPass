@@ -204,9 +204,19 @@ class TestCheckSrtResolvable:
         assert result["found"] is False
         assert "node" in result["install_hint"].lower()
 
-    def test_srt_found(self, monkeypatch):
+    def test_srt_found(self, monkeypatch, tmp_path):
+        resolver = tmp_path / "_srt_resolve.mjs"
+        resolver.touch()
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
-        mock_proc = MagicMock(returncode=0, stdout="/usr/lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js")
+        monkeypatch.setattr(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
+            lambda: resolver,
+        )
+        mock_proc = MagicMock(
+            returncode=0,
+            stdout="/usr/lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js\n",
+            stderr="",
+        )
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
             return_value=mock_proc,
@@ -214,13 +224,25 @@ class TestCheckSrtResolvable:
             result = check_srt_resolvable()
         assert result["found"] is True
         assert "sandbox-runtime" in result["path"]
+        assert result["install_hint"] == ""
         argv = mock_run.call_args[0][0]
         assert argv[0] == "/usr/bin/node"
-        assert argv[1] == "-e"
+        assert argv[1] == str(resolver)
+        assert argv[2] == "--resolve"
 
-    def test_srt_not_found(self, monkeypatch):
+    def test_srt_not_found(self, monkeypatch, tmp_path):
+        resolver = tmp_path / "_srt_resolve.mjs"
+        resolver.touch()
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
-        mock_proc = MagicMock(returncode=1, stdout="")
+        monkeypatch.setattr(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
+            lambda: resolver,
+        )
+        monkeypatch.setattr(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._srt_install_hint",
+            lambda: "npm install -g @anthropic-ai/sandbox-runtime",
+        )
+        mock_proc = MagicMock(returncode=1, stdout="", stderr="tried: /a\n/b")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
             return_value=mock_proc,
@@ -229,14 +251,99 @@ class TestCheckSrtResolvable:
         assert result["found"] is False
         assert "npm install" in result["install_hint"]
 
-    def test_srt_timeout(self, monkeypatch):
+    def test_srt_timeout(self, monkeypatch, tmp_path):
+        resolver = tmp_path / "_srt_resolve.mjs"
+        resolver.touch()
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+        monkeypatch.setattr(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
+            lambda: resolver,
+        )
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="node", timeout=10),
         ):
             result = check_srt_resolvable()
         assert result["found"] is False
+
+    def test_srt_resolver_missing_falls_back(self, monkeypatch):
+        """When aipass.hooks isn't importable / resolver file is absent, fail gracefully."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+        monkeypatch.setattr(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
+            lambda: None,
+        )
+        result = check_srt_resolvable()
+        assert result["found"] is False
+        assert result["path"] is None
+        assert "npm install" in result["install_hint"]
+
+
+# =============================================================================
+# _find_srt_resolver
+# =============================================================================
+
+
+class TestFindSrtResolver:
+    def test_resolves_real_hooks_branch(self):
+        """aipass.hooks is a real namespace package in this repo — resolver should be found."""
+        from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import _find_srt_resolver
+
+        resolver = _find_srt_resolver()
+        assert resolver is not None
+        assert resolver.name == "_srt_resolve.mjs"
+        assert resolver.is_file()
+
+    def test_missing_spec_returns_none(self, monkeypatch):
+        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
+
+        monkeypatch.setattr(sandbox_checker.importlib.util, "find_spec", lambda name: None)
+        assert sandbox_checker._find_srt_resolver() is None
+
+    def test_missing_file_returns_none(self, monkeypatch, tmp_path):
+        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
+
+        fake_spec = MagicMock(submodule_search_locations=[str(tmp_path)])
+        monkeypatch.setattr(sandbox_checker.importlib.util, "find_spec", lambda name: fake_spec)
+        assert sandbox_checker._find_srt_resolver() is None
+
+
+# =============================================================================
+# _srt_install_hint
+# =============================================================================
+
+
+class TestSrtInstallHint:
+    def test_no_npm_falls_back_to_plain(self, monkeypatch):
+        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        hint = sandbox_checker._srt_install_hint()
+        assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
+
+    def test_npm_root_success_names_prefix(self, monkeypatch):
+        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/npm" if name == "npm" else None)
+        mock_proc = MagicMock(returncode=0, stdout="/usr/local/lib/node_modules\n", stderr="")
+        with patch(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
+            return_value=mock_proc,
+        ):
+            hint = sandbox_checker._srt_install_hint()
+        assert "/usr/local/lib/node_modules" in hint
+        assert "npm install -g @anthropic-ai/sandbox-runtime" in hint
+
+    def test_npm_root_failure_falls_back_to_plain(self, monkeypatch):
+        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/npm" if name == "npm" else None)
+        with patch(
+            "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="npm", timeout=5),
+        ):
+            hint = sandbox_checker._srt_install_hint()
+        assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
 
 # =============================================================================

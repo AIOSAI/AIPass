@@ -9,6 +9,20 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — doctor + setup.sh adopt the srt resolver; doctor message truthing (DPLAN-0279, @aipass scope)
+
+**fix(aipass)** — doctor's `sandbox_checker.py` and setup.sh's sandbox-prereqs
+block stopped mirroring the srt path derivation and now shell out to
+`_srt_resolve.mjs --resolve` (located via `importlib.util.find_spec`, no
+hardcoded path) — the last two copies of the node-prefix==npm-prefix assumption
+are gone. Install hints now name the prefix npm will actually use
+(`npm root -g`), and "missing" is distinguished from "installed but not
+resolvable". Walk warts from the same round-3 session: root `.venv` at
+AIPASS_HOME no longer flagged "redundant" (setup created it; nested project
+venvs still flagged), pytest-collect timeout 30s→90s with actionable remedy
+text, `detect_shell()` falls back to `/proc/<ppid>/comm` when `$SHELL` is
+unset. 18 new tests (880 total green), seedgo 100%.
+
 ## [2026-08-01] — srt resolver: candidate-list prefix discovery + honest exit codes (DPLAN-0279, @hooks scope)
 
 **fix(hooks)** — `_srt_resolve.mjs` derived npm's global prefix from node's

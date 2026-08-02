@@ -96,8 +96,33 @@ def detect_git() -> Dict[str, Any]:
 # =============================================================================
 
 
+def _shell_from_parent_proc() -> str | None:
+    """POSIX fallback: read the invoking parent process's command name via /proc.
+
+    Many containers/CI runners don't export $SHELL even though a real shell
+    (bash/sh) is running the process — this is knowable via /proc/<ppid>/comm
+    on Linux. Returns None if unavailable (non-Linux, /proc missing, read
+    failure) — callers should keep the existing "unknown" fallback.
+    """
+    if os.name != "posix":
+        return None
+    try:
+        comm_path = Path(f"/proc/{os.getppid()}/comm")
+        if not comm_path.is_file():
+            return None
+        name = comm_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.info("[system_detector] /proc ppid comm read failed: %s", exc)
+        return None
+    return name or None
+
+
 def detect_shell() -> Dict[str, Any]:
     """Return shell name and path.
+
+    Falls back to the parent process's command name (via /proc/<ppid>/comm on
+    Linux) when $SHELL isn't set — common in containers/CI runners that don't
+    export it even though a real shell is running the process.
 
     Returns:
         name: str — e.g. "bash", "zsh", or "unknown"
@@ -105,11 +130,16 @@ def detect_shell() -> Dict[str, Any]:
     """
     shell_path = os.environ.get("SHELL", "")
     if shell_path:
-        name = Path(shell_path).name
-    else:
-        name = "unknown"
-        shell_path = ""
-    return {"name": name, "path": shell_path}
+        return {"name": Path(shell_path).name, "path": shell_path}
+
+    name = _shell_from_parent_proc()
+    if name:
+        resolved = shutil.which(name)
+        if resolved:
+            return {"name": name, "path": resolved}
+        return {"name": name, "path": ""}
+
+    return {"name": "unknown", "path": ""}
 
 
 # =============================================================================

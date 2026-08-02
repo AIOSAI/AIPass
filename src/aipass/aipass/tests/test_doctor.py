@@ -189,11 +189,117 @@ class TestDetectShell:
         assert result["name"] == "bash"
         assert result["path"] == "/bin/bash"
 
-    def test_shell_missing_env(self, monkeypatch) -> None:
-        """Missing SHELL env var returns 'unknown'."""
+    def test_shell_missing_env_and_no_proc_fallback(self, monkeypatch) -> None:
+        """Missing SHELL env var and no /proc fallback available returns 'unknown'."""
         monkeypatch.delenv("SHELL", raising=False)
-        result = detect_shell()
+        with patch(
+            "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+            return_value=None,
+        ):
+            result = detect_shell()
         assert result["name"] == "unknown"
+        assert result["path"] == ""
+
+    def test_shell_missing_env_falls_back_to_proc_comm(self, monkeypatch) -> None:
+        """Missing SHELL but a resolvable parent /proc comm name is used instead of 'unknown'."""
+        monkeypatch.delenv("SHELL", raising=False)
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+                return_value="zsh",
+            ),
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
+                return_value="/usr/bin/zsh",
+            ),
+        ):
+            result = detect_shell()
+        assert result["name"] == "zsh"
+        assert result["path"] == "/usr/bin/zsh"
+
+    def test_shell_missing_env_proc_comm_not_on_path(self, monkeypatch) -> None:
+        """Parent comm name resolves but isn't found via which — bare name still beats 'unknown'."""
+        monkeypatch.delenv("SHELL", raising=False)
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+                return_value="bash",
+            ),
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
+                return_value=None,
+            ),
+        ):
+            result = detect_shell()
+        assert result["name"] == "bash"
+        assert result["path"] == ""
+
+
+# =============================================================================
+# TestShellFromParentProc
+# =============================================================================
+
+
+class TestShellFromParentProc:
+    def test_non_posix_returns_none(self, monkeypatch) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        monkeypatch.setattr(system_detector.os, "name", "nt")
+        assert system_detector._shell_from_parent_proc() is None
+
+    def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        fake_ppid = 424242
+        proc_dir = tmp_path / str(fake_ppid)
+        proc_dir.mkdir()
+        (proc_dir / "comm").write_text("bash\n", encoding="utf-8")
+
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
+
+        real_path_cls = system_detector.Path
+
+        def _fake_path(arg, *a, **kw):
+            if str(arg) == f"/proc/{fake_ppid}/comm":
+                return real_path_cls(proc_dir / "comm")
+            return real_path_cls(arg, *a, **kw)
+
+        monkeypatch.setattr(system_detector, "Path", _fake_path)
+        assert system_detector._shell_from_parent_proc() == "bash"
+
+    def test_missing_comm_file_returns_none(self, monkeypatch, tmp_path) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        fake_ppid = 999999
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
+
+        real_path_cls = system_detector.Path
+
+        def _fake_path(arg, *a, **kw):
+            if str(arg) == f"/proc/{fake_ppid}/comm":
+                return real_path_cls(tmp_path / "nonexistent" / "comm")
+            return real_path_cls(arg, *a, **kw)
+
+        monkeypatch.setattr(system_detector, "Path", _fake_path)
+        assert system_detector._shell_from_parent_proc() is None
+
+    def test_read_oserror_returns_none(self, monkeypatch) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: 1)
+
+        class _BoomPath:
+            def is_file(self):
+                return True
+
+            def read_text(self, encoding="utf-8"):
+                raise OSError("permission denied")
+
+        monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
+        assert system_detector._shell_from_parent_proc() is None
 
 
 # =============================================================================

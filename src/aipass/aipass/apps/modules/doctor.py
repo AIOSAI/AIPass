@@ -570,7 +570,7 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
             [sys.executable, "-m", "pytest", "src/aipass/", "--collect-only", "-q"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=90,
             cwd=cwd,
         )
         output = proc.stdout + proc.stderr
@@ -586,7 +586,14 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
         results.append(CheckResult("pytest collect", GLYPH_WARN, "pytest not found", "pip install pytest"))
     except subprocess.TimeoutExpired as exc:
         logger.warning("[doctor] pytest collect timed out: %s", exc)
-        results.append(CheckResult("pytest collect", GLYPH_WARN, "timed out", ""))
+        results.append(
+            CheckResult(
+                "pytest collect",
+                GLYPH_WARN,
+                "timed out (90s)",
+                "Run manually: pytest src/aipass/ --collect-only -q — may just be a slow/shared-CPU environment",
+            )
+        )
 
     # hooks + env + permissions — manifest-driven provider check
     manifest_checks = _check_provider_manifest()
@@ -687,8 +694,13 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("registry", GLYPH_WARN, "not found", "Expected *_REGISTRY.json in project root"))
 
+    # Detect AIPASS_HOME once — used both to skip the standard root .venv
+    # (setup.sh creates a real, non-symlink .venv there by design) and for
+    # the CLAUDE.md fence check below.
+    aipass_home = _detect_aipass_home()
+
     # Root artifacts
-    root_hits = check_root_artifacts(project_root)
+    root_hits = check_root_artifacts(project_root, aipass_home=aipass_home)
     if root_hits:
         for hit in root_hits:
             glyph = GLYPH_PASS if hit.severity == "pass" else GLYPH_WARN
@@ -705,7 +717,6 @@ def _check_structure() -> List[CheckResult]:
 
     # CLAUDE.md ancestor fence — nested projects/<name> must exclude the host's
     # CLAUDE.md + .claude/CLAUDE.md, or Claude Code inherits them via ancestor walk.
-    aipass_home = _detect_aipass_home()
     if aipass_home:
         fenceless = find_fenceless_projects(aipass_home)
         if fenceless:
