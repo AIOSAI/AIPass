@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.5.1
+version: 1.5.2
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]
@@ -57,11 +57,13 @@ The command menu is re-registered via BotFather's `setMyCommands` on every start
 
 ## /lock
 
+> **Deployment state, machine config, saga and ops runbook: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).** This section documents the mechanism; that doc documents what is actually switched on.
+
 Control-bot-only. Password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. Per Patrick's ruling #217 this is the daily-driver verb: the machine stays awake 24/7 and `/suspend` is retired from routine use.
 
 The bot runs as a `systemd --user` service, **outside the graphical session scope** — it has no `XDG_SESSION_ID`, so a bare `loginctl lock-session` has no ambient session to resolve and can refuse. `_resolve_graphical_session()` therefore walks `loginctl list-sessions` and picks the session whose `Type` is `wayland` or `x11`, `State=active`, and `User` equals the bot's own uid (never another user's desktop), then locks it by id. If that path fails or `loginctl` is missing, it falls back to the GNOME ScreenSaver `Lock` method on the session bus via `gdbus`. Only if both fail does it report the failure — a screen that never locked is never acked as locked.
 
-**Live-verified 2026-08-02** from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset (the service context): resolver returned session `3` (`Type=wayland`, `State=active`, uid 1000), `loginctl lock-session 3` succeeded, `LockedHint` went `no` → `yes`. The `gdbus` fallback is covered by mocked tests only — it has not needed to fire on this machine.
+**Live-verified twice on 2026-08-02**, both resolving session `3` (`Type=wayland`, `State=active`, uid 1000): first from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset to reproduce the service context (`LockedHint` `no` → `yes`), then by Patrick's own tap in the control chat through the live `telegram-bot@base.service` after its restart onto v1.5.1. The `gdbus` fallback is covered by mocked tests only — it has never needed to fire on this machine.
 
 ## /suspend (DPLAN-0270 P5)
 
@@ -83,9 +85,9 @@ Root-privileged pieces live as reviewable repo files in `tools/suspend/`, instal
 - `aipass-suspend-sudoers` — passwordless `rtcwake` for the bot user
 - `60-aipass-suspend.rules` — polkit rule for `systemctl suspend`
 - `aipass-resume-signal` — optional system-sleep resume-stamp hook
-- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: on Patrick's laptop those short spurious-wake beats are the accepted deployment mode — `/suspend` locks and darkens the machine while agents stay effectively awake. Masking them made suspend real and trapped the conversation (ruling 2026-08-02, compass #216).
+- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: masking those wakes made suspend real and trapped the conversation (ruling 2026-08-02, compass #216). Compass #217 later superseded the reasoning — the machine now stays awake 24/7 and `/lock` replaces `/suspend` entirely — but the opt-in default stands, and the unit is disabled on this machine.
 
-**Honest status:** `/suspend` is **grounded** as of 2026-08-02 — do not live-test it. The 2026-08-02 rework (cross-process presence, alarm-time wake classification, poll-anchored grace + in-flight hold, `suspend_enabled` flag) landed as code + tests only and has never run against real hardware. Verification is a scheduled hands-off overnight soak with Patrick (DPLAN-0270 test-matrix step T4), not something applied automatically on landing.
+**Honest status:** `/suspend` is **retired from daily use and grounded** as of 2026-08-02 (Patrick's ruling, compass #217) — do not live-test it without him. The v1.5.0 rework worked as designed in a live soak, and Patrick still hit the wall: fixed suspend is still suspend, and real sleep is real disconnect. So the machine now stays awake 24/7 and `/lock` is the daily driver. The verb stays shipped and tested as a battery-saver, with `suspend_enabled` as the parking brake; it has still never passed a hands-off overnight soak (DPLAN-0270 test-matrix step T4). Full deployment picture: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).
 
 ## Streaming replies (DPLAN-0229)
 
