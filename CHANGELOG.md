@@ -9,7 +9,26 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-02] — drone git log: count idioms parse, warnings stop polluting the watched logs
+## [2026-08-02] — trigger suppress grows teeth: suppressed errors stop waking their owners
+
+**feat(trigger)** — `errors suppress` now does what its name promised (Patrick
+ruling, compass #219: the wake cycle ends at wake→investigate→suppress→sleep —
+no re-waking owners every 2h forever for judged-benign errors; the recurring
+no-passport pair had cost 468 wakes each since May). `should_dispatch()` gates
+on registry status *inside* the function so no caller can route around it:
+suppressed = no dispatch, unconditionally, while suppressed. Bookkeeping is
+untouched — occurrences still count and timestamp, so a wrong suppress stays
+auditable in `errors list`. New `errors unsuppress <id>` restores dispatch
+with backoff state intact (the ruling's escape hatch — no lift path existed
+before). `resolved` deliberately does NOT gate: a resolved error that recurs
+means the fix didn't hold and must still wake its owner. `is_suppressed()`
+fails open — a registry read problem makes noise, never silence. Suppressed
+refusals log to `medic_suppressed.jsonl` (not "Backoff active", which read as
+a timing wait). `errors stats` shows a Silenced count. The wrong-suppress
+safety net is fingerprint precision: any new or changed error fingerprints
+differently and wakes normally. Registry 2.4.0; 655 trigger tests green (+17);
+live-proved on the real registry including a full unsuppress→re-suppress
+round-trip.
 
 **fix(drone)** — `drone @git log -20` (standard git shorthand) built the broken
 flag `--20` and git died with a fatal; `-n 20` / `--count 20` worked but logged

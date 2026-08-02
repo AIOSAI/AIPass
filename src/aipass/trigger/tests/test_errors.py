@@ -654,6 +654,111 @@ class TestHandleCommandResolve:
 
 
 # ---------------------------------------------------------------------------
+# handle_command — "unsuppress" subcommand
+# ---------------------------------------------------------------------------
+
+
+class TestHandleCommandUnsuppress:
+    """Tests for the 'unsuppress' subcommand (compass #219)."""
+
+    def test_unsuppress_restores_status_to_new(self):
+        """unsuppress <id> sets a suppressed entry back to 'new' so dispatch resumes."""
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        mocks["get_entry"].return_value = {
+            "id": "e001",
+            "fingerprint": "abc123def456abc123def456abc123def456abc1",
+            "error_type": "ImportError",
+            "component": "FLOW",
+            "status": "suppressed",
+            "suppress_reason": "known noise",
+        }
+
+        result = handle_command("errors", ["unsuppress", "e001"])
+
+        assert result is True
+        mocks["update_status"].assert_called_once()
+        update_call = mocks["update_status"].call_args
+        assert update_call[0][0] == "abc123def456abc123def456abc123def456abc1"
+        assert update_call[0][1] == "new"
+
+        # No reason passed — the original suppress_reason survives as history
+        assert len(update_call[0]) == 2
+
+        cli_modules = sys.modules["aipass.cli.apps.modules"]
+        success_args = [str(a) for call in cli_modules.success.call_args_list for a in call.args]
+        has_confirm = any("Unsuppressed" in text and "e001" in text for text in success_args)
+        assert has_confirm, "Expected 'Unsuppressed' confirmation with error ID in success() output"
+
+    def test_unsuppress_noop_when_not_suppressed(self):
+        """unsuppress on a non-suppressed entry changes nothing and says so."""
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        mocks["get_entry"].return_value = {
+            "id": "e002",
+            "fingerprint": "def456abc123def456abc123def456abc123def4",
+            "status": "new",
+        }
+
+        result = handle_command("errors", ["unsuppress", "e002"])
+
+        assert result is True
+        mocks["update_status"].assert_not_called()
+        printed = [str(c) for c in mocks["console"].print.call_args_list]
+        assert any("not suppressed" in text for text in printed), "Expected 'not suppressed' notice"
+
+    def test_unsuppress_no_id_prints_usage(self):
+        """unsuppress with no ID prints a usage hint."""
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        _mocks()
+
+        result = handle_command("errors", ["unsuppress"])
+
+        assert result is True
+        cli_modules = sys.modules["aipass.cli.apps.modules"]
+        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+        assert any("missing" in text.lower() for text in err_args), "Expected 'missing' in error() output"
+
+    def test_unsuppress_unknown_id_reports_not_found(self):
+        """unsuppress on an unknown ID reports not found without touching status."""
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        mocks["get_entry"].return_value = None
+        mocks["query"].return_value = []
+
+        result = handle_command("errors", ["unsuppress", "nope"])
+
+        assert result is True
+        mocks["update_status"].assert_not_called()
+        cli_modules = sys.modules["aipass.cli.apps.modules"]
+        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+        assert any("not found" in text.lower() for text in err_args), "Expected 'not found' in error() output"
+
+    def test_stats_shows_silenced_count(self):
+        """stats surfaces how many fingerprints are currently silenced."""
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        mocks["get_stats"].return_value = {
+            "total": 7,
+            "by_status": {"new": 5, "suppressed": 2},
+            "by_component": {},
+            "by_severity": {},
+        }
+
+        handle_command("errors", ["stats"])
+
+        printed = [str(c) for c in mocks["console"].print.call_args_list]
+        assert any("Silenced" in text and "2" in text for text in printed), (
+            "Expected a 'Silenced' count line in stats output"
+        )
+
+
+# ---------------------------------------------------------------------------
 # handle_command — "clear-resolved" subcommand
 # ---------------------------------------------------------------------------
 

@@ -4,8 +4,8 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
-**Version:** 2.2.0
-**Last Updated:** 2026-07-17
+**Version:** 2.3.0
+**Last Updated:** 2026-08-02
 
 ## Quick Start
 
@@ -33,6 +33,8 @@ drone @trigger errors list                  # View tracked errors
 drone @trigger errors stats                 # Registry stats + circuit breaker
 drone @trigger errors circuit-breaker       # Circuit breaker state
 drone @trigger errors detail <fingerprint>  # Single error detail
+drone @trigger errors suppress <id> [why]   # Silence an error — no dispatch while suppressed
+drone @trigger errors unsuppress <id>       # Restore dispatch (existing backoff applies)
 drone @trigger errors --help                # Error subcommand help
 
 # Medic (error dispatch control)
@@ -118,10 +120,19 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 4. **Not DEV_CENTRAL** — devpulse protected from self-dispatch
 5. **Branch in registry** — target must be a registered citizen
 6. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown
-7. **Per-fingerprint backoff** — exponential backoff per unique error
+7. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
 8. **Rate limit** — prevents dispatch floods
 
 On successful dispatch: sends email via `deliver_email_to_branch()` then calls `wake_branch()` to spawn an agent in the target branch immediately.
+
+**Suppression is real silence (compass #219).** A fingerprint with status `suppressed` never dispatches while suppressed — no re-wakes, ever. Agents must not be woken forever for a judged-benign error; the cycle ends at wake → investigate → suppress → sleep. Guardrails:
+
+- Bookkeeping continues — `count` and `last_seen` keep updating, so a wrong suppress stays fully auditable in `errors list` / `errors detail`.
+- `errors unsuppress <id>` restores dispatch. Backoff state is preserved, not reset to immediate.
+- `errors stats` prints a **Silenced** count so the silent set is never invisible.
+- Only `suppressed` gates. `resolved` deliberately does **not** — a resolved error that recurs means the fix did not hold, which is genuine signal.
+- Wrong-suppress risk is handled by fingerprint precision, not by periodic re-wake machinery.
+- The status read fails open: a registry read error allows dispatch rather than silencing a real error.
 
 **Two mute classes, deliberately independent:**
 
@@ -159,12 +170,12 @@ trigger/
 │   ├── log_watcher_service.py      # Persistent watcher daemon (systemd)
 │   ├── modules/
 │   │   ├── core.py                 # Event bus: Trigger.fire/on/off/status
-│   │   ├── errors.py               # Error registry CLI: list/stats/circuit-breaker
+│   │   ├── errors.py               # Error registry CLI: list/suppress/unsuppress/stats
 │   │   ├── medic.py                # Medic toggle: on/off/status/mute/unmute
 │   │   ├── branch_log_events.py    # Branch log watcher CLI: start/stop/status
 │   │   └── log_events.py           # System log watcher CLI: start/stop/status
 │   └── handlers/
-│       ├── error_registry.py       # SHA1 fingerprinting, circuit breaker, backoff
+│       ├── error_registry.py       # SHA1 fingerprinting, circuit breaker, suppression gate, backoff
 │       ├── error_reporter.py       # report_error() API + source fix emails
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
 │       ├── medic_state.py          # Medic config persistence (trigger_config.json)
@@ -187,7 +198,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 619 tests across 20 modules
+├── tests/                          # 655 tests across 20 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── trigger_config.json         # Medic state, muted branches
 │   ├── error_registry.json         # All tracked errors
@@ -215,7 +226,7 @@ trigger/
 
 ## Testing
 
-619 tests across 20 test modules, all passing. Coverage: 81/81 public functions (100%).
+655 tests across 20 test modules, all passing. Coverage: 87/87 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -229,7 +240,7 @@ Seedgo: 100% (41/41 standards). Zero type errors. All categories at 100%.
 
 ---
 
-*Last Updated: 2026-07-14*
+*Last Updated: 2026-08-02*
 
 ---
 [← Back to AIPass](../../../README.md)

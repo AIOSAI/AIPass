@@ -487,6 +487,135 @@ def test_record_dispatch_increments_count(tmp_path: Path) -> None:
 
 
 # ===========================================================================
+# 7b. should_dispatch -- registry suppression gate (compass #219)
+# ===========================================================================
+
+
+def test_should_dispatch_false_when_suppressed(tmp_path: Path) -> None:
+    """A suppressed fingerprint never dispatches, even with no backoff pending."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    result = er.report("ImportError", "cannot import widget", "FLOW")
+    fp = result["fingerprint"]
+
+    # Never dispatched -> would be True on backoff alone
+    assert er.should_dispatch(fp) is True
+
+    er.update_status(fp, "suppressed", "known noise")
+    assert er.should_dispatch(fp) is False
+
+
+def test_unsuppress_restores_dispatch(tmp_path: Path) -> None:
+    """Lifting suppression restores dispatch for the same fingerprint."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = er.report("ImportError", "cannot import widget", "FLOW")["fingerprint"]
+
+    er.update_status(fp, "suppressed", "known noise")
+    assert er.should_dispatch(fp) is False
+
+    er.update_status(fp, "new")
+    assert er.should_dispatch(fp) is True
+
+
+def test_unsuppress_keeps_existing_backoff(tmp_path: Path) -> None:
+    """Unsuppress restores dispatch subject to backoff -- it does not reset to immediate."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = er.report("IOError", "disk full", "BACKUP")["fingerprint"]
+    er.record_dispatch(fp)
+
+    er.update_status(fp, "suppressed", "quiet for now")
+    er.update_status(fp, "new")
+
+    # Backoff from the pre-suppression dispatch still applies
+    assert er.should_dispatch(fp) is False
+
+    er._fingerprint_dispatch_times[fp] = [time.time() - 301]
+    assert er.should_dispatch(fp) is True
+
+
+def test_bookkeeping_continues_while_suppressed(tmp_path: Path) -> None:
+    """Occurrences still count and timestamp while suppressed -- a wrong suppress stays auditable."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = er.report("IOError", "disk full", "BACKUP")["fingerprint"]
+    er.update_status(fp, "suppressed", "known noise")
+
+    seeded = er.get_entry(fp)
+    assert seeded is not None
+    first_seen = seeded["last_seen"]
+
+    er.report("IOError", "disk full", "BACKUP")
+    result = er.report("IOError", "disk full", "BACKUP")
+
+    entry = er.get_entry(fp)
+    assert entry is not None
+    assert result["count"] == 3
+    assert entry["count"] == 3
+    assert entry["status"] == "suppressed"
+    assert entry["last_seen"] >= first_seen
+    assert er.should_dispatch(fp) is False
+
+
+def test_new_fingerprint_dispatches_while_another_suppressed(tmp_path: Path) -> None:
+    """Suppression is per-fingerprint -- an unrelated error still dispatches."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    quiet = er.report("ImportError", "cannot import widget", "FLOW")["fingerprint"]
+    er.update_status(quiet, "suppressed", "known noise")
+
+    loud = er.report("IOError", "disk full", "BACKUP")["fingerprint"]
+
+    assert er.should_dispatch(quiet) is False
+    assert er.should_dispatch(loud) is True
+
+
+def test_resolved_status_does_not_gate_dispatch(tmp_path: Path) -> None:
+    """Only 'suppressed' silences. A resolved error that recurs means the fix did not hold."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = er.report("IOError", "disk full", "BACKUP")["fingerprint"]
+    er.update_status(fp, "resolved")
+
+    assert er.is_suppressed(fp) is False
+    assert er.should_dispatch(fp) is True
+
+
+def test_is_suppressed_true_only_for_suppressed_status(tmp_path: Path) -> None:
+    """is_suppressed tracks the registry status and is False for unknown fingerprints."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = er.report("IOError", "disk full", "BACKUP")["fingerprint"]
+
+    assert er.is_suppressed(fp) is False
+    er.update_status(fp, "suppressed", "known noise")
+    assert er.is_suppressed(fp) is True
+    assert er.is_suppressed("never_seen_fingerprint") is False
+
+
+def test_is_suppressed_fails_open_on_registry_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registry read failure must not silence a real error."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    def _boom(_fingerprint: str) -> dict:
+        raise OSError("registry unreadable")
+
+    monkeypatch.setattr(er, "get_entry", _boom)
+
+    assert er.is_suppressed("any_fingerprint") is False
+    assert er.should_dispatch("any_fingerprint") is True
+
+
+# ===========================================================================
 # 8. list / query
 # ===========================================================================
 
