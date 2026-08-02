@@ -70,6 +70,9 @@ _COMMANDS = (
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
 
+# Count flags whose value lives in the following arg — skipped, not warned about
+_LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
+
 
 def _detect_branch_dir() -> tuple[str, Path] | None:
     """Detect caller's branch from CWD via passport lookup.
@@ -475,15 +478,29 @@ def _handle_diff(args: list[str]) -> dict:
 
 
 def _handle_log(args: list[str]) -> dict:
-    """Handle the log subcommand (global tier)."""
+    """Handle the log subcommand (global tier).
+
+    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`.
+    """
     count = 10
     for arg in args:
+        if arg in _LOG_COUNT_FLAGS:
+            continue
+        # git shorthand: -20 means 20 commits
+        candidate = arg[1:] if arg.startswith("-") and arg[1:].isdigit() else arg
         try:
-            count = int(arg)
+            count = int(candidate)
             break
         except ValueError as exc:
             logger.warning("Invalid log count argument '%s': %s", arg, exc)
             continue
+
+    if count < 1:
+        return {
+            "stdout": "",
+            "stderr": f"Invalid log count {count}: must be 1 or greater",
+            "exit_code": 1,
+        }
 
     result = log_handler.get_git_log(count=count)
 

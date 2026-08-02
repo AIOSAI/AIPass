@@ -9,6 +9,18 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — drone git log: count idioms parse, warnings stop polluting the watched logs
+
+**fix(drone)** — `drone @git log -20` (standard git shorthand) built the broken
+flag `--20` and git died with a fatal; `-n 20` / `--count 20` worked but logged
+a warning per flag into the very logs @trigger watches — which is how the bug
+surfaced (found by @drone while investigating a benign fingerprint pair).
+`_handle_log` now skips count flags (`-n`, `--count`, `--max-count`) silently,
+parses the `-N` shorthand, and rejects non-positive counts with a clean exit 1
+instead of handing git a bad flag. Genuinely unparseable args still warn.
+All five idioms verified byte-identical live; 12 regression tests
+(canary-checked against the old parse logic); 897 drone tests green.
+
 ## [2026-08-02] — /suspend rework: presence crosses processes, wake-mask goes opt-in
 
 **feat(skills)** — Telegram `/suspend` heartbeat rework (base_bot v1.5.0) after

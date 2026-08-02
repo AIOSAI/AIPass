@@ -653,6 +653,59 @@ class TestNewCommandRouting:
         assert result["exit_code"] == 0
         assert "abc123" in result["stdout"]
 
+    @pytest.mark.parametrize(
+        ("args", "expected_flag"),
+        [
+            (["20"], "-20"),
+            (["-n", "20"], "-20"),
+            (["--count", "20"], "-20"),
+            (["--max-count", "20"], "-20"),
+            (["-20"], "-20"),
+            ([], "-10"),
+        ],
+    )
+    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
+    def test_log_count_arg_forms(
+        self, _mock_auth: MagicMock, repo_dir: Path, args: list[str], expected_flag: str
+    ) -> None:
+        """All git count idioms resolve to the same -N flag. `-20` used to emit `--20` (git fatal)."""
+        mock_result = MagicMock(returncode=0, stdout="abc123 test\n", stderr="")
+        with patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=mock_result) as mock_run:
+            result = handle_command("log", args)
+        assert result["exit_code"] == 0
+        assert mock_run.call_args[0][0] == ["git", "log", "--oneline", expected_flag]
+
+    @pytest.mark.parametrize("flag", ["-n", "--count", "--max-count"])
+    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
+    def test_log_count_flags_log_no_warning(self, _mock_auth: MagicMock, repo_dir: Path, flag: str) -> None:
+        """Count flags are skipped silently — they used to warn, polluting the logs @trigger watches."""
+        mock_result = MagicMock(returncode=0, stdout="abc123 test\n", stderr="")
+        with (
+            patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=mock_result),
+            patch("aipass.drone.apps.modules.git_module.logger") as mock_logger,
+        ):
+            handle_command("log", [flag, "20"])
+        mock_logger.warning.assert_not_called()
+
+    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
+    def test_log_unknown_arg_still_warns(self, _mock_auth: MagicMock, repo_dir: Path) -> None:
+        """Genuinely unparseable args still warn — the fix narrows the noise, it doesn't silence it."""
+        mock_result = MagicMock(returncode=0, stdout="abc123 test\n", stderr="")
+        with (
+            patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=mock_result),
+            patch("aipass.drone.apps.modules.git_module.logger") as mock_logger,
+        ):
+            handle_command("log", ["--bogus"])
+        mock_logger.warning.assert_called_once()
+
+    @pytest.mark.parametrize("bad_count", ["0", "-n 0"])
+    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
+    def test_log_rejects_non_positive_count(self, _mock_auth: MagicMock, repo_dir: Path, bad_count: str) -> None:
+        """Zero/negative count fails honestly instead of handing git a bad flag."""
+        result = handle_command("log", bad_count.split())
+        assert result["exit_code"] == 1
+        assert "must be 1 or greater" in result["stderr"]
+
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="devpulse")
     def test_commit_no_args_error(self, _mock_auth: MagicMock) -> None:
         result = handle_command("commit")
