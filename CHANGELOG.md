@@ -9,6 +9,27 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — /suspend rework: presence crosses processes, wake-mask goes opt-in
+
+**feat(skills)** — Telegram `/suspend` heartbeat rework (base_bot v1.5.0) after
+the 2026-08-02 incident where the loop re-suspended the machine under the
+user's hands (his chat messages never counted as presence). Four fixes + one
+reframe: (1) every bot process stamps a shared `last_inbound.json` on any
+allowed-user message, so chatting with any bot cancels the cycle — presence
+now crosses processes; (2) wake cause is classified by alarm-time comparison
+(woke well before the armed RTC alarm = human → cancel + disarm) instead of
+wall-clock-gap guessing, catching the 14s nap that left the loop armed
+invisibly; (3) the grace window (100s→180s) anchors to the first successful
+Telegram poll after resume, not resume detection, and re-arm holds while a
+reply is in flight; (4) `suspend_enabled` bot-config flag grounds the verb
+without a code edit. Adaptive cadence recreates the accidental "perfect days"
+duty-cycle deliberately: 3-min beats while conversation is live, 25-min when
+quiet, config-tunable. `install_suspend_grants.sh` makes the wake-source
+masking **opt-in** (`--with-wake-sources`) per user ruling (compass #216):
+on this hardware the spurious wakes are the product — they keep agents
+running behind the locked screen. test_suspend.py 26→70; 944 telegram + 252
+skills green; verb stays grounded until the post-reboot soak.
+
 ## [2026-08-02] — medic mutes no longer swallow runaway alerts
 
 **fix(trigger)** — medic content-mutes silently suppressed runaway-log alerts

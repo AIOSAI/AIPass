@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_suspend.py
 # Description: Tests for the /suspend control verb + resume-heartbeat logic — DPLAN-0270 P5
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-07-30
-# Modified: 2026-07-30
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -27,14 +27,19 @@ All subprocess calls are mocked — no real systemctl/rtcwake/sudo ever runs.
 
 import json
 import subprocess
-from unittest.mock import patch, MagicMock
+import time
+from unittest.mock import call, patch, MagicMock
 
 import pytest
 
 from aipass.skills.lib.telegram.apps.handlers.base_bot import (
     BaseBot,
+    PENDING_STUCK_TIMEOUT_SECONDS,
     RESUME_WALLCLOCK_JUMP_SECONDS,
     RTCWAKE_BIN,
+    SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES,
+    SUSPEND_ACTIVE_WINDOW_DEFAULT_MINUTES,
+    SUSPEND_EARLY_WAKE_MARGIN_SECONDS,
     SUSPEND_GRACE_WINDOW_SECONDS,
     SUSPEND_HEARTBEAT_DEFAULT_MINUTES,
 )
@@ -44,6 +49,15 @@ from aipass.skills.lib.telegram.apps.handlers.base_bot import (
 def _patch_base_bot_deps(tmp_path):
     patches = [
         patch("aipass.skills.lib.telegram.apps.handlers.base_bot.PENDING_DIR", tmp_path),
+        # Must be redirected: the real stamp lives under ~/.aipass and a live bot on the
+        # dev machine keeps it current, which would read as "human present" in every test.
+        patch(
+            "aipass.skills.lib.telegram.apps.handlers.base_bot.LAST_INBOUND_STAMP_FILE",
+            tmp_path / "last_inbound.json",
+        ),
+        # _suspend_enabled() reads the real bot config otherwise — an ops kill-switch
+        # flipped on this machine would silently ground the verb under the whole suite.
+        patch("aipass.skills.lib.telegram.apps.handlers.config.load_bot_config", return_value={}),
         patch("aipass.skills.lib.telegram.apps.handlers.base_bot.signal.signal"),
         patch("aipass.skills.lib.telegram.apps.handlers.base_bot.atexit.register"),
     ]
@@ -269,6 +283,7 @@ class TestCheckResumeSignal:
         bot._suspend_chat_id = 7
         bot._suspend_last_resume_seen = 1000.0
         bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0
         bot._last_control_command_at = 1050.0  # a command landed after resume
 
         signal_file = tmp_path / "resume_signal.json"
@@ -285,8 +300,9 @@ class TestCheckResumeSignal:
             bot._check_resume_signal()
 
         assert bot._suspend_heartbeat_active is False
-        mock_run.assert_not_called()  # no re-arm — stayed awake
-        bot.send_message.assert_called_once_with(7, "Staying awake — command received.")  # type: ignore[union-attr]
+        # Cancelling disarms the pending RTC alarm; the one thing it must never do is re-arm.
+        assert mock_run.call_args_list == [call(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)]
+        bot.send_message.assert_called_once_with(7, "Staying awake — activity detected.")  # type: ignore[union-attr]
 
     def test_rearms_when_grace_window_elapses_with_no_command(self, tmp_path, _patch_base_bot_deps):
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
@@ -294,6 +310,7 @@ class TestCheckResumeSignal:
         bot._suspend_chat_id = 7
         bot._suspend_last_resume_seen = 1000.0
         bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0  # Telegram was already reachable at resume
         bot._last_control_command_at = 500.0  # last command was BEFORE resume
 
         signal_file = tmp_path / "resume_signal.json"
@@ -318,6 +335,7 @@ class TestCheckResumeSignal:
         bot._suspend_chat_id = 7
         bot._suspend_last_resume_seen = 1000.0
         bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0
         bot._last_control_command_at = 0.0
 
         signal_file = tmp_path / "resume_signal.json"
@@ -435,8 +453,9 @@ class TestSpuriousWakeAbsorption:
         missing = tmp_path / "no_signal.json"
         t0 = 1000.0
         wake_at = t0 + RESUME_WALLCLOCK_JUMP_SECONDS + 5
-        after_grace = wake_at + SUSPEND_GRACE_WINDOW_SECONDS + 1
-        clock = _SteppedClock(t0, wake_at, after_grace)
+        poll_ok_at = wake_at + 50  # network back ~50s after resume, as measured on this box
+        after_grace = poll_ok_at + SUSPEND_GRACE_WINDOW_SECONDS + 1
+        clock = _SteppedClock(t0, wake_at, poll_ok_at, after_grace)
 
         with (
             patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
@@ -445,7 +464,10 @@ class TestSpuriousWakeAbsorption:
         ):
             bot._check_resume_signal()  # baseline mark before the (spurious) suspend
             clock.advance()
-            bot._check_resume_signal()  # wall-clock jump detected — grace window starts
+            bot._check_resume_signal()  # wall-clock jump detected — awaiting first good poll
+            bot._last_successful_poll_at = poll_ok_at  # run()'s loop records a reachable Telegram
+            clock.advance()
+            bot._check_resume_signal()  # grace window now starts, not before
             clock.advance()
             bot._check_resume_signal()  # grace window elapses, no command — re-arm
 
@@ -502,3 +524,615 @@ class TestSuspendGating:
 
         assert "suspend" in control_bot.get_custom_commands()
         assert "suspend" not in branch_bot.get_custom_commands()
+
+
+# =============================================
+# ROOT CAUSE 1 (incident 2026-08-02) — the grace window was control-verb-blind.
+# Patrick chatting with @devpulse is a different PROCESS from the control bot,
+# so presence has to cross processes via a shared stamp file.
+# =============================================
+
+
+def _stamp_inbound(tmp_path, at, bot_id="devpulse"):
+    """Write the shared presence stamp as a sibling bot process would."""
+    (tmp_path / "last_inbound.json").write_text(json.dumps({"last_inbound_at": at, "bot_id": bot_id}))
+
+
+class TestCrossProcessHumanPresence:
+    def test_allowed_user_message_writes_stamp(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch.object(bot, "_write_mirror_mapping"),
+            patch.object(bot, "handle_message"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=9000.0),
+        ):
+            bot.process_update({"message": {"chat": {"id": 1}, "from": {"id": 111}, "text": "hi"}})
+
+        assert json.loads((tmp_path / "last_inbound.json").read_text())["last_inbound_at"] == 9000.0
+
+    def test_unauthorized_user_does_not_stamp(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch.object(bot, "_write_mirror_mapping"),
+            patch.object(bot, "handle_message"),
+        ):
+            bot.process_update({"message": {"chat": {"id": 1}, "from": {"id": 999}, "text": "hi"}})
+
+        assert not (tmp_path / "last_inbound.json").exists()
+
+    def test_rate_limited_human_still_counts_as_present(self, tmp_path, _patch_base_bot_deps):
+        """A throttled human is still a human — the stamp precedes the rate-limit bail-out."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch.object(bot, "_write_mirror_mapping"),
+            patch.object(bot, "check_rate_limit", return_value=False),
+            patch.object(bot, "handle_message") as mock_handle,
+        ):
+            bot.process_update({"message": {"chat": {"id": 1}, "from": {"id": 111}, "text": "hi"}})
+
+        mock_handle.assert_not_called()
+        assert (tmp_path / "last_inbound.json").exists()
+
+    def test_presence_sees_sibling_bot_stamp(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _stamp_inbound(tmp_path, 1050.0)
+
+        assert bot._human_present_since(1000.0) is True
+
+    def test_stamp_older_than_resume_is_not_presence(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _stamp_inbound(tmp_path, 900.0)  # conversation happened BEFORE the suspend
+
+        assert bot._human_present_since(1000.0) is False
+
+    def test_missing_stamp_is_not_presence(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        assert bot._read_inbound_stamp() == 0.0
+        assert bot._human_present_since(1000.0) is False
+
+    def test_corrupt_stamp_is_not_presence(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        (tmp_path / "last_inbound.json").write_text("{{{not json")
+
+        assert bot._read_inbound_stamp() == 0.0
+
+    def test_chat_with_another_bot_cancels_the_suspend_cycle(self, tmp_path, _patch_base_bot_deps):
+        """THE incident regression: Patrick talks to @devpulse, the control bot must stay awake."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0
+        bot._last_control_command_at = 0.0  # no control verb — only ordinary chat, on another bot
+        _stamp_inbound(tmp_path, 1020.0)
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        assert bot._suspend_heartbeat_active is False
+        assert mock_run.call_args_list == [call(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)]
+        bot.send_message.assert_called_once_with(7, "Staying awake — activity detected.")  # type: ignore[union-attr]
+
+
+# =============================================
+# ROOT CAUSE 2 (incident 2026-08-02) — wake cause was guessed from gap size.
+# A 14s nap fell under the jump threshold, so the loop stayed armed invisibly.
+# Now: compare the actual wake against the armed RTC time.
+# =============================================
+
+
+class TestWakeCauseClassification:
+    def test_alarm_time_recorded_when_armed(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch("subprocess.run"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1000.0),
+        ):
+            bot._handle_control_suspend(chat_id=42, arg="")
+
+        assert bot._suspend_alarm_at == 1000.0 + SUSPEND_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_alarm_time_cleared_when_arming_fails(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", side_effect=_cpe(["sudo"])):
+            bot._handle_control_suspend(chat_id=42, arg="")
+
+        assert bot._suspend_alarm_at is None
+
+    def test_short_nap_under_jump_threshold_is_still_detected(self, tmp_path, _patch_base_bot_deps):
+        """The 14s nap that got missed: too small for the gap check, but the alarm was due."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_alarm_at = 1010.0
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 1014.0)  # a 14s gap — far under RESUME_WALLCLOCK_JUMP_SECONDS
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+        ):
+            bot._check_resume_signal()  # baseline, alarm not yet due
+            clock.advance()
+            bot._check_resume_signal()
+
+        assert 1014.0 - 1000.0 < RESUME_WALLCLOCK_JUMP_SECONDS  # the old gap check could not see this
+        assert bot._suspend_resume_pending_since == 1014.0
+
+    def test_early_wake_cancels_the_whole_cycle(self, tmp_path, _patch_base_bot_deps):
+        """Woke long before the armed alarm = a human did it. Don't absorb it, stop."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_alarm_at = 2500.0
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 1200.0)  # lid opened 1300s before the alarm was due
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+            clock.advance()
+            bot._check_resume_signal()
+
+        assert bot._suspend_heartbeat_active is False
+        assert bot._suspend_alarm_at is None
+        assert mock_run.call_args_list == [call(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)]
+        bot.send_message.assert_called_once_with(7, "Staying awake — you woke the machine.")  # type: ignore[union-attr]
+
+    def test_wake_at_alarm_time_is_our_own_rtc(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_alarm_at = 2500.0
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, 2500.0)
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("subprocess.run"),
+        ):
+            bot._check_resume_signal()
+            clock.advance()
+            bot._check_resume_signal()
+
+        assert bot._suspend_heartbeat_active is True  # heartbeat continues, grace window pending
+        assert bot._suspend_resume_pending_since == 2500.0
+
+    def test_slightly_early_rtc_fire_is_not_read_as_human(self, tmp_path, _patch_base_bot_deps):
+        """RTC hardware fires a little early; only a wake outside the margin means a human."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_alarm_at = 2500.0
+        wake_at = 2500.0 - (SUSPEND_EARLY_WAKE_MARGIN_SECONDS / 2)
+
+        missing = tmp_path / "no_signal.json"
+        clock = _SteppedClock(1000.0, wake_at)
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", side_effect=clock),
+            patch("subprocess.run"),
+        ):
+            bot._check_resume_signal()
+            clock.advance()
+            bot._check_resume_signal()
+
+        assert bot._suspend_heartbeat_active is True
+        assert bot._suspend_resume_pending_since == wake_at
+
+
+# =============================================
+# ROOT CAUSE 3 (incident 2026-08-02) — the post-resume window was unusable.
+# DNS/network needs 45-60s after resume, so a window measured from resume
+# detection was already half gone before a reply could even be sent.
+# =============================================
+
+
+class TestPostResumeGraceAnchor:
+    def test_grace_does_not_start_before_telegram_is_reachable(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._last_successful_poll_at = 900.0  # last good poll was BEFORE the suspend
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS * 3,
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        mock_run.assert_not_called()  # network still down — never re-arm blind
+        assert bot._suspend_grace_started_at is None
+
+    def test_grace_starts_at_first_successful_poll(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._last_successful_poll_at = 1055.0  # DNS came back 55s after resume
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=1056.0),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        assert bot._suspend_grace_started_at == 1055.0
+        mock_run.assert_not_called()
+
+    def test_full_window_survives_a_late_network(self, tmp_path, _patch_base_bot_deps):
+        """At resume+grace the machine must still be awake — the clock starts at the poll."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1060.0  # anchored to the first good poll
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.base_bot.time.time",
+                return_value=1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1,  # old anchor would re-arm here
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        mock_run.assert_not_called()
+        assert bot._suspend_heartbeat_active is True
+
+    def test_poll_loop_records_successful_poll(self, tmp_path, _patch_base_bot_deps):
+        """The anchor is only meaningful if run() actually stamps it on a good poll."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        assert bot._last_successful_poll_at == 0.0
+
+        def _one_poll(_offset):
+            bot.state["running"] = False
+            return []
+
+        with (
+            patch.object(bot, "_verify_connection_with_retry", return_value=True),
+            patch.object(bot, "_set_command_menu"),
+            patch.object(bot, "_boot_monitor"),
+            patch.object(bot, "_check_lock", return_value=False),
+            patch.object(bot, "_create_lock"),
+            patch.object(bot, "clean_stale_pending"),
+            patch.object(bot, "_load_offset", return_value=0),
+            patch.object(bot, "poll_updates", side_effect=_one_poll),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=7777.0),
+        ):
+            bot.run()
+
+        assert bot._last_successful_poll_at == 7777.0
+
+
+# =============================================
+# in-flight turn hold — never suspend out from under a reply that hasn't sent
+# =============================================
+
+
+def _write_pending(tmp_path, bot_id, delivered, timestamp):
+    (tmp_path / f"bot-{bot_id}.json").write_text(
+        json.dumps({"chat_id": 1, "delivered": delivered, "timestamp": timestamp})
+    )
+
+
+class TestTurnInFlightHold:
+    def test_undelivered_pending_is_in_flight(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _write_pending(tmp_path, "base", delivered=False, timestamp=time.time())
+
+        assert bot._turn_in_flight() is True
+
+    def test_sibling_bot_pending_counts(self, tmp_path, _patch_base_bot_deps):
+        """The control bot must see a turn in flight on @devpulse, not just its own."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _write_pending(tmp_path, "devpulse", delivered=False, timestamp=time.time())
+
+        assert bot._turn_in_flight() is True
+
+    def test_delivered_pending_is_not_in_flight(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _write_pending(tmp_path, "base", delivered=True, timestamp=time.time())
+
+        assert bot._turn_in_flight() is False
+
+    def test_wedged_pending_cannot_block_forever(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _write_pending(tmp_path, "base", delivered=False, timestamp=time.time() - PENDING_STUCK_TIMEOUT_SECONDS - 1)
+
+        assert bot._turn_in_flight() is False
+
+    def test_corrupt_pending_is_skipped(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        (tmp_path / "bot-base.json").write_text("{{{not json")
+
+        assert bot._turn_in_flight() is False
+
+    def test_rearm_held_while_turn_in_flight(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0
+        now = 1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1
+        _write_pending(tmp_path, "devpulse", delivered=False, timestamp=now - 5)
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=now),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        mock_run.assert_not_called()  # grace elapsed, but a reply is still owed
+        assert bot._suspend_resume_pending_since == 1000.0  # window stays open, re-checked next poll
+
+    def test_rearms_once_the_turn_completes(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        bot._suspend_resume_pending_since = 1000.0
+        bot._suspend_grace_started_at = 1000.0
+        now = 1000.0 + SUSPEND_GRACE_WINDOW_SECONDS + 1
+        _write_pending(tmp_path, "devpulse", delivered=True, timestamp=now - 5)
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.time", return_value=now),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        assert mock_run.call_args_list[0].args[0][:5] == ["sudo", "-n", RTCWAKE_BIN, "-m", "no"]
+
+
+# =============================================
+# suspend_enabled — ops kill-switch, no code edit needed to ground the verb
+# =============================================
+
+
+class TestSuspendEnabledFlag:
+    def test_disabled_rejects_before_any_subprocess(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.config.load_bot_config",
+                return_value={"suspend_enabled": False},
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._handle_control_suspend(chat_id=1, arg="8h")
+
+        mock_run.assert_not_called()
+        assert bot._suspend_heartbeat_active is False
+        assert "suspend_enabled=false" in bot.send_message.call_args[0][1]  # type: ignore[union-attr]
+
+    def test_absent_flag_defaults_to_enabled(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.config.load_bot_config", return_value={"other": 1}),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._handle_control_suspend(chat_id=1, arg="8h")
+
+        assert mock_run.call_count == 2  # rtcwake, systemctl suspend
+
+    def test_explicit_true_allows_suspend(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.config.load_bot_config",
+                return_value={"suspend_enabled": True},
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._handle_control_suspend(chat_id=1, arg="8h")
+
+        assert mock_run.call_count == 2
+
+    def test_unreadable_config_defaults_to_enabled(self, tmp_path, _patch_base_bot_deps):
+        """A broken secrets store must not silently ground a verb ops depends on."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch(
+                "aipass.skills.lib.telegram.apps.handlers.config.load_bot_config",
+                side_effect=Exception("secrets store down"),
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._handle_control_suspend(chat_id=1, arg="8h")
+
+        assert mock_run.call_count == 2
+
+
+# =============================================
+# adaptive cadence (devpulse addendum 2026-08-02) — Jul 30-Aug 1's short beats
+# were accidental (spurious wakes), but that duty-cycle IS the behaviour Patrick
+# experienced as chat-behind-suspend working. Recreate it deliberately.
+# =============================================
+
+
+class TestAdaptiveHeartbeatCadence:
+    def test_quiet_uses_the_long_beat(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        assert bot._suspend_heartbeat_seconds() == SUSPEND_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_live_conversation_uses_the_short_beat(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _stamp_inbound(tmp_path, time.time() - 60)  # spoke a minute ago
+
+        assert bot._suspend_heartbeat_seconds() == SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_conversation_gone_cold_falls_back_to_the_long_beat(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        stale = time.time() - (SUSPEND_ACTIVE_WINDOW_DEFAULT_MINUTES * 60 + 60)
+        _stamp_inbound(tmp_path, stale)
+
+        assert bot._suspend_heartbeat_seconds() == SUSPEND_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_chat_on_another_bot_tightens_this_bots_cadence(self, tmp_path, _patch_base_bot_deps):
+        """The point of the shared stamp: talking to @devpulse speeds up the control bot's beats."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _stamp_inbound(tmp_path, time.time() - 5, bot_id="devpulse")
+
+        assert bot._suspend_heartbeat_seconds() == SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_all_three_cadence_knobs_are_config_driven(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        _stamp_inbound(tmp_path, time.time() - 600)  # 10m ago: outside default window, inside custom
+
+        config = {
+            "suspend_heartbeat_minutes": 40,
+            "suspend_active_heartbeat_minutes": 2,
+            "suspend_active_window_minutes": 45,
+        }
+        with patch("aipass.skills.lib.telegram.apps.handlers.config.load_bot_config", return_value=config):
+            assert bot._suspend_heartbeat_seconds() == 2 * 60
+
+            (tmp_path / "last_inbound.json").unlink()
+            assert bot._suspend_heartbeat_seconds() == 40 * 60
+
+    def test_config_failure_falls_back_to_defaults(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch(
+            "aipass.skills.lib.telegram.apps.handlers.config.load_bot_config",
+            side_effect=Exception("secrets store down"),
+        ):
+            assert bot._suspend_heartbeat_seconds() == SUSPEND_HEARTBEAT_DEFAULT_MINUTES * 60
+
+    def test_rearm_after_live_chat_uses_the_short_beat(self, tmp_path, _patch_base_bot_deps):
+        """End to end: the re-arm the grace window fires picks up the adaptive interval."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_chat_id = 7
+        now = time.time()
+        bot._suspend_resume_pending_since = now - SUSPEND_GRACE_WINDOW_SECONDS - 10
+        bot._suspend_grace_started_at = now - SUSPEND_GRACE_WINDOW_SECONDS - 10
+        # Spoke before the resume — presence doesn't cancel, but the conversation is still warm.
+        _stamp_inbound(tmp_path, now - SUSPEND_GRACE_WINDOW_SECONDS - 60)
+
+        missing = tmp_path / "no_signal.json"
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.RESUME_SIGNAL_FILE", missing),
+            patch("subprocess.run") as mock_run,
+        ):
+            bot._check_resume_signal()
+
+        armed = mock_run.call_args_list[0].args[0]
+        assert armed[:5] == ["sudo", "-n", RTCWAKE_BIN, "-m", "no"]
+        assert armed[6] == str(SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES * 60)
+
+
+# =============================================
+# /lock — the verb that actually serves the use case /suspend was doing:
+# password-lock + dark screen, agents keep running (devpulse 7fedf6e8)
+# =============================================
+
+
+class TestLockVerb:
+    def test_lock_calls_loginctl_and_confirms(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run") as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        mock_run.assert_called_once_with(["loginctl", "lock-session"], check=True, capture_output=True)
+        bot.send_message.assert_called_once_with(1, "🔒 Screen locked — agents still running.")  # type: ignore[union-attr]
+
+    def test_lock_needs_no_root_or_rtcwake(self, tmp_path, _patch_base_bot_deps):
+        """No sudo, no rtcwake, no systemctl — that's the whole point of the verb."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run") as mock_run:
+            bot._handle_control_lock(chat_id=1)
+
+        for call_args in mock_run.call_args_list:
+            assert call_args.args[0][0] not in ("sudo", "systemctl")
+            assert RTCWAKE_BIN not in call_args.args[0]
+
+    def test_lock_loginctl_missing(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            bot._handle_control_lock(chat_id=1)
+
+        bot.send_message.assert_called_once_with(1, "loginctl not found on this machine.")  # type: ignore[union-attr]
+
+    def test_lock_failure_reports(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch("subprocess.run", side_effect=_cpe(["loginctl"], stderr=b"no session")):
+            bot._handle_control_lock(chat_id=1)
+
+        bot.send_message.assert_called_once_with(1, "Failed to lock the screen — see logs.")  # type: ignore[union-attr]
+
+    def test_lock_does_not_touch_suspend_state(self, tmp_path, _patch_base_bot_deps):
+        """Locking must never disturb an active heartbeat — they're independent verbs."""
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        bot._suspend_heartbeat_active = True
+        bot._suspend_alarm_at = 2500.0
+
+        with patch("subprocess.run"):
+            bot._handle_control_lock(chat_id=1)
+
+        assert bot._suspend_heartbeat_active is True
+        assert bot._suspend_alarm_at == 2500.0
+
+    def test_lock_routed_for_control_bot(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps)
+
+        with patch.object(bot, "_handle_control_lock") as mock_handler:
+            handled = bot._dispatch_command(chat_id=1, parsed=("lock", ""))
+
+        assert handled is True
+        mock_handler.assert_called_once_with(1)
+
+    def test_branch_bot_does_not_get_lock(self, tmp_path, _patch_base_bot_deps):
+        bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="devpulse")
+
+        with patch.object(bot, "_handle_control_lock") as mock_handler:
+            bot._dispatch_command(chat_id=1, parsed=("lock", ""))
+
+        mock_handler.assert_not_called()
+
+    def test_lock_in_custom_commands_for_control_bot_only(self, tmp_path, _patch_base_bot_deps):
+        control_bot = _make_bot(tmp_path, _patch_base_bot_deps)
+        branch_bot = _make_bot(tmp_path, _patch_base_bot_deps, branch_name="devpulse")
+
+        assert "lock" in control_bot.get_custom_commands()
+        assert "lock" not in branch_bot.get_custom_commands()

@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.4.0
+version: 1.5.0
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]
@@ -55,21 +55,33 @@ Session names use the `CONTROL_SESSION_PREFIX = "aipass-"` prefix and are manage
 
 The command menu is re-registered via BotFather's `setMyCommands` on every startup (`_set_command_menu()`, called from `run()`), so the control bot's `/start` entry is overridden with control-verb text instead of the generic welcome copy.
 
+## /lock
+
+Control-bot-only. Runs `loginctl lock-session` — password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. This is the verb for what `/suspend` was actually being used for; reach for `/suspend` only when the goal is genuinely saving battery.
+
 ## /suspend (DPLAN-0270 P5)
 
-Control-bot-only. `/suspend [duration]`:
-- No argument — **heartbeat mode**. Arms `rtcwake` for `suspend_heartbeat_minutes` (bot config override, default 25) and suspends. On each wake it checks for a command in a 100s grace window (`SUSPEND_GRACE_WINDOW_SECONDS`); if none arrived, it re-arms and re-suspends on its own (absorbs spurious wakes without staying up).
+Control-bot-only, and gated by `suspend_enabled` in the bot config (default `true`) — an ops kill-switch that grounds the verb without a code edit. `/suspend [duration]`:
+- No argument — **heartbeat mode**. Arms `rtcwake`, suspends, and on each wake opens a grace window; if no human turns up, it re-arms and re-suspends on its own (absorbs spurious wakes without staying up).
 - `8h` / `45m` — **single-wake mode**, wakes once after the given duration.
 
-Resume detection is primarily a **wall-clock jump** in the poll loop: if the gap between consecutive loop iterations exceeds `RESUME_WALLCLOCK_JUMP_SECONDS` (45s — chosen to clear both the 30s poll timeout and the 60s network-backoff cap, so neither produces a false positive), a resume is assumed. An optional systemd `system-sleep` hook (`aipass-resume-signal`) writing a resume-stamp file is kept as a secondary signal, since this signal is not proven to fire reliably on the deployed hardware.
+**Cadence is adaptive**, and all three knobs are bot-config overridable: `suspend_active_heartbeat_minutes` (default 3) while the conversation is live, `suspend_heartbeat_minutes` (default 25) once it goes quiet, and `suspend_active_window_minutes` (default 30) for how recent an inbound counts as live. Liveness is read from the shared presence stamp, so chatting with `@devpulse` tightens the control bot's beats. This deliberately recreates the Jul 30 - Aug 1 behaviour, where spurious ACPI wakes accidentally duty-cycled the machine in 7-44s beats and chat-behind-suspend felt near-live; once `aipass-wake-sources` masking made suspend actually stick, that accident stopped and the long beat trapped the conversation.
+
+Resume detection has two triggers: a **wall-clock jump** in the poll loop larger than `RESUME_WALLCLOCK_JUMP_SECONDS` (45s — clears both the 30s poll timeout and the 60s network-backoff cap, so neither produces a false positive), and **reaching the armed alarm time** (`_suspend_alarm_at`), which catches a nap too short for the gap check to see. An optional systemd `system-sleep` hook (`aipass-resume-signal`) writing a resume-stamp file is kept as a third, secondary signal, since it is not proven to fire reliably on the deployed hardware.
+
+**Wake cause** is decided by comparing the wake against the armed alarm time, not by guessing from gap size: waking more than `SUSPEND_EARLY_WAKE_MARGIN_SECONDS` (60s) early means a human woke the machine, so the whole cycle is cancelled and the RTC alarm disarmed. At or near the alarm, it's our own RTC and the grace window opens.
+
+**The grace window** (`SUSPEND_GRACE_WINDOW_SECONDS`, 180s) is measured from the first *successful Telegram poll* after resume, not from resume detection — DNS/network needs 45-60s to come back, and the whole reply chain (poll → inject → model turn → send) has to fit inside the window or the machine re-suspends mid-conversation. Re-arming is also held while any bot has an undelivered pending (`_turn_in_flight()`), so a reply in flight is never cut off.
+
+**Human presence crosses processes.** Every bot process stamps `~/.aipass/telegram_bots/last_inbound.json` on any allowed-user inbound message; the control bot's grace check reads it. The control bot cannot see another bot's traffic in-process, so without this, chatting with `@devpulse` did not register as "human present" and the machine re-suspended under Patrick's hands (incident 2026-08-02). Any inbound message on any bot now cancels the cycle, not just a control verb on the control bot.
 
 Root-privileged pieces live as reviewable repo files in `tools/suspend/`, installed by `tools/suspend/install_suspend_grants.sh` (never applied directly to `/etc` by an agent):
 - `aipass-suspend-sudoers` — passwordless `rtcwake` for the bot user
 - `60-aipass-suspend.rules` — polkit rule for `systemctl suspend`
 - `aipass-resume-signal` — optional system-sleep resume-stamp hook
-- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot)
+- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: on Patrick's laptop those short spurious-wake beats are the accepted deployment mode — `/suspend` locks and darkens the machine while agents stay effectively awake. Masking them made suspend real and trapped the conversation (ruling 2026-08-02, compass #216).
 
-**Honest status:** the hardening above (wall-clock-jump detection, stale-stamp fix, wake-source persistence unit) landed as code + tests only. The currently running bot predates it — installing the grants and restarting the bot is a deliberate, separate session (DPLAN-0270's test-matrix step T3), not something applied automatically on landing.
+**Honest status:** `/suspend` is **grounded** as of 2026-08-02 — do not live-test it. The 2026-08-02 rework (cross-process presence, alarm-time wake classification, poll-anchored grace + in-flight hold, `suspend_enabled` flag) landed as code + tests only and has never run against real hardware. Verification is a scheduled hands-off overnight soak with Patrick (DPLAN-0270 test-matrix step T4), not something applied automatically on landing.
 
 ## Streaming replies (DPLAN-0229)
 
