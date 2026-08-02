@@ -61,8 +61,8 @@ class TestContextGaugeHandle:
             result = handle({"session_id": "s-nudge", "transcript_path": str(transcript), "cwd": str(tmp_path)})
         assert result["exit_code"] == 0
         assert "CONTEXT GAUGE" in result["stdout"]
-        assert "run /prep NOW" in result["stdout"]
-        assert "wrap up the current work item" not in result["stdout"]
+        assert "/prep" in result["stdout"]
+        assert "compact fires soon" not in result["stdout"]
         assert result["sound"] == "context gauge"
 
     def test_fires_escalate_at_95_percent_of_trigger(self, tmp_path, monkeypatch):
@@ -77,7 +77,7 @@ class TestContextGaugeHandle:
             result = handle({"session_id": "s-escalate", "transcript_path": str(transcript), "cwd": str(tmp_path)})
         assert result["exit_code"] == 0
         assert "CONTEXT GAUGE" in result["stdout"]
-        assert "wrap up the current work item" in result["stdout"]
+        assert "compact fires soon" in result["stdout"]
         assert result["sound"] == "context gauge"
 
     def test_fires_once_per_threshold_per_session(self, tmp_path, monkeypatch):

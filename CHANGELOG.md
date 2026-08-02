@@ -9,6 +9,17 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — context gauge copy: calm heads-up, not panic (calm-compact doctrine)
+
+**fix(hooks)** — `context_gauge.py` still preached the pre-recovery doctrine
+("run /prep NOW", "before auto-compact takes the choice away", "imminent") —
+written for DPLAN-0253, before PreCompact recovery injection and the post-compact
+regroup (DPLAN-0276/0278) made auto-compact survivable by design. The same
+session this shipped in proved the machinery live: compact fired mid-turn, the
+PostToolUse backstop re-grounded once, one-shot token held. New copy is a calm
+cue — bank memories via /prep at the next natural breakpoint, act without
+asking, keep working. Docstring updated to match; 8/8 gauge tests green.
+
 ## [2026-08-01] — doctor + setup.sh adopt the srt resolver; doctor message truthing (DPLAN-0279, @aipass scope)
 
 **fix(aipass)** — doctor's `sandbox_checker.py` and setup.sh's sandbox-prereqs

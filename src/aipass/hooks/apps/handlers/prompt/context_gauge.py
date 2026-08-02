@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.0.0
-# Description: Nudges the model to run /prep before auto-compact fires (UserPromptSubmit, DPLAN-0253)
+# Version: 1.0.1
+# Description: Calm heads-up to run /prep as auto-compact approaches (UserPromptSubmit, DPLAN-0253)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-08-01
 # =============================================
 
-"""Early-warning nudge so the model runs /prep before the compact ceiling —
-memory should never be at the mercy of an auto-compact firing mid-work.
+"""Heads-up so the model banks memories via /prep before the compact ceiling.
+Auto-compact is survivable by design (PreCompact recovery injection + post-
+compact regroup, DPLAN-0276/0278) — the gauge is a calm cue to save state at
+a natural breakpoint, not an alarm.
 
 Reads live transcript usage every prompt (cheap tail read), resolves the
-branch's compact trigger (window * 0.9), and injects a hard line once fill
+branch's compact trigger (window * 0.9), and injects a line once fill
 crosses 80%/95% of that trigger. Independent of the cadence system — its own
 per-session, per-threshold guard file in tempdir, same idiom as
 feedback_pulse.py / auto_process.py, so it isn't gated by turn count."""
@@ -80,8 +82,9 @@ def handle(hook_data: dict) -> dict:
             logger.info("[HOOKS] context_gauge: escalate fired at %.0f%% session=%s", pct, session_id[:8])
             return {
                 "stdout": (
-                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — run /prep NOW "
-                    "AND wrap up the current work item. Auto-compact is imminent."
+                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — compact fires soon. "
+                    "Run /prep now if anything is unbanked (just do it, no need to ask), "
+                    "then carry on — recovery injection handles the rest."
                 ),
                 "exit_code": 0,
                 "sound": "context gauge",
@@ -92,8 +95,9 @@ def handle(hook_data: dict) -> dict:
             logger.info("[HOOKS] context_gauge: nudge fired at %.0f%% session=%s", pct, session_id[:8])
             return {
                 "stdout": (
-                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — run /prep NOW, "
-                    "before auto-compact takes the choice away."
+                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — heads up, auto-compact "
+                    "is coming. Run /prep at the next natural breakpoint (just do it, no need "
+                    "to ask). Compact is survivable by design — keep working calmly."
                 ),
                 "exit_code": 0,
                 "sound": "context gauge",
