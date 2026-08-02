@@ -9,6 +9,19 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — Windows CI green: POSIX-only skips on the new DPLAN-0279 tests
+
+**fix(ci)** — the srt-resolver subprocess tests and doctor's /proc-fallback
+tests (both added today) failed on Windows CI only. The srt candidate tests
+hand node a minimal env — without SYSTEMROOT node's CSPRNG aborts at startup
+(exit 134) — and their sh-script npm stubs plus lib/node_modules layouts are
+POSIX scenarios by design (srt's sandbox wrap targets bwrap + /bin/bash). The
+doctor tests force os.name='posix' process-wide, which makes pathlib dispatch
+Path() to PosixPath on Windows and unrelated code in the patch window
+(the logger call) dies with NotImplementedError. Both get explicit
+POSIX-only skip markers; Windows-relevant coverage (usage-error contract,
+non-posix early return) still runs everywhere. Linux/macOS coverage unchanged.
+
 ## [2026-08-01] — context gauge copy: calm heads-up, not panic (calm-compact doctrine)
 
 **fix(hooks)** — `context_gauge.py` still preached the pre-recovery doctrine

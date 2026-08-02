@@ -16,6 +16,7 @@ privileged symlink); each test isolates a different resolution mechanism
 instead: the npm_config_prefix env var, a stubbed `npm` on PATH, or neither.
 """
 
+import os
 import shutil
 import stat
 import subprocess
@@ -28,6 +29,12 @@ _PKG_RELATIVE_ENTRY = Path("@anthropic-ai/sandbox-runtime/dist/index.js")
 _NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(_NODE is None, reason="requires a real node binary")
+
+# The candidate scenarios are POSIX layouts by design (lib/node_modules joins,
+# sh-script npm stubs; srt's sandbox wrap targets bwrap + /bin/bash). On Windows
+# the minimal envs also abort node itself at startup — its CSPRNG needs
+# SYSTEMROOT (exit 134, "Assertion failed: ncrypto::CSPRNG").
+_posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX-layout scenario")
 
 
 def _make_package(node_modules_dir: Path) -> Path:
@@ -67,6 +74,7 @@ def _run_resolve(tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
 class TestSrtResolveCandidates:
     """DPLAN-0279 regression coverage: candidate-list prefix discovery."""
 
+    @_posix_only
     def test_npm_config_prefix_env_wins(self, tmp_path):
         """nvm-style layout: the environment names the prefix directly -- highest
         priority candidate, resolved without needing npm on PATH at all."""
@@ -79,6 +87,7 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
+    @_posix_only
     def test_npm_root_g_used_when_no_env_prefix(self, tmp_path):
         """Debian/Ubuntu-style split-prefix layout: no env var, but `npm root -g`
         (queried directly, authoritative) reports the real /usr/local-style root."""
@@ -94,6 +103,7 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
+    @_posix_only
     def test_env_prefix_takes_priority_over_npm_root_g(self, tmp_path):
         """Candidate order: npm_config_prefix must win even when `npm root -g`
         would also resolve to something (and to something WITHOUT the package)."""
@@ -111,6 +121,7 @@ class TestSrtResolveCandidates:
         assert result.returncode == 0
         assert result.stdout.strip() == str(entry)
 
+    @_posix_only
     def test_missing_entirely_exits_nonzero_with_tried_candidates(self, tmp_path):
         """srt not installed anywhere a candidate looks: non-zero exit, no
         stdout, and the tried candidate paths listed on stderr (not silently

@@ -9,6 +9,7 @@
 """Tests for aipass doctor command — Phase 1 (FPLAN-0188)."""
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -240,6 +241,14 @@ class TestDetectShell:
 # =============================================================================
 
 
+"""The three forced-posix tests patch os.name process-wide; on Windows that
+makes pathlib dispatch Path() to PosixPath, which any code running inside the
+patch window (e.g. the logger call in the OSError branch) trips over with
+NotImplementedError. The code path is POSIX-gated anyway — skip on Windows;
+test_non_posix_returns_none keeps the Windows-relevant coverage."""
+_posix_only = pytest.mark.skipif(os.name == "nt", reason="forces os.name='posix'; breaks pathlib dispatch on Windows")
+
+
 class TestShellFromParentProc:
     def test_non_posix_returns_none(self, monkeypatch) -> None:
         from aipass.aipass.apps.handlers.system_detect import system_detector
@@ -247,6 +256,7 @@ class TestShellFromParentProc:
         monkeypatch.setattr(system_detector.os, "name", "nt")
         assert system_detector._shell_from_parent_proc() is None
 
+    @_posix_only
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
         from aipass.aipass.apps.handlers.system_detect import system_detector
 
@@ -268,6 +278,7 @@ class TestShellFromParentProc:
         monkeypatch.setattr(system_detector, "Path", _fake_path)
         assert system_detector._shell_from_parent_proc() == "bash"
 
+    @_posix_only
     def test_missing_comm_file_returns_none(self, monkeypatch, tmp_path) -> None:
         from aipass.aipass.apps.handlers.system_detect import system_detector
 
@@ -285,6 +296,7 @@ class TestShellFromParentProc:
         monkeypatch.setattr(system_detector, "Path", _fake_path)
         assert system_detector._shell_from_parent_proc() is None
 
+    @_posix_only
     def test_read_oserror_returns_none(self, monkeypatch) -> None:
         from aipass.aipass.apps.handlers.system_detect import system_detector
 
