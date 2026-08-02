@@ -46,7 +46,8 @@ def _read_last_session(branch_dir: Path) -> str | None:
             result.append(f"Last session (#{sid}, {sdate}): {ssum}")
         learnings = data.get("key_learnings", [])
         if isinstance(learnings, list) and learnings:
-            keys = [entry.get("key", "?") for entry in learnings[-10:] if isinstance(entry, dict)]
+            # newest-first: [:10] is the ten most recent, not [-10:] (the ten oldest)
+            keys = [entry.get("key", "?") for entry in learnings[:10] if isinstance(entry, dict)]
             if keys:
                 result.append(f"Key learnings available: {', '.join(keys)}")
         return "\n".join(result) if result else None
@@ -87,7 +88,7 @@ def handle(hook_data: dict) -> dict:
         import importlib
 
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
-        cadence.reset_counter(hook_data=hook_data)
+        cadence.reset_counter(hook_data=hook_data, caller="compact")
     except Exception as exc:
         logger.info("[HOOKS] compact: cadence reset failed: %s", exc)
 

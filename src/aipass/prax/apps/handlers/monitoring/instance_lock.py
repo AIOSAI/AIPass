@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: instance_lock.py
 # Description: Single-instance lock for the prax monitor
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-08-02
 # =============================================
 
 """Relay-scoped lock for the prax monitor Telegram relay.
@@ -82,6 +82,20 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
+def _current_boot_id() -> Optional[str]:
+    """Return a stable identifier for the current boot, or None if unavailable.
+
+    Linux exposes /proc/sys/kernel/random/boot_id, which is regenerated on
+    every boot. Platforms without it get None, which falls back to plain
+    pid-liveness — no regression, just no cross-boot protection.
+    """
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip() or None
+    except OSError as exc:
+        logger.info("[instance_lock] boot_id unavailable, using pid liveness only: %s", exc)
+        return None
+
+
 def get_lock_path() -> Path:
     """Return the path for the relay lock file."""
     if _lock_path_override is not None:
@@ -95,19 +109,40 @@ def try_acquire() -> bool:
     lock_path = get_lock_path()
     json_handler.log_operation("instance_lock_acquire", {"pid": os.getpid()})
 
+    current_boot = _current_boot_id()
+
     if lock_path.exists():
         try:
             data = _json.loads(lock_path.read_text(encoding="utf-8"))
             existing_pid = data.get("pid", 0)
-            if existing_pid and _is_pid_alive(existing_pid):
+            existing_boot = data.get("boot_id")
+
+            if existing_boot and current_boot and existing_boot != current_boot:
+                # The lock file outlived a reboot. Its PID belongs to the
+                # previous boot, but the number may already be reused by an
+                # unrelated early-boot process, so a liveness check would
+                # wrongly report the relay as held. That stranded the relay in
+                # viewer-only mode for 1h51m on 2026-07-31 (pid 1567 reused
+                # seconds after boot). A lock from a past boot is always stale.
+                logger.info(
+                    "[instance_lock] Reclaiming lock from previous boot (PID %d, boot %s != %s)",
+                    existing_pid,
+                    existing_boot[:8],
+                    current_boot[:8],
+                )
+            elif existing_pid and _is_pid_alive(existing_pid):
                 logger.info("[instance_lock] Relay lock held by PID %d — skipping TG relay", existing_pid)
                 return False
-            logger.info("[instance_lock] Reclaiming stale lock (PID %d is dead)", existing_pid)
+            else:
+                logger.info("[instance_lock] Reclaiming stale lock (PID %d is dead)", existing_pid)
         except (ValueError, OSError) as exc:
             logger.info("[instance_lock] Removing corrupt lock file: %s", exc)
 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(_json.dumps({"pid": os.getpid()}), encoding="utf-8")
+    payload: dict[str, object] = {"pid": os.getpid()}
+    if current_boot:
+        payload["boot_id"] = current_boot
+    lock_path.write_text(_json.dumps(payload), encoding="utf-8")
     _held_lock = lock_path
     logger.info("[instance_lock] Acquired relay lock (PID %d)", os.getpid())
     return True

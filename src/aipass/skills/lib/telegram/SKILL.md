@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.4.0
+version: 1.5.2
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]
@@ -13,7 +13,7 @@ has_handler: true
 
 # Telegram Bridge
 
-Multi-bot personal-assistant bridge: long-polling listener routes user Telegram messages into Claude tmux sessions. The base reply flow is Claude's Stop hook writing a pending file, which the bot picks up and sends back to Telegram; bots opting into streaming (below) also live-edit a "Processing..." placeholder while the reply is still being generated. A control-center bot exposes /start, /kill, /suspend to wake, kill, and sleep terminal sessions by branch, and a separate hook mirrors terminal-typed messages into the same TG chat so the conversation reads as one continuous thread regardless of which door you type in.
+Multi-bot personal-assistant bridge: long-polling listener routes user Telegram messages into Claude tmux sessions. The base reply flow is Claude's Stop hook writing a pending file, which the bot picks up and sends back to Telegram; bots opting into streaming (below) also live-edit a "Processing..." placeholder while the reply is still being generated. A control-center bot exposes /start, /kill, /lock, /suspend to wake, kill, and lock or sleep terminal sessions by branch, and a separate hook mirrors terminal-typed messages into the same TG chat so the conversation reads as one continuous thread regardless of which door you type in.
 
 ## Architecture
 
@@ -55,21 +55,39 @@ Session names use the `CONTROL_SESSION_PREFIX = "aipass-"` prefix and are manage
 
 The command menu is re-registered via BotFather's `setMyCommands` on every startup (`_set_command_menu()`, called from `run()`), so the control bot's `/start` entry is overridden with control-verb text instead of the generic welcome copy.
 
+## /lock
+
+> **Deployment state, machine config, saga and ops runbook: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).** This section documents the mechanism; that doc documents what is actually switched on.
+
+Control-bot-only. Password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. Per Patrick's ruling #217 this is the daily-driver verb: the machine stays awake 24/7 and `/suspend` is retired from routine use.
+
+The bot runs as a `systemd --user` service, **outside the graphical session scope** — it has no `XDG_SESSION_ID`, so a bare `loginctl lock-session` has no ambient session to resolve and can refuse. `_resolve_graphical_session()` therefore walks `loginctl list-sessions` and picks the session whose `Type` is `wayland` or `x11`, `State=active`, and `User` equals the bot's own uid (never another user's desktop), then locks it by id. If that path fails or `loginctl` is missing, it falls back to the GNOME ScreenSaver `Lock` method on the session bus via `gdbus`. Only if both fail does it report the failure — a screen that never locked is never acked as locked.
+
+**Live-verified twice on 2026-08-02**, both resolving session `3` (`Type=wayland`, `State=active`, uid 1000): first from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset to reproduce the service context (`LockedHint` `no` → `yes`), then by Patrick's own tap in the control chat through the live `telegram-bot@base.service` after its restart onto v1.5.1. The `gdbus` fallback is covered by mocked tests only — it has never needed to fire on this machine.
+
 ## /suspend (DPLAN-0270 P5)
 
-Control-bot-only. `/suspend [duration]`:
-- No argument — **heartbeat mode**. Arms `rtcwake` for `suspend_heartbeat_minutes` (bot config override, default 25) and suspends. On each wake it checks for a command in a 100s grace window (`SUSPEND_GRACE_WINDOW_SECONDS`); if none arrived, it re-arms and re-suspends on its own (absorbs spurious wakes without staying up).
+Control-bot-only, and gated by `suspend_enabled` in the bot config (default `true`) — an ops kill-switch that grounds the verb without a code edit. `/suspend [duration]`:
+- No argument — **heartbeat mode**. Arms `rtcwake`, suspends, and on each wake opens a grace window; if no human turns up, it re-arms and re-suspends on its own (absorbs spurious wakes without staying up).
 - `8h` / `45m` — **single-wake mode**, wakes once after the given duration.
 
-Resume detection is primarily a **wall-clock jump** in the poll loop: if the gap between consecutive loop iterations exceeds `RESUME_WALLCLOCK_JUMP_SECONDS` (45s — chosen to clear both the 30s poll timeout and the 60s network-backoff cap, so neither produces a false positive), a resume is assumed. An optional systemd `system-sleep` hook (`aipass-resume-signal`) writing a resume-stamp file is kept as a secondary signal, since this signal is not proven to fire reliably on the deployed hardware.
+**Cadence is adaptive**, and all three knobs are bot-config overridable: `suspend_active_heartbeat_minutes` (default 3) while the conversation is live, `suspend_heartbeat_minutes` (default 25) once it goes quiet, and `suspend_active_window_minutes` (default 30) for how recent an inbound counts as live. Liveness is read from the shared presence stamp, so chatting with `@devpulse` tightens the control bot's beats. This deliberately recreates the Jul 30 - Aug 1 behaviour, where spurious ACPI wakes accidentally duty-cycled the machine in 7-44s beats and chat-behind-suspend felt near-live; once `aipass-wake-sources` masking made suspend actually stick, that accident stopped and the long beat trapped the conversation.
+
+Resume detection has two triggers: a **wall-clock jump** in the poll loop larger than `RESUME_WALLCLOCK_JUMP_SECONDS` (45s — clears both the 30s poll timeout and the 60s network-backoff cap, so neither produces a false positive), and **reaching the armed alarm time** (`_suspend_alarm_at`), which catches a nap too short for the gap check to see. An optional systemd `system-sleep` hook (`aipass-resume-signal`) writing a resume-stamp file is kept as a third, secondary signal, since it is not proven to fire reliably on the deployed hardware.
+
+**Wake cause** is decided by comparing the wake against the armed alarm time, not by guessing from gap size: waking more than `SUSPEND_EARLY_WAKE_MARGIN_SECONDS` (60s) early means a human woke the machine, so the whole cycle is cancelled and the RTC alarm disarmed. At or near the alarm, it's our own RTC and the grace window opens.
+
+**The grace window** (`SUSPEND_GRACE_WINDOW_SECONDS`, 180s) is measured from the first *successful Telegram poll* after resume, not from resume detection — DNS/network needs 45-60s to come back, and the whole reply chain (poll → inject → model turn → send) has to fit inside the window or the machine re-suspends mid-conversation. Re-arming is also held while any bot has an undelivered pending (`_turn_in_flight()`), so a reply in flight is never cut off.
+
+**Human presence crosses processes.** Every bot process stamps `~/.aipass/telegram_bots/last_inbound.json` on any allowed-user inbound message; the control bot's grace check reads it. The control bot cannot see another bot's traffic in-process, so without this, chatting with `@devpulse` did not register as "human present" and the machine re-suspended under Patrick's hands (incident 2026-08-02). Any inbound message on any bot now cancels the cycle, not just a control verb on the control bot.
 
 Root-privileged pieces live as reviewable repo files in `tools/suspend/`, installed by `tools/suspend/install_suspend_grants.sh` (never applied directly to `/etc` by an agent):
 - `aipass-suspend-sudoers` — passwordless `rtcwake` for the bot user
 - `60-aipass-suspend.rules` — polkit rule for `systemctl suspend`
 - `aipass-resume-signal` — optional system-sleep resume-stamp hook
-- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot)
+- `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: masking those wakes made suspend real and trapped the conversation (ruling 2026-08-02, compass #216). Compass #217 later superseded the reasoning — the machine now stays awake 24/7 and `/lock` replaces `/suspend` entirely — but the opt-in default stands, and the unit is disabled on this machine.
 
-**Honest status:** the hardening above (wall-clock-jump detection, stale-stamp fix, wake-source persistence unit) landed as code + tests only. The currently running bot predates it — installing the grants and restarting the bot is a deliberate, separate session (DPLAN-0270's test-matrix step T3), not something applied automatically on landing.
+**Honest status:** `/suspend` is **retired from daily use and grounded** as of 2026-08-02 (Patrick's ruling, compass #217) — do not live-test it without him. The v1.5.0 rework worked as designed in a live soak, and Patrick still hit the wall: fixed suspend is still suspend, and real sleep is real disconnect. So the machine now stays awake 24/7 and `/lock` is the daily driver. The verb stays shipped and tested as a battery-saver, with `suspend_enabled` as the parking brake; it has still never passed a hands-off overnight soak (DPLAN-0270 test-matrix step T4). Full deployment picture: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).
 
 ## Streaming replies (DPLAN-0229)
 

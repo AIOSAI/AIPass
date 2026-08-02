@@ -14,6 +14,7 @@ No Rich markup — display concerns belong to the UI layer.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import socket
@@ -121,11 +122,72 @@ def check_node_present() -> Dict[str, Any]:
     return {"found": bool(path), "path": path}
 
 
+def _find_srt_resolver() -> Path | None:
+    """Locate _srt_resolve.mjs inside the sibling aipass.hooks branch.
+
+    Uses importlib.util.find_spec so no absolute/hardcoded path is baked in —
+    this works regardless of where the repo is checked out. aipass.hooks is a
+    namespace package (no __init__.py required) so find_spec still resolves
+    it via submodule_search_locations.
+
+    Returns:
+        Path to the resolver script if aipass.hooks is importable and the
+        file exists on disk, else None.
+    """
+    try:
+        spec = importlib.util.find_spec("aipass.hooks")
+    except (ImportError, ValueError, ModuleNotFoundError) as exc:
+        logger.info("[sandbox_check] aipass.hooks not importable: %s", exc)
+        return None
+
+    if spec is None or not spec.submodule_search_locations:
+        logger.info("[sandbox_check] aipass.hooks package not found")
+        return None
+
+    hooks_dir = Path(next(iter(spec.submodule_search_locations)))
+    resolver = hooks_dir / "apps" / "modules" / "_srt_resolve.mjs"
+    if not resolver.is_file():
+        logger.warning("[sandbox_check] srt resolver script missing at %s", resolver)
+        return None
+    return resolver
+
+
+def _srt_install_hint() -> str:
+    """Build an install hint that names the actual npm global prefix.
+
+    Falls back to the plain install command if npm isn't available or the
+    prefix query fails — still a valid hint, just less specific.
+    """
+    plain = "npm install -g @anthropic-ai/sandbox-runtime"
+    npm = shutil.which("npm")
+    if not npm:
+        return plain
+
+    try:
+        proc = subprocess.run(
+            [npm, "root", "-g"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        root = proc.stdout.strip()
+        if proc.returncode == 0 and root:
+            return f"{plain}  (installs to {root})"
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        logger.info("[sandbox_check] npm root -g query failed: %s", exc)
+
+    return plain
+
+
 def check_srt_resolvable() -> Dict[str, Any]:
     """Check if @anthropic-ai/sandbox-runtime is resolvable via node.
 
-    Mirrors _srt_resolve.mjs resolution: derive node prefix from process.execPath,
-    then check <prefix>/lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js.
+    Delegates to _srt_resolve.mjs (owned by the hooks branch) for resolution —
+    it tries npm_config_prefix, `npm root -g`, and known global node_modules
+    locations in order, which correctly handles layouts where node's own
+    install prefix differs from npm's global prefix (Debian/Ubuntu, official
+    node Docker images). See DPLAN-0279.
 
     Returns:
         found: bool
@@ -140,17 +202,14 @@ def check_srt_resolvable() -> Dict[str, Any]:
             "install_hint": "Install node first, then: npm install -g @anthropic-ai/sandbox-runtime",
         }
 
+    resolver = _find_srt_resolver()
+    if resolver is None:
+        json_handler.log_operation("sandbox_check_srt", {"found": False})
+        return {"found": False, "path": None, "install_hint": _srt_install_hint()}
+
     try:
-        script = (
-            "const p = require('path');"
-            "const prefix = p.dirname(p.dirname(process.execPath));"
-            "const entry = p.join(prefix, 'lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js');"
-            "const fs = require('fs');"
-            "if (fs.existsSync(entry)) { process.stdout.write(entry); }"
-            "else { process.exit(1); }"
-        )
         proc = subprocess.run(
-            [node, "-e", script],
+            [node, str(resolver), "--resolve"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -161,6 +220,10 @@ def check_srt_resolvable() -> Dict[str, Any]:
             json_handler.log_operation("sandbox_check_srt", {"found": True, "path": path})
             return {"found": True, "path": path, "install_hint": ""}
 
+        tried = proc.stderr.strip()
+        if tried:
+            logger.info("[sandbox_check] srt not resolvable, tried:\n%s", tried)
+
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
         logger.warning("[sandbox_check] srt resolve error: %s", exc)
 
@@ -168,7 +231,7 @@ def check_srt_resolvable() -> Dict[str, Any]:
     return {
         "found": False,
         "path": None,
-        "install_hint": "npm install -g @anthropic-ai/sandbox-runtime",
+        "install_hint": _srt_install_hint(),
     }
 
 

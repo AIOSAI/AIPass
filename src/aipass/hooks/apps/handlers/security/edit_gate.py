@@ -23,6 +23,7 @@ STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / ".diagnostics_s
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
+_NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 
 
 def _get_package_from_cwd(cwd: str) -> str:
@@ -146,14 +147,66 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
         logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
 
 
-def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
-    """Check .trinity Write/Edit/MultiEdit for over-limit entries. Returns block dict or None."""
-    try:
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
-        limits = el.load_entry_limits(branch)
-        if not limits.get("enabled"):
-            return None
+def _check_newest_first(before: dict, after: dict) -> dict | None:
+    """Reject sessions[]/key_learnings[] edits that add entries anywhere but index 0,
+    or whose number doesn't exceed the max existing number (DPLAN-0278).
 
+    These arrays are newest-first: rollover archives the TAIL as "oldest". A new
+    entry appended after existing ones, or numbered <= the current max, gets
+    silently archived as history on the next rollover instead of kept as recent.
+    """
+    for key in _NEWEST_FIRST_ARRAYS:
+        b = before.get(key)
+        a = after.get(key)
+        if not isinstance(b, list) or not isinstance(a, list) or len(a) <= len(b):
+            continue
+
+        added_count = len(a) - len(b)
+        new_entries = a[:added_count]
+        rest = a[added_count:]
+
+        existing_numbers: list[int] = []
+        for e in b:
+            if not isinstance(e, dict):
+                continue
+            number = e.get("number")
+            if isinstance(number, int):
+                existing_numbers.append(number)
+        max_existing = max(existing_numbers) if existing_numbers else 0
+
+        if rest != b:
+            reason = (
+                f"{key} is newest-first — the entries after the new addition(s) no longer match the prior "
+                "content, which means something was added after index 0 (e.g. appended at the tail). The "
+                "next rollover archives the tail as 'oldest' and would silently drop a misplaced write. "
+                "Insert new entries at index 0 only, leaving the rest of the array untouched."
+            )
+            return {
+                "stdout": json.dumps({"decision": "block", "reason": reason}),
+                "exit_code": 2,
+                "sound": "edit gate",
+            }
+
+        for entry in new_entries:
+            if not isinstance(entry, dict):
+                continue
+            number = entry.get("number")
+            if not isinstance(number, int) or number <= max_existing:
+                reason = (
+                    f"{key}: new entry number ({number}) must be greater than the max existing "
+                    f"number ({max_existing}) — newest-first requires ascending numbers inserted at index 0."
+                )
+                return {
+                    "stdout": json.dumps({"decision": "block", "reason": reason}),
+                    "exit_code": 2,
+                    "sound": "edit gate",
+                }
+    return None
+
+
+def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
+    """Check .trinity Write/Edit/MultiEdit for over-limit entries and newest-first violations."""
+    try:
         resolved_path = str(fp.resolve()) if not fp.is_absolute() else str(fp)
 
         if tool_name == "Write":
@@ -172,9 +225,16 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
                 return None
             after = json.loads(after_text)
 
-        block = _evaluate_limits(before, after, limits, el)
+        block = _check_newest_first(before, after)
         if block:
             return block
+
+        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        limits = el.load_entry_limits(branch)
+        if limits.get("enabled"):
+            block = _evaluate_limits(before, after, limits, el)
+            if block:
+                return block
 
         _check_section_counts(after, branch, fp.stem)
 

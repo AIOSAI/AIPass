@@ -66,7 +66,8 @@ DEFAULT_PROMPT = "Hi. Check inbox, process new emails, update memories when done
 
 # Model aliases — passed directly to claude CLI which resolves latest-in-class.
 KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku"})
-DEFAULT_MODEL = "sonnet"
+# If this default is flipped again, update the README to match (Patrick, 2026-08-01).
+DEFAULT_MODEL = "opus"
 
 # Branches that cannot be woken manually by cross-branch drone commands.
 # Dispatch-send path (dispatch.py._orchestrate_dispatch_send) bypasses this check.
@@ -572,7 +573,7 @@ def wake_branch(
         auto: If True, respect autonomous_pause (used by daemon)
         sender: Return-to-sender for bounce emails
         model: Model shorthand ("sonnet", "opus", "haiku") or full model ID.
-               Defaults to sonnet (claude-sonnet-4-6).
+               Defaults to opus (Patrick ruling 2026-08-01: agents run opus).
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
@@ -859,7 +860,7 @@ if __name__ == "__main__":
         print("  --fresh          Start fresh session (claude -p) instead of resuming (claude -c -p)")
         print("  --auto           Respect autonomous_pause (used by daemon). Manual wake ignores it.")
         print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse)")
-        print("  --model NAME     Model to use: sonnet (default), opus, haiku, or full model ID")
+        print("  --model NAME     Model to use: opus (default), sonnet, haiku, or full model ID")
         print()
         print("Output: Step-by-step status of the dispatch pipeline:")
         print("  ✅ resolve → @branch found at /path/to/branch")

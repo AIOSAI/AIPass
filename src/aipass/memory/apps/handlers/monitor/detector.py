@@ -354,11 +354,18 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
 
     reasons = []
 
-    max_sessions = file_limits.get("sessions", {}).get("count")
-    if max_sessions is not None:
+    session_limits = file_limits.get("sessions", {})
+    max_sessions = session_limits.get("count")
+    auto_compact_cap = session_limits.get("auto_compact_cap")
+    if max_sessions is not None or auto_compact_cap is not None:
         sessions = data.get("sessions", [])
-        if isinstance(sessions, list) and len(sessions) >= max_sessions:
-            reasons.append(f"{len(sessions)}/{max_sessions} sessions")
+        if isinstance(sessions, list):
+            auto_count = sum(1 for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact")
+            regular_count = len(sessions) - auto_count
+            if auto_compact_cap is not None and auto_count >= auto_compact_cap:
+                reasons.append(f"{auto_count}/{auto_compact_cap} auto-compact snapshots")
+            if max_sessions is not None and regular_count >= max_sessions:
+                reasons.append(f"{regular_count}/{max_sessions} sessions")
 
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None:

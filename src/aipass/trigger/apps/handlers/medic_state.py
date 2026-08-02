@@ -9,8 +9,18 @@
 """
 Medic State Handler - Persistence and status for Medic toggle
 
-Reads/writes medic_enabled flag and muted_branches list in trigger_config.json.
+Reads/writes medic_enabled flag and the mute lists in trigger_config.json.
 Collects status data from suppression logs and rate limit logs.
+
+Two independent mute classes share the same entry format and TTL machinery:
+    muted_branches         - CONTENT mutes. Silence error_detected dispatch for
+                             a branch doing known-noisy work.
+    volume_muted_branches  - VOLUME mutes. Silence runaway_log_detected alerts.
+
+They are deliberately separate: a content mute says "expect error lines from
+me right now", which says nothing about log volume. Gating volume alerts on a
+content mute inverted their purpose — during build windows (when agents mute
+themselves) runaway alerts were exactly the ones being dropped.
 
 Architecture:
     Module (medic.py) orchestrates, this handler manages state.
@@ -36,6 +46,11 @@ _DURATION_RE = re.compile(r"^(\d+)(h|d)$")
 
 DEFAULT_MUTE_SECONDS = 86400  # 24 hours
 DEFAULT_OFF_SECONDS = 86400  # 24 hours
+
+# Two independent mute classes — see module docstring.
+MUTE_KEY_CONTENT = "muted_branches"  # content-based error noise (medic)
+MUTE_KEY_VOLUME = "volume_muted_branches"  # volume-based runaway alerts
+MUTE_KEYS = (MUTE_KEY_CONTENT, MUTE_KEY_VOLUME)
 
 
 def parse_duration(duration_str: str) -> Optional[float]:
@@ -69,13 +84,14 @@ def _is_mute_active(entry, now: datetime) -> bool:
 
 
 def _clean_expired_mutes(data: dict) -> None:
-    """Remove expired mute entries from config data in-place."""
+    """Remove expired mute entries from every mute class in config data, in-place."""
     config = data.get("config", {})
-    muted = config.get("muted_branches", [])
-    if not muted:
-        return
     now = datetime.now()
-    config["muted_branches"] = [e for e in muted if _is_mute_active(e, now)]
+    for key in MUTE_KEYS:
+        muted = config.get(key, [])
+        if not muted:
+            continue
+        config[key] = [e for e in muted if _is_mute_active(e, now)]
 
 
 def read_config() -> dict:
@@ -192,40 +208,18 @@ def _normalize_branch_name(name: str) -> str:
     return cleaned.lower()
 
 
-def get_muted_branches() -> List[str]:
+def _get_muted_detail_for(key: str) -> List[Dict[str, Any]]:
     """
-    Get list of currently active muted branch names.
+    Get active mute entries for one mute class, with expiry info.
 
-    Evaluates TTL expiry on read — expired mutes are filtered out.
-
-    Returns:
-        List of muted branch names (lowercase, e.g., ['speakeasy', 'api'])
-    """
-    data = read_config()
-    raw = data.get("config", {}).get("muted_branches", [])
-    now = datetime.now()
-    result = []
-    for entry in raw:
-        if isinstance(entry, str):
-            result.append(_normalize_branch_name(entry))
-        elif isinstance(entry, dict):
-            expires_at = entry.get("expires_at")
-            if expires_at is None or datetime.fromisoformat(expires_at) > now:
-                result.append(_normalize_branch_name(entry.get("name", "")))
-    return result
-
-
-def get_muted_branches_detail() -> List[Dict[str, Any]]:
-    """
-    Get muted branches with expiry info for status display.
-
-    Returns active mutes only (expired ones filtered out).
+    Args:
+        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
 
     Returns:
         List of dicts with 'name' and 'expires_at' (None = permanent)
     """
     data = read_config()
-    raw = data.get("config", {}).get("muted_branches", [])
+    raw = data.get("config", {}).get(key, [])
     now = datetime.now()
     result = []
     for entry in raw:
@@ -243,6 +237,53 @@ def get_muted_branches_detail() -> List[Dict[str, Any]]:
     return result
 
 
+def get_muted_branches() -> List[str]:
+    """
+    Get list of currently active CONTENT-muted branch names.
+
+    Evaluates TTL expiry on read — expired mutes are filtered out.
+
+    Returns:
+        List of muted branch names (lowercase, e.g., ['speakeasy', 'api'])
+    """
+    return [m["name"] for m in _get_muted_detail_for(MUTE_KEY_CONTENT)]
+
+
+def get_muted_branches_detail() -> List[Dict[str, Any]]:
+    """
+    Get CONTENT-muted branches with expiry info for status display.
+
+    Returns active mutes only (expired ones filtered out).
+
+    Returns:
+        List of dicts with 'name' and 'expires_at' (None = permanent)
+    """
+    return _get_muted_detail_for(MUTE_KEY_CONTENT)
+
+
+def get_volume_muted_branches() -> List[str]:
+    """
+    Get list of currently active VOLUME-muted branch names.
+
+    Volume mutes gate runaway_log_detected alerts only — they are independent
+    of the content mutes used by the medic error pipeline.
+
+    Returns:
+        List of volume-muted branch names (lowercase)
+    """
+    return [m["name"] for m in _get_muted_detail_for(MUTE_KEY_VOLUME)]
+
+
+def get_volume_muted_branches_detail() -> List[Dict[str, Any]]:
+    """
+    Get VOLUME-muted branches with expiry info for status display.
+
+    Returns:
+        List of dicts with 'name' and 'expires_at' (None = permanent)
+    """
+    return _get_muted_detail_for(MUTE_KEY_VOLUME)
+
+
 def _mute_entry_name(entry) -> str:
     """Extract the normalized branch name from a mute entry (string or dict)."""
     if isinstance(entry, str):
@@ -252,14 +293,12 @@ def _mute_entry_name(entry) -> str:
     return ""
 
 
-def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> bool:
+def _mute_branch_in(key: str, branch_name: str, duration_seconds: Optional[float] = None) -> bool:
     """
-    Add a branch to the muted list with optional TTL.
-
-    Muted branches will have errors detected but NOT dispatched.
-    Persists in trigger_config.json.
+    Add a branch to one mute class with optional TTL.
 
     Args:
+        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
         branch_name: Branch name (with or without @)
         duration_seconds: TTL in seconds (None = permanent/forever)
 
@@ -271,23 +310,24 @@ def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> b
         data = read_config()
         if "config" not in data:
             data["config"] = {}
-        raw_muted = data["config"].get("muted_branches", [])
+        raw_muted = data["config"].get(key, [])
         new_muted = [e for e in raw_muted if _mute_entry_name(e) != clean]
         if duration_seconds is not None:
             expires = datetime.now() + timedelta(seconds=duration_seconds)
             new_muted.append({"name": clean, "expires_at": expires.isoformat()})
         else:
             new_muted.append({"name": clean, "expires_at": None})
-        data["config"]["muted_branches"] = new_muted
+        data["config"][key] = new_muted
         data["timestamp"] = datetime.now().strftime("%Y-%m-%d")
         return write_config(data)
 
 
-def unmute_branch(branch_name: str) -> bool:
+def _unmute_branch_in(key: str, branch_name: str) -> bool:
     """
-    Remove a branch from the muted list.
+    Remove a branch from one mute class.
 
     Args:
+        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
         branch_name: Branch name (with or without @)
 
     Returns:
@@ -298,10 +338,72 @@ def unmute_branch(branch_name: str) -> bool:
         data = read_config()
         if "config" not in data:
             data["config"] = {}
-        raw_muted = data["config"].get("muted_branches", [])
-        data["config"]["muted_branches"] = [e for e in raw_muted if _mute_entry_name(e) != clean]
+        raw_muted = data["config"].get(key, [])
+        data["config"][key] = [e for e in raw_muted if _mute_entry_name(e) != clean]
         data["timestamp"] = datetime.now().strftime("%Y-%m-%d")
         return write_config(data)
+
+
+def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> bool:
+    """
+    Add a branch to the CONTENT muted list with optional TTL.
+
+    Muted branches will have errors detected but NOT dispatched. Does NOT
+    gate runaway (volume) alerts — use mute_branch_volume for those.
+    Persists in trigger_config.json.
+
+    Args:
+        branch_name: Branch name (with or without @)
+        duration_seconds: TTL in seconds (None = permanent/forever)
+
+    Returns:
+        True on success
+    """
+    return _mute_branch_in(MUTE_KEY_CONTENT, branch_name, duration_seconds)
+
+
+def unmute_branch(branch_name: str) -> bool:
+    """
+    Remove a branch from the CONTENT muted list.
+
+    Args:
+        branch_name: Branch name (with or without @)
+
+    Returns:
+        True on success
+    """
+    return _unmute_branch_in(MUTE_KEY_CONTENT, branch_name)
+
+
+def mute_branch_volume(branch_name: str, duration_seconds: Optional[float] = None) -> bool:
+    """
+    Add a branch to the VOLUME muted list with optional TTL.
+
+    Volume mutes silence runaway_log_detected alerts for a branch that is
+    knowingly producing heavy log output. CRITICAL-severity runaways still
+    bypass this mute — see runaway_handler.
+
+    Args:
+        branch_name: Branch name (with or without @)
+        duration_seconds: TTL in seconds (None = permanent/forever)
+
+    Returns:
+        True on success
+    """
+    return _mute_branch_in(MUTE_KEY_VOLUME, branch_name, duration_seconds)
+
+
+def unmute_branch_volume(branch_name: str) -> bool:
+    """
+    Remove a branch from the VOLUME muted list.
+
+    Args:
+        branch_name: Branch name (with or without @)
+
+    Returns:
+        True on success
+    """
+    return _unmute_branch_in(MUTE_KEY_VOLUME, branch_name)
 
 
 def get_suppression_stats() -> Dict[str, Any]:

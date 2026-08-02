@@ -112,7 +112,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "rollover": {
         "defaults": {
             "local": {
-                "sessions": {"count": 20},
+                "sessions": {"count": 20, "auto_compact_cap": 3},
                 "key_learnings": {"count": 25},
             },
             "observations": {

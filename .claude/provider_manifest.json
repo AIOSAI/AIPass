@@ -26,8 +26,11 @@
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact", "event": "PreCompact", "matcher": "auto", "timeout": 60},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover", "event": "PreCompact", "matcher": "manual", "timeout": 120},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_rollover", "event": "PreCompact", "matcher": "auto", "timeout": 120},
+        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process", "event": "PreCompact", "matcher": "manual", "timeout": 120},
+        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:auto_process", "event": "PreCompact", "matcher": "auto", "timeout": 120},
         {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep", "event": "PreCompact", "matcher": "manual", "timeout": 30},
-        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep", "event": "PreCompact", "matcher": "auto", "timeout": 30}
+        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py PreCompact:pre_compact_prep", "event": "PreCompact", "matcher": "auto", "timeout": 30},
+        {"command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:cadence_reset", "event": "SessionStart", "timeout": 30}
       ],
       "env": {
         "AIPASS_HOME": "{{REPO_ROOT}}",
@@ -62,8 +65,7 @@
           "Bash(git push*)"
         ],
         "ask": [
-          "Edit(~/.claude/**)",
-          "Write(~/.claude/**)"
+          "Edit(~/.claude/**)"
         ]
       },
       "commands": {

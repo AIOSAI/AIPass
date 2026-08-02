@@ -105,7 +105,7 @@ Your continuity across sessions. Save proactively — after milestones, decision
  - `passport.json` — identity. Update only when identity genuinely evolves.
  - `local.json` — session log, key learnings, todos.
  - `observations.json` — what you learn about the user.
- - Overflow rolls to vectors automatically — never trim by hand. `drone @memory search "query"` recalls it — search before assuming you're cold.
+ - Overflow rolls to vectors automatically — never trim by hand. `drone @memory search "query"` recalls it — search before assuming you're cold. Expected entry missing from local.json? It likely rolled over — absence locally ≠ gone.
  - Entry caps are hook-enforced (over-limit edit = rejected whole). The live cap is in each file's `*_meta` line — read it before writing, draft to ~80%; if rejected, rewrite hard in one pass.
 
 # House rules

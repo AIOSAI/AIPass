@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-02-13
-# Modified: 2026-03-08
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -13,9 +13,10 @@ Commands for viewing, filtering, and managing errors in the Medic v2
 error registry. Provides visibility into all tracked errors with
 fingerprinting, counts, and status tracking.
 
-Commands: list, detail, suppress, resolve, clear-resolved, stats, circuit-breaker
+Commands: list, detail, suppress, unsuppress, resolve, clear-resolved, stats, circuit-breaker
 Public API: report_error() for cross-branch push reporting (Drone calls this)
 Phase 5: Suppress triggers source fix pipeline (email + fix status tracking)
+Suppress silences dispatch outright (compass #219) — unsuppress restores it
 Architecture: Module orchestrates, error_registry handler manages data
 """
 
@@ -142,8 +143,11 @@ def print_help() -> None:
     console.print("  [bold]list[/bold]               List tracked errors (default)")
     console.print("                       [dim]--status=new --component=FLOW --severity=high --limit=20[/dim]")
     console.print("  [bold]detail[/bold] <id>         Show full details for an error entry")
-    console.print("  [bold]suppress[/bold] <id> [reason]  Mark error as suppressed")
-    console.print("  [bold]resolve[/bold] <id>        Mark error as resolved")
+    # \[reason] is escaped — Rich would otherwise eat the brackets as a style tag.
+    console.print("  [bold]suppress[/bold] <id> \\[reason]  Silence it — no dispatch while suppressed")
+    console.print("                       [dim]occurrences still count — stays auditable[/dim]")
+    console.print("  [bold]unsuppress[/bold] <id>     Restore dispatch [dim](existing backoff still applies)[/dim]")
+    console.print("  [bold]resolve[/bold] <id>        Mark error as resolved [dim](recurrence still dispatches)[/dim]")
     console.print("  [bold]clear-resolved[/bold]      Purge old resolved entries [dim](--days=7)[/dim]")
     console.print("  [bold]purge[/bold]              Purge stale entries [dim](--days=30)[/dim]")
     console.print("  [bold]stats[/bold]               Summary statistics + circuit breaker state")
@@ -155,6 +159,7 @@ def print_help() -> None:
     console.print("  drone @trigger errors list --status=new --component=FLOW")
     console.print("  drone @trigger errors detail a1b2c3d4")
     console.print("  drone @trigger errors suppress a1b2c3d4 known startup issue")
+    console.print("  drone @trigger errors unsuppress a1b2c3d4")
     console.print("  drone @trigger errors resolve a1b2c3d4")
     console.print("  drone @trigger errors clear-resolved --days=14")
     console.print("  drone @trigger errors circuit-breaker reset")
@@ -190,6 +195,7 @@ def handle_command(command: str, args: list) -> bool:
         "list": _cmd_list,
         "detail": _cmd_detail,
         "suppress": _cmd_suppress,
+        "unsuppress": _cmd_unsuppress,
         "resolve": _cmd_resolve,
         "clear-resolved": _cmd_clear_resolved,
         "purge": _cmd_purge,
@@ -359,6 +365,41 @@ def _cmd_suppress(console, args: list) -> bool:
     return True
 
 
+def _cmd_unsuppress(console, args: list) -> bool:
+    """Lift suppression — the error dispatches again on its next occurrence.
+
+    Restores the entry to 'new'. Backoff state is deliberately untouched: an
+    error that was mid-backoff when it got silenced resumes where it left off
+    rather than firing immediately.
+    """
+    from aipass.cli.apps.modules import error, success
+
+    if not args:
+        error(
+            "Missing error ID or fingerprint",
+            suggestion="Usage: drone @trigger errors unsuppress <id_or_fingerprint>",
+        )
+        return True
+
+    entry = _find_by_id_or_fp(args[0])
+    if not entry:
+        error(f"Error not found: {args[0]}")
+        return True
+
+    if entry.get("status") != "suppressed":
+        console.print(f"[dim]Error {entry.get('id', '?')} is not suppressed (status: {entry.get('status', '?')})[/dim]")
+        return True
+
+    fp = entry.get("fingerprint", args[0])
+    # No reason passed — the original suppress_reason stays as history.
+    if update_status(fp, "new"):
+        logger.info(f"[ERRORS] Unsuppressed {entry.get('id', '?')} ({fp[:12]})")
+        success(f"Unsuppressed error {entry.get('id', '?')} ({fp[:12]}) — dispatch restored")
+    else:
+        error(f"Failed to unsuppress error {args[0]}")
+    return True
+
+
 def _cmd_resolve(console, args: list) -> bool:
     """Mark error as resolved."""
     from aipass.cli.apps.modules import error, success
@@ -414,6 +455,9 @@ def _cmd_stats(console, args: list) -> bool:
     console.print("Error Registry Statistics")
     console.print()
     console.print(f"  [bold]Total errors:[/bold]  {stats['total']}")
+    silenced = stats["by_status"].get("suppressed", 0)
+    if silenced:
+        console.print(f"  [bold]Silenced:[/bold]      {silenced} [dim](no dispatch until unsuppressed)[/dim]")
     console.print()
 
     for label, data, color_fn in [

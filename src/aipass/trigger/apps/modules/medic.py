@@ -14,7 +14,11 @@ Provides on/off/status/mute/unmute commands for the Medic system
 are still detected and logged but NOT dispatched to branches.
 Per-branch muting suppresses dispatch for specific branches only.
 
-Commands: on, off, status, mute, unmute
+Two mute classes, deliberately independent:
+    mute / unmute                CONTENT — gates error_detected dispatch
+    volume-mute / volume-unmute  VOLUME  — gates runaway_log_detected alerts
+
+Commands: on, off, status, mute, unmute, volume-mute, volume-unmute
 Architecture: Module orchestrates, medic_state handler manages persistence
 """
 
@@ -31,9 +35,12 @@ from aipass.trigger.apps.handlers.medic_state import (
     is_enabled,
     set_enabled,
     get_muted_branches_detail,
+    get_volume_muted_branches_detail,
     get_disabled_until,
     mute_branch,
     unmute_branch,
+    mute_branch_volume,
+    unmute_branch_volume,
     get_suppression_stats,
     get_rate_limit_stats,
     parse_duration,
@@ -123,6 +130,8 @@ def print_introspection():
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_muted_branches — list muted branches)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](mute_branch — suppress dispatch for a branch)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](unmute_branch — resume dispatch for a branch)[/dim]")
+    console.print("    [cyan]•[/cyan] medic_state.py [dim](mute_branch_volume — suppress runaway alerts)[/dim]")
+    console.print("    [cyan]•[/cyan] medic_state.py [dim](unmute_branch_volume — resume runaway alerts)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_suppression_stats — suppression statistics)[/dim]")
     console.print("    [cyan]•[/cyan] medic_state.py [dim](get_rate_limit_stats — rate limit statistics)[/dim]")
     console.print()
@@ -199,6 +208,8 @@ def print_help() -> None:
     console.print("  [bold]mute[/bold] @branch --for 48h  Custom TTL (e.g. 48h, 7d)")
     console.print("  [bold]mute[/bold] @branch --forever  Permanent mute")
     console.print("  [bold]unmute[/bold] @branch     Resume dispatch for a muted branch")
+    console.print("  [bold]volume-mute[/bold] @branch    Suppress runaway alerts for 24h (same flags)")
+    console.print("  [bold]volume-unmute[/bold] @branch  Resume runaway alerts for a branch")
     console.print("  [bold]help[/bold]               Show this help")
     console.print()
     console.rule("OFF vs MUTE")
@@ -210,6 +221,16 @@ def print_help() -> None:
     console.print("  [yellow]mute[/yellow]      Per-branch suppress for 24h (default).")
     console.print("            --for 48h or --for 7d for custom duration.")
     console.print("            --forever for permanent. Auto-expires — no need to unmute.")
+    console.print()
+    console.rule("CONTENT MUTE vs VOLUME MUTE")
+    console.print()
+    console.print("  [yellow]mute[/yellow]          CONTENT — gates error_detected. The 'expect error")
+    console.print("                lines from me while I build' switch. Never gates runaways.")
+    console.print("  [yellow]volume-mute[/yellow]   VOLUME — gates runaway_log_detected for a branch")
+    console.print("                knowingly logging heavy. CRITICAL bypasses it.")
+    console.print()
+    console.print("  [dim]Separate on purpose: a content mute says nothing about log volume,[/dim]")
+    console.print("  [dim]and build windows are exactly when floods happen.[/dim]")
     console.print()
     console.rule("EXAMPLES")
     console.print()
@@ -234,7 +255,12 @@ def print_help() -> None:
     console.print("  ->  handler checks medic_enabled  ->  checks branch mute list")
     console.print("  ->  dispatches fix-it email to affected branch (or suppresses)")
     console.print()
-    console.print("  Suppressed errors: trigger/logs/medic_suppressed.jsonl")
+    console.print("  Prax rate tracker  ->  fires runaway_log_detected event")
+    console.print("  ->  handler checks per-file cooldown  ->  checks VOLUME mute list")
+    console.print("  ->  dispatches runaway alert (CRITICAL bypasses the mute)")
+    console.print()
+    console.print("  Suppressed errors:   trigger/logs/medic_suppressed.jsonl")
+    console.print("  Runaway decisions:   trigger/logs/runaway_suppressed.jsonl")
     console.print()
 
 
@@ -332,6 +358,64 @@ def _handle_unmute(console, args: list) -> None:
         error(f"Failed to unmute @{branch_name}", suggestion="Check trigger_config.json")
 
 
+def _handle_volume_mute(console, args: list) -> None:
+    """Handle 'medic volume-mute @branch [--for <dur>] [--forever]'."""
+    from aipass.cli.apps.modules import error
+
+    duration_secs, is_forever, rest = _parse_duration_args(args)
+
+    usage = "Usage: medic volume-mute @branch [--for 48h] [--forever]"
+    if not rest:
+        error("Missing branch name", suggestion=usage)
+        return
+    branch_name = _extract_branch_name(rest[0])
+    if not branch_name:
+        error("Missing branch name", suggestion=usage)
+        return
+    if mute_branch_volume(branch_name, duration_seconds=duration_secs):
+        logger.info(f"[MEDIC] Volume-muted branch: {branch_name}")
+        if is_forever or duration_secs is None:
+            console.print(f"  [yellow]Volume-muted[/yellow] @{branch_name} — permanent (use volume-unmute to restore)")
+        else:
+            hours = int(duration_secs) // 3600
+            console.print(f"  [yellow]Volume-muted[/yellow] @{branch_name} — auto-expires in {hours}h")
+        console.print("  [dim]Runaway alerts suppressed. CRITICAL runaways still deliver.[/dim]")
+    else:
+        error(f"Failed to volume-mute @{branch_name}", suggestion="Check trigger_config.json")
+
+
+def _handle_volume_unmute(console, args: list) -> None:
+    """Handle 'medic volume-unmute @branch'."""
+    from aipass.cli.apps.modules import error
+
+    usage = "Usage: medic volume-unmute @branch"
+    if not args:
+        error("Missing branch name", suggestion=usage)
+        return
+    branch_name = _extract_branch_name(args[0])
+    if not branch_name:
+        error("Missing branch name", suggestion=usage)
+        return
+    if unmute_branch_volume(branch_name):
+        logger.info(f"[MEDIC] Volume-unmuted branch: {branch_name}")
+        console.print(f"  [green]Volume-unmuted[/green] @{branch_name} — runaway alerts resumed")
+    else:
+        error(f"Failed to volume-unmute @{branch_name}", suggestion="Check trigger_config.json")
+
+
+def _fmt_mute_list(detail: list) -> str:
+    """Render a mute detail list as a display string."""
+    if not detail:
+        return "none"
+    parts = []
+    for m in detail:
+        if m["expires_at"] is None:
+            parts.append(f"@{m['name']} [dim](permanent)[/dim]")
+        else:
+            parts.append(f"@{m['name']} [dim]({_fmt_remaining(m['expires_at'])} left)[/dim]")
+    return ", ".join(parts)
+
+
 def _handle_status(console) -> None:
     """Handle 'medic status' — display current medic state."""
     enabled = is_enabled()
@@ -340,6 +424,7 @@ def _handle_status(console) -> None:
     suppression = get_suppression_stats()
     rate_limits = get_rate_limit_stats()
     muted_detail = get_muted_branches_detail()
+    volume_muted_detail = get_volume_muted_branches_detail()
 
     state_color = "green" if enabled else "yellow"
     state_text = "ENABLED" if enabled else "DISABLED"
@@ -356,21 +441,14 @@ def _handle_status(console) -> None:
     else:
         watcher_text = "stopped"
 
-    if muted_detail:
-        muted_parts = []
-        for m in muted_detail:
-            if m["expires_at"] is None:
-                muted_parts.append(f"@{m['name']} [dim](permanent)[/dim]")
-            else:
-                muted_parts.append(f"@{m['name']} [dim]({_fmt_remaining(m['expires_at'])} left)[/dim]")
-        muted_text = ", ".join(muted_parts)
-    else:
-        muted_text = "none"
+    muted_text = _fmt_mute_list(muted_detail)
+    volume_muted_text = _fmt_mute_list(volume_muted_detail)
 
     console.print("Medic Status")
     console.print(f"  State:           [{state_color}]{state_text}[/{state_color}]")
     console.print(f"  Log watcher:     {watcher_text}")
-    console.print(f"  Muted branches:  {muted_text}")
+    console.print(f"  Muted branches:  {muted_text} [dim](content errors)[/dim]")
+    console.print(f"  Volume-muted:    {volume_muted_text} [dim](runaway alerts)[/dim]")
     console.print(f"  Suppressed:      {suppression['suppressed_count']}")
     console.print(f"  Last suppressed: {suppression['last_suppressed']}")
     console.print(f"  Rate limited:    {rate_limits['rate_limited_count']}")
@@ -488,7 +566,7 @@ def handle_command(command: str, args: list) -> bool:
             return True
         return _route_medic_module(args)
 
-    if command not in ["on", "off", "status", "mute", "unmute"]:
+    if command not in ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute"]:
         return False
 
     if args and args[0] in ["--help", "-h", "help"]:
@@ -498,6 +576,8 @@ def handle_command(command: str, args: list) -> bool:
     handlers = {
         "mute": lambda: _handle_mute(console, args),
         "unmute": lambda: _handle_unmute(console, args),
+        "volume-mute": lambda: _handle_volume_mute(console, args),
+        "volume-unmute": lambda: _handle_volume_unmute(console, args),
         "on": lambda: _handle_on(console),
         "off": lambda: _handle_off(console, args),
         "status": lambda: _handle_status(console),

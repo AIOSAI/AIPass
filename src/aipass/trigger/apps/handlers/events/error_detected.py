@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-02-10
-# Modified: 2026-02-14
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -84,6 +84,7 @@ try:
         circuit_breaker_probe_succeeded,
         should_dispatch as registry_should_dispatch,
         record_dispatch as registry_record_dispatch,
+        is_suppressed as registry_is_suppressed,
     )
 
     _REGISTRY_DISPATCH_AVAILABLE = True
@@ -109,6 +110,10 @@ except ImportError:
     def registry_record_dispatch(fingerprint: str) -> None:
         """Fallback no-op dispatch recording when error_registry is unavailable."""
         pass
+
+    def registry_is_suppressed(fingerprint: str) -> bool:
+        """Fallback suppression check — nothing is suppressed without the registry."""
+        return False
 
 
 # Legacy rate limiting (kept for backward compat when registry unavailable)
@@ -439,7 +444,8 @@ def handle_error_detected(
     Medic v2 dispatch gating (when error_registry available):
         1. count >= 2 threshold (skip first occurrence)
         2. circuit_breaker_allows() - global gate, pauses all dispatch on error storm
-        3. should_dispatch(fingerprint) - per-error exponential backoff
+        3. should_dispatch(fingerprint) - registry status gate (suppressed = never
+           dispatch while suppressed) then per-error exponential backoff
     Fallback: legacy per-branch rate limiting (3 per 10 min) if registry unavailable.
 
     Args:
@@ -514,7 +520,16 @@ def handle_error_detected(
                 return
 
             if not registry_should_dispatch(fingerprint):
-                _write_rate_log("Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping")
+                # Distinguish the two reasons should_dispatch can refuse, so the
+                # trail does not report a permanent suppression as a timing wait.
+                if registry_is_suppressed(fingerprint):
+                    _write_suppression_log(
+                        f"Suppressed fingerprint {fingerprint[:12]} - no dispatch for", branch, module, message
+                    )
+                else:
+                    _write_rate_log(
+                        "Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping"
+                    )
                 return
         else:
             # Legacy fallback: per-branch rate limiting (Medic v1)

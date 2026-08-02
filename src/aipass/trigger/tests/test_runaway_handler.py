@@ -133,28 +133,113 @@ class TestCooldownExpired:
 
 
 # ---------------------------------------------------------------------------
-# 4. Branch muted — muted branch is suppressed
+# 4. Mute classes — content mutes never gate runaways, volume mutes do
 # ---------------------------------------------------------------------------
 
 
-class TestBranchMuted:
-    """Muted branch dispatch is suppressed."""
+def _write_config(tmp_path: Path, config: dict) -> None:
+    """Write a trigger_config.json with the given config section."""
+    (tmp_path / "trigger_config.json").write_text(
+        json.dumps({"config": config}),
+        encoding="utf-8",
+    )
 
-    def test_muted_branch_suppressed(self, tmp_path: Path) -> None:
-        """Branch listed in muted_branches is suppressed — no email sent."""
+
+class TestBranchMuted:
+    """Volume mutes gate runaway alerts; medic content mutes do not."""
+
+    def test_content_muted_branch_still_delivers(self, tmp_path: Path) -> None:
+        """REGRESSION: a medic-muted branch still gets its runaway alert.
+
+        Every dispatch checklist tells agents to medic-mute before build work,
+        which is exactly when floods happen — gating runaways on the content
+        mute made this channel dead in its own peak window.
+        """
         send = _setup_happy_path()
 
-        config_file = tmp_path / "trigger_config.json"
-        config_file.write_text(
-            json.dumps({"config": {"muted_branches": ["flow"]}}),
-            encoding="utf-8",
-        )
+        _write_config(tmp_path, {"muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
             rate_lines_per_min=500,
             sustained_duration_sec=60,
+        )
+        send.assert_called_once()
+        assert send.call_args.kwargs["to_branch"] == "@flow"
+
+    def test_volume_muted_branch_suppressed(self, tmp_path: Path) -> None:
+        """Branch listed in volume_muted_branches is suppressed — no email sent."""
+        send = _setup_happy_path()
+
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+        )
+        send.assert_not_called()
+
+    def test_expired_volume_mute_delivers(self, tmp_path: Path) -> None:
+        """An expired volume mute entry does not suppress."""
+        send = _setup_happy_path()
+
+        expired = (datetime.now() - timedelta(hours=1)).isoformat()
+        _write_config(tmp_path, {"volume_muted_branches": [{"name": "flow", "expires_at": expired}]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+        )
+        send.assert_called_once()
+
+    def test_critical_bypasses_volume_mute(self, tmp_path: Path) -> None:
+        """CRITICAL runaways deliver even through an active volume mute."""
+        send = _setup_happy_path()
+
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+        send.assert_called_once()
+        assert send.call_args.kwargs["to_branch"] == "@flow"
+
+    def test_critical_bypass_is_case_insensitive(self, tmp_path: Path) -> None:
+        """Severity matching tolerates 'CRITICAL' as well as 'critical'."""
+        send = _setup_happy_path()
+
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="CRITICAL",
+        )
+        send.assert_called_once()
+
+    def test_warning_still_respects_volume_mute(self, tmp_path: Path) -> None:
+        """Non-critical runaways still honour an explicit volume mute."""
+        send = _setup_happy_path()
+
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+            severity="warning",
         )
         send.assert_not_called()
 
@@ -411,12 +496,18 @@ class TestEmailSendFails:
 
 
 # ---------------------------------------------------------------------------
-# 12. Suppression log written — cooldown and mute both write suppression log
+# 12. Decision log — every gating decision is recorded with an outcome
 # ---------------------------------------------------------------------------
 
 
+def _decision_entries(reason: str) -> list:
+    """Collect decision-log entries written with the given reason."""
+    calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
+    return [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == reason]
+
+
 class TestSuppressionLog:
-    """Cooldown and mute suppressions write to the suppression log."""
+    """Cooldown and mute suppressions write to the decision log."""
 
     def test_cooldown_writes_suppression_log(self) -> None:
         """Cooldown suppression writes reason='cooldown' via _append_jsonl."""
@@ -442,19 +533,15 @@ class TestSuppressionLog:
             sustained_duration_sec=120,
         )
 
-        calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
-        suppression_calls = [c for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == "cooldown"]
-        assert len(suppression_calls) == 1
-        assert suppression_calls[0][0][1]["file"] == file_path
+        entries = _decision_entries("cooldown")
+        assert len(entries) == 1
+        assert entries[0]["file"] == file_path
+        assert entries[0]["outcome"] == "suppressed"
 
-    def test_mute_writes_suppression_log(self, tmp_path: Path) -> None:
-        """Branch mute suppression writes reason='branch_muted' via _append_jsonl."""
+    def test_volume_mute_writes_suppression_entry(self, tmp_path: Path) -> None:
+        """Volume mute suppression writes outcome='suppressed', reason='volume_muted'."""
         _setup_happy_path()
-        config_file = tmp_path / "trigger_config.json"
-        config_file.write_text(
-            json.dumps({"config": {"muted_branches": ["flow"]}}),
-            encoding="utf-8",
-        )
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
 
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
@@ -463,10 +550,44 @@ class TestSuppressionLog:
             sustained_duration_sec=60,
         )
 
-        calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
-        suppression_calls = [c for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == "branch_muted"]
-        assert len(suppression_calls) == 1
-        assert suppression_calls[0][0][1]["branch"] == "flow"
+        entries = _decision_entries("volume_muted")
+        assert len(entries) == 1
+        assert entries[0]["branch"] == "flow"
+        assert entries[0]["outcome"] == "suppressed"
+
+    def test_critical_bypass_writes_delivered_entry(self, tmp_path: Path) -> None:
+        """A critical bypass is logged as delivered, not suppressed."""
+        _setup_happy_path()
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        entries = _decision_entries("bypass_critical")
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "delivered"
+        assert entries[0]["branch"] == "flow"
+        assert not _decision_entries("volume_muted")
+
+    def test_content_mute_writes_no_decision_entry(self, tmp_path: Path) -> None:
+        """A content mute is not a runaway gate — it leaves no decision entry."""
+        _setup_happy_path()
+        _write_config(tmp_path, {"muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=500,
+            sustained_duration_sec=60,
+        )
+
+        assert not _decision_entries("volume_muted")
+        assert not _decision_entries("bypass_critical")
 
 
 # ---------------------------------------------------------------------------

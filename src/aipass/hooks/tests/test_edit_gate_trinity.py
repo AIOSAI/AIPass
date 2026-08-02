@@ -1177,6 +1177,161 @@ class TestTrinityTodosCountAdvisory:
         assert result["stdout"] == ""
 
 
+class TestTrinityNewestFirst:
+    """DPLAN-0278: sessions[]/key_learnings[] must be inserted at index 0, number = max+1."""
+
+    def test_clean_prepend_allowed(self, tmp_path):
+        """New session inserted at index 0 with number = max+1 -> allowed."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 6, "summary": "new"}, {"number": 5, "summary": "old"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert result["stdout"] == ""
+
+    def test_tail_append_blocked(self, tmp_path):
+        """New session appended after the existing tail entry -> blocked."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        parsed = json.loads(result["stdout"])
+        assert parsed["decision"] == "block"
+        assert "newest-first" in parsed["reason"]
+
+    def test_number_not_greater_than_max_blocked(self, tmp_path):
+        """New entry prepended at index 0 but number <= max existing -> blocked."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 5, "summary": "duplicate number"}, {"number": 5, "summary": "old"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        parsed = json.loads(result["stdout"])
+        assert parsed["decision"] == "block"
+        assert "number" in parsed["reason"]
+
+    def test_key_learnings_tail_append_blocked(self, tmp_path):
+        """key_learnings appended after the tail -> blocked."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"key_learnings": [{"number": 10, "key": "old", "value": "v"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "key_learnings": [
+                {"number": 10, "key": "old", "value": "v"},
+                {"number": 11, "key": "new", "value": "v2"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        parsed = json.loads(result["stdout"])
+        assert parsed["decision"] == "block"
+
+    def test_first_write_no_before_file_skips_check(self, tmp_path):
+        """No existing file (first write) -> nothing to compare against, allowed."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"number": 1, "summary": "first"}]})
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_shrinking_array_skips_check(self, tmp_path):
+        """Rollover-style shrink (fewer entries after) -> not treated as an append, allowed."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 6, "summary": "keep"}, {"number": 5, "summary": "drop"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 6, "summary": "keep"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_newest_first_checked_even_when_limits_disabled(self, tmp_path):
+        """Tail-append still blocked even with enabled=False (independent gate)."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_DISABLED)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+
+    def test_unrelated_field_edit_no_new_entries_allowed(self, tmp_path):
+        """Edit that doesn't add any new numbered entries -> newest-first check no-ops."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}], "todos": [{"task": "old todo"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(
+                _hook_data(
+                    file_path,
+                    tool_name="Edit",
+                    cwd=cwd,
+                    old_string='"old todo"',
+                    new_string='"new todo"',
+                )
+            )
+
+        assert result["exit_code"] == 0
+
+
 class TestSectionCountGuard:
     """Soft count guard: warn (never block) when rolling sections exceed count cap."""
 

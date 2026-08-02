@@ -141,7 +141,7 @@
   ],
   "PostToolUse": [
     {
-      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit|Read|Grep|Glob|Task",
       "hooks": [
         {
           "type": "command",

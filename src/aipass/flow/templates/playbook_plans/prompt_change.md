@@ -22,7 +22,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
    |---|---|---|
    | Handler registration | `.aipass/hooks.json` | git-tracked (travels with clone) **+** `.aipass/project_hooks.json` (what `aipass init` copies) |
    | Cadence (period/offset) | `hooks_json/custom_config/cadence_config.json` (machine-local, gitignored) | `cadence.py` `DEFAULTS` (the committed backstop) |
-   | Event→handler bridge | `~/.claude/settings.json` (machine-local) | `setup.sh` **+** `.claude/provider_manifest.json` |
+   | Event→handler bridge | `~/.claude/settings.json` (machine-local) | `.claude/provider_manifest.json` (single source — `setup.sh` reads it, FPLAN-0374) |
 
 3. **Never delete a retired prompt.** Mark `(superseded)` in its header / disable it in `hooks.json`, or move it to `.archive/`. If a disabled handler still reads it **by path** for rollback, leave the file exactly where the handler looks.
 4. **The `.md` files travel by git; the wiring does not.** Prompt/tier `.md` files are tracked → a clone gets them free. The machine-local wiring (cadence_config, settings bridge) must be regenerated from the committed seed sources, so those seeds are what you must update.
@@ -48,8 +48,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
 - [ ] New handler file lives at `src/aipass/hooks/apps/handlers/prompt/<name>.py` — **@hooks owns it; dispatch them to build it.**
 
 ## 4. Seed propagation — so FRESH installs get it (the step that's always forgotten)
-- [ ] **Fresh clone** — `setup.sh`: writes the settings bridge. Grep it for the handler name; add the `UserPromptSubmit:<handler>` line; remove any retired-handler bridge.
-- [ ] **Doctor source-of-truth** — `.claude/provider_manifest.json`: mirrors setup.sh's bridge list. Add/retire to match.
+- [ ] **Fresh clone + doctor — ONE source:** `.claude/provider_manifest.json`. Add/retire the `UserPromptSubmit:<handler>` bridge entry THERE. `setup.sh` no longer carries an inline hook list — it reads the manifest (`refresh_provider_hooks` strip-and-readd, FPLAN-0374) and doctor checks against the same file. There is no second list to sync.
 - [ ] **Cadence backstop** — `cadence.py` `DEFAULTS`: contains the loader (so a clone with no `cadence_config.json` still fires it). Remove retired loaders' crumbs.
 - [ ] **`aipass init` (new projects)** — ⚠️ TWO files, both easy to miss:
   - `.aipass/project_hooks.json` (the template init copies into new projects) — mirror the live `hooks.json` (right handlers enabled, retired ones off/removed).
@@ -91,7 +90,7 @@ Fill as you go — this becomes the vectorized trail.
 
 ## Listen (TTS-friendly summary)
 
-This playbook is the checklist for changing any injected prompt in AIPass. The big lesson it captures is that live is not the same as seeded. When you change a prompt, editing the repository's own hook configuration makes it work for us right now, but it does nothing for a fresh clone, a newly initialised project, or a newly spawned branch, because those are all built from separate seed files. So the checklist walks you through three things. First, the content of the prompt itself, watching the size limits. Second, the three wiring layers that make it inject live, which are the handler registration, the cadence timing, and the event bridge. Third, and most important, every seed path that a fresh install is built from, including the main setup script, the doctor manifest, the cadence defaults, the two files behind the aipass init flow, and the spawn templates. There are also two runtimes — Claude Code and Codex — both injecting the same prompt content, so retiring or changing a prompt for one means doing it for the other; Claude reads it on a per-turn cadence, Codex reads it once at session start. Then you verify it actually injects, including right after a compaction, tidy away any retired prompt without deleting it, and update the changelog. Run it any time a prompt changes so nothing is left half wired.
+This playbook is the checklist for changing any injected prompt in AIPass. The big lesson it captures is that live is not the same as seeded. When you change a prompt, editing the repository's own hook configuration makes it work for us right now, but it does nothing for a fresh clone, a newly initialised project, or a newly spawned branch, because those are all built from separate seed files. So the checklist walks you through three things. First, the content of the prompt itself, watching the size limits. Second, the three wiring layers that make it inject live, which are the handler registration, the cadence timing, and the event bridge. Third, and most important, every seed path that a fresh install is built from, including the provider manifest which both the setup script and doctor read as the single source, the cadence defaults, the two files behind the aipass init flow, and the spawn templates. There are also two runtimes — Claude Code and Codex — both injecting the same prompt content, so retiring or changing a prompt for one means doing it for the other; Claude reads it on a per-turn cadence, Codex reads it once at session start. Then you verify it actually injects, including right after a compaction, tidy away any retired prompt without deleting it, and update the changelog. Run it any time a prompt changes so nothing is left half wired.
 
 ---
 

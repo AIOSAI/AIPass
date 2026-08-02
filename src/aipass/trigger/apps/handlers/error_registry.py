@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-02-13
-# Modified: 2026-02-27
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -421,19 +421,52 @@ def get_backoff_seconds(dispatch_count: int) -> int:
     return 7200
 
 
-def should_dispatch(fingerprint: str) -> bool:
-    """Check if this fingerprint should be dispatched based on exponential backoff.
+def is_suppressed(fingerprint: str) -> bool:
+    """Check whether a fingerprint is currently marked suppressed in the registry.
 
-    Uses the dispatch history for this fingerprint to determine if enough
-    time has elapsed since the last dispatch according to the backoff
-    schedule.
+    Only the 'suppressed' status silences dispatch. 'resolved' deliberately
+    does NOT — a resolved error that recurs means the fix did not hold, which
+    is genuine signal and must still wake its owner.
 
     Args:
         fingerprint: Error fingerprint to check
 
     Returns:
-        True if enough time has passed since last dispatch for this fingerprint
+        True if the entry exists and its status is 'suppressed'
     """
+    try:
+        entry = get_entry(fingerprint)
+        return bool(entry) and entry.get("status") == "suppressed"
+    except Exception as exc:
+        # Fail open: a registry read problem must not silence real errors.
+        logger.warning("is_suppressed check failed for '%s': %s", fingerprint, exc)
+        return False
+
+
+def should_dispatch(fingerprint: str) -> bool:
+    """Check if this fingerprint should be dispatched.
+
+    Two independent gates, in order:
+      1. Registry status — a 'suppressed' fingerprint never dispatches while
+         suppressed. A benign error that has been investigated and judged
+         must not wake its owner again (compass #219). Un-suppressing
+         restores dispatch immediately, subject to the backoff below.
+      2. Exponential backoff — enough time must have elapsed since the last
+         dispatch of this fingerprint.
+
+    Occurrence bookkeeping is unaffected: register_error() still counts and
+    timestamps every occurrence, so a wrong suppress stays fully auditable
+    in `errors list` even while it is silent.
+
+    Args:
+        fingerprint: Error fingerprint to check
+
+    Returns:
+        True if this fingerprint may be dispatched now
+    """
+    if is_suppressed(fingerprint):
+        return False
+
     count = _fingerprint_dispatch_count.get(fingerprint, 0)
     if count == 0:
         return True

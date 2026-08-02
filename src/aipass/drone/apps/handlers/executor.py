@@ -24,7 +24,7 @@ from aipass.drone.apps.handlers.json import json_handler
 DEFAULT_TIMEOUT = 30
 
 TIMEOUT_OVERRIDES: dict[str, dict[str, int]] = {
-    "memory": {"process-plans": 120},
+    "memory": {"process-plans": 120, "rollover": 100},
     "flow": {"close": 90},
 }
 

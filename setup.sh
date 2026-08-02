@@ -319,22 +319,18 @@ else
         ACTION_NEEDED+=("npm missing — install Node.js (includes npm) from https://nodejs.org/")
     fi
 
-    # @anthropic-ai/sandbox-runtime — resolve same way as _srt_resolve.mjs
-    if command -v node &>/dev/null; then
-        SRT_PATH=$(node -e "
-            const p = require('path');
-            const fs = require('fs');
-            const prefix = p.dirname(p.dirname(process.execPath));
-            const entry = p.join(prefix, 'lib/node_modules/@anthropic-ai/sandbox-runtime/dist/index.js');
-            if (fs.existsSync(entry)) process.stdout.write(entry);
-            else process.exit(1);
-        " 2>/dev/null) || SRT_PATH=""
+    # @anthropic-ai/sandbox-runtime — resolve via the real resolver (owned by
+    # the hooks branch, handles node-prefix != npm-prefix layouts, DPLAN-0279)
+    SRT_RESOLVER="$SCRIPT_DIR/src/aipass/hooks/apps/modules/_srt_resolve.mjs"
+    if command -v node &>/dev/null && [ -f "$SRT_RESOLVER" ]; then
+        SRT_PATH=$(node "$SRT_RESOLVER" --resolve 2>/dev/null) || SRT_PATH=""
         if [ -n "$SRT_PATH" ]; then
             echo "  srt       ... $SRT_PATH"
         else
             echo "  srt       ... MISSING"
             if command -v npm &>/dev/null; then
-                echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime"
+                NPM_PREFIX=$(npm root -g 2>/dev/null)
+                echo "    Attempting: npm install -g @anthropic-ai/sandbox-runtime (into ${NPM_PREFIX:-npm global prefix})"
                 if npm install -g @anthropic-ai/sandbox-runtime 2>/dev/null; then
                     echo "    srt       ... installed"
                 else
@@ -349,10 +345,14 @@ else
                 ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
             fi
         fi
-    else
+    elif ! command -v node &>/dev/null; then
         echo "  srt       ... skipped (no node)"
         SB_MISSING+=("srt")
         ACTION_NEEDED+=("srt missing — install node+npm first, then: npm install -g @anthropic-ai/sandbox-runtime")
+    else
+        echo "  srt       ... skipped (resolver script missing: $SRT_RESOLVER)"
+        SB_MISSING+=("srt")
+        ACTION_NEEDED+=("srt check skipped — resolver script missing, reinstall/repair the repo")
     fi
 
     # rg (ripgrep)
@@ -693,26 +693,23 @@ fi
 # --- Install Claude Code hooks ---
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 
-# Determine python command for non-Claude provider hooks.
-# Claude hooks use bridge pattern with $AIPASS_HOME env var — no HOOK_PYTHON needed.
-# Linux: keep "python3" — distros ship 3.10+ and hooks import nothing
-# version-specific beyond that.
-# macOS: stock /usr/bin/python3 is 3.9.6 on macOS 12 and cannot parse
-# scripts that use PEP 604 union syntax (`X | None`). Use the venv python.
-# Windows: existing venv-python behavior.
-if [ "$IS_WINDOWS" -eq 1 ]; then
-    HOOK_PYTHON="$SCRIPT_DIR/.venv/Scripts/python.exe"
-elif [ "$IS_MACOS" -eq 1 ]; then
-    HOOK_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
-else
-    HOOK_PYTHON="python3"
-fi
-
 if [ -f "$SCRIPT_DIR/src/aipass/hooks/apps/handlers/bridges/claude.py" ]; then
     echo "Installing Claude Code hooks ..."
     mkdir -p "$HOME/.claude"
 
-    "$PYTHON" - "$SCRIPT_DIR" "$CLAUDE_SETTINGS" "$IS_WINDOWS" << 'PYEOF'
+    "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
+import sys
+from pathlib import Path
+
+from aipass.aipass.apps.handlers.provider_wire import refresh_provider_hooks
+
+manifest_path = Path(sys.argv[1])
+actions = refresh_provider_hooks(manifest_path)
+for action in actions:
+    print(f"  {action}")
+PYEOF
+
+    "$PYTHON" - "$SCRIPT_DIR" "$CLAUDE_SETTINGS" << 'PYEOF'
 import json
 import os
 import sys
@@ -720,87 +717,12 @@ from pathlib import Path
 
 repo_root = sys.argv[1]
 settings_path = Path(sys.argv[2])
-is_windows = len(sys.argv) > 3 and sys.argv[3] == "1"
-
-# Bridge entry point — all hooks route through the engine via this bridge.
-# Uses $AIPASS_HOME env var (injected into settings.env below) so the
-# settings file stays relocatable. CC on Windows runs hooks via Git Bash
-# (which must exist for setup.sh to have run), so $VAR expansion works —
-# but the venv interpreter lives at Scripts/python.exe there, not bin/python3
-# (@hooks assessment, DPLAN-0234 Strand C).
-venv_python = ".venv/Scripts/python.exe" if is_windows else ".venv/bin/python3"
-bridge = f"$AIPASS_HOME/{venv_python} $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py"
 
 # Load existing settings or start fresh
 if settings_path.exists():
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
 else:
     settings = {}
-
-# Build hooks config — bridge pattern
-# UserPromptSubmit: 5 separate entries (EventType:hook_name) to avoid output merging
-# PreToolUse, PostToolUse, SubagentStop, Stop, Notification: single aggregate entries
-# PreCompact: 3 hooks x 2 matchers (manual + auto) = 6 entries
-# SessionStart: cadence reset on startup/clear (handler skips resume itself)
-aipass_hooks = {
-    "UserPromptSubmit": [
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:tier0_kernel"}]},
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:navmap"}]},
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:branch_prompt"}]},
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:identity_injector"}]},
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:email_notification"}]},
-        {"hooks": [{"type": "command", "command": f"{bridge} UserPromptSubmit:auto_process", "timeout": 120}]},
-    ],
-    "PreToolUse": [
-        {"matcher": "Bash|Edit|MultiEdit|Write|Read|Grep|Glob|WebSearch|WebFetch|Task",
-         "hooks": [{"type": "command", "command": f"{bridge} PreToolUse"}]},
-    ],
-    "PostToolUse": [
-        {"matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
-         "hooks": [{"type": "command", "command": f"{bridge} PostToolUse"}]},
-    ],
-    "SubagentStop": [
-        {"hooks": [{"type": "command", "command": f"{bridge} SubagentStop"}]},
-    ],
-    "Stop": [
-        {"hooks": [{"type": "command", "command": f"{bridge} Stop"}]},
-    ],
-    "Notification": [
-        {"hooks": [{"type": "command", "command": f"{bridge} Notification"}]},
-    ],
-    "PreCompact": [
-        {"matcher": "manual", "hooks": [{"type": "command", "command": f"{bridge} PreCompact:pre_compact", "timeout": 60}]},
-        {"matcher": "auto",   "hooks": [{"type": "command", "command": f"{bridge} PreCompact:pre_compact", "timeout": 60}]},
-        {"matcher": "manual", "hooks": [{"type": "command", "command": f"{bridge} PreCompact:pre_compact_rollover", "timeout": 120}]},
-        {"matcher": "auto",   "hooks": [{"type": "command", "command": f"{bridge} PreCompact:pre_compact_rollover", "timeout": 120}]},
-        {"matcher": "manual", "hooks": [{"type": "command", "command": f"{bridge} PreCompact:auto_process", "timeout": 120}]},
-        {"matcher": "auto",   "hooks": [{"type": "command", "command": f"{bridge} PreCompact:auto_process", "timeout": 120}]},
-    ],
-    "SessionStart": [
-        {"hooks": [{"type": "command", "command": f"{bridge} SessionStart:cadence_reset", "timeout": 30}]},
-    ],
-}
-
-# Merge, don't replace (DPLAN-0234 Strand C): refresh every AIPass bridge entry
-# (identified by the bridges/claude.py marker) but preserve any hooks the user
-# wired themselves. Re-runs stay idempotent; custom hooks survive reinstall.
-existing_hooks = settings.get("hooks", {})
-merged_hooks = {}
-for event in set(existing_hooks) | set(aipass_hooks):
-    user_entries = [
-        entry for entry in existing_hooks.get(event, [])
-        if "bridges/claude.py" not in json.dumps(entry)
-    ]
-    merged = aipass_hooks.get(event, []) + user_entries
-    # Never emit an empty hook event. If this event had only stale AIPass bridge
-    # entries (no current aipass_hooks definition AND no user-wired hooks), the
-    # filter above orphans it to [] — a half-wired event that fires nothing,
-    # written silently. Drop the key instead and say so, so the state stays honest.
-    if not merged:
-        print(f"  ! dropped orphaned hook event (no live entries): {event}")
-        continue
-    merged_hooks[event] = merged
-settings["hooks"] = merged_hooks
 
 # Inject AIPASS_HOME into env block so dispatched agents find AIPass
 env_block = settings.get("env", {})
@@ -856,11 +778,12 @@ permissions["deny"] = deny
 
 ask = permissions.get("ask", [])
 home = os.path.expanduser("~")
+# Edit(path) rules cover ALL file-editing tools (Edit, Write, NotebookEdit).
+# Write(path) rules are never matched by file permission checks — Claude Code
+# warns about them at launch. Ship Edit() only.
 ask_rules = [
     f"Edit({home}/.claude/**)",
-    f"Write({home}/.claude/**)",
     "Edit(~/.claude/**)",
-    "Write(~/.claude/**)",
 ]
 for rule in ask_rules:
     if rule not in ask:

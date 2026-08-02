@@ -85,6 +85,7 @@ def _setup_happy_path(mod: object) -> MagicMock:
     mod._send_email = send_mock  # type: ignore[attr-defined]
     mod.circuit_breaker_allows = MagicMock(return_value=True)  # type: ignore[attr-defined]
     mod.registry_should_dispatch = MagicMock(return_value=True)  # type: ignore[attr-defined]
+    mod.registry_is_suppressed = MagicMock(return_value=False)  # type: ignore[attr-defined]
     mod.registry_record_dispatch = MagicMock()  # type: ignore[attr-defined]
     mod.circuit_breaker_record_error = MagicMock()  # type: ignore[attr-defined]
     mod._REGISTRY_DISPATCH_AVAILABLE = True  # type: ignore[attr-defined]
@@ -251,6 +252,56 @@ class TestHandleErrorDetectedGates:
 
         send.assert_not_called()
 
+    def test_backoff_refusal_logs_as_rate_limit(self) -> None:
+        """A backoff refusal is logged to the rate log, not as a suppression."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+        mod.registry_should_dispatch = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        rate_log = MagicMock()
+        suppression_log = MagicMock()
+        mod._write_rate_log = rate_log  # type: ignore[attr-defined]
+        mod._write_suppression_log = suppression_log  # type: ignore[attr-defined]
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="abc123"
+        )
+
+        rate_log.assert_called_once()
+        suppression_log.assert_not_called()
+        assert "Backoff active" in str(rate_log.call_args)
+
+    def test_suppressed_fingerprint_does_not_dispatch(self) -> None:
+        """A registry-suppressed fingerprint never dispatches (compass #219)."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod.registry_should_dispatch = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        mod.registry_is_suppressed = MagicMock(return_value=True)  # type: ignore[attr-defined]
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="abc123"
+        )
+
+        send.assert_not_called()
+
+    def test_suppressed_fingerprint_logs_as_suppression(self) -> None:
+        """A suppressed refusal is logged as suppression, not mislabelled as a timing wait."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+        mod.registry_should_dispatch = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        mod.registry_is_suppressed = MagicMock(return_value=True)  # type: ignore[attr-defined]
+        rate_log = MagicMock()
+        suppression_log = MagicMock()
+        mod._write_rate_log = rate_log  # type: ignore[attr-defined]
+        mod._write_suppression_log = suppression_log  # type: ignore[attr-defined]
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2, fingerprint="abc123"
+        )
+
+        suppression_log.assert_called_once()
+        rate_log.assert_not_called()
+        assert "Suppressed fingerprint" in str(suppression_log.call_args)
+
 
 # ---------------------------------------------------------------------------
 # handle_error_detected -- happy path
@@ -381,6 +432,11 @@ class TestFallbackStubs:
         """Fallback always allows dispatch for any fingerprint."""
         mod = _import_module()
         assert mod.registry_should_dispatch("any-fingerprint") is True
+
+    def test_registry_is_suppressed_returns_false(self) -> None:
+        """Fallback suppresses nothing — no registry means no silencing."""
+        mod = _import_module()
+        assert mod.registry_is_suppressed("any-fingerprint") is False
 
     def test_registry_record_dispatch_does_not_raise(self) -> None:
         """Fallback record_dispatch is a no-op."""

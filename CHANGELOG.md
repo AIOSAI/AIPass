@@ -9,6 +9,263 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — trigger suppress grows teeth: suppressed errors stop waking their owners
+
+**feat(trigger)** — `errors suppress` now does what its name promised (Patrick
+ruling, compass #219: the wake cycle ends at wake→investigate→suppress→sleep —
+no re-waking owners every 2h forever for judged-benign errors; the recurring
+no-passport pair had cost 468 wakes each since May). `should_dispatch()` gates
+on registry status *inside* the function so no caller can route around it:
+suppressed = no dispatch, unconditionally, while suppressed. Bookkeeping is
+untouched — occurrences still count and timestamp, so a wrong suppress stays
+auditable in `errors list`. New `errors unsuppress <id>` restores dispatch
+with backoff state intact (the ruling's escape hatch — no lift path existed
+before). `resolved` deliberately does NOT gate: a resolved error that recurs
+means the fix didn't hold and must still wake its owner. `is_suppressed()`
+fails open — a registry read problem makes noise, never silence. Suppressed
+refusals log to `medic_suppressed.jsonl` (not "Backoff active", which read as
+a timing wait). `errors stats` shows a Silenced count. The wrong-suppress
+safety net is fingerprint precision: any new or changed error fingerprints
+differently and wakes normally. Registry 2.4.0; 655 trigger tests green (+17);
+live-proved on the real registry including a full unsuppress→re-suppress
+round-trip.
+
+**fix(drone)** — `drone @git log -20` (standard git shorthand) built the broken
+flag `--20` and git died with a fatal; `-n 20` / `--count 20` worked but logged
+a warning per flag into the very logs @trigger watches — which is how the bug
+surfaced (found by @drone while investigating a benign fingerprint pair).
+`_handle_log` now skips count flags (`-n`, `--count`, `--max-count`) silently,
+parses the `-N` shorthand, and rejects non-positive counts with a clean exit 1
+instead of handing git a bad flag. Genuinely unparseable args still warn.
+All five idioms verified byte-identical live; 12 regression tests
+(canary-checked against the old parse logic); 897 drone tests green.
+
+## [2026-08-02] — /suspend rework: presence crosses processes, wake-mask goes opt-in
+
+**feat(skills)** — Telegram `/suspend` heartbeat rework (base_bot v1.5.0) after
+the 2026-08-02 incident where the loop re-suspended the machine under the
+user's hands (his chat messages never counted as presence). Four fixes + one
+reframe: (1) every bot process stamps a shared `last_inbound.json` on any
+allowed-user message, so chatting with any bot cancels the cycle — presence
+now crosses processes; (2) wake cause is classified by alarm-time comparison
+(woke well before the armed RTC alarm = human → cancel + disarm) instead of
+wall-clock-gap guessing, catching the 14s nap that left the loop armed
+invisibly; (3) the grace window (100s→180s) anchors to the first successful
+Telegram poll after resume, not resume detection, and re-arm holds while a
+reply is in flight; (4) `suspend_enabled` bot-config flag grounds the verb
+without a code edit. Adaptive cadence recreates the accidental "perfect days"
+duty-cycle deliberately: 3-min beats while conversation is live, 25-min when
+quiet, config-tunable. `install_suspend_grants.sh` makes the wake-source
+masking **opt-in** (`--with-wake-sources`) per user ruling (compass #216):
+on this hardware the spurious wakes are the product — they keep agents
+running behind the locked screen. test_suspend.py 26→70; 944 telegram + 252
+skills green; verb stays grounded until the post-reboot soak.
+
+**feat(skills)** — `/lock` control verb hardened for the service context
+(base_bot v1.5.1). The live soak settled the deployment model (compass #217,
+supersedes #216): even a correctly-working suspend disconnects the agents, so
+the machine stays awake 24/7 and `/lock` replaces `/suspend` for daily use —
+instant password wall + dark screen, nothing sleeps. Session resolution walks
+`loginctl list-sessions` for the caller's own active wayland/x11 session
+(uid-matched — never locks another user's desktop) with a GNOME ScreenSaver
+D-Bus fallback and an honest failure if both refuse; live-proved from a
+session-less env (LockedHint no→yes). test_suspend.py 70→77; 1211 green.
+
+## [2026-08-02] — medic mutes no longer swallow runaway alerts
+
+**fix(trigger)** — medic content-mutes silently suppressed runaway-log alerts
+(31/31 suppression-log entries were `branch_muted`, and dispatch SOP mutes
+branches exactly when build-time floods happen — the alert channel was
+structurally dead during active work). Mute classes are now split: content
+mutes gate error-content events only; a new `volume_muted_branches` class
+gates runaway alerts, with `severity=critical` bypassing even a deliberate
+volume mute as a safety floor. Decision trail upgraded from suppression-only
+to outcome-labelled (`delivered/bypass_critical` vs `suppressed/volume_muted`).
+New `medic volume-mute / volume-unmute @branch` operator commands; `status`
+shows both lists. 638 trigger tests green (+16), incl. the regression: a
+content-muted branch still receives a runaway alert. Live-verified against
+the real 5-branches-muted config with transport stubbed.
+
+## [2026-08-02] — runaway detector: rotation reset the counters; relay pidfile: boot identity
+
+**fix(prax)** — the runaway-log detector could mathematically never fire on a
+fast flood: `scan_rates()` treated the RotatingFileHandler roll (.log → .log.1)
+as a truncation and zeroed the sustained counters, so the faster the flood, the
+sooner the file rotated and the sooner detection reset — the 2026-07-31 event
+queue firehose (~4090 lines/min, 6.8× the CRITICAL threshold) rolled every
+~24s against a 60s-sustain requirement. Root-caused from the on-disk
+arithmetic (rotated file = 199,890 bytes vs the 200,000 threshold). Fix: a
+shrink now counts the new file's content as the interval's bytes and leaves
+the sustained counters alone; subsidence still clears them when rates truly
+drop. Red-before/green-after rotation tests added.
+
+**fix(prax)** — monitor relay pidfile survives reboots: `instance_lock` v1.1.0
+records the kernel `boot_id` in the lock and reclaims unconditionally on a
+boot mismatch (a lock from a past boot is always stale — PID liveness was
+answering the wrong question after PID-number reuse). Same-boot behavior
+unchanged; non-Linux falls back to liveness-only. 9 new boot-identity tests;
+full prax suite 1078 passed.
+
+Known gap (reported, not yet fixed — @trigger territory): medic branch-mutes
+silently suppress runaway alerts (31 suppressed entries, 5 branches muted at
+once), and dispatch SOP mutes branches exactly when build-time runaways
+happen. Fix direction: separate volume mute, or critical-severity bypass.
+
+## [2026-08-02] — flow plan templates truth-pass
+
+**fix(flow)** — template review caught commands that misfire when agents
+copy-paste them and doctrine that reality reversed. FPLAN default + master:
+`ai_mail email` gains its `drone @` prefix, `seedgo audit` gains the `aipass`
+pack arg, nonexistent `drone @flow status` removed, `flow create` examples gain
+the location arg, the "no auto-compact for devpulse" line replaced with the
+current calm-compact doctrine (auto-compact is survivable by design), typo
+garble cleaned, a leftover flow-internal path row dropped. Playbook default:
+PBPLAN → PPLAN, add-a-SOP command now shows template-before-type. Merge SOP:
+hardcoded "13 branches" → the script's live count. Prompt-change SOP: seed
+propagation rewritten for manifest-driven hook wiring (provider_manifest.json
+is the single source since FPLAN-0374 — setup.sh reads it, no second list).
+
+## [2026-08-01] — dispatch default model: opus (Patrick ruling)
+
+**chore(ai_mail)** — `DEFAULT_MODEL` in dispatch wake flips sonnet → opus:
+dispatched citizens now run full-reasoning by default (`--model sonnet`/`haiku`
+still available per-dispatch). Also truths the doc drift — dispatch.py's help
+already claimed opus was the default while wake.py shipped sonnet. 234 ai_mail
+dispatch tests green.
+
+## [2026-08-01] — setup.sh hook wiring: manifest is the single source, no doctor-heal dependency
+
+**fix(aipass)** — fresh installs wired only 6/13 UserPromptSubmit bridge hooks
+and missed `pre_compact_prep`: setup.sh's inline hook dict was a hand-maintained
+second copy of `provider_manifest.json` and had drifted (found in the
+`aipass-dev` container walk; `doctor --fix` healed it, but Patrick's ruling —
+setup must be right on its own). New `refresh_provider_hooks()` in
+provider_wire.py does manifest-driven strip-and-readd of bridge-marked entries
+(user hooks always preserved); `auto_wire_provider()` and doctor `--fix` consume
+the same helper, and setup.sh shells into it via the venv python — the hardcoded
+dict is deleted, failures abort the install loudly. Also fixes the upgrade
+double-fire class: stale bridge entries are replaced, not duplicated beside new
+ones. Reverse drift caught too: the manifest itself was missing
+`SessionStart:cadence_reset` (verified against the seedgo golden fixture).
+Devpulse review caught a Windows gap pre-commit: manifest commands hardcode
+`.venv/bin/python3`, which doesn't exist in Windows venvs —
+`_platform_bridge_command()` now swaps to `Scripts/python.exe` at write time
+(manifest stays POSIX-canonical) and doctor's compare normalizes through the
+same function. 12 new tests, 892 green, fresh-container walk re-verified.
+
+## [2026-08-01] — Windows CI green: POSIX-only skips on the new DPLAN-0279 tests
+
+**fix(ci)** — the srt-resolver subprocess tests and doctor's /proc-fallback
+tests (both added today) failed on Windows CI only. The srt candidate tests
+hand node a minimal env — without SYSTEMROOT node's CSPRNG aborts at startup
+(exit 134) — and their sh-script npm stubs plus lib/node_modules layouts are
+POSIX scenarios by design (srt's sandbox wrap targets bwrap + /bin/bash). The
+doctor tests force os.name='posix' process-wide, which makes pathlib dispatch
+Path() to PosixPath on Windows and unrelated code in the patch window
+(the logger call) dies with NotImplementedError. Both get explicit
+POSIX-only skip markers; Windows-relevant coverage (usage-error contract,
+non-posix early return) still runs everywhere. Linux/macOS coverage unchanged.
+
+## [2026-08-01] — context gauge copy: calm heads-up, not panic (calm-compact doctrine)
+
+**fix(hooks)** — `context_gauge.py` still preached the pre-recovery doctrine
+("run /prep NOW", "before auto-compact takes the choice away", "imminent") —
+written for DPLAN-0253, before PreCompact recovery injection and the post-compact
+regroup (DPLAN-0276/0278) made auto-compact survivable by design. The same
+session this shipped in proved the machinery live: compact fired mid-turn, the
+PostToolUse backstop re-grounded once, one-shot token held. New copy is a calm
+cue — bank memories via /prep at the next natural breakpoint, act without
+asking, keep working. Docstring updated to match; 8/8 gauge tests green.
+
+## [2026-08-01] — doctor + setup.sh adopt the srt resolver; doctor message truthing (DPLAN-0279, @aipass scope)
+
+**fix(aipass)** — doctor's `sandbox_checker.py` and setup.sh's sandbox-prereqs
+block stopped mirroring the srt path derivation and now shell out to
+`_srt_resolve.mjs --resolve` (located via `importlib.util.find_spec`, no
+hardcoded path) — the last two copies of the node-prefix==npm-prefix assumption
+are gone. Install hints now name the prefix npm will actually use
+(`npm root -g`), and "missing" is distinguished from "installed but not
+resolvable". Walk warts from the same round-3 session: root `.venv` at
+AIPASS_HOME no longer flagged "redundant" (setup created it; nested project
+venvs still flagged), pytest-collect timeout 30s→90s with actionable remedy
+text, `detect_shell()` falls back to `/proc/<ppid>/comm` when `$SHELL` is
+unset. 18 new tests (880 total green), seedgo 100%.
+
+## [2026-08-01] — srt resolver: candidate-list prefix discovery + honest exit codes (DPLAN-0279, @hooks scope)
+
+**fix(hooks)** — `_srt_resolve.mjs` derived npm's global prefix from node's
+install location (`dirname(dirname(process.execPath))`). On Debian/Ubuntu apt
+layouts and official node Docker images node lives in `/usr` while npm installs
+globals to `/usr/local` — srt was reported missing while correctly installed,
+and the advised `npm install -g` could never satisfy the check. With the
+sandbox flag ON that layout fail-closed every dispatch. Now: candidate-list
+discovery (`npm_config_prefix` env → `npm root -g` → `/usr/local` → `/usr` →
+execPath derivation), dynamic `import()`+`pathToFileURL` preserved per the ESM
+constraint. The silent exit-0-on-failure path (uncaught top-level rejection) is
+fixed — non-zero exit with tried candidates on stderr — and a new `--resolve`
+CLI mode gives doctor/setup a resolve-only contract (path on stdout, exit 0/1).
+5 new subprocess tests incl. the Debian split-prefix layout; found by the
+fresh-eyes container agent during the round-3 install walk.
+
+## [2026-08-01] — setup.sh hook-block drift: PostToolUse matcher + dead Write() ask rules (round-3 walk)
+
+**fix(setup)** — setup.sh's hand-rolled hook block shipped the pre-v2.7.10
+PostToolUse matcher (`Bash|Edit|MultiEdit|Write|NotebookEdit`); doctor then
+wired the manifest's widened matcher (`…|Read|Grep|Glob|Task`, the DPLAN-0276
+regroup backstop) alongside it. Both matched on any Bash/Edit call — the hook
+bridge fired **twice per tool call** on fresh installs, and setup's
+strip-and-readd merge resurrected the stale entry on every re-run. Matcher now
+mirrors `provider_manifest.json` exactly, so doctor's dedup recognizes it.
+Also dropped the `Write(~/.claude/**)` ask rules setup shipped — Claude Code
+never matches `Write(path)` rules (only `Edit(path)` covers file-editing
+tools) and warned about them at every launch. Found live during the round-3
+container walk. PreCompact "duplicates" investigated same pass: false alarm —
+manual/auto matcher pairs are by design.
+
+## [2026-08-01] — Compact fixes: regroup double-arm, newest-first memory enforcement (DPLAN-0278)
+
+**fix(hooks)** — the DPLAN-0276 post-compact re-ground backstop fired up to 17×
+per session (~400KB injected, plausibly *causing* extra compactions). Root
+cause: `session_start.py` called `cadence.reset_counter()` on `source=compact`
+on top of `compact.py`'s own PreCompact reset — double-arming `regroup_pending`
+every compact boundary. Fixed (compact added to `_SKIP_SOURCES`) and hardened:
+the boolean flag is now a one-shot per-arm token with timestamp, consumed
+atomically; duplicate resets within 30s reuse the existing token; every arm
+logs caller+PID. Also: the re-ground payload now teaches the memory-file shape
+(`.trinity` arrays are newest-first — insert at index 0, number = max+1), the
+recovery text's `key_learnings[-10:]` inversion became `[:10]`, and
+`edit_gate` mechanically rejects `.trinity` session/learning edits that append
+at the tail or regress the number field. Background: a post-compact agent that
+lost the newest-first convention wrote fresh entries at the array tail, where
+the next rollover archived them as "oldest" — memories silently eaten within
+the hour.
+
+**fix(memory)** — rollover safety valve: tail entries dated today or numbered
+above the array head are held back with a warning (misplaced fresh writes, not
+oldest history). AUTO-COMPACT SNAPSHOT entries get their own small cap
+(default 3) instead of consuming the 15-session budget (~40% of memory slots
+were machine boilerplate, evicting real memories ~1.7× faster).
+
+**fix(drone)** — memory-branch `rollover` command gets a 100s executor timeout
+override (was killed at the 30s default twice in 3 days mid-archive).
+
+**fix(hooks-tests)** — the "ghost re-arm" solved: `test_compact.py` invoked the
+compact handler with no cadence isolation, so every pytest run of it minted a
+real regroup token into the developer's own live session state file
+(`/tmp/aipass-cadence-<session>.json`, session id inherited from the
+environment) — and pytest's log capture swallowed the arm line, making the
+subsequent backstop fire look sourceless. One suite run = one ghost re-ground
+(~24KB injected); a test-heavy session saw 16+. Fixed with an autouse fixture
+pinning `_GUARD_DIR` to tmp_path and a fake session id; verified by running
+the full hooks suite and confirming the live state file stays unarmed.
+
+**chore(hooks)** — provider manifest ↔ live settings reconciled both
+directions (manifest gained `PreCompact:auto_process`; live PostToolUse
+matcher gained `Read|Grep|Glob|Task` so the backstop sees read-tools);
+seedgo's provider-hooks snapshot baseline updated to match; navmap breadcrumb:
+a memory missing from `local.json` likely rolled over — `drone @memory search`
+finds it.
+
 ## [2026-08-01] — CI wall-time phase 1b: pytest-xdist (DPLAN-0277)
 
 **ci(speed)** — the test suite now runs `-n auto --dist loadscope` in the

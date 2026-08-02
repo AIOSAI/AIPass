@@ -97,6 +97,13 @@
       "subject": "DPLAN-0242 build: runaway-log detection and escalation",
       "date_closed": "2026-07-15",
       "location": "prax"
+    },
+    {
+      "plan_id": "FPLAN-0376",
+      "type": "FPLAN",
+      "subject": "Runaway detector rotation false-negative + relay.pid cross-boot staleness",
+      "date_closed": "2026-08-02",
+      "location": "prax"
     }
   ],
   "document_metadata": {

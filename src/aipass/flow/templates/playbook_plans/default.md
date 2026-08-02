@@ -9,7 +9,7 @@
 
 ## What Are Playbooks?
 
-Playbooks (PBPLANs) are **throwaway SOP runs** — a checklist stamped from a reusable
+Playbooks (PPLANs) are **throwaway SOP runs** — a checklist stamped from a reusable
 template for a recurring operation (merge, release cut, branch onboarding,
 incident response). You tick steps off as you go, log what happened, then close.
 
@@ -24,8 +24,8 @@ research (RPLAN), or multi-branch builds (TDPLAN). Playbooks are for *operating 
 system*, not changing it.
 
 **Add a new SOP:** drop `templates/playbook_plans/<sop_name>.md`, then
-`drone @flow create . "Subject" <sop_name>`. No registration needed (the type is
-already registered; the file stem is the shorthand).
+`drone @flow create . "Subject" <sop_name> pplan` (template name before type).
+No registration needed — any .md file stem in the type's templates/ dir works.
 
 ---
 

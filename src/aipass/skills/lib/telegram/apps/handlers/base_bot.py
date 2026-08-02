@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.4.2
+# Version: 1.5.1
 # Created: 2026-02-24
-# Modified: 2026-07-28
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -147,8 +147,21 @@ NETWORK_LOG_INTERVAL = 300  # 5 minutes between offline summary lines
 STARTUP_RETRY_CAP_SECONDS = 180  # ~3 minutes of backoff before failing loud
 CONTROL_SESSION_PREFIX = "aipass-"  # tmux session prefix for /start /kill /status control verbs (DPLAN-0270 P1)
 RTCWAKE_BIN = "/usr/sbin/rtcwake"  # exact path — must match the sudoers.d grant exactly, no wildcards
-SUSPEND_HEARTBEAT_DEFAULT_MINUTES = 25  # /suspend heartbeat interval, overridable via bot config
-SUSPEND_GRACE_WINDOW_SECONDS = 100  # post-resume window to wait for a command before re-arming (DPLAN-0270 P5)
+SUSPEND_HEARTBEAT_DEFAULT_MINUTES = 25  # quiet-cadence /suspend heartbeat interval, overridable via bot config
+# Adaptive cadence: Jul 30-Aug 1 the machine accidentally duty-cycled in short beats (spurious
+# wakes defeated real sleep) and chat-behind-suspend felt near-live. Recreate that on purpose —
+# short beats while conversation is recent, long beats when quiet (devpulse addendum 2026-08-02).
+SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES = 3
+SUSPEND_ACTIVE_WINDOW_DEFAULT_MINUTES = 30  # inbound newer than this = "conversation is live"
+# Grace window is measured from the first SUCCESSFUL Telegram poll after resume, not from resume
+# detection: DNS/network needs 45-60s post-resume, and the reply chain (poll -> inject -> model turn
+# -> send) must fit inside the window or the machine re-suspends mid-conversation (incident 2026-08-02).
+SUSPEND_GRACE_WINDOW_SECONDS = 180
+SUSPEND_EARLY_WAKE_MARGIN_SECONDS = 60  # woke this far before the armed alarm = a human woke it, not our RTC
+# Cross-process human-presence signal: every bot process stamps this on any allowed-user inbound
+# message. The control bot cannot see other bots' traffic in-process, so the signal must cross
+# processes — chatting with @devpulse has to count as "human present" (incident 2026-08-02).
+LAST_INBOUND_STAMP_FILE = Path.home() / ".aipass" / "telegram_bots" / "last_inbound.json"
 RESUME_SIGNAL_FILE = Path.home() / ".aipass" / "telegram_bots" / "resume_signal.json"  # optional secondary signal
 # Wall-clock gap between consecutive poll-loop iterations that means "we were actually
 # asleep," not just idle. Ceiling for a normal iteration is ~POLL_TIMEOUT (30s long-poll)
@@ -295,6 +308,9 @@ class BaseBot:
         self._suspend_resume_pending_since: float | None = None
         self._suspend_last_loop_mark: float | None = None
         self._last_control_command_at: float = 0.0
+        self._suspend_alarm_at: float | None = None  # wall-clock time the armed RTC alarm is due
+        self._suspend_grace_started_at: float | None = None  # set on first good poll after resume
+        self._last_successful_poll_at: float = 0.0
 
         # Conversation state for /create flow (keyed by chat_id)
         self._create_state: dict[int, dict] = {}
@@ -381,6 +397,9 @@ class BaseBot:
 
                 # Reset general backoff on successful poll
                 retry_delay = 5
+
+                # Anchor for the post-resume grace window: network is provably back.
+                self._last_successful_poll_at = time.time()
 
                 # Network recovery
                 if net_offline_since is not None:
@@ -673,6 +692,11 @@ class BaseBot:
             logger.warning("Blocked message from unauthorized user_id: %s (@%s)", user_id, username)
             return
 
+        # Human presence: an allowed user just spoke to SOME bot. Stamped before the
+        # rate-limit check (a throttled human is still a human) so the control bot's
+        # suspend grace check can see conversation happening on any other bot.
+        self._write_inbound_stamp()
+
         # Rate limit check
         if not self.check_rate_limit(user_id):
             logger.warning("Rate limited user_id: %s", user_id)
@@ -795,6 +819,10 @@ class BaseBot:
 
         if cmd_name == "suspend" and self._is_control_bot():
             self._handle_control_suspend(chat_id, cmd_args)
+            return True
+
+        if cmd_name == "lock" and self._is_control_bot():
+            self._handle_control_lock(chat_id)
             return True
 
         # /stop — every bot, not just control bots (interrupts THIS bot's own
@@ -1869,18 +1897,134 @@ class BaseBot:
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to settle pending on /stop: %s", e)
 
+    def _resolve_graphical_session(self) -> Optional[str]:
+        """
+        Find this user's active graphical logind session id, or None.
+
+        The bot runs as a `systemd --user` service, outside the graphical
+        session scope — it has no XDG_SESSION_ID, so `loginctl lock-session`
+        with no argument has no ambient session to resolve and may refuse.
+        Naming the session explicitly makes the call work from any context.
+        """
+        try:
+            listed = subprocess.run(
+                ["loginctl", "list-sessions", "--no-legend"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            logger.warning("Could not list logind sessions: %s", e)
+            return None
+
+        our_uid = str(os.getuid())
+        for line in listed.stdout.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            session_id = parts[0]
+            try:
+                shown = subprocess.run(
+                    ["loginctl", "show-session", session_id, "-p", "Type", "-p", "State", "-p", "User"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except (FileNotFoundError, subprocess.CalledProcessError) as e:
+                logger.info("Could not inspect session %s, skipping it: %s", session_id, e)
+                continue
+            props = dict(p.split("=", 1) for p in shown.stdout.splitlines() if "=" in p)
+            if (
+                props.get("Type") in ("wayland", "x11")
+                and props.get("State") == "active"
+                and props.get("User") == our_uid
+            ):
+                return session_id
+        return None
+
+    def _lock_via_dbus(self) -> bool:
+        """Fallback lock via the GNOME ScreenSaver session-bus method. True if it succeeded."""
+        try:
+            subprocess.run(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.gnome.ScreenSaver",
+                    "--object-path",
+                    "/org/gnome/ScreenSaver",
+                    "--method",
+                    "org.gnome.ScreenSaver.Lock",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            logger.warning("D-Bus screensaver lock failed: %s", e)
+            return False
+
+    def _handle_control_lock(self, chat_id: int) -> None:
+        """
+        /lock — password-lock the screen, leave everything running.
+
+        This is what /suspend was actually being used for: lock + dark screen
+        while the agents keep working behind the password wall. No root, no
+        sudoers grant, no polkit rule, and nothing sleeps — so unlike /suspend
+        there is no wake, grace-window or reachability story to get wrong.
+        Patrick's ruling #217 retired suspend from daily use in favour of this.
+        """
+        session_id = self._resolve_graphical_session()
+        target = ["loginctl", "lock-session"] + ([session_id] if session_id else [])
+
+        try:
+            subprocess.run(target, check=True, capture_output=True)
+            logger.info("Screen locked via loginctl (session=%s)", session_id or "ambient")
+            self.send_message(chat_id, "🔒 Locked — agents stay awake.")
+            return
+        except FileNotFoundError:
+            logger.warning("loginctl not found, trying the D-Bus screensaver fallback")
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+            logger.warning("loginctl lock refused (%s), trying the D-Bus fallback", stderr or e)
+
+        if self._lock_via_dbus():
+            logger.info("Screen locked via the GNOME ScreenSaver D-Bus fallback")
+            self.send_message(chat_id, "🔒 Locked — agents stay awake.")
+            return
+
+        logger.error("/lock failed: neither loginctl nor the D-Bus fallback could lock the screen")
+        self.send_message(chat_id, "Could not lock the screen — loginctl and the D-Bus fallback both failed.")
+
     def _suspend_heartbeat_seconds(self) -> int:
-        """Heartbeat interval for /suspend, in seconds — config override or hardcoded default."""
-        minutes = SUSPEND_HEARTBEAT_DEFAULT_MINUTES
+        """
+        Heartbeat interval for /suspend, in seconds — adaptive, config-driven.
+
+        Short beats while the conversation is live so phone chat feels near-live,
+        long beats once it goes quiet. "Live" means an allowed-user message on
+        ANY bot within suspend_active_window_minutes, read from the shared
+        presence stamp so a chat with @devpulse tightens the control bot's cadence.
+        """
+        quiet_minutes = SUSPEND_HEARTBEAT_DEFAULT_MINUTES
+        active_minutes = SUSPEND_ACTIVE_HEARTBEAT_DEFAULT_MINUTES
+        window_minutes = SUSPEND_ACTIVE_WINDOW_DEFAULT_MINUTES
         try:
             from .config import load_bot_config
 
             config = load_bot_config(self.bot_id)
             if config:
-                minutes = config.get("suspend_heartbeat_minutes", minutes)
+                quiet_minutes = config.get("suspend_heartbeat_minutes", quiet_minutes)
+                active_minutes = config.get("suspend_active_heartbeat_minutes", active_minutes)
+                window_minutes = config.get("suspend_active_window_minutes", window_minutes)
         except Exception as e:
-            logger.warning("Could not read suspend_heartbeat_minutes, using default: %s", e)
-        return int(minutes) * 60
+            logger.warning("Could not read suspend heartbeat config, using defaults: %s", e)
+
+        last_inbound = self._read_inbound_stamp()
+        if last_inbound and time.time() - last_inbound < int(window_minutes) * 60:
+            logger.info("Suspend cadence: conversation is live, using %s-minute beat", active_minutes)
+            return int(active_minutes) * 60
+        return int(quiet_minutes) * 60
 
     def _parse_suspend_duration(self, arg: str) -> tuple[Optional[int], Optional[str]]:
         """
@@ -1921,6 +2065,11 @@ class BaseBot:
         by a wall-clock jump the loop detects on actual wake (see
         _check_resume_signal).
         """
+        if not self._suspend_enabled():
+            logger.info("/suspend rejected — grounded via bot config (suspend_enabled=false)")
+            self.send_message(chat_id, "/suspend is disabled for this bot (suspend_enabled=false in its config).")
+            return
+
         seconds, err = self._parse_suspend_duration(arg)
         if err:
             self.send_message(chat_id, err)
@@ -1957,7 +2106,12 @@ class BaseBot:
                 "See tools/suspend/install_suspend_grants.sh. Not suspending.",
             )
             self._suspend_heartbeat_active = False
+            self._suspend_alarm_at = None
             return
+
+        # Remember when this alarm is due — the wake-cause check compares the actual
+        # wake time against it to tell our own RTC wake from a human opening the lid.
+        self._suspend_alarm_at = time.time() + seconds
 
         try:
             subprocess.run(["systemctl", "suspend"], check=True, capture_output=True)
@@ -1971,9 +2125,93 @@ class BaseBot:
                 "installed yet. See tools/suspend/install_suspend_grants.sh. Disarmed the alarm; staying awake.",
             )
             self._suspend_heartbeat_active = False
+            self._suspend_alarm_at = None
             return
 
         logger.info("Suspend armed+enqueued: wake in %ds (heartbeat=%s)", seconds, self._suspend_heartbeat_active)
+
+    def _write_inbound_stamp(self) -> None:
+        """
+        Record "an allowed user just messaged some bot" for the cross-process presence check.
+
+        Every bot process writes the same shared file; the control bot's suspend
+        grace window reads it. Written atomically (tmp + replace) so a concurrent
+        reader in another process never sees a torn file.
+        """
+        try:
+            LAST_INBOUND_STAMP_FILE.parent.mkdir(parents=True, exist_ok=True)
+            payload = json.dumps({"last_inbound_at": time.time(), "bot_id": self.bot_id})
+            tmp = LAST_INBOUND_STAMP_FILE.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, LAST_INBOUND_STAMP_FILE)
+        except OSError as e:
+            logger.warning("Could not write inbound presence stamp: %s", e)
+
+    def _read_inbound_stamp(self) -> float:
+        """Newest allowed-user inbound seen by ANY bot process. 0.0 when missing or unreadable."""
+        try:
+            data = json.loads(LAST_INBOUND_STAMP_FILE.read_text(encoding="utf-8"))
+            return float(data.get("last_inbound_at", 0))
+        except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError):
+            return 0.0
+
+    def _human_present_since(self, since: float) -> bool:
+        """
+        True if a human showed up after `since` — on ANY bot, not just this one.
+
+        Counts a control verb handled in-process AND any allowed-user message
+        stamped by a sibling bot process. The old check saw only the former,
+        which is why chatting with @devpulse did not stop the machine
+        re-suspending under Patrick's hands (incident 2026-08-02).
+        """
+        return self._last_control_command_at >= since or self._read_inbound_stamp() >= since
+
+    def _turn_in_flight(self) -> bool:
+        """
+        True while ANY bot process has an undelivered turn in flight.
+
+        Re-arming mid-turn suspends the machine before the reply can be sent.
+        Ignores pendings older than PENDING_STUCK_TIMEOUT_SECONDS so a wedged
+        file cannot block re-arm forever.
+        """
+        try:
+            for pending in PENDING_DIR.glob("bot-*.json"):
+                try:
+                    data = json.loads(pending.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if data.get("delivered"):
+                    continue
+                if time.time() - float(data.get("timestamp", 0)) < PENDING_STUCK_TIMEOUT_SECONDS:
+                    return True
+        except OSError as e:
+            logger.warning("Could not scan pending dir for in-flight turns: %s", e)
+        return False
+
+    def _suspend_enabled(self) -> bool:
+        """Ops kill-switch — suspend_enabled=false in bot config grounds the verb without a code edit."""
+        try:
+            from .config import load_bot_config
+
+            config = load_bot_config(self.bot_id)
+            if config and "suspend_enabled" in config:
+                return bool(config["suspend_enabled"])
+        except Exception as e:
+            logger.warning("Could not read suspend_enabled, defaulting to enabled: %s", e)
+        return True
+
+    def _cancel_suspend_heartbeat(self, notice: str) -> None:
+        """Stop the heartbeat cycle, disarm any pending RTC alarm, and tell the chat why."""
+        self._suspend_heartbeat_active = False
+        self._suspend_resume_pending_since = None
+        self._suspend_grace_started_at = None
+        self._suspend_alarm_at = None
+        try:
+            subprocess.run(["sudo", "-n", RTCWAKE_BIN, "-m", "disable"], capture_output=True)
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.warning("Could not disarm RTC alarm on cancel: %s", e)
+        if self._suspend_chat_id is not None:
+            self.send_message(self._suspend_chat_id, notice)
 
     def _read_resume_stamp(self) -> float | None:
         """Read the optional system-sleep hook's resumed_at stamp, if the file exists and parses."""
@@ -2022,35 +2260,77 @@ class BaseBot:
         # second fresh resume and keep bailing out before the elapsed-check below ever runs.
         if self._suspend_resume_pending_since is None:
             gap = (now - last_mark) if last_mark is not None else 0.0
-            resumed = gap > RESUME_WALLCLOCK_JUMP_SECONDS
+            woke = gap > RESUME_WALLCLOCK_JUMP_SECONDS
             source = "wall-clock jump"
-            if not resumed:
-                resumed = self._resume_signal_file_advanced()
+            # Reaching the armed alarm time is a deterministic trigger that does NOT
+            # depend on gap size — a nap shorter than the jump threshold used to leave
+            # the loop armed invisibly with no grace window at all (incident 2026-08-02).
+            if not woke and self._suspend_alarm_at is not None and now >= self._suspend_alarm_at:
+                woke = True
+                source = "armed alarm time reached"
+            if not woke:
+                woke = self._resume_signal_file_advanced()
                 source = "resume-signal file"
-            if resumed:
-                self._suspend_resume_pending_since = now
-                logger.info("Resume detected via %s (gap=%.0fs) — starting grace window", source, gap)
+            if not woke:
+                return
+
+            # Wake-cause: compare the actual wake against the armed RTC time instead of
+            # guessing from the gap. Meaningfully early = a human woke the machine, so
+            # the whole cycle is cancelled rather than absorbed as a spurious wake.
+            if self._suspend_alarm_at is not None and now < self._suspend_alarm_at - SUSPEND_EARLY_WAKE_MARGIN_SECONDS:
+                early_by = self._suspend_alarm_at - now
+                logger.info(
+                    "Woke %.0fs before the armed alarm via %s — human wake, cancelling heartbeat",
+                    early_by,
+                    source,
+                )
+                self._cancel_suspend_heartbeat("Staying awake — you woke the machine.")
+                return
+
+            self._suspend_resume_pending_since = now
+            self._suspend_grace_started_at = None
+            logger.info(
+                "Resume detected via %s (gap=%.0fs) — grace window starts at first successful poll",
+                source,
+                gap,
+            )
             return
 
         resume_detected_at = self._suspend_resume_pending_since
-        if now - resume_detected_at < SUSPEND_GRACE_WINDOW_SECONDS:
+
+        # Any human activity on ANY bot ends the cycle immediately — checked before the
+        # elapsed test so a message lands as "stay awake" the moment it arrives.
+        if self._human_present_since(resume_detected_at):
+            logger.info("Suspend heartbeat: human activity post-resume, staying awake")
+            self._cancel_suspend_heartbeat("Staying awake — activity detected.")
+            return
+
+        # Post-resume DNS/network takes 45-60s. Anchoring the window to the first poll
+        # that actually succeeds is what makes the wake usable for a real conversation.
+        grace_start = self._suspend_grace_started_at
+        if grace_start is None:
+            if self._last_successful_poll_at >= resume_detected_at:
+                self._suspend_grace_started_at = self._last_successful_poll_at
+                logger.info("Telegram reachable after resume — %ds grace window starts", SUSPEND_GRACE_WINDOW_SECONDS)
+            return
+
+        if now - grace_start < SUSPEND_GRACE_WINDOW_SECONDS:
+            return
+
+        # Never suspend out from under an in-flight turn — the reply would never send.
+        if self._turn_in_flight():
+            logger.info("Suspend heartbeat: turn in flight, holding re-arm")
             return
 
         self._suspend_resume_pending_since = None
-
-        if self._last_control_command_at >= resume_detected_at:
-            self._suspend_heartbeat_active = False
-            logger.info("Suspend heartbeat: command received post-resume, staying awake")
-            if self._suspend_chat_id is not None:
-                self.send_message(self._suspend_chat_id, "Staying awake — command received.")
-            return
+        self._suspend_grace_started_at = None
 
         if self._suspend_chat_id is None:
             logger.error("Suspend heartbeat active but no chat_id recorded — aborting heartbeat")
             self._suspend_heartbeat_active = False
             return
 
-        logger.info("Suspend heartbeat: no command in grace window, re-arming (spurious wake absorbed)")
+        logger.info("Suspend heartbeat: no activity in grace window, re-arming (spurious wake absorbed)")
         self._arm_and_suspend(self._suspend_chat_id, self._suspend_heartbeat_seconds())
 
     # =============================================
@@ -3184,6 +3464,10 @@ class BaseBot:
                 "description": "Suspend the machine — /suspend (heartbeat, re-arms until a command "
                 "arrives) or /suspend 8h (single wake, no heartbeat)",
                 "menu_text": "Suspend machine",
+            }
+            commands["lock"] = {
+                "description": "Lock the screen — agents keep running behind the password wall",
+                "menu_text": "Lock screen",
             }
         return commands
 

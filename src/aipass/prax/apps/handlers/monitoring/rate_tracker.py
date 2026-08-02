@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rate_tracker.py
 # Description: Log file rate tracking for runaway detection
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-14
-# Modified: 2026-07-15
+# Modified: 2026-08-02
 # =============================================
 
 """
@@ -200,13 +200,24 @@ def scan_rates() -> list:
             continue
 
         if size < state.last_offset:
-            state.last_offset = size
-            state.last_check = now
-            state.warning_sustained = 0
-            state.critical_sustained = 0
-            continue
+            # The file shrank: RotatingFileHandler rolled .log -> .log.1 and
+            # opened a fresh file, or something truncated it. Bytes written
+            # before the roll are no longer observable here, so count the new
+            # file's content as this interval's floor (an undercount, which
+            # the window average absorbs).
+            #
+            # Critically, do NOT zero the sustained counters. A rotation is
+            # evidence of volume, not of subsidence - and the faster a runaway
+            # writes, the sooner it rotates, so resetting here made detection
+            # strictly less likely the worse the flood got. The 2026-07-31
+            # event-queue firehose ran at ~4090 lines/min (6.8x CRITICAL) and
+            # rotated every ~24s, below the 60s CRITICAL needs, so it never
+            # fired. Counters still clear on their own via the subsidence
+            # branch once the rate actually drops.
+            bytes_added = size
+        else:
+            bytes_added = size - state.last_offset
 
-        bytes_added = size - state.last_offset
         lines_estimate = bytes_added / AVG_LINE_BYTES if bytes_added > 0 else 0.0
         lines_per_min = (lines_estimate / elapsed) * 60.0
 

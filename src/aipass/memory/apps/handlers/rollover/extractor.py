@@ -171,6 +171,49 @@ def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
 # =============================================================================
 
 
+def _is_misplaced_entry(entry: Any, head_number: int | None) -> bool:
+    """
+    An entry in the tail (about to be archived as "oldest") that is dated
+    today or numbered above the array's head is not oldest history — it's a
+    fresh write landed at the wrong end (post-compact convention loss).
+    """
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("date") == datetime.now().strftime("%Y-%m-%d"):
+        return True
+    number = entry.get("number")
+    if isinstance(number, int) and isinstance(head_number, int) and number > head_number:
+        return True
+    return False
+
+
+def _extract_tail_excess(
+    entries: list, limit: int | None, head_number: int | None, array_name: str, branch_key: str
+) -> list:
+    """
+    Select the oldest entries beyond `limit` for archival, holding back any
+    that look like misplaced fresh writes (safety valve).
+
+    Returns the list of entries safe to archive; may be empty.
+    """
+    if limit is None or not isinstance(entries, list) or len(entries) < limit:
+        return []
+    excess = max(len(entries) - limit, 1)
+    candidate_tail = entries[-excess:]  # oldest from end
+
+    archivable = []
+    for entry in candidate_tail:
+        if _is_misplaced_entry(entry, head_number):
+            logger.warning(
+                f"[extractor] {branch_key}/{array_name}: refusing to archive misplaced entry "
+                f"(dated today or numbered above head #{head_number}) — treating as a fresh "
+                f"write, not oldest history: {entry}"
+            )
+        else:
+            archivable.append(entry)
+    return archivable
+
+
 def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract items from v2 format file (entry-count based).
@@ -200,35 +243,59 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     all_extracted = []
 
-    # Extract from sessions array (newest first, oldest at end)
-    max_sessions = file_limits.get("sessions", {}).get("count")
-    if max_sessions is not None:
-        sessions = data.get("sessions", [])
-        if isinstance(sessions, list) and len(sessions) >= max_sessions:
-            excess = max(len(sessions) - max_sessions, 1)
-            extracted_sessions = sessions[-excess:]  # oldest from end
-            data["sessions"] = sessions[:-excess]  # keep newest
-            all_extracted.extend(extracted_sessions)
+    # Extract from sessions array (newest first, oldest at end). AUTO-COMPACT
+    # SNAPSHOT entries (status == "auto-compact") get their own small cap and
+    # never count against the regular session budget.
+    sessions = data.get("sessions", [])
+    if isinstance(sessions, list) and sessions:
+        session_limits = file_limits.get("sessions", {})
+        head_number = sessions[0].get("number") if isinstance(sessions[0], dict) else None
+
+        auto_compact_cap = session_limits.get("auto_compact_cap")
+        if auto_compact_cap is not None:
+            auto_entries = [e for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact"]
+            archived_auto = _extract_tail_excess(
+                auto_entries, auto_compact_cap, head_number, "sessions(auto-compact)", branch_key
+            )
+            if archived_auto:
+                archived_ids = {id(e) for e in archived_auto}
+                sessions = [e for e in sessions if id(e) not in archived_ids]
+                all_extracted.extend(archived_auto)
+
+        max_sessions = session_limits.get("count")
+        if max_sessions is not None:
+            regular_entries = [e for e in sessions if not (isinstance(e, dict) and e.get("status") == "auto-compact")]
+            archived_regular = _extract_tail_excess(regular_entries, max_sessions, head_number, "sessions", branch_key)
+            if archived_regular:
+                archived_ids = {id(e) for e in archived_regular}
+                sessions = [e for e in sessions if id(e) not in archived_ids]
+                all_extracted.extend(archived_regular)
+
+        data["sessions"] = sessions
 
     # Extract from key_learnings list (sorted newest-first; oldest at end)
+    key_learnings = data.get("key_learnings", [])
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
-    if max_key_learnings is not None:
-        key_learnings = data.get("key_learnings", [])
-        if isinstance(key_learnings, list) and len(key_learnings) >= max_key_learnings:
-            excess = max(len(key_learnings) - max_key_learnings, 1)
-            extracted_kl = key_learnings[-excess:]  # oldest from end
-            data["key_learnings"] = key_learnings[:-excess]  # keep newest
-            all_extracted.extend(extracted_kl)
+    if max_key_learnings is not None and isinstance(key_learnings, list) and key_learnings:
+        kl_head_number = key_learnings[0].get("number") if isinstance(key_learnings[0], dict) else None
+        archived_kl = _extract_tail_excess(
+            key_learnings, max_key_learnings, kl_head_number, "key_learnings", branch_key
+        )
+        if archived_kl:
+            archived_ids = {id(e) for e in archived_kl}
+            data["key_learnings"] = [e for e in key_learnings if id(e) not in archived_ids]
+            all_extracted.extend(archived_kl)
 
     # Extract from observations array (if v2 observations file)
+    observations = data.get("observations", [])
     max_observations = file_limits.get("observations", {}).get("count")
-    if max_observations is not None:
-        observations = data.get("observations", [])
-        if isinstance(observations, list) and len(observations) >= max_observations:
-            excess = max(len(observations) - max_observations, 1)
-            extracted_obs = observations[-excess:]
-            data["observations"] = observations[:-excess]
-            all_extracted.extend(extracted_obs)
+    if max_observations is not None and isinstance(observations, list) and observations:
+        obs_head_number = observations[0].get("number") if isinstance(observations[0], dict) else None
+        archived_obs = _extract_tail_excess(observations, max_observations, obs_head_number, "observations", branch_key)
+        if archived_obs:
+            archived_ids = {id(e) for e in archived_obs}
+            data["observations"] = [e for e in observations if id(e) not in archived_ids]
+            all_extracted.extend(archived_obs)
 
     if not all_extracted:
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}

@@ -9,6 +9,7 @@
 """Tests for aipass doctor command — Phase 1 (FPLAN-0188)."""
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -189,11 +190,128 @@ class TestDetectShell:
         assert result["name"] == "bash"
         assert result["path"] == "/bin/bash"
 
-    def test_shell_missing_env(self, monkeypatch) -> None:
-        """Missing SHELL env var returns 'unknown'."""
+    def test_shell_missing_env_and_no_proc_fallback(self, monkeypatch) -> None:
+        """Missing SHELL env var and no /proc fallback available returns 'unknown'."""
         monkeypatch.delenv("SHELL", raising=False)
-        result = detect_shell()
+        with patch(
+            "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+            return_value=None,
+        ):
+            result = detect_shell()
         assert result["name"] == "unknown"
+        assert result["path"] == ""
+
+    def test_shell_missing_env_falls_back_to_proc_comm(self, monkeypatch) -> None:
+        """Missing SHELL but a resolvable parent /proc comm name is used instead of 'unknown'."""
+        monkeypatch.delenv("SHELL", raising=False)
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+                return_value="zsh",
+            ),
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
+                return_value="/usr/bin/zsh",
+            ),
+        ):
+            result = detect_shell()
+        assert result["name"] == "zsh"
+        assert result["path"] == "/usr/bin/zsh"
+
+    def test_shell_missing_env_proc_comm_not_on_path(self, monkeypatch) -> None:
+        """Parent comm name resolves but isn't found via which — bare name still beats 'unknown'."""
+        monkeypatch.delenv("SHELL", raising=False)
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+                return_value="bash",
+            ),
+            patch(
+                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
+                return_value=None,
+            ),
+        ):
+            result = detect_shell()
+        assert result["name"] == "bash"
+        assert result["path"] == ""
+
+
+# =============================================================================
+# TestShellFromParentProc
+# =============================================================================
+
+
+"""The three forced-posix tests patch os.name process-wide; on Windows that
+makes pathlib dispatch Path() to PosixPath, which any code running inside the
+patch window (e.g. the logger call in the OSError branch) trips over with
+NotImplementedError. The code path is POSIX-gated anyway — skip on Windows;
+test_non_posix_returns_none keeps the Windows-relevant coverage."""
+_posix_only = pytest.mark.skipif(os.name == "nt", reason="forces os.name='posix'; breaks pathlib dispatch on Windows")
+
+
+class TestShellFromParentProc:
+    def test_non_posix_returns_none(self, monkeypatch) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        monkeypatch.setattr(system_detector.os, "name", "nt")
+        assert system_detector._shell_from_parent_proc() is None
+
+    @_posix_only
+    def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        fake_ppid = 424242
+        proc_dir = tmp_path / str(fake_ppid)
+        proc_dir.mkdir()
+        (proc_dir / "comm").write_text("bash\n", encoding="utf-8")
+
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
+
+        real_path_cls = system_detector.Path
+
+        def _fake_path(arg, *a, **kw):
+            if str(arg) == f"/proc/{fake_ppid}/comm":
+                return real_path_cls(proc_dir / "comm")
+            return real_path_cls(arg, *a, **kw)
+
+        monkeypatch.setattr(system_detector, "Path", _fake_path)
+        assert system_detector._shell_from_parent_proc() == "bash"
+
+    @_posix_only
+    def test_missing_comm_file_returns_none(self, monkeypatch, tmp_path) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        fake_ppid = 999999
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
+
+        real_path_cls = system_detector.Path
+
+        def _fake_path(arg, *a, **kw):
+            if str(arg) == f"/proc/{fake_ppid}/comm":
+                return real_path_cls(tmp_path / "nonexistent" / "comm")
+            return real_path_cls(arg, *a, **kw)
+
+        monkeypatch.setattr(system_detector, "Path", _fake_path)
+        assert system_detector._shell_from_parent_proc() is None
+
+    @_posix_only
+    def test_read_oserror_returns_none(self, monkeypatch) -> None:
+        from aipass.aipass.apps.handlers.system_detect import system_detector
+
+        monkeypatch.setattr(system_detector.os, "name", "posix")
+        monkeypatch.setattr(system_detector.os, "getppid", lambda: 1)
+
+        class _BoomPath:
+            def is_file(self):
+                return True
+
+            def read_text(self, encoding="utf-8"):
+                raise OSError("permission denied")
+
+        monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
+        assert system_detector._shell_from_parent_proc() is None
 
 
 # =============================================================================
@@ -542,6 +660,36 @@ class TestProviderManifest:
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
+
+    def test_windows_scripts_path_command_recognized_as_wired(self, tmp_path) -> None:
+        """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
+        the POSIX-canonical manifest — write (_platform_bridge_command) and verify must agree
+        (DPLAN-0234 Strand C)."""
+        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
+
+        posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [{"command": posix_cmd, "event": "Stop"}]}}}),
+            encoding="utf-8",
+        )
+        windows_cmd = "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
+        provider_settings = tmp_path / ".claude" / "settings.json"
+        provider_settings.write_text(
+            json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}),
+            encoding="utf-8",
+        )
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
+            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"),
+        ):
+            results = _check_provider_manifest()
+        hooks_result = [r for r in results if r.label == "hooks"][0]
+        assert hooks_result.glyph == GLYPH_PASS
+        assert "1" in hooks_result.detail
+        assert "missing" not in hooks_result.detail
 
     def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
         """Command already shaped like 'event:label' must not get the event prefixed twice."""

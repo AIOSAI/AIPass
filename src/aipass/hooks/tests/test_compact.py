@@ -12,6 +12,22 @@
 import json
 from unittest.mock import patch, MagicMock
 
+import pytest
+
+from aipass.hooks.apps.modules import cadence
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cadence_state(tmp_path, monkeypatch):
+    """handle() calls cadence.reset_counter() for real. Without isolation each
+    test mints a regroup token into /tmp/aipass-cadence-<live-session>.json —
+    the developer's OWN session inherits CLAUDE_CODE_SESSION_ID — and the
+    re-ground backstop then fires in that live session on its next tool call
+    (the DPLAN-0278 "ghost re-arm": pytest swallows the arm log line, so the
+    fire looks sourceless). Every suite run re-armed it."""
+    monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-compact-session")
+
 
 class TestCompactHandler:
     def test_injects_recovery_context(self, tmp_path):

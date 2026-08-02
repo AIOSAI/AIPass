@@ -420,6 +420,12 @@
       "file": "tests/test_trust.py",
       "standard": "encapsulation",
       "reason": "Tests import trust_registry directly to verify enrollment/revocation in isolation with monkeypatched REGISTRY_PATH."
+    },
+    {
+      "file": "apps/handlers/provider_wire.py",
+      "standard": "unused_function",
+      "functions": ["refresh_provider_hooks"],
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. Also the single source of truth for hook wiring, reachable in-process via auto_wire_provider (doctor --fix, interactive wire-prompt) and covered directly by tests/test_provider_wire.py."
     }
   ]
 }
