@@ -65,8 +65,7 @@
           "Bash(git push*)"
         ],
         "ask": [
-          "Edit(~/.claude/**)",
-          "Write(~/.claude/**)"
+          "Edit(~/.claude/**)"
         ]
       },
       "commands": {

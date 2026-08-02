@@ -66,6 +66,7 @@ DEFAULT_PROMPT = "Hi. Check inbox, process new emails, update memories when done
 
 # Model aliases — passed directly to claude CLI which resolves latest-in-class.
 KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku"})
+# If this default is flipped again, update the README to match (Patrick, 2026-08-01).
 DEFAULT_MODEL = "opus"
 
 # Branches that cannot be woken manually by cross-branch drone commands.
