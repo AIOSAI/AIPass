@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_suspend.py
 # Description: Tests for the /suspend control verb + resume-heartbeat logic — DPLAN-0270 P5
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-07-30
 # Modified: 2026-08-02
 # =============================================
@@ -90,8 +90,17 @@ def _cpe(cmd, stderr=b""):
 
 
 # The resolver matches sessions against our own uid, so build the fixtures from it
-# rather than hard-coding 1000 — CI does not run as Patrick.
-_UID = str(os.getuid())
+# rather than hard-coding 1000 — CI does not run as Patrick. Windows has no
+# os.getuid at all, so fall back to a fixed uid there and pin the resolver to the
+# same value below (module-level getuid would kill collection on Windows).
+_UID = str(os.getuid()) if hasattr(os, "getuid") else "1000"
+
+
+@pytest.fixture(autouse=True)
+def _pin_getuid(monkeypatch):
+    # The /lock resolver calls os.getuid() only after the (mocked) loginctl
+    # succeeds, so on Windows the mock walks it straight into a missing API.
+    monkeypatch.setattr(os, "getuid", lambda: int(_UID), raising=False)
 
 
 def _loginctl_stub(*, sessions="3 …\n", props=None, list_error=None, lock_error=None, dbus_error=None):
