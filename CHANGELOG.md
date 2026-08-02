@@ -9,6 +9,31 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — runaway detector: rotation reset the counters; relay pidfile: boot identity
+
+**fix(prax)** — the runaway-log detector could mathematically never fire on a
+fast flood: `scan_rates()` treated the RotatingFileHandler roll (.log → .log.1)
+as a truncation and zeroed the sustained counters, so the faster the flood, the
+sooner the file rotated and the sooner detection reset — the 2026-07-31 event
+queue firehose (~4090 lines/min, 6.8× the CRITICAL threshold) rolled every
+~24s against a 60s-sustain requirement. Root-caused from the on-disk
+arithmetic (rotated file = 199,890 bytes vs the 200,000 threshold). Fix: a
+shrink now counts the new file's content as the interval's bytes and leaves
+the sustained counters alone; subsidence still clears them when rates truly
+drop. Red-before/green-after rotation tests added.
+
+**fix(prax)** — monitor relay pidfile survives reboots: `instance_lock` v1.1.0
+records the kernel `boot_id` in the lock and reclaims unconditionally on a
+boot mismatch (a lock from a past boot is always stale — PID liveness was
+answering the wrong question after PID-number reuse). Same-boot behavior
+unchanged; non-Linux falls back to liveness-only. 9 new boot-identity tests;
+full prax suite 1078 passed.
+
+Known gap (reported, not yet fixed — @trigger territory): medic branch-mutes
+silently suppress runaway alerts (31 suppressed entries, 5 branches muted at
+once), and dispatch SOP mutes branches exactly when build-time runaways
+happen. Fix direction: separate volume mute, or critical-severity bypass.
+
 ## [2026-08-02] — flow plan templates truth-pass
 
 **fix(flow)** — template review caught commands that misfire when agents

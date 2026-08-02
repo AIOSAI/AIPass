@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_instance_lock.py
 # Description: Tests for the monitor single-instance lock
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-08-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py
@@ -11,6 +11,7 @@
 Covers:
 - _is_pid_alive() cross-platform liveness check
 - try_acquire() creates lock, returns False for live duplicate, reclaims stale
+- _current_boot_id() + cross-boot reclaim (PID reuse after reboot)
 - release() removes lock file on clean shutdown
 - Concurrent viewer: relay lock scoped to TG sends, never blocks display
 """
@@ -19,6 +20,8 @@ import json
 import os
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 _HANDLER_MOCKS = {
     "aipass.prax.apps.handlers.json": MagicMock(),
@@ -155,6 +158,131 @@ class TestTryAcquire:
 
         assert mod.try_acquire() is True
         assert lock_path.exists()
+
+
+class TestBootIdentity:
+    """Test cross-boot staleness detection (relay.pid outliving a reboot)."""
+
+    def test_current_boot_id_returns_none_when_unreadable(self):
+        """Platforms without /proc get None rather than an exception."""
+        mod = _import_lock()
+        with patch("pathlib.Path.read_text", side_effect=OSError("no /proc")):
+            assert mod._current_boot_id() is None
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="/proc is Linux-only")
+    def test_current_boot_id_reads_proc_on_linux(self):
+        """Linux exposes a non-empty boot id that is stable within a boot."""
+        mod = _import_lock()
+        boot_id = mod._current_boot_id()
+        assert boot_id
+        assert boot_id == mod._current_boot_id()
+
+    def test_lock_file_records_boot_id(self, tmp_path):
+        """A freshly acquired lock carries the current boot id."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        with patch.object(mod, "_current_boot_id", return_value="boot-now"):
+            assert mod.try_acquire() is True
+
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert data["boot_id"] == "boot-now"
+
+    def test_reclaims_lock_from_previous_boot(self, tmp_path):
+        """A lock from an earlier boot is stale even if its PID is alive now.
+
+        This is the 2026-07-31 failure: relay.pid survived a reboot holding
+        PID 1567, which the new boot handed to an unrelated early process.
+        Liveness said "held", so the relay ran viewer-only for 1h51m.
+        """
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        lock_path.write_text(
+            json.dumps({"pid": os.getpid(), "boot_id": "boot-before-reboot"}),
+            encoding="utf-8",
+        )
+
+        with (
+            patch.object(mod, "_current_boot_id", return_value="boot-after-reboot"),
+            patch.object(mod, "_is_pid_alive", return_value=True) as alive,
+        ):
+            assert mod.try_acquire() is True
+
+        alive.assert_not_called()
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert data["pid"] == os.getpid()
+        assert data["boot_id"] == "boot-after-reboot"
+
+    def test_same_boot_live_holder_still_blocks(self, tmp_path):
+        """Matching boot ids fall through to the normal liveness check."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        lock_path.write_text(
+            json.dumps({"pid": os.getpid(), "boot_id": "boot-now"}),
+            encoding="utf-8",
+        )
+
+        with patch.object(mod, "_current_boot_id", return_value="boot-now"):
+            assert mod.try_acquire() is False
+
+    def test_same_boot_dead_holder_is_reclaimed(self, tmp_path):
+        """Matching boot ids with a dead PID still reclaim as before."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        lock_path.write_text(
+            json.dumps({"pid": 99999999, "boot_id": "boot-now"}),
+            encoding="utf-8",
+        )
+
+        with (
+            patch.object(mod, "_current_boot_id", return_value="boot-now"),
+            patch.object(mod, "_is_pid_alive", return_value=False),
+        ):
+            assert mod.try_acquire() is True
+
+    def test_legacy_lock_without_boot_id_uses_liveness(self, tmp_path):
+        """Pre-1.1.0 lock files have no boot_id — behaviour must not regress."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        lock_path.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
+
+        with patch.object(mod, "_current_boot_id", return_value="boot-now"):
+            assert mod.try_acquire() is False
+
+    def test_no_boot_id_available_uses_liveness_only(self, tmp_path):
+        """Without a readable boot id the lock degrades to plain pid liveness."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        lock_path.write_text(
+            json.dumps({"pid": os.getpid(), "boot_id": "boot-before-reboot"}),
+            encoding="utf-8",
+        )
+
+        with patch.object(mod, "_current_boot_id", return_value=None):
+            assert mod.try_acquire() is False
+
+    def test_lock_omits_boot_id_when_unavailable(self, tmp_path):
+        """No boot id means no boot_id key — never a null that reads as a mismatch."""
+        mod = _import_lock()
+        lock_path = tmp_path / "relay.pid"
+        setattr(mod, "_lock_path_override", lock_path)
+
+        with patch.object(mod, "_current_boot_id", return_value=None):
+            assert mod.try_acquire() is True
+
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert "boot_id" not in data
 
 
 class TestRelease:

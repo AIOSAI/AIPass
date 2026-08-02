@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rate_tracker.py
 # Description: Tests for the rate tracker runaway-log detector
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-14
-# Modified: 2026-07-15
+# Modified: 2026-08-02
 # =============================================
 
 """Tests for apps/handlers/monitoring/rate_tracker.py
@@ -100,14 +100,19 @@ class TestRateCalculation:
         assert len(results) == 1
         assert results[0]["rate_lines_per_min"] == 0.0
 
-    def test_truncated_file_resets_offset(self, tmp_path, monkeypatch):
-        """File that shrinks (rotation) resets offset without error."""
+    def test_truncated_file_tracked_from_new_content(self, tmp_path, monkeypatch):
+        """A file that shrinks (rotation) is rated on the new file's content.
+
+        The bytes written before the roll are unobservable, so the new file's
+        size is the interval floor. A quiet file after truncation must stay
+        below threshold and not false-fire.
+        """
         logs_dir = tmp_path / "system"
         logs_dir.mkdir(parents=True)
         log_file = logs_dir / "test_module.log"
         log_file.write_text("x" * 10000)
 
-        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        mod, event_mock = _import_tracker(monkeypatch, logs_dir=logs_dir)
         mod.scan_rates()
 
         log_file.write_text("x" * 100)
@@ -115,7 +120,11 @@ class TestRateCalculation:
         with patch.object(mod.time, "time", return_value=time.time() + 10.0):
             results = mod.scan_rates()
 
-        assert results == []
+        assert len(results) == 1
+        # 100 bytes / 120 bytes-per-line over 10s == 5 lines/min, well under WARNING
+        assert results[0]["rate_lines_per_min"] < mod.WARNING_LINES_PER_MIN
+        assert results[0]["severity"] is None
+        event_mock.assert_not_called()
 
 
 class TestSustainedThresholds:
@@ -254,6 +263,70 @@ class TestSubsidence:
                 mod.scan_rates()
 
         assert event_mock.call_count == 2
+
+
+class TestRotationDuringRunaway:
+    """Regression: log rotation must not mask a sustained runaway.
+
+    The 2026-07-31 prax event-queue firehose (~4090 lines/min, 6.8x the
+    CRITICAL threshold) never fired an alert. At that rate the log hit its
+    200KB RotatingFileHandler limit every ~24s, and every rotation zeroed
+    the sustained counters, so the counter never reached the 6 consecutive
+    intervals CRITICAL requires. The faster the runaway, the more often it
+    rotated, the less likely detection became - a strict inversion.
+    """
+
+    def _run_rotating_flood(self, mod, log_file, bytes_per_interval, intervals):
+        """Flood the file, rotating (shrinking to a fresh file) every 2nd interval."""
+        base_time = time.time()
+        for i in range(intervals):
+            if i % 2 == 1:
+                # RotatingFileHandler rolls .log -> .log.1 and opens a fresh
+                # file, so the tracked path suddenly shrinks mid-flood.
+                log_file.write_bytes(b"x" * bytes_per_interval)
+            else:
+                log_file.write_bytes(b"x" * bytes_per_interval + log_file.read_bytes())
+
+            with patch.object(
+                mod.time,
+                "time",
+                return_value=base_time + (i + 1) * mod.SCAN_INTERVAL,
+            ):
+                mod.scan_rates()
+
+    def test_runaway_still_fires_when_log_rotates(self, tmp_path, monkeypatch):
+        """A critical-rate flood that rotates its own log must still fire."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, event_mock = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        mod.scan_rates()
+
+        bytes_per_interval = int(mod.CRITICAL_LINES_PER_MIN * mod.AVG_LINE_BYTES * mod.SCAN_INTERVAL / 60 * 1.5)
+
+        self._run_rotating_flood(mod, log_file, bytes_per_interval, mod.CRITICAL_SUSTAINED_INTERVALS * 2)
+
+        assert event_mock.called, "runaway that rotates its own log must still fire an event"
+
+    def test_rotation_preserves_sustained_counter(self, tmp_path, monkeypatch):
+        """Rotation must not zero the sustained counters mid-flood."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        mod.scan_rates()
+
+        bytes_per_interval = int(mod.CRITICAL_LINES_PER_MIN * mod.AVG_LINE_BYTES * mod.SCAN_INTERVAL / 60 * 1.5)
+
+        # Three intervals, the last one a rotation - the counter must keep climbing.
+        self._run_rotating_flood(mod, log_file, bytes_per_interval, 3)
+
+        state = mod._tracked[str(log_file)]
+        assert state.critical_sustained >= 3
 
 
 class TestBurstDetection:
