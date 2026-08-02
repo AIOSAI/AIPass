@@ -9,6 +9,14 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-01] — dispatch default model: opus (Patrick ruling)
+
+**chore(ai_mail)** — `DEFAULT_MODEL` in dispatch wake flips sonnet → opus:
+dispatched citizens now run full-reasoning by default (`--model sonnet`/`haiku`
+still available per-dispatch). Also truths the doc drift — dispatch.py's help
+already claimed opus was the default while wake.py shipped sonnet. 234 ai_mail
+dispatch tests green.
+
 ## [2026-08-01] — setup.sh hook wiring: manifest is the single source, no doctor-heal dependency
 
 **fix(aipass)** — fresh installs wired only 6/13 UserPromptSubmit bridge hooks

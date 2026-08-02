@@ -579,9 +579,9 @@ def test_known_model_aliases_has_expected_entries():
     assert "haiku" in KNOWN_MODEL_ALIASES
 
 
-def test_default_model_is_sonnet():
-    """Default model should be sonnet."""
-    assert DEFAULT_MODEL == "sonnet"
+def test_default_model_is_opus():
+    """Default model should be opus (Patrick ruling 2026-08-01)."""
+    assert DEFAULT_MODEL == "opus"
 
 
 def test_known_model_aliases_are_bare_names():
