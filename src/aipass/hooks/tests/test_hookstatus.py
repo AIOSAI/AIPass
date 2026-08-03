@@ -136,10 +136,10 @@ class TestConfigPresent:
 
 
 class TestConfigAbsent:
-    """Tests when no config file is found."""
+    """Tests when no config is loaded — for any of the loader's refusals."""
 
     def test_no_config_shows_message(self):
-        """Verify missing config shows instruction to run aipass init."""
+        """Verify a genuinely missing config still says exactly that."""
         from aipass.hooks.apps.modules.hookstatus import handle_command
         from io import StringIO
         from rich.console import Console
@@ -152,14 +152,44 @@ class TestConfigAbsent:
                 "aipass.hooks.apps.modules.hookstatus.find_project_config",
                 return_value=None,
             ),
+            patch(
+                "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
+                return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
+            ),
+            patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
+        ):
+            result = handle_command("status", [])
+
+        assert result is True
+        assert "No .aipass/hooks.json found" in buf.getvalue()
+
+    def test_untrusted_config_reports_the_real_refusal(self):
+        """Present-but-unenrolled must not be rendered as file-not-found."""
+        from aipass.hooks.apps.modules.hookstatus import handle_command
+        from io import StringIO
+        from rich.console import Console
+
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=200)
+
+        with (
+            patch(
+                "aipass.hooks.apps.modules.hookstatus.find_project_config",
+                return_value=None,
+            ),
+            patch(
+                "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
+                return_value="not enrolled in the trust registry\nFix: aipass trust /proj",
+            ),
             patch("aipass.hooks.apps.modules.hookstatus.CONSOLE", test_console),
         ):
             result = handle_command("status", [])
 
         assert result is True
         output = buf.getvalue()
-        assert "No .aipass/hooks.json found" in output
-        assert "aipass init" in output
+        assert "not enrolled in the trust registry" in output
+        assert "aipass trust /proj" in output
+        assert "No .aipass/hooks.json found" not in output
 
 
 class TestMasterSwitchOff:

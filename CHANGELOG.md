@@ -9,6 +9,65 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — install ends with hooks alive: setup enrolls itself; hook test runner stops ghost-arming live sessions
+
+**feat(setup)** — setup.sh now enrolls the repo it just installed in the hook
+trust registry (Patrick ruling, compass #221: the trust gate protects against
+FOREIGN projects' hostile hooks.json — distrusting the config the installer
+itself just wired is senseless). Previously a non-interactive install finished
+"clean" with every hook silently dead until a manual `aipass trust`. The
+enroll block runs right after hook wiring, calls the existing `enroll()` API
+on `$SCRIPT_DIR` only (direct — the init-flow helper silently no-ops on temp
+paths, which would have broken container/CI installs), and fails honestly:
+WARN + the exact repair command in ACTION NEEDED, never an aborted install.
+Proven causal in counterfactual containers (fix stripped → hooks dead; fix
+present → registry absent → enrolled → 30 hooks fire with zero manual steps).
+5 new tests execute the shipped bash block itself under `set -euo pipefail`;
+897 aipass tests green. Built by @aipass.
+
+**fix(hooks)** — `drone @hooks test` run from inside a live Claude session
+armed the session's own post-compact regroup backstop: handlers resolve
+`CLAUDE_CODE_SESSION_ID` env-first, the live session's ID leaks into the Bash
+subprocess, so the mock PreCompact fire minted a real regroup token — next
+real PostToolUse injected a "POST-COMPACT RE-GROUND" blob with no compaction
+anywhere (ghost re-arm family, DPLAN-0278; spotted by the concierge during
+the v2.7.12 install walk). hook_test v1.0.1 pins the env var to
+`hook-test-mock` for the firing loop (try/finally restore) and stamps mock
+payloads with the same ID, so all mock state lands in an isolated throwaway
+file. Red/green proven live on a real session and re-proven in a fresh
+container; 1310 hooks tests green.
+
+**fix(hooks)** — the trust gate's refusals now tell the truth.
+`find_project_config()` returns the same bare `None` for four different
+reasons, and every CLI surface reported all of them as "No .aipass/hooks.json
+found" — a lie whenever the file sat right there and the trust registry was
+what refused it (cost two container runs to see through during the install
+walk). New `config_unavailable_reason()` in the loader distinguishes absent /
+not-enrolled / hash-changed / unreadable, each with the exact repair command
+(`aipass trust <dir>`); wired into `hook test`, `hookstatus`, and
+`wire verify`. Bridges stay silent by design (loader already logs there). +7
+tests, one pinning the message against the gate so they can't drift apart;
+1317 hooks tests green. Built by @hooks. Also: the two setup.sh trust tests
+now skip on Windows — `shutil.which("bash")` there finds the WSL launcher,
+not a shell, so CI red-flagged a POSIX-only installer test.
+
+**fix(drone)** — git-gate refusals stop dead-ending and stop double-paging.
+Rerouted verbs now point at their replacement (`add` → `commit --all`/
+`commit "<msg>" <files>`, `push` → `dev-pr`, `pull` → `sync`); unknown verbs
+get no hint so a typo is never handed a bogus suggestion. Root of the twin
+468-occurrence medic fingerprints found: one refusal logged at ERROR twice
+(auth.py, then git_module.py re-logging the identical event 0.12s apart) —
+which is why suppressing one fingerprint left its twin paging. auth.py now
+owns severity; the duplicate is WARNING. Benign by-design denials (no
+passport in CWD, unknown verb) downgrade to WARNING — still logged, exit 1,
+stderr, but medic no longer dispatches owners for working-as-intended
+refusals (same doctrine as compass #219); owner-tier denials remain ERROR
+and still page. Downgrade verified targeted live, canary-checked: 6 of 7 new
+regression tests genuinely fail without the fix, the 7th proves owner-tier
+still escalates. 904 drone tests green. Built by @drone — self-dispatched
+via the daemon/medic pipeline off the very error devpulse hit an hour
+earlier.
+
 ## [2026-08-02] — trigger suppress grows teeth: suppressed errors stop waking their owners
 
 **feat(trigger)** — `errors suppress` now does what its name promised (Patrick

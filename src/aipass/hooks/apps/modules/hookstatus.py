@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: hookstatus.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Hook status — read-only view of per-project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-28
-# Modified: 2026-05-28
+# Modified: 2026-08-02
 # =============================================
 
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
 CONSOLE = err_console
@@ -85,8 +85,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         config = find_project_config()
         if config is None:
-            CONSOLE.print("[yellow]No .aipass/hooks.json found in this directory tree.[/yellow]")
-            CONSOLE.print("Run: [bold]aipass init[/bold]")
+            CONSOLE.print(f"[yellow]{config_unavailable_reason()}[/yellow]")
             return True
         _render_status(config)
         return True

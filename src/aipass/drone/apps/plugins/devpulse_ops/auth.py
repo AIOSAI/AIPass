@@ -50,6 +50,21 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
 }
 
 
+# Real git verbs drone deliberately does not expose — staging and remote work are
+# folded into higher-level commands. Without a pointer the refusal is a dead end.
+_REROUTED_VERBS: dict[str, str] = {
+    "add": "Staging is part of commit — use 'commit --all' or 'commit \"<msg>\" <files>'.",
+    "push": "Use 'dev-pr' to push dev and open a PR.",
+    "pull": "Use 'sync'.",
+}
+
+
+def _rerouted_hint(command: str) -> str:
+    """Return a ' <hint>' suffix for git verbs drone routes elsewhere, else ''."""
+    hint = _REROUTED_VERBS.get(command)
+    return f" {hint}" if hint else ""
+
+
 def _find_caller() -> str:
     """Walk up from CWD to find passport.json and return branch name.
 
@@ -80,8 +95,11 @@ def _find_caller() -> str:
             break
         current = parent
 
+    # WARNING, not ERROR: the gate failing closed on a non-branch CWD is designed
+    # behaviour, not a fault. Logged loud enough to diagnose, quiet enough not to
+    # page anyone (@trigger log-fix 906263c8ff2e).
     msg = "No .trinity/passport.json found in directory hierarchy — cannot verify caller"
-    logger.error(msg)
+    logger.warning(msg)
     raise PermissionError(msg)
 
 
@@ -122,4 +140,4 @@ def verify_git_access(command: str) -> str:
         )
         return caller
 
-    raise PermissionError(f"Unknown git command: '{command}'")
+    raise PermissionError(f"Unknown git command: '{command}'.{_rerouted_hint(command)}")

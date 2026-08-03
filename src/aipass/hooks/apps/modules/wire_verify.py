@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-07-09
+# Modified: 2026-08-02
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -24,7 +24,7 @@ import json
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -155,7 +155,7 @@ def verify_wiring(provider_path=None, project_config=None):
 
     config = project_config if project_config is not None else find_project_config()
     if config is None:
-        errors.append("No .aipass/hooks.json found in directory tree")
+        errors.append(config_unavailable_reason())
         return {"errors": errors, "warnings": warnings, "info": info, "ok": False}
 
     provider_index = _build_provider_index(provider_hooks, errors)

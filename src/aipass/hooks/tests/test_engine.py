@@ -747,7 +747,13 @@ class TestCliRouting:
     def test_output_capture_status(self, capsys):
         from aipass.hooks.apps.hooks import handle_command
 
-        with patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None):
+        with (
+            patch("aipass.hooks.apps.modules.hookstatus.find_project_config", return_value=None),
+            patch(
+                "aipass.hooks.apps.modules.hookstatus.config_unavailable_reason",
+                return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
+            ),
+        ):
             handle_command("status", [])
         captured = capsys.readouterr()
         assert "No .aipass/hooks.json" in captured.err
