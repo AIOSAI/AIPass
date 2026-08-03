@@ -26,6 +26,7 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     revoke,
 )
 from aipass.hooks.apps.handlers.config.loader import (
+    config_unavailable_reason,
     find_project_config,
     never_enrolled_banner,
     trust_break_banner,
@@ -515,6 +516,88 @@ class TestBootstrap:
 
             assert is_trusted(str(hostile_dir)) is False
             assert is_trusted(str(aipass_dir)) is True
+
+
+class TestConfigUnavailableReason:
+    """find_project_config() returns a bare None for four different refusals.
+
+    The CLI surfaces used to report every one of them as "no hooks.json
+    found" — a lie the moment the file exists and the trust gate is what
+    actually refused. These pin each state to its own truthful message.
+    """
+
+    def test_config_genuinely_absent(self, temp_test_dir, mock_logger):
+        empty = temp_test_dir / "not_a_project"
+        empty.mkdir()
+        with patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=empty):
+            reason = config_unavailable_reason()
+        assert "No .aipass/hooks.json found" in reason
+
+    def test_present_but_never_enrolled(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "unenrolled_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            reason = config_unavailable_reason()
+        assert "not enrolled" in reason
+        assert f"aipass trust {project}" in reason
+        assert "No .aipass/hooks.json found" not in reason
+
+    def test_enrolled_but_hash_mismatch(self, temp_test_dir, mock_logger):
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "tampered_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        hooks_file = project / ".aipass" / "hooks.json"
+        hooks_file.write_text('{"hooks_enabled": true}')
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        hooks_file.write_text('{"hooks_enabled": true, "changed": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            reason = config_unavailable_reason()
+        assert "changed since it was enrolled" in reason
+        assert f"aipass trust {project}" in reason
+
+    def test_trusted_but_unparseable(self, temp_test_dir, mock_logger):
+        """Enrolled, hash matches, but the JSON is broken — the fourth refusal."""
+        reg_path = temp_test_dir / "registry.json"
+        project = temp_test_dir / "broken_json_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text("{ not json")
+        with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
+            enroll(str(project))
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            assert find_project_config() is None
+            reason = config_unavailable_reason()
+        assert "could not be read or parsed" in reason
+
+    def test_reason_matches_the_refusal_that_actually_happened(self, temp_test_dir, mock_logger):
+        """The message and the gate must agree: config really is refused here."""
+        reg_path = temp_test_dir / "registry.json"
+        reg_path.write_text('{"version": 1, "projects": {}}')
+        project = temp_test_dir / "paired_project"
+        project.mkdir()
+        (project / ".aipass").mkdir()
+        (project / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}')
+        with (
+            patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
+            patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
+        ):
+            assert find_project_config() is None
+            assert "not enrolled" in config_unavailable_reason()
 
 
 class TestLoaderTrustIntegration:

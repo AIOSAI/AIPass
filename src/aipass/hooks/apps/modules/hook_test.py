@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Portable hook test runner — fires every hook with mock data
 # Branch: hooks
 # Layer: apps/modules
@@ -24,7 +24,7 @@ import tempfile
 import time
 
 from aipass.hooks.apps.modules.engine import dispatch
-from aipass.hooks.apps.handlers.config.loader import find_project_config
+from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 
@@ -118,7 +118,7 @@ def run_test(verbose: bool = False) -> dict:
     """Fire every hook with mock data, return results summary."""
     config = find_project_config()
     if config is None:
-        return {"error": "No .aipass/hooks.json found — run from an AIPass project directory."}
+        return {"error": config_unavailable_reason()}
 
     if not config.get("hooks_enabled", True):
         return {"error": "hooks_enabled is false in project config."}

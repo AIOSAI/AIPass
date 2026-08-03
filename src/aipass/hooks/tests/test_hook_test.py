@@ -9,10 +9,28 @@ _MOD = "aipass.hooks.apps.modules.hook_test"
 
 class TestRunTest:
     def test_no_config_returns_error(self):
-        with patch(f"{_MOD}.find_project_config", return_value=None):
+        with (
+            patch(f"{_MOD}.find_project_config", return_value=None),
+            patch(
+                f"{_MOD}.config_unavailable_reason",
+                return_value="No .aipass/hooks.json found — run from an AIPass project directory.",
+            ),
+        ):
             result = hook_test.run_test()
         assert "error" in result
         assert "hooks.json" in result["error"]
+
+    def test_no_config_error_reports_the_real_refusal(self):
+        """Not-enrolled must not be reported as file-not-found — the CLI echoes
+        whatever the loader says refused it, verbatim."""
+        truth = "/proj/.aipass/hooks.json exists, but this project is not enrolled...\nFix: aipass trust /proj"
+        with (
+            patch(f"{_MOD}.find_project_config", return_value=None),
+            patch(f"{_MOD}.config_unavailable_reason", return_value=truth),
+        ):
+            result = hook_test.run_test()
+        assert result["error"] == truth
+        assert "No .aipass/hooks.json found" not in result["error"]
 
     def test_hooks_disabled_returns_error(self):
         with patch(f"{_MOD}.find_project_config", return_value={"hooks_enabled": False}):

@@ -37,6 +37,20 @@ payloads with the same ID, so all mock state lands in an isolated throwaway
 file. Red/green proven live on a real session and re-proven in a fresh
 container; 1310 hooks tests green.
 
+**fix(hooks)** — the trust gate's refusals now tell the truth.
+`find_project_config()` returns the same bare `None` for four different
+reasons, and every CLI surface reported all of them as "No .aipass/hooks.json
+found" — a lie whenever the file sat right there and the trust registry was
+what refused it (cost two container runs to see through during the install
+walk). New `config_unavailable_reason()` in the loader distinguishes absent /
+not-enrolled / hash-changed / unreadable, each with the exact repair command
+(`aipass trust <dir>`); wired into `hook test`, `hookstatus`, and
+`wire verify`. Bridges stay silent by design (loader already logs there). +7
+tests, one pinning the message against the gate so they can't drift apart;
+1317 hooks tests green. Built by @hooks. Also: the two setup.sh trust tests
+now skip on Windows — `shutil.which("bash")` there finds the WSL launcher,
+not a shell, so CI red-flagged a POSIX-only installer test.
+
 ## [2026-08-02] — trigger suppress grows teeth: suppressed errors stop waking their owners
 
 **feat(trigger)** — `errors suppress` now does what its name promised (Patrick

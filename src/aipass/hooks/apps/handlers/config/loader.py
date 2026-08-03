@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Hook config loader — finds and parses .aipass/hooks.json
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-05-19
-# Modified: 2026-05-19
+# Modified: 2026-08-02
 # =============================================
 
 """Loads per-project hook configuration from .aipass/hooks.json."""
@@ -59,6 +59,49 @@ def find_project_config() -> dict | None:
                 return None
         search = search.parent
     return None
+
+
+def config_unavailable_reason() -> str:
+    """Explain truthfully why find_project_config() returned None.
+
+    The loader refuses for four different reasons but returns the same bare
+    None for all of them, so CLI surfaces reported every one as "no
+    hooks.json found" — a lie whenever the file is sitting right there and
+    the trust gate is what actually refused. Callers wanting a human-facing
+    message ask here. Same config-independent walk as the banners below (it
+    must answer precisely when the config cannot be loaded), and it mirrors
+    find_project_config()'s walk exactly: first directory with a hooks.json
+    wins, trusted or not.
+    """
+    from aipass.hooks.apps.handlers.config.trust_registry import (
+        is_hash_mismatch,
+        is_unenrolled,
+    )
+
+    search = Path.cwd()
+    home = Path.home()
+    while search != home and search.parent != search:
+        config_file = search / ".aipass" / "hooks.json"
+        if config_file.exists():
+            project_dir = str(search)
+            if is_unenrolled(project_dir):
+                return (
+                    f"{config_file} exists, but this project is not enrolled in the trust "
+                    "registry — the trust gate refused it, so no hooks run here.\n"
+                    f"Fix: aipass trust {project_dir}"
+                )
+            if is_hash_mismatch(project_dir):
+                return (
+                    f"{config_file} has changed since it was enrolled in the trust registry "
+                    "— the trust gate refused it, so no hooks run here.\n"
+                    f"Fix (re-enroll): aipass trust {project_dir}"
+                )
+            return (
+                f"{config_file} is enrolled and trusted but could not be read or parsed "
+                "— see the [HOOKS] error in the engine log."
+            )
+        search = search.parent
+    return "No .aipass/hooks.json found — run from an AIPass project directory."
 
 
 def trust_break_banner() -> str | None:
