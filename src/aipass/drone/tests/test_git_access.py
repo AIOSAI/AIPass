@@ -175,6 +175,69 @@ class TestVerifyGitAccessUnknown:
         with pytest.raises(PermissionError, match="Unknown git command"):
             verify_git_access("nonexistent")
 
+    @pytest.mark.parametrize(
+        ("command", "pointer"),
+        [
+            ("add", "commit"),
+            ("push", "dev-pr"),
+            ("pull", "sync"),
+        ],
+    )
+    def test_rerouted_verbs_point_at_replacement(self, devpulse_dir: Path, command: str, pointer: str) -> None:
+        """Real git verbs drone folds into higher-level commands name their replacement.
+
+        The refusal is correct — without the pointer it was a dead end (ERROR 26b225d3).
+        """
+        with pytest.raises(PermissionError) as exc_info:
+            verify_git_access(command)
+        assert pointer in str(exc_info.value)
+
+    def test_unknown_verb_gets_no_hint(self, devpulse_dir: Path) -> None:
+        """Only rerouted verbs get a pointer — a typo must not be handed a bogus suggestion."""
+        with pytest.raises(PermissionError) as exc_info:
+            verify_git_access("nonexistent")
+        assert str(exc_info.value) == "Unknown git command: 'nonexistent'."
+
+
+class TestGitAccessLogSeverity:
+    """Severity is owned by auth.py: designed refusals warn, real denials error.
+
+    One refusal used to log ERROR in both auth.py and git_module.py, so a single
+    event produced two @trigger fingerprints 0.12s apart — suppressing one left
+    the twin paging. See @trigger log-fix 906263c8ff2e / 1c8a86e955c1.
+    """
+
+    def test_missing_passport_logs_warning_not_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Failing closed on a non-branch CWD is designed behaviour, not a fault."""
+        monkeypatch.chdir(tmp_path)
+        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
+            with pytest.raises(PermissionError, match="No .trinity/passport.json"):
+                verify_git_access("status")
+        mock_logger.warning.assert_called_once()
+        mock_logger.error.assert_not_called()
+
+    def test_owner_tier_denial_still_logs_error(self, seedgo_dir: Path) -> None:
+        """An identified branch reaching for owner-tier IS a fault — must still page."""
+        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
+            with pytest.raises(PermissionError, match="not authorized"):
+                verify_git_access("commit")
+        mock_logger.error.assert_called_once()
+
+    def test_git_module_does_not_duplicate_denial_error(self, repo_dir: Path) -> None:
+        """git_module re-logs the denial at WARNING — auth.py already logged it authoritatively."""
+        with (
+            patch(
+                "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access",
+                side_effect=PermissionError("nope"),
+            ),
+            patch("aipass.drone.apps.modules.git_module.logger") as mock_logger,
+        ):
+            result = handle_command("status")
+        assert result["exit_code"] == 1
+        assert "nope" in result["stderr"]
+        mock_logger.warning.assert_called_once()
+        mock_logger.error.assert_not_called()
+
 
 # ===========================================================================
 # 3. diff_handler

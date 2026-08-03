@@ -51,6 +51,23 @@ tests, one pinning the message against the gate so they can't drift apart;
 now skip on Windows — `shutil.which("bash")` there finds the WSL launcher,
 not a shell, so CI red-flagged a POSIX-only installer test.
 
+**fix(drone)** — git-gate refusals stop dead-ending and stop double-paging.
+Rerouted verbs now point at their replacement (`add` → `commit --all`/
+`commit "<msg>" <files>`, `push` → `dev-pr`, `pull` → `sync`); unknown verbs
+get no hint so a typo is never handed a bogus suggestion. Root of the twin
+468-occurrence medic fingerprints found: one refusal logged at ERROR twice
+(auth.py, then git_module.py re-logging the identical event 0.12s apart) —
+which is why suppressing one fingerprint left its twin paging. auth.py now
+owns severity; the duplicate is WARNING. Benign by-design denials (no
+passport in CWD, unknown verb) downgrade to WARNING — still logged, exit 1,
+stderr, but medic no longer dispatches owners for working-as-intended
+refusals (same doctrine as compass #219); owner-tier denials remain ERROR
+and still page. Downgrade verified targeted live, canary-checked: 6 of 7 new
+regression tests genuinely fail without the fix, the 7th proves owner-tier
+still escalates. 904 drone tests green. Built by @drone — self-dispatched
+via the daemon/medic pipeline off the very error devpulse hit an hour
+earlier.
+
 ## [2026-08-02] — trigger suppress grows teeth: suppressed errors stop waking their owners
 
 **feat(trigger)** — `errors suppress` now does what its name promised (Patrick

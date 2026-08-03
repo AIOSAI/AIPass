@@ -138,7 +138,10 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
         caller = verify_git_access(cmd)
     except PermissionError as exc:
-        logger.error("git access denied: %s", exc)
+        # WARNING, not ERROR: auth.py already logged this same denial with the
+        # authoritative severity. Re-logging at ERROR made one refusal surface as
+        # two ERROR fingerprints 0.12s apart, so suppressing one left the twin loud.
+        logger.warning("git access denied: %s", exc)
         return {"stdout": "", "stderr": str(exc), "exit_code": 1}
 
     json_handler.log_operation("git_handle_command", {"command": command, "args": args, "caller": caller})
