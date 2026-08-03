@@ -9,6 +9,28 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-02] — TG slash relay: /context fired from Telegram comes back to the chat
+
+**feat(skills)** — CC informational slash commands now round-trip from
+Telegram (Patrick ask: stop pick-and-choosing which builtins work remotely).
+The bot injects an allowlisted informational command (`/context`; extend via
+`informational_commands` config) as raw text — no relay prefix, or CC would
+read it as prose — then a daemon-thread watcher tails the CC transcript from
+the injection baseline and relays the command's stdout back to the chat as
+HTML `<pre>` chunks. Local commands produce no assistant turn, so this path
+deliberately writes NO pending file and starts NO heartbeat (nothing for the
+Stop hook to strand — the stuck-pending lesson applied, not relearned);
+90s timeout edits the placeholder to an honest failure. Scope-guarded twice:
+watcher only starts from TG-inbound handling and the scan is bounded to
+lines after the baseline — a desk or remote-control `/context` can never
+surprise-echo to the phone. Found en route: current CC emits `/context`
+twice (ANSI TUI panel + clean-markdown isMeta twin); the twin is preferred.
+`/cost` verified-not-assumed and left OUT (zero invocations exist on this
+machine to pin its shape). Side-effect passthrough (`clear`/`compact`/
+`prep`/`memo`) byte-identical behavior. 51 new tests (canary-checked: each
+guarantee broken in turn, tests bite), 1010 telegram green, seedgo 100%.
+Built by @skills; live-proven end-to-end including a real Telegram hop.
+
 ## [2026-08-02] — install ends with hooks alive: setup enrolls itself; hook test runner stops ghost-arming live sessions
 
 **feat(setup)** — setup.sh now enrolls the repo it just installed in the hook

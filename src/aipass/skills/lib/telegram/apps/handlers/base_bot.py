@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-02-24
 # Modified: 2026-08-02
 # =============================================
@@ -130,6 +130,18 @@ PENDING_DIR = Path.home() / ".aipass" / "telegram_pending"
 PENDING_TTL = 3600  # 1 hour
 PENDING_STUCK_TIMEOUT_SECONDS = 600  # give up on an undelivered pending, don't spin "Processing..." forever
 DEFAULT_PASSTHROUGH_COMMANDS = ("clear", "compact", "prep", "memo")  # exact-match commands injected as-is
+# Informational passthrough: executes like the side-effect commands above, but its stdout is
+# relayed back to the chat. Local commands produce NO assistant turn, so these never reach the
+# Stop hook — they get their own completion path (_relay_slash_stdout), never a pending file.
+# /cost is deliberately absent: it has never been run on this machine, so its transcript shape
+# is unverified and the dispatch said verify, don't assume.
+DEFAULT_INFORMATIONAL_COMMANDS = ("context",)
+SLASH_STDOUT_TIMEOUT_SECONDS = 90  # give up waiting for a local command's stdout entry
+SLASH_STDOUT_POLL_INTERVAL = 1.0
+TWIN_LOOKAHEAD_ENTRIES = 3  # how far past the stdout entry its markdown twin may sit
+LOCAL_STDOUT_OPEN = "<local-command-stdout>"
+LOCAL_STDOUT_CLOSE = "</local-command-stdout>"
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 TELEGRAM_CHAR_LIMIT = 4096
 RATE_LIMIT_MESSAGES = 5
 RATE_LIMIT_WINDOW = 60
@@ -298,6 +310,9 @@ class BaseBot:
         self._rate_limit_tracker: dict[int, list] = {}
         self._heartbeat_thread: threading.Thread | None = None
         self._heartbeat_stop = threading.Event()
+        # Most recent informational-command watcher — kept for test observability
+        # and shutdown inspection; the thread is a daemon and owns its own exit.
+        self._slash_stdout_thread: threading.Thread | None = None
         self._heartbeat_gen: int = 0
 
         # /suspend control verb state (DPLAN-0270 P5) — heartbeat mode only;
@@ -570,7 +585,13 @@ class BaseBot:
             logger.error("Unexpected poll error: %s", e)
             return []
 
-    def send_message(self, chat_id: int, text: str, reply_to: Optional[int] = None) -> dict | None:
+    def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        reply_to: Optional[int] = None,
+        parse_mode: Optional[str] = None,
+    ) -> dict | None:
         """
         Send a message via Telegram sendMessage API.
 
@@ -578,6 +599,9 @@ class BaseBot:
             chat_id: Target chat ID
             text: Message text
             reply_to: Optional message ID to reply to
+            parse_mode: Optional Telegram parse mode ("HTML"). Omitted by
+                default — agent replies are plain text and must never have
+                stray markup interpreted as formatting.
 
         Returns:
             Parsed JSON response dict (contains message_id), or None on failure
@@ -590,6 +614,8 @@ class BaseBot:
         }
         if reply_to is not None:
             payload["reply_to_message_id"] = reply_to
+        if parse_mode is not None:
+            payload["parse_mode"] = parse_mode
 
         for attempt in range(3):
             try:
@@ -898,18 +924,33 @@ class BaseBot:
     # MESSAGE HANDLING
     # =============================================
 
-    def _passthrough_commands(self) -> set[str]:
-        """Exact-match allowlist of slash commands injected as-is (config override, else default)."""
-        commands = DEFAULT_PASSTHROUGH_COMMANDS
+    def _config_command_list(self, key: str, default: tuple[str, ...]) -> set[str]:
+        """Read an exact-match slash-command allowlist from bot config, falling back to *default*."""
+        commands = default
         try:
             from .config import load_bot_config
 
             config = load_bot_config(self.bot_id)
-            if config and isinstance(config.get("passthrough_commands"), list):
-                commands = config["passthrough_commands"]
+            if config and isinstance(config.get(key), list):
+                commands = config[key]
         except Exception as e:
-            logger.warning("Could not read passthrough_commands, using default: %s", e)
+            logger.warning("Could not read %s, using default: %s", key, e)
         return {str(c).lower().lstrip("/") for c in commands}
+
+    def _informational_commands(self) -> set[str]:
+        """Allowlisted commands whose stdout is relayed back to the chat (config: informational_commands)."""
+        return self._config_command_list("informational_commands", DEFAULT_INFORMATIONAL_COMMANDS)
+
+    def _passthrough_commands(self) -> set[str]:
+        """
+        Exact-match allowlist of slash commands injected as-is (config override, else default).
+
+        Union of the side-effect commands (clear/compact/prep/memo — fire and forget)
+        and the informational ones (stdout relayed back). The guard treats them
+        identically; only the post-injection handling differs.
+        """
+        side_effect = self._config_command_list("passthrough_commands", DEFAULT_PASSTHROUGH_COMMANDS)
+        return side_effect | self._informational_commands()
 
     def _guard_slash_injection(self, text: str) -> str:
         """
@@ -968,6 +1009,17 @@ class BaseBot:
                 f"⚠️ No live Claude session found for branch '{branch}'.\n"
                 "Start a Claude session in the branch directory first.",
             )
+            return
+
+        # Informational passthrough (/context): CC runs it as a local command,
+        # which produces no assistant turn — the Stop hook never fires, so a
+        # pending file here would sit undelivered until the stuck-timeout. This
+        # path relays the command's stdout and completes itself instead.
+        parsed = parse_command(text)
+        if parsed is not None and parsed[0] in self._informational_commands():
+            # Inject `text`, not `prompt`: a slash command is a command, not a
+            # message from a person, and a sender prefix would stop CC running it.
+            self._handle_informational_command(chat_id, parsed[0], text)
             return
 
         # Inbound reliability: clean stale pending + finalize stranded placeholder
@@ -2680,6 +2732,206 @@ class BaseBot:
                 if isinstance(block, dict) and block.get("type") == "text":
                     return block.get("text", "")
         return None
+
+    @staticmethod
+    def _extract_local_command_stdout(entry: dict) -> str | None:
+        """
+        Pull a local slash command's stdout out of a transcript entry, or None.
+
+        CC writes this in two places depending on version, so both are checked:
+        the top-level `content` of a `type=system, subtype=local_command` entry
+        (current), and `message.content` (older). The payload is wrapped in
+        <local-command-stdout>...</local-command-stdout>; the wrapper is stripped.
+        """
+        candidates = [entry.get("content")]
+        message = entry.get("message")
+        if isinstance(message, dict):
+            candidates.append(message.get("content"))
+
+        for raw in candidates:
+            if not isinstance(raw, str) or LOCAL_STDOUT_OPEN not in raw:
+                continue
+            body = raw.split(LOCAL_STDOUT_OPEN, 1)[1]
+            if LOCAL_STDOUT_CLOSE in body:
+                body = body.split(LOCAL_STDOUT_CLOSE, 1)[0]
+            return body.strip()
+        return None
+
+    @staticmethod
+    def _extract_meta_command_text(entry: dict) -> str | None:
+        """
+        Pull the clean-markdown twin of a rendered TUI panel, or None.
+
+        Current CC logs an informational command twice: the ANSI-art panel as
+        it appeared in the terminal, then an isMeta user entry carrying the
+        same content as plain markdown. The second is what we want to relay —
+        the first is box-drawing characters and colour escapes.
+        """
+        if not entry.get("isMeta"):
+            return None
+        message = entry.get("message")
+        if not isinstance(message, dict) or message.get("role") != "user":
+            return None
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return None
+        if content.lstrip().startswith("<local-command-caveat>"):
+            return None  # the "do not respond to these" wrapper, never the payload
+        return content.strip()
+
+    def _scan_transcript_for_stdout(self, transcript_path: Path, from_line: int) -> tuple[str | None, bool]:
+        """
+        Scan transcript lines after *from_line* for a local command's output.
+
+        Bounded to lines written after injection, which is half the scope guard:
+        a /context run at the desk before the bot injected cannot be picked up.
+
+        Returns (payload, is_clean). Two shapes exist in the wild: the stdout
+        entry is either clean markdown, or ANSI TUI art immediately followed by
+        an isMeta twin carrying the same content as markdown. The twin is
+        preferred. is_clean is False when only the ANSI panel is present, which
+        tells the caller the twin may still be mid-write.
+        """
+        try:
+            lines = transcript_path.read_text(encoding="utf-8").splitlines()
+        except OSError as e:
+            logger.info("Could not read transcript while waiting for stdout: %s", e)
+            return None, False
+
+        stdout_payload = None
+        lookahead = 0
+        malformed = 0
+        for line in lines[from_line:]:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                # Expected: the scan can catch CC mid-append, leaving a partial
+                # final line. Logged once per scan so a genuinely corrupt
+                # transcript is visible without the 1s poll loop flooding.
+                malformed += 1
+                if malformed == 1:
+                    logger.info("Skipping malformed transcript line while waiting for command stdout")
+                continue
+            if not isinstance(entry, dict):
+                continue
+            if stdout_payload is None:
+                stdout_payload = self._extract_local_command_stdout(entry)
+                continue
+            # The stdout entry has landed — the markdown twin, if any, is written
+            # right behind it. Bounded so a later unrelated meta entry (the next
+            # command's own preamble) can never be mistaken for this one's output.
+            lookahead += 1
+            if lookahead > TWIN_LOOKAHEAD_ENTRIES:
+                break
+            twin = self._extract_meta_command_text(entry)
+            if twin:
+                return twin, True
+
+        if stdout_payload is None:
+            return None, False
+        return stdout_payload, ANSI_ESCAPE_RE.search(stdout_payload) is None
+
+    @staticmethod
+    def _format_stdout_for_telegram(text: str) -> str:
+        """
+        Render command stdout as a Telegram HTML <pre> block.
+
+        The payload is markdown tables. Telegram renders no tables at all, so a
+        monospace block is the only format where the columns still line up.
+        ANSI escapes are stripped and the three HTML-significant characters are
+        escaped, which is what keeps parse_mode=HTML from mangling the content.
+        """
+        clean = ANSI_ESCAPE_RE.sub("", text)
+        escaped = clean.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return f"<pre>{escaped}</pre>"
+
+    def _send_stdout_panel(self, chat_id: int, text: str) -> None:
+        """Send command stdout to the chat as one or more monospace blocks."""
+        # Chunk the raw text, then wrap each chunk — wrapping first would let the
+        # <pre> tags be split across messages and both halves would render broken.
+        budget = TELEGRAM_CHAR_LIMIT - len("<pre></pre>") - 64  # headroom for entity escaping
+        for chunk in self.chunk_text(ANSI_ESCAPE_RE.sub("", text), limit=budget):
+            self.send_message(chat_id, self._format_stdout_for_telegram(chunk), parse_mode="HTML")
+
+    def _relay_slash_stdout(
+        self,
+        chat_id: int,
+        cmd_name: str,
+        transcript_path: Path,
+        baseline: int,
+        processing_msg_id: Optional[int],
+    ) -> None:
+        """
+        Wait for an informational command's stdout and relay it to the chat.
+
+        This is the whole reason informational commands do not use the pending
+        file: a local command produces no assistant turn, so the Stop hook never
+        fires and a pending would sit undelivered until the stuck-timeout gave
+        up (S179's failure mode, in a new flavour). This path owns its own
+        completion instead — it either relays the output or says why it could
+        not, and it always terminates.
+        """
+        deadline = time.time() + SLASH_STDOUT_TIMEOUT_SECONDS
+        grace_used = False
+        while time.time() < deadline:
+            time.sleep(SLASH_STDOUT_POLL_INTERVAL)
+            payload, is_clean = self._scan_transcript_for_stdout(transcript_path, baseline)
+            if not payload:
+                continue
+            if not is_clean and not grace_used:
+                # Only the ANSI panel so far — its markdown twin is written a
+                # beat later. Spend exactly one extra poll on it, then relay
+                # whatever we have rather than losing the output to the timeout.
+                grace_used = True
+                continue
+            logger.info("Relaying /%s stdout to chat (%d chars)", cmd_name, len(payload))
+            if processing_msg_id:
+                self.edit_message(chat_id, processing_msg_id, f"/{cmd_name}")
+            self._send_stdout_panel(chat_id, payload)
+            return
+
+        logger.warning("/%s produced no stdout entry within %ss", cmd_name, SLASH_STDOUT_TIMEOUT_SECONDS)
+        message = f"⚠️ /{cmd_name} ran, but no output appeared within {SLASH_STDOUT_TIMEOUT_SECONDS}s."
+        if processing_msg_id:
+            self.edit_message(chat_id, processing_msg_id, message)
+        else:
+            self.send_message(chat_id, message)
+
+    def _handle_informational_command(self, chat_id: int, cmd_name: str, prompt: str) -> None:
+        """
+        Inject an allowlisted informational command and relay its stdout back.
+
+        Deliberately writes NO pending file and starts NO heartbeat — see
+        _relay_slash_stdout for why. The watcher runs on a daemon thread so the
+        poll loop keeps serving other messages while it waits.
+        """
+        transcript_path, baseline = self._resolve_active_transcript()
+        if not transcript_path:
+            logger.warning("/%s: no active transcript to watch", cmd_name)
+            self.send_message(chat_id, f"⚠️ Cannot run /{cmd_name} — no active Claude transcript found.")
+            return
+
+        processing_result = self.send_message(chat_id, PROCESSING_MSG)
+        processing_msg_id = processing_result.get("message_id") if processing_result else None
+
+        if not self.inject_message(prompt):
+            logger.error("Failed to inject /%s into tmux", cmd_name)
+            failure = f"Failed to send /{cmd_name} to the Claude session."
+            if processing_msg_id:
+                self.edit_message(chat_id, processing_msg_id, failure)
+            else:
+                self.send_message(chat_id, failure)
+            return
+
+        watcher = threading.Thread(
+            target=self._relay_slash_stdout,
+            args=(chat_id, cmd_name, Path(transcript_path), baseline, processing_msg_id),
+            daemon=True,
+            name=f"slash-stdout-{self.bot_id}",
+        )
+        watcher.start()
+        self._slash_stdout_thread = watcher
+        logger.info("Watching transcript for /%s stdout from line %d", cmd_name, baseline)
 
     def _read_transcript_tail(self, n_lines: int = 50) -> str | None:
         """Read the latest assistant text response from the active transcript.
