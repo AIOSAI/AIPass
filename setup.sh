@@ -800,6 +800,30 @@ else
     echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"
 fi
 
+# --- Enroll this install in the hook trust registry (Patrick's ruling, compass #221) ---
+# The hook engine only loads .aipass/hooks.json for projects listed in
+# ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
+# hostile hooks.json from running — it was never meant to distrust the config
+# this installer just wired up. Without this step a non-interactive install
+# finishes "clean" with every hook silently dead ("No .aipass/hooks.json found").
+# enroll() is idempotent (dict-key assignment + stale prune), so re-running
+# setup.sh refreshes the hash instead of duplicating the entry.
+echo ""
+echo "Enrolling this install in the hook trust registry ..."
+if "$VENV_PYTHON" - "$SCRIPT_DIR" << 'PYEOF'
+import sys
+
+from aipass.hooks.apps.handlers.config.trust_registry import enroll
+
+sys.exit(0 if enroll(sys.argv[1]) else 1)
+PYEOF
+then
+    echo "  trusted -> $SCRIPT_DIR"
+else
+    echo "  WARN: could not enroll $SCRIPT_DIR — hooks stay inactive until it is trusted"
+    ACTION_NEEDED+=("Hook trust enrollment failed — run: aipass trust $SCRIPT_DIR")
+fi
+
 # --- Install claude() boot shim (attach-if-live / start-in-tmux) ---
 # Ships via the .gitignore negation (#666). Idempotent: the installer checks for
 # its marker before appending to the shell rc, and resolves the venv Python from

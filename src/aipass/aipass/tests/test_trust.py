@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trust.py
-# Description: Tests for trust CLI commands and init enrollment (DPLAN-0244)
-# Version: 1.0.0
+# Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
+# Version: 1.1.0
 # Created: 2026-07-15
-# Modified: 2026-07-15
+# Modified: 2026-08-02
 # =============================================
 
 """Tests for trust/revoke CLI commands and init auto-enrollment.
@@ -11,6 +11,12 @@
 All tests use tmp dirs + monkeypatch REGISTRY_PATH so they never
 touch the real ~/.aipass registry.
 """
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -20,6 +26,9 @@ from aipass.hooks.apps.handlers.config.trust_registry import (
     read_registry,
     revoke,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+SETUP_SH = REPO_ROOT / "setup.sh"
 
 
 @pytest.fixture(autouse=True)
@@ -332,14 +341,140 @@ def test_prune_removes_stale_entries(tmp_path):
     gone_hooks.mkdir()
     (gone_hooks / "hooks.json").write_text("{}", encoding="utf-8")
     enroll(str(gone))
-    import shutil
-
     shutil.rmtree(gone)
 
     assert handle_command("trust", ["prune"]) is True
     registry = read_registry()
     assert str(live.resolve()) in registry["projects"]
     assert str(gone.resolve()) not in registry["projects"]
+
+
+def test_enroll_is_idempotent(tmp_path):
+    """Enrolling the same project twice leaves exactly ONE entry, not a duplicate.
+
+    setup.sh enrolls the repo it installs on every run (compass #221), so a
+    re-install must refresh the existing entry rather than grow the registry.
+    """
+    project = tmp_path / "reinstalled"
+    project.mkdir()
+    hooks_dir = project / ".aipass"
+    hooks_dir.mkdir()
+    (hooks_dir / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+
+    assert enroll(str(project)) is True
+    assert enroll(str(project)) is True
+    assert enroll(str(project)) is True
+
+    registry = read_registry()
+    assert list(registry["projects"]) == [str(project.resolve())]
+    assert is_trusted(str(project)) is True
+
+
+def test_enroll_missing_hooks_json_leaves_registry_intact(tmp_path):
+    """A failed enroll returns False and does not corrupt/erase existing entries."""
+    good = tmp_path / "good"
+    good.mkdir()
+    good_hooks = good / ".aipass"
+    good_hooks.mkdir()
+    (good_hooks / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+    assert enroll(str(good)) is True
+
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    assert enroll(str(bare)) is False
+
+    registry = read_registry()
+    assert list(registry["projects"]) == [str(good.resolve())]
+    assert is_trusted(str(good)) is True
+    assert is_trusted(str(bare)) is False
+
+
+# ---------------------------------------------------------------------------
+# setup.sh install-time enrollment (compass #221)
+#
+# These run the REAL bash lines lifted out of setup.sh — not a paraphrase —
+# with SCRIPT_DIR/VENV_PYTHON supplied and $HOME redirected at a tmp dir so
+# the registry written is a throwaway one.
+# ---------------------------------------------------------------------------
+
+_ENROLL_ANCHOR = 'echo "Enrolling this install in the hook trust registry ..."'
+
+
+def _extract_enroll_block() -> str:
+    """Lift setup.sh's enroll block (anchor line -> closing `fi`) verbatim."""
+    lines = SETUP_SH.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == _ENROLL_ANCHOR)
+    end = next(i for i in range(start, len(lines)) if lines[i] == "fi")
+    return "\n".join(lines[start : end + 1])
+
+
+def _run_enroll_block(script_dir: Path, home: Path) -> subprocess.CompletedProcess:
+    """Execute the extracted block under `set -euo pipefail` with a fake HOME."""
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            f'SCRIPT_DIR="{script_dir}"',
+            f'VENV_PYTHON="{sys.executable}"',
+            "ACTION_NEEDED=()",
+            _extract_enroll_block(),
+            'echo "REACHED_END action_needed=${#ACTION_NEEDED[@]}"',
+        ]
+    )
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+
+
+def test_setup_sh_has_enroll_block():
+    """setup.sh calls trust_registry.enroll on the repo it just installed."""
+    body = SETUP_SH.read_text(encoding="utf-8")
+    assert _ENROLL_ANCHOR in body
+    block = _extract_enroll_block()
+    assert "from aipass.hooks.apps.handlers.config.trust_registry import enroll" in block
+    assert "enroll(sys.argv[1])" in block
+    # Only ever the repo being installed — never a blanket trust.
+    assert '"$SCRIPT_DIR"' in block
+    assert "ACTION_NEEDED+=" in block
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+def test_setup_sh_enroll_block_trusts_the_install(tmp_path):
+    """Running setup.sh's own enroll lines trusts SCRIPT_DIR, no manual step."""
+    repo = tmp_path / "FakeAIPass"
+    (repo / ".aipass").mkdir(parents=True)
+    (repo / ".aipass" / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    proc = _run_enroll_block(repo, home)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "REACHED_END action_needed=0" in proc.stdout
+    assert f"trusted -> {repo}" in proc.stdout
+    registry = home / ".aipass" / "trusted_projects.json"
+    assert registry.is_file()
+    assert str(repo.resolve()) in registry.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+def test_setup_sh_enroll_block_fails_honestly(tmp_path):
+    """No hooks.json: warn + ACTION NEEDED, but never abort the install."""
+    repo = tmp_path / "NoHooks"
+    repo.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    proc = _run_enroll_block(repo, home)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "REACHED_END action_needed=1" in proc.stdout
+    assert "WARN: could not enroll" in proc.stdout
+    assert f"trusted -> {repo}" not in proc.stdout
 
 
 def test_prune_no_stale_entries(tmp_path):

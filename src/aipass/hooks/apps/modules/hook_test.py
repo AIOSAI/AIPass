@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Portable hook test runner — fires every hook with mock data
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-08-02
 # =============================================
 
 """Portable hook test runner.
@@ -35,6 +35,12 @@ HELP_COMMANDS = [
 ]
 
 _SYNTHETIC_PATH = os.path.join(tempfile.gettempdir(), "hook_test_synthetic.txt")
+
+# Session identity for mock fires. Handlers resolve CLAUDE_CODE_SESSION_ID env-first,
+# and a live session's ID leaks into this subprocess — without an override, mock
+# PreCompact fires arm the REAL session's regroup backstop (mid-turn RE-GROUND
+# injection with no actual compaction).
+_MOCK_SESSION_ID = "hook-test-mock"
 
 MOCK_EVENTS = {
     "UserPromptSubmit": {
@@ -119,26 +125,37 @@ def run_test(verbose: bool = False) -> dict:
 
     results = {}
 
-    for event_type, event_hooks in config.items():
-        if event_type in ("hooks_enabled", "_comment"):
-            continue
-        if not isinstance(event_hooks, dict):
-            continue
-
-        mock_data = MOCK_EVENTS.get(event_type, {"type": event_type})
-        stdin_data = json.dumps(mock_data)
-
-        event_results = []
-        for hook_name, hook_def in event_hooks.items():
-            if not isinstance(hook_def, dict):
+    prior_session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    os.environ["CLAUDE_CODE_SESSION_ID"] = _MOCK_SESSION_ID
+    try:
+        for event_type, event_hooks in config.items():
+            if event_type in ("hooks_enabled", "_comment"):
                 continue
-            if not hook_def.get("handler", "") and not hook_def.get("command", ""):
+            if not isinstance(event_hooks, dict):
                 continue
-            result = _test_single_hook(event_type, hook_name, hook_def, stdin_data, verbose)
-            event_results.append(result)
 
-        if event_results:
-            results[event_type] = event_results
+            mock_data = dict(MOCK_EVENTS.get(event_type, {"type": event_type}))
+            mock_data.setdefault("session_id", _MOCK_SESSION_ID)
+            stdin_data = json.dumps(mock_data)
+
+            event_results = []
+            for hook_name, hook_def in event_hooks.items():
+                if not isinstance(hook_def, dict):
+                    continue
+                if not hook_def.get("handler", "") and not hook_def.get("command", ""):
+                    continue
+                result = _test_single_hook(event_type, hook_name, hook_def, stdin_data, verbose)
+                event_results.append(result)
+
+            if event_results:
+                results[event_type] = event_results
+    finally:
+        if prior_session is None:
+            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+        else:
+            os.environ["CLAUDE_CODE_SESSION_ID"] = prior_session
+        # The throwaway aipass-cadence-hook-test-mock.json state file is left in
+        # tempdir on purpose: fixed name, overwritten per run, OS-cleans on reboot.
 
     return results
 
