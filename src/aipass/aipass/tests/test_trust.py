@@ -399,6 +399,14 @@ def test_enroll_missing_hooks_json_leaves_registry_intact(tmp_path):
 
 _ENROLL_ANCHOR = 'echo "Enrolling this install in the hook trust registry ..."'
 
+# setup.sh is a POSIX installer. On Windows, shutil.which("bash") finds
+# System32\bash.exe — the WSL launcher, which exits 1 with no distro installed —
+# so a which() check alone does not prove a usable shell.
+_NEEDS_POSIX_BASH = pytest.mark.skipif(
+    sys.platform == "win32" or shutil.which("bash") is None,
+    reason="needs a POSIX bash (Windows 'bash' is the WSL launcher)",
+)
+
 
 def _extract_enroll_block() -> str:
     """Lift setup.sh's enroll block (anchor line -> closing `fi`) verbatim."""
@@ -442,7 +450,7 @@ def test_setup_sh_has_enroll_block():
     assert "ACTION_NEEDED+=" in block
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+@_NEEDS_POSIX_BASH
 def test_setup_sh_enroll_block_trusts_the_install(tmp_path):
     """Running setup.sh's own enroll lines trusts SCRIPT_DIR, no manual step."""
     repo = tmp_path / "FakeAIPass"
@@ -461,7 +469,7 @@ def test_setup_sh_enroll_block_trusts_the_install(tmp_path):
     assert str(repo.resolve()) in registry.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+@_NEEDS_POSIX_BASH
 def test_setup_sh_enroll_block_fails_honestly(tmp_path):
     """No hooks.json: warn + ACTION NEEDED, but never abort the install."""
     repo = tmp_path / "NoHooks"
