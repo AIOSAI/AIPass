@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for branch log watcher event producer
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
 # Modified: 2026-08-04
 # =============================================
@@ -408,7 +408,7 @@ class TestReadNewLines:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"{now} | mod | ERROR | New failure\n")
 
-        # Patch _save_log_positions to avoid touching the real file
+        # Patch _mark_data_dirty to avoid touching the real file
         with patch.object(lw, "_mark_data_dirty"):
             watcher._read_new_lines(file_path)
 
@@ -1181,49 +1181,6 @@ class TestLoadSeenHashes:
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _save_seen_hashes
-# ---------------------------------------------------------------------------
-
-
-class TestSaveSeenHashes:
-    """Tests for _save_seen_hashes persistence."""
-
-    def test_saves_to_new_file(self, tmp_path):
-        """Creates trigger_data.json when it does not exist yet."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"hash1", "hash2"}
-        lw._save_seen_hashes()
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert set(written["seen_error_hashes"]) == {"hash1", "hash2"}
-
-    def test_merges_with_existing_data(self, tmp_path):
-        """Preserves other keys already in trigger_data.json."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        data_file.write_text(
-            json.dumps({"log_positions": {"/a.log": 100}}),
-            encoding="utf-8",
-        )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"x"}
-        lw._save_seen_hashes()
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert written["log_positions"] == {"/a.log": 100}
-        assert written["seen_error_hashes"] == ["x"]
-
-    def test_handles_write_error(self, tmp_path):
-        """Write failure logs warning but does not raise."""
-        lw = _import_log_watcher()
-        bad_path = tmp_path / "nope" / "nope" / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = bad_path
-        lw._seen_error_hashes = {"z"}
-        with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
-            lw._save_seen_hashes()
-
-
-# ---------------------------------------------------------------------------
 # Tests -- _load_log_positions
 # ---------------------------------------------------------------------------
 
@@ -1283,45 +1240,6 @@ class TestLoadLogPositions:
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _save_log_positions
-# ---------------------------------------------------------------------------
-
-
-class TestSaveLogPositions:
-    """Tests for _save_log_positions persistence."""
-
-    def test_saves_positions_to_new_file(self, tmp_path):
-        """Creates file with log_positions key."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._save_log_positions({"/a.log": 50})
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert written["log_positions"] == {"/a.log": 50}
-
-    def test_merges_with_existing_data(self, tmp_path):
-        """Preserves other keys in trigger_data.json."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        data_file.write_text(
-            json.dumps({"seen_error_hashes": ["abc"]}),
-            encoding="utf-8",
-        )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._save_log_positions({"/b.log": 77})
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert written["seen_error_hashes"] == ["abc"]
-        assert written["log_positions"] == {"/b.log": 77}
-
-    def test_handles_write_error(self, tmp_path):
-        """Write failure logs warning but does not raise."""
-        lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "trigger_data.json"
-        with patch.object(lw, "atomic_write_json", side_effect=OSError("disk full")):
-            lw._save_log_positions({"/c.log": 10})
-
-
-# ---------------------------------------------------------------------------
 # Tests -- log_inodes persistence (parallel key, backward compatible)
 # ---------------------------------------------------------------------------
 
@@ -1329,13 +1247,17 @@ class TestSaveLogPositions:
 class TestLogInodesPersistence:
     """Tests for the 'log_inodes' key alongside 'log_positions'."""
 
-    def test_save_and_load_round_trip(self, tmp_path):
+    def test_flush_and_load_round_trip(self, tmp_path):
         """Positions and inodes round-trip through trigger_data.json."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         lw.TRIGGER_DATA_FILE = data_file
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/a.log": 50}
+        lw._active_watcher.log_inodes = {"/a.log": 4242}
+        lw._seen_error_hashes = set()
 
-        lw._save_log_positions({"/a.log": 50}, {"/a.log": 4242})
+        lw._flush_trigger_data(force=True)
 
         assert lw._load_log_positions() == {"/a.log": 50}
         assert lw._load_log_inodes() == {"/a.log": 4242}
@@ -1345,8 +1267,12 @@ class TestLogInodesPersistence:
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         lw.TRIGGER_DATA_FILE = data_file
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/a.log": 50}
+        lw._active_watcher.log_inodes = {"/a.log": 4242}
+        lw._seen_error_hashes = set()
 
-        lw._save_log_positions({"/a.log": 50}, {"/a.log": 4242})
+        lw._flush_trigger_data(force=True)
 
         written = json.loads(data_file.read_text(encoding="utf-8"))
         assert written["log_positions"] == {"/a.log": 50}
@@ -1365,24 +1291,29 @@ class TestLogInodesPersistence:
         assert lw._load_log_positions() == {"/a.log": 12}
         assert lw._load_log_inodes() == {}
 
-    def test_save_without_inodes_leaves_key_untouched(self, tmp_path):
-        """Omitting inodes does not wipe an existing log_inodes key.
+    def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path):
+        """A flush with no active watcher does not wipe on-disk position state.
 
-        No-overreach guard: passes with and without the fix - the old
-        single-argument save path must keep working untouched.
+        With no watcher there is no in-memory position state to write, so
+        log_positions/log_inodes already on disk must survive the hash-only
+        flush rather than being clobbered with empty dicts.
         """
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(
-            json.dumps({"log_inodes": {"/a.log": 7}}),
+            json.dumps({"log_positions": {"/a.log": 50}, "log_inodes": {"/a.log": 7}}),
             encoding="utf-8",
         )
         lw.TRIGGER_DATA_FILE = data_file
+        lw._active_watcher = None
+        lw._seen_error_hashes = {"h1"}
 
-        lw._save_log_positions({"/a.log": 50})
+        lw._flush_trigger_data(force=True)
 
         written = json.loads(data_file.read_text(encoding="utf-8"))
+        assert written["log_positions"] == {"/a.log": 50}
         assert written["log_inodes"] == {"/a.log": 7}
+        assert written["seen_error_hashes"] == ["h1"]
 
     def test_load_returns_empty_for_missing_file(self, tmp_path):
         """Missing trigger_data.json yields an empty inode map."""
@@ -1502,6 +1433,45 @@ class TestDebouncedWriter:
         data = json.loads(data_file.read_text(encoding="utf-8"))
         assert data["log_positions"] == {"/x.log": 42}
         assert set(data["seen_error_hashes"]) == {"hash1", "hash2"}
+
+    def test_flush_merges_with_existing_data(self, tmp_path):
+        """Unrelated keys already in trigger_data.json survive a flush."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        data_file.write_text(
+            json.dumps({"unrelated_key": {"keep": "me"}}),
+            encoding="utf-8",
+        )
+        lw.TRIGGER_DATA_FILE = data_file
+        lw._data_dirty = True
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/b.log": 77}
+        lw._active_watcher.log_inodes = {"/b.log": 7777}
+        lw._seen_error_hashes = {"x"}
+
+        lw._flush_trigger_data(force=True)
+
+        written = json.loads(data_file.read_text(encoding="utf-8"))
+        assert written["unrelated_key"] == {"keep": "me"}
+        assert written["log_positions"] == {"/b.log": 77}
+        assert written["seen_error_hashes"] == ["x"]
+
+    def test_flush_handles_write_error(self, tmp_path):
+        """Write failure logs a warning but does not raise."""
+        lw = _import_log_watcher()
+        lw.TRIGGER_DATA_FILE = tmp_path / "trigger_data.json"
+        lw._data_dirty = True
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/c.log": 10}
+        lw._active_watcher.log_inodes = {"/c.log": 1010}
+        lw._seen_error_hashes = {"z"}
+
+        with patch.object(lw, "logger") as mock_logger:
+            with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
+                lw._flush_trigger_data(force=True)
+
+        warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
+        assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
 
     def test_restart_survival(self, tmp_path):
         """Flushed data survives reload — positions and hashes intact."""

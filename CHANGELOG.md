@@ -22,6 +22,16 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**fix(trigger)** — follow-up: the seedgo unused_function gate (CI red on
+PR#727) caught `_save_seen_hashes`/`_save_log_positions` orphaned since
+#674's coalesced flush — only tests still called them. Deleted rather than
+wired-to-nothing (the None-watcher "gap" doesn't exist: the flush merges
+with existing on-disk JSON, preserving positions untouched). Their test
+blocks repointed at the real write path `_flush_trigger_data`, and got
+stronger: the old write-error tests asserted nothing; the replacements
+assert the warning reaches the logger, canary-checked three ways. 694
+green, trigger audit back to 100%.
+
 **fix(ai_mail)** — the 6-week "unreproducible" dispatch failure
 (2×468-adjacent fingerprints, 44 occurrences) root-caused and reproduced on
 demand: sender identity resolves from AIPASS_CALLER_CWD, so running drone

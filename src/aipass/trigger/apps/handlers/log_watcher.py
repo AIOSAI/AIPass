@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-02-02
 # Modified: 2026-08-04
 # =============================================
@@ -169,25 +169,6 @@ def _load_seen_hashes() -> None:
         _seen_error_hashes = set()  # Start fresh on read failure
 
 
-def _save_seen_hashes() -> None:
-    """
-    Persist dedup hashes to trigger_data.json.
-
-    Writes current _seen_error_hashes to disk so they survive restarts.
-    Merges with existing trigger_data.json content to preserve other keys.
-    """
-    try:
-        with json_file_lock(TRIGGER_DATA_FILE):
-            data: Dict[str, Any] = {}
-            if TRIGGER_DATA_FILE.exists():
-                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
-            data["seen_error_hashes"] = list(_seen_error_hashes)
-            atomic_write_json(TRIGGER_DATA_FILE, data)
-    except Exception as exc:
-        logger.warning("Failed to save seen hashes: %s", exc)
-        return  # Write failure - hashes remain in memory only
-
-
 def _load_log_positions() -> Dict[str, int]:
     """
     Load persisted log positions from trigger_data.json.
@@ -230,31 +211,6 @@ def _load_log_inodes() -> Dict[str, int]:
     except Exception as e:
         logger.warning("Failed to load log inodes: %s", e)
     return {}
-
-
-def _save_log_positions(positions: Dict[str, int], inodes: Optional[Dict[str, int]] = None) -> None:
-    """
-    Persist log positions to trigger_data.json.
-
-    Saves byte offsets for each log file so they survive restarts.
-    Merges with existing trigger_data.json content to preserve other keys.
-
-    Args:
-        positions: Dict mapping file paths to byte offsets
-        inodes: Optional dict mapping file paths to inode numbers
-    """
-    try:
-        with json_file_lock(TRIGGER_DATA_FILE):
-            data: Dict[str, Any] = {}
-            if TRIGGER_DATA_FILE.exists():
-                data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
-            data["log_positions"] = positions
-            if inodes is not None:
-                data["log_inodes"] = inodes
-            atomic_write_json(TRIGGER_DATA_FILE, data)
-    except Exception as exc:
-        logger.warning("Failed to save log positions: %s", exc)
-        return  # Write failure - positions remain in memory only
 
 
 def _mark_data_dirty() -> None:
