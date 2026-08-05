@@ -40,6 +40,7 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
     _wrap_for_sandbox,
     main,
 )
+from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
 
 
 # --- Fixtures --------------------------------------------------------
@@ -2827,3 +2828,85 @@ def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, m
 
     assert exc_info.value.code == 0
     mock_bounce.assert_not_called()
+
+
+# === Wake-back honesty: manager senders (VERA field report) =================
+#
+# wake_branch's manager gate delivers the mail and skips the wake by design, but
+# returns (status, True) — so _wake_sender read success=True and logged
+# "woken after ... completed" for a wake that never happened. The status object
+# was honest; the bool was not. These pin the honest tag.
+
+
+class TestWakeBackManagerHonesty:
+    """A manager sender is mailed, never woken — the log must say exactly that."""
+
+    @staticmethod
+    def _manager_gate_status():
+        """Real DispatchStatus as wake_branch's manager gate leaves it."""
+        status = DispatchStatus()
+        status.ok("resolve", "@devpulse → /repo/src/aipass/devpulse")
+        status.info("manager", "@devpulse is a manager — mail only, wake skipped")
+        return status
+
+    @staticmethod
+    def _patch_wake(monkeypatch, status, success):
+        monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
+        mock_wake = MagicMock(return_value=(status, success))
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
+            mock_wake,
+        )
+        return mock_wake
+
+    def test_manager_sender_returns_skipped_manager(self, monkeypatch):
+        """The gate's True must not be reported as a successful wake."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+        assert result == "skipped_manager"
+
+    def test_manager_wake_back_never_claims_woken(self, monkeypatch):
+        """No log line may assert the manager was woken."""
+        mock_logger = MagicMock()
+        monkeypatch.setattr(mod, "logger", mock_logger)
+        self._patch_wake(monkeypatch, self._manager_gate_status(), True)
+
+        _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+
+        formats = [c.args[0] for c in mock_logger.info.call_args_list if c.args]
+        assert not any("woken after" in f for f in formats), f"claimed a wake: {formats}"
+        assert any("skipped" in f for f in formats), f"no skip logged: {formats}"
+
+    def test_daemon_bypassed_manager_still_reports_success(self, monkeypatch):
+        """The @daemon self-wake exception records manager as ok — that IS a real wake."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        status = DispatchStatus()
+        status.ok("manager", "@devpulse manager gate bypassed — daemon-scheduled self-wake")
+        status.ok("spawn", "agent started")
+        self._patch_wake(monkeypatch, status, True)
+        result = _wake_sender("@devpulse", "@ai_mail", 0, "/fake/lock")
+        assert result == "success"
+
+    def test_builder_sender_unaffected(self, monkeypatch):
+        """A normal citizen has no manager step and still reports success."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        status = DispatchStatus()
+        status.ok("resolve", "@prax → /repo/src/aipass/prax")
+        status.ok("spawn", "agent started")
+        self._patch_wake(monkeypatch, status, True)
+        result = _wake_sender("@prax", "@ai_mail", 0, "/fake/lock")
+        assert result == "success"
+
+    def test_skipped_manager_reaches_the_wake_log(self, monkeypatch, tmp_path):
+        """The honest tag is what lands in dispatch_wake.log."""
+        monkeypatch.setattr(mod, "logger", MagicMock())
+        lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
+        lock_file.parent.mkdir(parents=True)
+        lock_file.write_text("{}", encoding="utf-8")
+
+        _log_wake_result("@ai_mail", "@devpulse", 0, "skipped_manager", str(lock_file))
+
+        written = (tmp_path / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
+        assert "wake_result=skipped_manager" in written
+        assert "sender=@devpulse" in written

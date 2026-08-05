@@ -57,6 +57,18 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**fix(ai_mail)** — wake-back no longer claims "woken" when the manager gate
+skipped it (found by VERA in Vera-Studio field telemetry after her manager
+flip; diagnosis exact, line for line). The gate's bool means "the dispatch
+did what it should," not "an agent was woken" — a manager returns True
+having deliberately woken nobody, and `_wake_sender` read that as woken.
+New `skipped_manager` result tag keyed on the status object's structural
+step (not prose-sniffing — substring matching is what let this hide),
+docstrings now tell the truth about managers, and the unreachable @daemon
+exception on wake-backs is explained in place. Gate behavior untouched.
+839 ai_mail tests green (+9, canary-checked both directions). By @ai_mail,
+verified by devpulse.
+
 **docs(flow)** — weekly_update playbook template v2, authored by VERA
 (Vera-Studio) from her PPLAN-0017 run and landed from flow/dropbox: new
 Step 0 reads the live subreddit for the last posted number before anything

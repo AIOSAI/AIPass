@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.0.1
+# Version: 2.1.0
 # Created: 2026-03-02
-# Modified: 2026-07-31
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -114,6 +114,18 @@ class DispatchStatus:
             icon = icons.get(status, "·")
             lines.append(f"{icon} {label} → {detail}")
         return "\n".join(lines)
+
+    def find_step(self, label: str) -> Optional[Tuple[str, str, str]]:
+        """Return the last (status, label, detail) recorded under `label`, or None.
+
+        Lets callers read a specific gate's own verdict instead of pattern-matching
+        the prose in `summary`. Needed because the overall success bool cannot express
+        "delivered, but deliberately not woken" — see the manager gate in wake_branch.
+        """
+        for step in reversed(self.steps):
+            if step[1] == label:
+                return step
+        return None
 
     @property
     def summary(self) -> str:
@@ -577,6 +589,13 @@ def wake_branch(
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
+
+        The bool means "the dispatch did what it should", NOT "an agent was woken".
+        A manager target returns True having deliberately woken nothing — mail is
+        delivered and the wake is skipped by design (see Step 3). Callers that need
+        to know whether a process actually started must check
+        status.find_step("manager"): "info" = gate skipped the wake, "ok" = the
+        @daemon self-wake exception applied and the spawn went ahead.
     """
     json_handler.log_operation(
         "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}

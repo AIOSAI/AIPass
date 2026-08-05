@@ -94,6 +94,39 @@ def test_dispatch_status_summary_empty():
     assert ds.summary == "no status"
 
 
+def test_dispatch_status_find_step_returns_match():
+    """find_step() returns the full (status, label, detail) tuple."""
+    ds = DispatchStatus()
+    ds.ok("resolve", "found")
+    ds.info("manager", "@devpulse is a manager — mail only, wake skipped")
+    assert ds.find_step("manager") == ("info", "manager", "@devpulse is a manager — mail only, wake skipped")
+
+
+def test_dispatch_status_find_step_missing_returns_none():
+    """find_step() returns None when the label was never recorded."""
+    ds = DispatchStatus()
+    ds.ok("resolve", "found")
+    assert ds.find_step("manager") is None
+
+
+def test_dispatch_status_find_step_distinguishes_gate_outcomes():
+    """The manager label carries ok (daemon bypass) vs info (skipped) — callers rely on it."""
+    skipped = DispatchStatus()
+    skipped.info("manager", "mail only, wake skipped")
+    bypassed = DispatchStatus()
+    bypassed.ok("manager", "gate bypassed — daemon-scheduled self-wake")
+    assert skipped.find_step("manager")[0] == "info"
+    assert bypassed.find_step("manager")[0] == "ok"
+
+
+def test_dispatch_status_find_step_returns_last_occurrence():
+    """A repeated label resolves to the most recent record."""
+    ds = DispatchStatus()
+    ds.info("spawn", "first try")
+    ds.ok("spawn", "second try")
+    assert ds.find_step("spawn") == ("ok", "spawn", "second try")
+
+
 def test_dispatch_status_format_output():
     """format() produces multi-line output with icons."""
     ds = DispatchStatus()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-02
-# Modified: 2026-07-31
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -93,12 +93,14 @@ MAX_WAKE_DEPTH = 3
 def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str) -> str:
     """Wake the dispatcher back after target completion.
 
-    Any citizen sender gets woken back (same availability checks as
-    normal wake — interactive session, active lock, depth cap).
+    Builder-class citizens get woken back, subject to the same availability
+    checks as a normal wake (interactive session, active lock, depth cap).
+    Managers never are: wake_branch's manager gate delivers the mail and skips
+    the wake by design, so a manager dispatcher is only ever mailed back.
 
     Returns a result tag for the dispatch_wake.log:
       success, blocked_occupied, blocked_locked, blocked_depth,
-      skipped_sender, skipped_self, failed
+      skipped_sender, skipped_self, skipped_manager, failed
     """
     if not sender or not sender.strip():
         logger.info("[monitor] Wake-back skipped — no sender")
@@ -119,7 +121,21 @@ def _wake_sender(sender: str, branch_email: str, exit_code: int, lock_file: str)
         from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
         os.environ["AIPASS_WAKE_DEPTH"] = str(depth + 1)
+        # sender="" terminates the wake-back chain. It also means the @daemon
+        # exception inside the manager gate can never apply here — a wake-back is
+        # never a daemon-scheduled self-wake — so managers always hit the skip path.
         wake_status, success = wake_branch(sender, auto=True, sender="")
+
+        # Must precede the success check: the manager gate returns True having woken
+        # nothing, so trusting the bool alone logged "woken" for a wake that never
+        # happened. The status object was honest all along; read it instead.
+        manager_step = wake_status.find_step("manager")
+        if manager_step and manager_step[0] == "info":
+            logger.info(
+                "[monitor] Wake-back skipped — sender %s is citizen_class=manager (mail delivered, never woken)",
+                sender,
+            )
+            return "skipped_manager"
 
         if success:
             logger.info("[monitor] Wake-back: %s woken after %s completed (exit %d)", sender, branch_email, exit_code)
