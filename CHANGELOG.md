@@ -57,6 +57,21 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**feat(aipass)** — `aipass init update` provisions external projects for
+manager-class git (DPLAN-0281 P2). New `init/git_auth.py`: plans every
+repair BEFORE writing (a refused run leaves the project untouched), mints
+registry `metadata.id`, backfills the owner citizen's
+`citizenship.registry_id`, flips builder→manager, records the branch path —
+then `verify_git_auth()` independently re-reads disk and re-derives all
+four owner-tier checks. Refuses honestly instead of guessing: no owner
+marked, more than one owner, root-ish recorded paths (@drone's guardrail —
+at-or-under binding would degrade to repo-wide), paths outside the repo, or
+missing passports. `--dry-run` prints the plan, writes nothing. Canaried
+against drone's real P1 gate: repaired fixture authorizes, un-repaired
+refuses on class, a passport copied to a non-recorded dir refuses on
+path-binding. 934 aipass tests green (+37), seedgo 100%. By @aipass,
+verified by devpulse. P3 (run it on Vera-Studio live) is next.
+
 **feat(trigger)** — runaway WARNING tier is observe-only (Patrick ruling:
 "observe only is good"). WARNING runaways record with full fidelity —
 alerts.json, decision log, per-file cooldown — but no longer email or wake
