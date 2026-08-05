@@ -57,6 +57,15 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**docs(flow)** — weekly_update playbook template v2, authored by VERA
+(Vera-Studio) from her PPLAN-0017 run and landed from flow/dropbox: new
+Step 0 reads the live subreddit for the last posted number before anything
+else (an empty playbook is not evidence its post never fired — trusting one
+cost a delete-and-repost of an immutable Reddit title), and a cold-tested
+"Driving Chrome" section including the `pgrep -x chrome` correction
+(`pgrep -f google-chrome` false-positives on the caller's own command
+line). First cross-project template contribution.
+
 **feat(hooks)** — hooks_engine.log per-hook narration demoted out of the
 default view (ruling delegated by Patrick, decided by devpulse: quiet noise
 at the source, never mask it). prax's SystemLogger has no debug(), so
