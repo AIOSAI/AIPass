@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_watchers_log_watcher.py
 # Description: Unit tests for centralized system_logs log watcher
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-08-04
 # =============================================
 
 import sys
@@ -321,6 +321,517 @@ class TestLogFileWatcherReadNewLines:
 
 
 # ---------------------------------------------------------------------------
+# Tests -- LogFileWatcher rotation tail drain
+# ---------------------------------------------------------------------------
+
+
+def _rotate_log(log_file: Path) -> Path:
+    """
+    Perform a real RotatingFileHandler-style rotation.
+
+    Renames the live log to '<name>.log.1' (inode travels with the rename)
+    and creates a fresh empty '<name>.log'.
+
+    Args:
+        log_file: Path to the live log file
+
+    Returns:
+        Path to the rotated-out backup file
+    """
+    backup = Path(f"{log_file}.1")
+    if backup.exists():
+        backup.unlink()
+    log_file.rename(backup)
+    log_file.write_text("", encoding="utf-8")
+    return backup
+
+
+def _rotate_chain(log_file: Path, backup_count: int = 3) -> Path:
+    """
+    Perform a real RotatingFileHandler rotation including backup shifting.
+
+    Shifts '<name>.log.N' -> '<name>.log.N+1' (dropping the oldest), renames
+    the live log to '<name>.log.1', then creates a fresh empty '<name>.log'.
+    Inodes travel with the renames exactly as they do in production.
+
+    Args:
+        log_file: Path to the live log file
+        backup_count: Number of backups kept (prax uses 3)
+
+    Returns:
+        Path to the newest backup file ('<name>.log.1')
+    """
+    for index in range(backup_count - 1, 0, -1):
+        source = Path(f"{log_file}.{index}")
+        target = Path(f"{log_file}.{index + 1}")
+        if source.exists():
+            if target.exists():
+                target.unlink()
+            source.rename(target)
+    backup = Path(f"{log_file}.1")
+    if backup.exists():
+        backup.unlink()
+    log_file.rename(backup)
+    log_file.write_text("", encoding="utf-8")
+    return backup
+
+
+def _processed_lines(mock_proc) -> list:
+    """Extract the log-line argument from every _process_log_line call."""
+    return [call.args[1] for call in mock_proc.call_args_list]
+
+
+class TestLogFileWatcherRotationDrain:
+    """Tests for draining the unread tail of a rotated-out log file."""
+
+    def test_rotation_drains_unread_tail(self, tmp_path):
+        """Lines written between last position and rotation ARE processed."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        # Bulk of the file is already processed (mirrors a log near its size cap)
+        log_file.write_text("2026-08-04 | mod | ERROR | already seen\n" * 20, encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Unread tail: written after last position, before rotation
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | missed one\n")
+            f.write("2026-08-04 | mod | ERROR | missed two\n")
+
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | after rotation\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("missed one" in line for line in lines)
+        assert any("missed two" in line for line in lines)
+        assert any("after rotation" in line for line in lines)
+        assert not any("already seen" in line for line in lines)
+
+    def test_drain_uses_branch_and_noise_filter(self, tmp_path):
+        """Drained lines get the same branch arg and _should_skip_log filter."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | INFO | Module initialized\n")
+            f.write("2026-08-04 | mod | ERROR | real tail failure\n")
+
+        _rotate_log(log_file)
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("real tail failure" in line for line in lines)
+        assert not any("Module initialized" in line for line in lines)
+        assert all(call.args[0] == "PRAX" for call in mock_proc.call_args_list)
+        assert all(call.args[2] == file_path for call in mock_proc.call_args_list)
+
+    def test_stale_backup_inode_mismatch_not_reprocessed(self, tmp_path):
+        """A stale '.log.1' from an earlier rotation is never re-read."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("old rotation content\n2026-08-04 | mod | ERROR | ancient\n", encoding="utf-8")
+        # Earlier rotation happened before we started tracking the live file
+        _rotate_log(log_file)
+
+        # Now the live file is a DIFFERENT inode with its own content
+        log_file.write_text("2026-08-04 | mod | ERROR | live line one\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Live file is truncated (shrinks) but the stale backup still sits there
+        log_file.write_text("2026-08-04 | mod | ERROR | fresh\n", encoding="utf-8")
+        watcher.log_positions[file_path] = 9999
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert not any("ancient" in line for line in lines)
+        assert any("fresh" in line for line in lines)
+
+    def test_missing_backup_file_still_reads_new_file(self, tmp_path):
+        """No '.log.1' present: no crash, the new file is still read."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | plenty of old content here\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Shrink with no backup file at all
+        log_file.write_text("2026-08-04 | mod | ERROR | tiny\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | tiny"]
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_in_place_truncation_no_duplicate_processing(self, tmp_path):
+        """Truncation in place (same inode) never re-fires the old content."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        file_path = str(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | first pass line\n", encoding="utf-8")
+
+        # A stale backup exists holding a copy of the same text, different inode
+        backup = Path(f"{file_path}.1")
+        backup.write_text("2026-08-04 | mod | ERROR | first pass line\n", encoding="utf-8")
+
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Truncate in place - inode is unchanged
+        inode_before = log_file.stat().st_ino
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | short\n")
+        assert log_file.stat().st_ino == inode_before
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | short"]
+
+    def test_normal_append_never_drains(self, tmp_path):
+        """No-overreach guard: an ordinary append never touches the drain path.
+
+        This test passes with and without the fix - it exists to prove the
+        drain does not run on the normal (non-shrink) path.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | first\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher.log_positions[file_path] = log_file.stat().st_size
+
+        # A backup with the SAME content exists but must be ignored
+        backup = Path(f"{file_path}.1")
+        backup.write_text("2026-08-04 | mod | ERROR | backup only\n", encoding="utf-8")
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | appended\n")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | appended"]
+
+    def test_repeat_shrink_event_does_not_drain_twice(self, tmp_path):
+        """Two events after one rotation drain the tail exactly once."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | tail line\n")
+
+        # Rotate, leaving the new live file EMPTY (nothing written yet)
+        _rotate_log(log_file)
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines.count("2026-08-04 | mod | ERROR | tail line") == 1
+
+    def test_unknown_inode_skips_drain(self, tmp_path):
+        """Position recorded without an inode (old state) disables the drain.
+
+        No-overreach guard: passes with and without the fix - it proves an
+        unknown inode degrades to exactly the pre-fix behaviour.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | tail line\n", encoding="utf-8")
+        file_path = str(log_file)
+        # Position only - exactly what an older in-memory/on-disk state holds
+        watcher.log_positions[file_path] = log_file.stat().st_size
+
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | new\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | new"]
+
+    def test_rotated_file_smaller_than_position_skipped(self, tmp_path):
+        """A backup shorter than the recorded position is not drained."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | content\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        # Pretend we were further along than the file ever got
+        watcher.log_positions[file_path] = 9999
+
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | new\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | new"]
+
+    def test_drain_failure_does_not_block_new_file(self, tmp_path):
+        """An exception inside the drain never prevents reading the new file."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | old content here\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        _rotate_log(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | new\n", encoding="utf-8")
+
+        with patch.object(watcher, "_drain_rotated_tail", side_effect=RuntimeError("boom")):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | new"]
+
+    def test_record_position_tracks_inode(self, tmp_path):
+        """_record_position stores the current inode alongside the offset."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        file_path = str(log_file)
+
+        watcher._record_position(file_path, 4)
+
+        assert watcher.log_positions[file_path] == 4
+        assert watcher.log_inodes[file_path] == log_file.stat().st_ino
+
+
+# ---------------------------------------------------------------------------
+# Tests -- LogFileWatcher inode-based rotation detection
+# ---------------------------------------------------------------------------
+
+
+def _fresh_lines(count: int) -> list:
+    """Build a list of distinct full ERROR lines for the post-rotation file."""
+    return [f"2026-08-04 | mod | ERROR | after rotation {i:03d}" for i in range(count)]
+
+
+class TestLogFileWatcherInodeRotation:
+    """Tests for rotation detected by inode and located across the backup chain."""
+
+    def test_rotation_detected_when_new_file_already_grew(self, tmp_path):
+        """A fresh log already past the old offset is still detected as rotated.
+
+        The size-only check missed this entirely and seeked into the middle of
+        the brand new file, yielding a partial line.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | already seen\n" * 20, encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        recorded_pos = watcher.log_positions[file_path]
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | missed one\n")
+
+        _rotate_chain(log_file)
+
+        # New file is LARGER than the recorded offset - there is no shrink to see
+        fresh = _fresh_lines(40)
+        log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
+        assert log_file.stat().st_size > recorded_pos
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("missed one" in line for line in lines)
+        # Read from position 0: every fresh line whole, none dropped, none partial
+        assert [line for line in lines if "after rotation" in line] == fresh
+        assert not any("already seen" in line for line in lines)
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_rotated_file_found_at_second_backup(self, tmp_path):
+        """Two rotations: the tail is drained from '.log.2' and a warning is emitted."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header line\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | tail from two rotations ago\n")
+
+        tracked_inode = log_file.stat().st_ino
+        _rotate_chain(log_file)  # tracked file -> .log.1
+        _rotate_chain(log_file)  # tracked file -> .log.2
+        assert Path(f"{file_path}.2").stat().st_ino == tracked_inode
+
+        log_file.write_text("2026-08-04 | mod | ERROR | brand new\n", encoding="utf-8")
+
+        with patch.object(wlw, "logger") as mock_logger:
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("tail from two rotations ago" in line for line in lines)
+        assert any("brand new" in line for line in lines)
+
+        warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
+        assert any("not replayed" in warning and ".log.2" in warning for warning in warnings)
+
+    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
+        """Inode matching nothing within the chain: nothing drained, new file read whole."""
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        tracked_inode = log_file.stat().st_ino
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | lost tail\n")
+
+        # Four rotations push the tracked file to '.log.4' - past the depth cap
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        assert Path(f"{file_path}.4").stat().st_ino == tracked_inode
+
+        fresh = _fresh_lines(40)
+        log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert not any("lost tail" in line for line in lines)
+        assert lines == fresh
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
+        """No-overreach guard: same inode plus a full backup chain never drains.
+
+        Passes with and without the fix - it proves walking the chain did not
+        turn an in-place truncation into a false rotation.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        file_path = str(log_file)
+        for name in ("chain three", "chain two", "chain one"):
+            log_file.write_text(f"2026-08-04 | mod | ERROR | {name}\n", encoding="utf-8")
+            _rotate_chain(log_file)
+
+        log_file.write_text("2026-08-04 | mod | ERROR | live content line\n", encoding="utf-8")
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        inode_before = log_file.stat().st_ino
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | short\n")
+        assert log_file.stat().st_ino == inode_before
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | short"]
+
+    def test_normal_append_with_backup_chain_never_drains(self, tmp_path):
+        """No-overreach guard: an append with backups present stays on the normal path.
+
+        Passes with and without the fix - it proves the chain walk only runs
+        when the inode actually changed.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        file_path = str(log_file)
+        for name in ("chain three", "chain two", "chain one"):
+            log_file.write_text(f"2026-08-04 | mod | ERROR | {name}\n", encoding="utf-8")
+            _rotate_chain(log_file)
+
+        log_file.write_text("2026-08-04 | mod | ERROR | first\n", encoding="utf-8")
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("2026-08-04 | mod | ERROR | appended\n")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | appended"]
+
+    def test_zero_inode_falls_back_to_size_check(self, tmp_path):
+        """No-overreach guard: a recorded inode of 0 is treated as unknown.
+
+        Passes with and without the fix - some Windows filesystems report
+        st_ino 0, which must never be trusted as a rotation signal.
+        """
+        wlw = _import_watchers_lw()
+        watcher = wlw.LogFileWatcher()
+
+        log_file = tmp_path / "prax_core.log"
+        log_file.write_text("2026-08-04 | mod | ERROR | tail line that is long\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher.log_positions[file_path] = log_file.stat().st_size
+        watcher.log_inodes[file_path] = 0
+
+        _rotate_chain(log_file)
+        log_file.write_text("2026-08-04 | mod | ERROR | new\n", encoding="utf-8")
+
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert lines == ["2026-08-04 | mod | ERROR | new"]
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+
+# ---------------------------------------------------------------------------
 # Tests -- start / stop / is_active
 # ---------------------------------------------------------------------------
 
@@ -439,6 +950,18 @@ class TestWatcherInitializePositions:
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
+
+    def test_initializes_inodes(self, tmp_path):
+        """Inodes are recorded alongside positions at startup."""
+        wlw = _import_watchers_lw()
+        sys_logs = tmp_path / "system_logs"
+        sys_logs.mkdir()
+        wlw.SYSTEM_LOGS_DIR = sys_logs
+        log_file = sys_logs / "app.log"
+        log_file.write_text("test data\n")
+        watcher = wlw.LogFileWatcher()
+        watcher.initialize_positions()
+        assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
     def test_handles_missing_dir(self, tmp_path):
         wlw = _import_watchers_lw()

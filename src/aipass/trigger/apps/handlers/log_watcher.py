@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.3.0
+# Version: 2.5.0
 # Created: 2026-02-02
-# Modified: 2026-02-27
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -43,6 +43,10 @@ TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json"
 
 # Max age for log entries to be considered fresh (seconds)
 STALE_ENTRY_THRESHOLD_SECONDS = 300  # 5 minutes
+
+# How far down the rotation chain ('<name>.log.1' .. '.N') to look for a
+# rotated-out file. Matches prax RotatingFileHandler backup_count.
+MAX_BACKUP_CHAIN_DEPTH = 3
 
 # Log filenames to exclude from watching (self-referential / dispatch feedback)
 # Compared case-insensitively against Path.name (see on_modified)
@@ -205,7 +209,30 @@ def _load_log_positions() -> Dict[str, int]:
     return {}
 
 
-def _save_log_positions(positions: Dict[str, int]) -> None:
+def _load_log_inodes() -> Dict[str, int]:
+    """
+    Load persisted log inodes from trigger_data.json.
+
+    Parallel key to 'log_positions' (kept separate so the on-disk
+    Dict[str, int] position shape never changes). Absence means
+    "no inode known", which simply disables the rotation drain until
+    positions are recorded again.
+
+    Returns:
+        Dict mapping file paths to inode numbers
+    """
+    try:
+        if TRIGGER_DATA_FILE.exists():
+            data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+            stored = data.get("log_inodes", {})
+            if isinstance(stored, dict):
+                return {k: int(v) for k, v in stored.items()}
+    except Exception as e:
+        logger.warning("Failed to load log inodes: %s", e)
+    return {}
+
+
+def _save_log_positions(positions: Dict[str, int], inodes: Optional[Dict[str, int]] = None) -> None:
     """
     Persist log positions to trigger_data.json.
 
@@ -214,6 +241,7 @@ def _save_log_positions(positions: Dict[str, int]) -> None:
 
     Args:
         positions: Dict mapping file paths to byte offsets
+        inodes: Optional dict mapping file paths to inode numbers
     """
     try:
         with json_file_lock(TRIGGER_DATA_FILE):
@@ -221,6 +249,8 @@ def _save_log_positions(positions: Dict[str, int]) -> None:
             if TRIGGER_DATA_FILE.exists():
                 data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
             data["log_positions"] = positions
+            if inodes is not None:
+                data["log_inodes"] = inodes
             atomic_write_json(TRIGGER_DATA_FILE, data)
     except Exception as exc:
         logger.warning("Failed to save log positions: %s", exc)
@@ -250,6 +280,7 @@ def _flush_trigger_data(force: bool = False) -> None:
                     data = json.loads(TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
                 if _active_watcher is not None:
                     data["log_positions"] = _active_watcher.log_positions
+                    data["log_inodes"] = _active_watcher.log_inodes
                 data["seen_error_hashes"] = list(_seen_error_hashes)
                 atomic_write_json(TRIGGER_DATA_FILE, data)
             _data_dirty = False
@@ -439,6 +470,88 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         """Initialize log watcher with position tracking."""
         super().__init__()
         self.log_positions: Dict[str, int] = {}
+        self.log_inodes: Dict[str, int] = {}
+
+    def _record_position(self, file_path: str, position: int) -> None:
+        """
+        Record byte position and inode identity for a watched file.
+
+        The inode is what later proves a shrunken file was rotated away
+        (renamed to '<name>.log.1') rather than truncated in place.
+
+        Args:
+            file_path: Path to log file
+            position: Byte offset already processed
+        """
+        self.log_positions[file_path] = position
+        try:
+            self.log_inodes[file_path] = Path(file_path).stat().st_ino
+        except OSError as exc:
+            logger.warning("Failed to record inode for '%s': %s", file_path, exc)
+            self.log_inodes.pop(file_path, None)
+
+    def _drain_rotated_tail(self, file_path: str, last_pos: int) -> None:
+        """
+        Process the unread tail of a log file that was just rotated away.
+
+        The rotated file is located BY INODE across the backup chain
+        ('<file_path>.1' .. '.MAX_BACKUP_CHAIN_DEPTH', stopping at the first
+        gap): the only file drained is the one whose CURRENT inode matches the
+        inode recorded for the live path - proof it is literally the file we
+        were reading, now renamed. No match anywhere in the chain, a backup
+        shorter than the recorded position, or an unknown inode all skip
+        silently rather than re-fire old errors.
+
+        DELIBERATE SCOPE LIMIT: when the match is found at '.2' or later, at
+        least one whole backup rotated past unseen. Those skipped backups are
+        NOT replayed - re-reading a full backup would fire a flood of events
+        for already-historical lines, which is worse than the gap. Only the
+        matched file's own tail is drained, and one warning names the file and
+        the number of skipped backups so the loss is visible in the log
+        instead of silent.
+
+        Args:
+            file_path: Path to the live log file
+            last_pos: Byte offset processed before the rotation
+        """
+        known_inode = self.log_inodes.get(file_path)
+        if not known_inode or last_pos <= 0:
+            return
+
+        try:
+            rotated: Optional[Path] = None
+            skipped = 0
+            for index in range(1, MAX_BACKUP_CHAIN_DEPTH + 1):
+                backup = Path(f"{file_path}.{index}")
+                if not backup.exists():
+                    break
+                if backup.stat().st_ino == known_inode:
+                    rotated = backup
+                    skipped = index - 1
+                    break
+            if rotated is None:
+                return
+            if skipped:
+                logger.warning(
+                    "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
+                    rotated,
+                    skipped,
+                )
+            if rotated.stat().st_size <= last_pos:
+                return
+            with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(last_pos)
+                tail = f.read()
+        except OSError as exc:
+            logger.warning("Failed to drain rotated log for '%s': %s", file_path, exc)
+            return
+
+        if not tail.strip():
+            return
+
+        for line in tail.strip().split("\n"):
+            if line.strip():
+                self._process_log_line(line, file_path)
 
     def _should_process(self, file_path: str) -> bool:
         """Check if a log file should be processed."""
@@ -452,12 +565,36 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         return is_branch_log or is_system_log
 
     def _read_new_lines(self, file_path: str) -> None:
-        """Read new content from a log file and process lines."""
-        current_size = Path(file_path).stat().st_size
-        last_pos = self.log_positions.get(file_path, 0)
+        """
+        Read new content from a log file and process lines.
 
-        if current_size < last_pos:
+        Rotation is detected by INODE, not by size: a fresh log can already
+        have grown past the recorded offset by the time the event arrives, and
+        a size-only check would then seek into the middle of a brand new file.
+        An inode of 0 (possible on some Windows filesystems) means "unknown"
+        and falls back to the size-based check.
+
+        Args:
+            file_path: Path to log file
+        """
+        stats = Path(file_path).stat()
+        current_size = stats.st_size
+        last_pos = self.log_positions.get(file_path, 0)
+        known_inode = self.log_inodes.get(file_path)
+        rotated_away = bool(known_inode) and bool(stats.st_ino) and known_inode != stats.st_ino
+
+        if rotated_away:
+            try:
+                self._drain_rotated_tail(file_path, last_pos)
+            except Exception as exc:
+                logger.warning("Failed to drain rotated tail for '%s': %s", file_path, exc)
             last_pos = 0
+            # Record immediately so a second event cannot drain the same tail twice
+            self._record_position(file_path, 0)
+        elif current_size < last_pos:
+            # Same file, smaller: truncated in place - no rotated tail exists
+            last_pos = 0
+            self._record_position(file_path, 0)
         if current_size <= last_pos:
             return
 
@@ -468,7 +605,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                 for line in new_lines.strip().split("\n"):
                     if line.strip():
                         self._process_log_line(line, file_path)
-            self.log_positions[file_path] = f.tell()
+            self._record_position(file_path, f.tell())
 
         _mark_data_dirty()
 
@@ -641,6 +778,8 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         """
         # Load persisted positions from disk first
         persisted = _load_log_positions()
+        # Seed inodes from disk; the live stat below wins for files that exist
+        self.log_inodes.update(_load_log_inodes())
 
         # Branch logs under aipass/*/logs/
         for branch_dir in AIPASS_PKG_ROOT.iterdir():
@@ -656,9 +795,9 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                     saved_pos = persisted.get(file_path, -1)
                     # Use persisted position if valid (not beyond current file size)
                     if 0 <= saved_pos <= current_size:
-                        self.log_positions[file_path] = saved_pos
+                        self._record_position(file_path, saved_pos)
                     else:
-                        self.log_positions[file_path] = current_size
+                        self._record_position(file_path, current_size)
                 except Exception as exc:
                     logger.warning("Failed to initialize position for branch log '%s': %s", log_file, exc)
                     continue  # Skip unreadable log file
@@ -671,9 +810,9 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                     current_size = log_file.stat().st_size
                     saved_pos = persisted.get(file_path, -1)
                     if 0 <= saved_pos <= current_size:
-                        self.log_positions[file_path] = saved_pos
+                        self._record_position(file_path, saved_pos)
                     else:
-                        self.log_positions[file_path] = current_size
+                        self._record_position(file_path, current_size)
                 except Exception as exc:
                     logger.warning("Failed to initialize position for system log '%s': %s", log_file, exc)
                     continue  # Skip unreadable log file

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-01-31
-# Modified: 2026-01-31
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -27,7 +27,7 @@ import hashlib
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.trigger.apps.config import TRIGGER_ROOT
@@ -38,6 +38,10 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 # System logs directory (package-relative via config)
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
+
+# How far down the rotation chain ('<name>.log.1' .. '.N') to look for a
+# rotated-out file. Matches prax RotatingFileHandler backup_count.
+MAX_BACKUP_CHAIN_DEPTH = 3
 
 # Try to import watchdog
 try:
@@ -190,14 +194,121 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         """Initialize log watcher with position tracking."""
         super().__init__()
         self.log_positions: Dict[str, int] = {}
+        self.log_inodes: Dict[str, int] = {}
+
+    def _record_position(self, file_path: str, position: int) -> None:
+        """
+        Record byte position and inode identity for a watched file.
+
+        The inode is what later proves a shrunken file was rotated away
+        (renamed to '<name>.log.1') rather than truncated in place.
+
+        Args:
+            file_path: Path to log file
+            position: Byte offset already processed
+        """
+        self.log_positions[file_path] = position
+        try:
+            self.log_inodes[file_path] = Path(file_path).stat().st_ino
+        except OSError as exc:
+            logger.warning("Failed to record inode for '%s': %s", file_path, exc)
+            self.log_inodes.pop(file_path, None)
+
+    def _drain_rotated_tail(self, file_path: str, last_pos: int) -> None:
+        """
+        Process the unread tail of a log file that was just rotated away.
+
+        The rotated file is located BY INODE across the backup chain
+        ('<file_path>.1' .. '.MAX_BACKUP_CHAIN_DEPTH', stopping at the first
+        gap): the only file drained is the one whose CURRENT inode matches the
+        inode recorded for the live path - proof it is literally the file we
+        were reading, now renamed. No match anywhere in the chain, a backup
+        shorter than the recorded position, or an unknown inode all skip
+        silently rather than re-fire old errors.
+
+        DELIBERATE SCOPE LIMIT: when the match is found at '.2' or later, at
+        least one whole backup rotated past unseen. Those skipped backups are
+        NOT replayed - re-reading a full backup would fire a flood of events
+        for already-historical lines, which is worse than the gap. Only the
+        matched file's own tail is drained, and one warning names the file and
+        the number of skipped backups so the loss is visible in the log
+        instead of silent.
+
+        Args:
+            file_path: Path to the live log file
+            last_pos: Byte offset processed before the rotation
+        """
+        known_inode = self.log_inodes.get(file_path)
+        if not known_inode or last_pos <= 0:
+            return
+
+        try:
+            rotated: Optional[Path] = None
+            skipped = 0
+            for index in range(1, MAX_BACKUP_CHAIN_DEPTH + 1):
+                backup = Path(f"{file_path}.{index}")
+                if not backup.exists():
+                    break
+                if backup.stat().st_ino == known_inode:
+                    rotated = backup
+                    skipped = index - 1
+                    break
+            if rotated is None:
+                return
+            if skipped:
+                logger.warning(
+                    "Rotated log found at '%s' - %d earlier backup(s) rotated past unread (not replayed)",
+                    rotated,
+                    skipped,
+                )
+            if rotated.stat().st_size <= last_pos:
+                return
+            with open(rotated, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(last_pos)
+                tail = f.read()
+        except OSError as exc:
+            logger.warning("Failed to drain rotated log for '%s': %s", file_path, exc)
+            return
+
+        if not tail.strip():
+            return
+
+        branch = _detect_branch_from_log(file_path)
+        for line in tail.strip().split("\n"):
+            if line.strip() and not _should_skip_log(line):
+                self._process_log_line(branch, line, file_path)
 
     def _read_new_lines(self, file_path: str) -> None:
-        """Read new content from a log file and process lines."""
-        current_size = Path(file_path).stat().st_size
-        last_pos = self.log_positions.get(file_path, 0)
+        """
+        Read new content from a log file and process lines.
 
-        if current_size < last_pos:
+        Rotation is detected by INODE, not by size: a fresh log can already
+        have grown past the recorded offset by the time the event arrives, and
+        a size-only check would then seek into the middle of a brand new file.
+        An inode of 0 (possible on some Windows filesystems) means "unknown"
+        and falls back to the size-based check.
+
+        Args:
+            file_path: Path to log file
+        """
+        stats = Path(file_path).stat()
+        current_size = stats.st_size
+        last_pos = self.log_positions.get(file_path, 0)
+        known_inode = self.log_inodes.get(file_path)
+        rotated_away = bool(known_inode) and bool(stats.st_ino) and known_inode != stats.st_ino
+
+        if rotated_away:
+            try:
+                self._drain_rotated_tail(file_path, last_pos)
+            except Exception as exc:
+                logger.warning("Failed to drain rotated tail for '%s': %s", file_path, exc)
             last_pos = 0
+            # Record immediately so a second event cannot drain the same tail twice
+            self._record_position(file_path, 0)
+        elif current_size < last_pos:
+            # Same file, smaller: truncated in place - no rotated tail exists
+            last_pos = 0
+            self._record_position(file_path, 0)
         if current_size <= last_pos:
             return
 
@@ -209,7 +320,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
                 for line in new_lines.strip().split("\n"):
                     if line.strip() and not _should_skip_log(line):
                         self._process_log_line(branch, line, file_path)
-            self.log_positions[file_path] = f.tell()
+            self._record_position(file_path, f.tell())
 
     def on_modified(self, event):
         """
@@ -310,7 +421,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
 
         for log_file in SYSTEM_LOGS_DIR.glob("*.log"):
             try:
-                self.log_positions[str(log_file)] = log_file.stat().st_size
+                self._record_position(str(log_file), log_file.stat().st_size)
             except Exception as exc:
                 logger.warning("Failed to initialize position for '%s': %s", log_file, exc)
 
