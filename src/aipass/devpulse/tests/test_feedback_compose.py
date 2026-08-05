@@ -222,3 +222,74 @@ class TestAiMailDelivery:
         assert result is True
         data = storage.load_inbox()
         assert len(data["messages"][0]["thread"]) == 1
+
+
+class TestHonestDeliveryReporting:
+    """Delivery outcomes must be surfaced, never silently skipped (2026-08-04 live failure)."""
+
+    @pytest.fixture
+    def inbox_with_message(self, mock_feedback_dir):
+        """Inbox seeded with one message from seedgo."""
+        storage.save_inbox(
+            {
+                "mailbox": "feedback",
+                "total_messages": 1,
+                "unread_count": 1,
+                "messages": [
+                    {
+                        "id": "aaa11111",
+                        "from": "seedgo",
+                        "subject": "Test feedback",
+                        "body": "Original message.",
+                        "timestamp": "2026-04-11T10:00:00",
+                        "read": True,
+                        "thread": [],
+                        "reply_path": "",
+                    },
+                ],
+            }
+        )
+
+    def test_deliver_returns_success_tuple(self, tmp_path):
+        """_deliver_to_ai_mail returns (True, 'delivered') on success."""
+        ai_mail_dir = tmp_path / "seedgo" / ".ai_mail.local"
+        ai_mail_dir.mkdir(parents=True)
+        inbox_path = ai_mail_dir / "inbox.json"
+        with open(inbox_path, "w", encoding="utf-8") as f:
+            json.dump({"messages": []}, f)
+
+        delivered, reason = compose._deliver_to_ai_mail("seedgo", "Subj", "Body", "aaa11111", str(inbox_path))
+        assert delivered is True
+        assert reason == "delivered"
+
+    def test_deliver_returns_failure_reason_when_inbox_missing(self, tmp_path):
+        """_deliver_to_ai_mail returns (False, reason) naming the missing path."""
+        missing = tmp_path / "nowhere" / "inbox.json"
+        delivered, reason = compose._deliver_to_ai_mail("ghost", "Subj", "Body", "aaa11111", str(missing))
+        assert delivered is False
+        assert str(missing) in reason
+
+    def test_send_warns_when_sender_unknown(self, empty_inbox):
+        """send_feedback tells an anonymous sender that replies cannot reach them."""
+        with patch.object(compose, "console") as mock_console:
+            compose.send_feedback("unknown", "Subj", "Body", "")
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "CANNOT reach you" in printed
+
+    def test_send_no_warning_when_sender_resolved(self, empty_inbox, tmp_path):
+        """send_feedback stays quiet when the sender has a return address."""
+        inbox_path = tmp_path / ".ai_mail.local" / "inbox.json"
+        inbox_path.parent.mkdir(parents=True)
+        inbox_path.write_text("{}", encoding="utf-8")
+        with patch.object(compose, "console") as mock_console:
+            compose.send_feedback("seedgo", "Subj", "Body", str(inbox_path))
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "CANNOT reach you" not in printed
+
+    def test_reply_reports_undelivered(self, inbox_with_message, mock_aipass_root):
+        """reply_to prints NOT delivered when the sender inbox is unreachable."""
+        with patch.object(compose, "console") as mock_console:
+            result = compose.reply_to("aaa11111", "Reply into the void")
+        assert result is True
+        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        assert "NOT delivered" in printed

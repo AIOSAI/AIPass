@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-04-11
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -107,6 +107,23 @@ def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str =
     logger.info(f"[FEEDBACK] Received feedback from {from_branch}: {subject}")
     console.print(f"[green]Feedback received (id: {msg_id}).[/green]")
 
+    # Anonymous sender = no return address. Say so NOW, at send time, to the
+    # one party who can fix it — a reply to 'unknown' can never be delivered
+    # (live failure 2026-08-04: 6 messages arrived anonymous, 3 replies
+    # silently stranded for 5 hours).
+    if from_branch == "unknown" or not ai_mail_path:
+        logger.warning(
+            f"[FEEDBACK] Sender unresolved (branch={from_branch}, "
+            f"reply_path={ai_mail_path or 'none'}) — replies cannot be delivered"
+        )
+        console.print(
+            "[yellow]Warning: your identity could not be resolved — replies to this feedback CANNOT reach you.[/yellow]"
+        )
+        console.print(
+            "[yellow]Run drone from inside your branch directory (where "
+            ".trinity/passport.json lives) so replies have a return address.[/yellow]"
+        )
+
     return msg_id
 
 
@@ -149,27 +166,40 @@ def reply_to(msg_id: str, body: str) -> bool:
 
     console.print(f"[green]Reply added to thread {msg_id}.[/green]")
 
-    # Deliver to sender's ai_mail using stored reply path
+    # Deliver to sender's ai_mail using stored reply path — and report the
+    # outcome honestly. A reply the sender never sees is not a sent reply
+    # (live failure 2026-08-04: 3 replies to 'unknown' silently stranded).
     sender = msg.get("from", "")
     reply_path = msg.get("reply_path", "")
     if sender:
-        _deliver_to_ai_mail(sender, msg.get("subject", ""), body, msg_id, reply_path)
+        delivered, reason = _deliver_to_ai_mail(sender, msg.get("subject", ""), body, msg_id, reply_path)
+        if delivered:
+            console.print(f"[green]Delivered to {sender}'s ai_mail inbox.[/green]")
+        else:
+            console.print(f"[red]NOT delivered to {sender}: {reason}[/red]")
+            console.print("[yellow]The reply is saved in the thread only — the sender will not see it.[/yellow]")
+    else:
+        console.print("[red]NOT delivered: message has no sender recorded.[/red]")
 
     return True
 
 
-def _deliver_to_ai_mail(to_branch: str, subject: str, body: str, thread_id: str, reply_path: str = "") -> None:
+def _deliver_to_ai_mail(
+    to_branch: str, subject: str, body: str, thread_id: str, reply_path: str = ""
+) -> tuple[bool, str]:
     """Deliver a reply to the sender's ai_mail inbox.
 
     Writes directly to the sender's .ai_mail.local/inbox.json.
-    If the path does not exist or delivery fails, logs a warning
-    and skips silently.
 
     Args:
         to_branch: Target branch name.
         subject: Original message subject (prefixed with Re:).
         body: Reply body text.
         thread_id: Original feedback message ID for reference.
+        reply_path: Sender inbox path captured at send time.
+
+    Returns:
+        tuple: (delivered, reason) — reason explains a failed delivery.
     """
     # Use stored reply_path (works for external projects), fall back to AIPass internal
     if reply_path:
@@ -178,15 +208,17 @@ def _deliver_to_ai_mail(to_branch: str, subject: str, body: str, thread_id: str,
         ai_mail_path = _AIPASS_ROOT / to_branch / ".ai_mail.local" / "inbox.json"
 
     if not ai_mail_path.exists():
-        logger.warning(f"[FEEDBACK] ai_mail inbox not found for {to_branch} at {ai_mail_path} — skipping delivery")
-        return
+        reason = f"ai_mail inbox not found at {ai_mail_path}"
+        logger.warning(f"[FEEDBACK] {reason} for {to_branch} — skipping delivery")
+        return False, reason
 
     try:
         with open(ai_mail_path, encoding="utf-8") as f:
             inbox = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
+        reason = f"failed to read inbox: {e}"
         logger.warning(f"[FEEDBACK] Failed to read {to_branch} ai_mail inbox: {e}")
-        return
+        return False, reason
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     mail_id = generate_id()
@@ -214,5 +246,8 @@ def _deliver_to_ai_mail(to_branch: str, subject: str, body: str, thread_id: str,
             json.dump(inbox, f, indent=2)
             f.write("\n")
         logger.info(f"[FEEDBACK] Reply delivered to {to_branch} ai_mail")
+        return True, "delivered"
     except OSError as e:
+        reason = f"failed to write inbox: {e}"
         logger.warning(f"[FEEDBACK] Failed to write to {to_branch} ai_mail: {e}")
+        return False, reason
