@@ -670,10 +670,11 @@ def wake_branch(
         prompt = f"Hi. {custom_message} "
     else:
         prompt = f"{DEFAULT_PROMPT} "
-    # Monitor owns lock cleanup end-to-end — telling the agent to delete it
-    # too let a second monitor spawn onto a "clear" lock while the first was
-    # still alive, then have its own unconditional cleanup steal the second
-    # monitor's lock out from under it (lock-theft, observed 2026-07-31).
+    # Monitor owns lock cleanup end-to-end, so the prompt no longer tells the
+    # agent to delete the lock: an agent deleting it while its own monitor is
+    # still alive lets a second monitor spawn onto a "clear" lock, and the two
+    # then race over one lock file. Rationale from reading the cleanup paths —
+    # not a logged incident; the monitor's PID-verified cleanup is the guard.
     prompt += (
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "
