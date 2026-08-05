@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-05-21
+# Modified: 2026-08-04
 # =============================================
 
 """Blocks unsafe edits: inbox writes, daemon confinement, cross-branch writes, diagnostics state."""
@@ -24,6 +24,22 @@ EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
+_NUMBER_KEYS = ("number", "session_number")
+
+
+def _entry_number(entry: dict) -> int | None:
+    """Read an entry's ordinal, tolerating legacy schemas.
+
+    Older .trinity files number sessions with 'session_number' rather than
+    'number', and the rest of the fleet still honours it (@memory's rollover
+    fixtures, @daemon's latest_session). A guard that reads only 'number' locks
+    those branches out of their own memory with no way to comply.
+    """
+    for key in _NUMBER_KEYS:
+        value = entry.get(key)
+        if isinstance(value, int):
+            return value
+    return None
 
 
 def _get_package_from_cwd(cwd: str) -> str:
@@ -154,6 +170,10 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
     These arrays are newest-first: rollover archives the TAIL as "oldest". A new
     entry appended after existing ones, or numbered <= the current max, gets
     silently archived as history on the next rollover instead of kept as recent.
+
+    Ordinals are read through _entry_number, and an array where no entry carries a
+    recognized ordinal skips the monotonicity check entirely — see the comment at
+    that branch. The ordering check is schema-independent and always runs.
     """
     for key in _NEWEST_FIRST_ARRAYS:
         b = before.get(key)
@@ -169,8 +189,8 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
         for e in b:
             if not isinstance(e, dict):
                 continue
-            number = e.get("number")
-            if isinstance(number, int):
+            number = _entry_number(e)
+            if number is not None:
                 existing_numbers.append(number)
         max_existing = max(existing_numbers) if existing_numbers else 0
 
@@ -187,20 +207,36 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
                 "sound": "edit gate",
             }
 
+        new_numbers = [_entry_number(e) for e in new_entries if isinstance(e, dict)]
+
+        # An unnumbered array is not a newest-first violation, it is a schema this
+        # guard can't read. Blocking it would lock the branch out of its own memory
+        # with no way to comply. The ordering check above still applies.
+        if not existing_numbers and all(n is None for n in new_numbers):
+            continue
+
         for entry in new_entries:
             if not isinstance(entry, dict):
                 continue
-            number = entry.get("number")
-            if not isinstance(number, int) or number <= max_existing:
+            number = _entry_number(entry)
+            if number is None:
+                reason = (
+                    f"{key}: new entry has no ordinal, but the existing entries are numbered "
+                    f"(max {max_existing}). Number it with one of: {', '.join(_NUMBER_KEYS)} — "
+                    "newest-first requires ascending numbers inserted at index 0."
+                )
+            elif number <= max_existing:
                 reason = (
                     f"{key}: new entry number ({number}) must be greater than the max existing "
                     f"number ({max_existing}) — newest-first requires ascending numbers inserted at index 0."
                 )
-                return {
-                    "stdout": json.dumps({"decision": "block", "reason": reason}),
-                    "exit_code": 2,
-                    "sound": "edit gate",
-                }
+            else:
+                continue
+            return {
+                "stdout": json.dumps({"decision": "block", "reason": reason}),
+                "exit_code": 2,
+                "sound": "edit gate",
+            }
     return None
 
 

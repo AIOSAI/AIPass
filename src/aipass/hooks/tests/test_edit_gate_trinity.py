@@ -1332,6 +1332,199 @@ class TestTrinityNewestFirst:
         assert result["exit_code"] == 0
 
 
+class TestTrinityLegacyNumberSchema:
+    """A branch whose sessions[] use the legacy 'session_number' key must still be able
+    to write memory. The guard exists to stop newest-first violations, and a schema it
+    cannot read is not a violation (reported by VERA, Vera-Studio)."""
+
+    def test_legacy_session_number_prepend_allowed(self, tmp_path):
+        """Legacy schema, correct newest-first prepend -> allowed (was hard-blocked)."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "sessions": [
+                {"session_number": 6, "summary": "new"},
+                {"session_number": 5, "summary": "old"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert result["stdout"] == ""
+
+    def test_legacy_session_number_tail_append_blocked(self, tmp_path):
+        """The ordering check is schema-independent — legacy tail append still blocks."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "sessions": [
+                {"session_number": 5, "summary": "old"},
+                {"session_number": 6, "summary": "new"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        assert json.loads(result["stdout"])["decision"] == "block"
+
+    def test_legacy_number_not_greater_than_max_blocked(self, tmp_path):
+        """Monotonicity is enforced within the legacy schema too, not just skipped."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "sessions": [
+                {"session_number": 5, "summary": "dupe"},
+                {"session_number": 5, "summary": "old"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        assert "must be greater than the max existing" in json.loads(result["stdout"])["reason"]
+
+    def test_number_key_wins_over_session_number(self, tmp_path):
+        """When both keys are present, 'number' is authoritative — session_number is ignored."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        # session_number 100 would block a new entry numbered 6; number 5 must win.
+        existing = {"sessions": [{"number": 5, "session_number": 100, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "sessions": [
+                {"number": 6, "summary": "new"},
+                {"number": 5, "session_number": 100, "summary": "old"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_cross_schema_migration_allowed(self, tmp_path):
+        """Legacy existing entries, modern 'number' on the new one -> allowed."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"number": 6, "summary": "new"}, {"session_number": 5, "summary": "old"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_wholly_unnumbered_array_passes_through(self, tmp_path):
+        """No recognized ordinal anywhere -> monotonicity can't be judged, so don't block."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"summary": "new"}, {"summary": "old"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+    def test_unnumbered_array_still_ordering_checked(self, tmp_path):
+        """Pass-through covers the number check only — tail appends still block."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"summary": "old"}, {"summary": "new"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        assert "newest-first" in json.loads(result["stdout"])["reason"]
+
+    def test_unnumbered_new_entry_against_numbered_existing_blocked(self, tmp_path):
+        """Dropping the ordinal when the file has one is a real violation — block, and
+        name the accepted keys so there is a path to comply."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"sessions": [{"number": 5, "summary": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {"sessions": [{"summary": "new"}, {"number": 5, "summary": "old"}]}
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "no ordinal" in reason
+        assert "session_number" in reason
+
+    def test_key_learnings_legacy_schema_prepend_allowed(self, tmp_path):
+        """The alias applies to every newest-first array, not just sessions."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        existing = {"key_learnings": [{"session_number": 5, "value": "old"}]}
+        Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
+
+        after = {
+            "key_learnings": [
+                {"session_number": 6, "value": "new"},
+                {"session_number": 5, "value": "old"},
+            ]
+        }
+        content = json.dumps(after)
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+
+
 class TestSectionCountGuard:
     """Soft count guard: warn (never block) when rolling sections exceed count cap."""
 

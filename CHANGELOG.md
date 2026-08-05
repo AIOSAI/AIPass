@@ -57,6 +57,18 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**fix(hooks)** — edit_gate's newest-first guard no longer hard-blocks
+legacy `session_number` branches from ever writing session memory (found by
+VERA — the gate was stricter than the schema the rest of the fleet still
+honors, with no compliance path). Two halves, both proven load-bearing by
+staged canaries: a number-key alias (`number` wins over `session_number`
+when both exist) so legacy arrays stay *guarded*, and an unreadable-schema
+pass-through so an unrecognized future schema degrades to the
+ordinal-independent ordering check instead of a permanent lockout. Block
+messages now name the accepted keys. Live-proved through the real Claude
+bridge: legacy prepend exits 0, tail-append and number-reuse still exit 2.
+1335 hooks tests green (+9). By @hooks, verified by devpulse.
+
 **fix(ai_mail)** — wake-back no longer claims "woken" when the manager gate
 skipped it (found by VERA in Vera-Studio field telemetry after her manager
 flip; diagnosis exact, line for line). The gate's bool means "the dispatch
