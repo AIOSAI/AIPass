@@ -271,9 +271,9 @@ class TestHonestDeliveryReporting:
 
     def test_send_warns_when_sender_unknown(self, empty_inbox):
         """send_feedback tells an anonymous sender that replies cannot reach them."""
-        with patch.object(compose, "console") as mock_console:
+        with patch.object(compose, "warning") as mock_warning:
             compose.send_feedback("unknown", "Subj", "Body", "")
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = " ".join(str(c) for c in mock_warning.call_args_list)
         assert "CANNOT reach you" in printed
 
     def test_send_no_warning_when_sender_resolved(self, empty_inbox, tmp_path):
@@ -281,15 +281,14 @@ class TestHonestDeliveryReporting:
         inbox_path = tmp_path / ".ai_mail.local" / "inbox.json"
         inbox_path.parent.mkdir(parents=True)
         inbox_path.write_text("{}", encoding="utf-8")
-        with patch.object(compose, "console") as mock_console:
+        with patch.object(compose, "warning") as mock_warning:
             compose.send_feedback("seedgo", "Subj", "Body", str(inbox_path))
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
-        assert "CANNOT reach you" not in printed
+        mock_warning.assert_not_called()
 
     def test_reply_reports_undelivered(self, inbox_with_message, mock_aipass_root):
-        """reply_to prints NOT delivered when the sender inbox is unreachable."""
-        with patch.object(compose, "console") as mock_console:
+        """reply_to raises a real error() when the sender inbox is unreachable."""
+        with patch.object(compose, "error") as mock_error:
             result = compose.reply_to("aaa11111", "Reply into the void")
         assert result is True
-        printed = " ".join(str(c) for c in mock_console.print.call_args_list)
+        printed = " ".join(str(c) for c in mock_error.call_args_list)
         assert "NOT delivered" in printed

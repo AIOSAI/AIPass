@@ -25,7 +25,7 @@ from aipass.devpulse.apps.handlers.feedback.storage import (
     generate_id,
 )
 
-from aipass.cli.apps.modules import err_console, error
+from aipass.cli.apps.modules import err_console, error, success, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 
 console = err_console
@@ -116,12 +116,10 @@ def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str =
             f"[FEEDBACK] Sender unresolved (branch={from_branch}, "
             f"reply_path={ai_mail_path or 'none'}) — replies cannot be delivered"
         )
-        console.print(
-            "[yellow]Warning: your identity could not be resolved — replies to this feedback CANNOT reach you.[/yellow]"
-        )
-        console.print(
-            "[yellow]Run drone from inside your branch directory (where "
-            ".trinity/passport.json lives) so replies have a return address.[/yellow]"
+        warning(
+            "your identity could not be resolved — replies to this feedback CANNOT reach you",
+            details="Run drone from inside your branch directory (where "
+            ".trinity/passport.json lives) so replies have a return address.",
         )
 
     return msg_id
@@ -174,12 +172,14 @@ def reply_to(msg_id: str, body: str) -> bool:
     if sender:
         delivered, reason = _deliver_to_ai_mail(sender, msg.get("subject", ""), body, msg_id, reply_path)
         if delivered:
-            console.print(f"[green]Delivered to {sender}'s ai_mail inbox.[/green]")
+            success(f"Delivered to {sender}'s ai_mail inbox.")
         else:
-            console.print(f"[red]NOT delivered to {sender}: {reason}[/red]")
-            console.print("[yellow]The reply is saved in the thread only — the sender will not see it.[/yellow]")
+            error(
+                f"NOT delivered to {sender}: {reason}",
+                suggestion="The reply is saved in the thread only — the sender will not see it.",
+            )
     else:
-        console.print("[red]NOT delivered: message has no sender recorded.[/red]")
+        error("NOT delivered: message has no sender recorded.")
 
     return True
 
