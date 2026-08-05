@@ -104,6 +104,13 @@
       "subject": "Runaway detector rotation false-negative + relay.pid cross-boot staleness",
       "date_closed": "2026-08-02",
       "location": "prax"
+    },
+    {
+      "plan_id": "FPLAN-0378",
+      "type": "FPLAN",
+      "subject": "Log rotation retention: backup_count 1 to 3, dead config-template schema fix",
+      "date_closed": "2026-08-05",
+      "location": "prax"
     }
   ],
   "document_metadata": {

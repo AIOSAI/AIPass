@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-08-04
 # =============================================
 
 """Tests for prax logging handler modules.
@@ -587,6 +587,10 @@ class TestCreateConfigFile:
         """Creates default config file when it does not exist."""
         mock_config = MagicMock()
         mock_config.PRAX_JSON_DIR = tmp_path
+        # Real dicts, not MagicMock attrs — create_config_file() serialises these
+        # into the generated file, so they have to survive json.dump.
+        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
+        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
         mock_direct = MagicMock()
         mock_direct_logger = MagicMock()
@@ -611,12 +615,67 @@ class TestCreateConfigFile:
             content = json.loads(config_path.read_text(encoding="utf-8"))
             assert content["module_name"] == "prax_logger"
             assert "config" in content
-            assert content["config"]["log_level"] == "INFO"
+            # The generated file must be readable by load_log_config(), which
+            # looks for these two sections and nothing else for retention.
+            assert content["config"]["system_logs"]["backup_count"] == 3
+            assert content["config"]["local_logs"]["max_lines"] == 250
+            assert content["config"]["debug_prints_enabled"] is False
+            # Keys no reader ever consults do not belong in a generated config.
+            for dead in ("max_log_size_mb", "backup_count", "console_output", "rotation_enabled", "debug_prints"):
+                assert dead not in content["config"], f"{dead} is written but never read"
+
+    def test_generated_config_is_readable_by_load_log_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """The file prax generates must be a file prax can read.
+
+        These two halves lived apart for months: the template wrote retention
+        keys at config.* while the loader read config.system_logs/local_logs, so
+        a fresh install produced a config that governed nothing.
+        """
+        mock_config = MagicMock()
+        mock_config.PRAX_JSON_DIR = tmp_path
+        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
+        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+
+        mock_direct = MagicMock()
+        mock_direct.get_direct_logger = MagicMock(return_value=MagicMock())
+
+        config_path = tmp_path / "prax_logger_config.json"
+        with patch.dict(
+            sys.modules,
+            {
+                "aipass.prax.apps.handlers.config.load": mock_config,
+                "aipass.prax.apps.handlers.logging.direct": mock_direct,
+            },
+        ):
+            sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
+            import aipass.prax.apps.handlers.logging.operations as ops
+
+            ops.CONFIG_FILE = config_path
+            ops.create_config_file()
+
+        # Outside the patch: read it back with the real loader.
+        sys.modules.pop("aipass.prax.apps.handlers.logging.operations", None)
+        import aipass.prax.apps.handlers.config.load as load_mod
+
+        mock_logger = MagicMock()
+        monkeypatch.setattr(load_mod, "logger", mock_logger)
+        monkeypatch.setattr(load_mod, "PRAX_LOGGER_CONFIG_FILE", config_path)
+        monkeypatch.setattr(load_mod, "_config_schema_warned", False)
+
+        result = load_mod.load_log_config()
+
+        assert result["system_logs"]["backup_count"] == 3
+        assert result["local_logs"]["max_lines"] == 250
+        mock_logger.warning.assert_not_called()
 
     def test_does_not_overwrite_existing_config(self, mock_prax_infrastructure, tmp_path):
         """Does not overwrite an existing config file."""
         mock_config = MagicMock()
         mock_config.PRAX_JSON_DIR = tmp_path
+        # Real dicts, not MagicMock attrs — create_config_file() serialises these
+        # into the generated file, so they have to survive json.dump.
+        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
+        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
         mock_direct = MagicMock()
         mock_direct_logger = MagicMock()
@@ -645,6 +704,10 @@ class TestCreateConfigFile:
         """Handles write errors without raising."""
         mock_config = MagicMock()
         mock_config.PRAX_JSON_DIR = tmp_path
+        # Real dicts, not MagicMock attrs — create_config_file() serialises these
+        # into the generated file, so they have to survive json.dump.
+        mock_config.DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
+        mock_config.DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
         mock_direct = MagicMock()
         mock_direct_logger = MagicMock()

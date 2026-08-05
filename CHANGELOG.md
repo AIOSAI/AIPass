@@ -9,6 +9,41 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-04] — fleet self-repair day: the error storm's own findings, landed
+
+**fix(trigger)** — rotation tail loss closed in BOTH log watchers. The old
+`size shrank → reset to 0` rotation handling silently skipped every line
+between the last read offset and the rotation cut — worst exactly during
+incidents, when the unread tail is largest; a second defect seeked stale
+offsets INTO the fresh file, reading garbage fragments. Now: inode identity
+recorded beside the offset, rotation detected by inode change, and the
+rotated-out file's unread tail drained before moving on (inode-matched, so
+never a stale backup re-fired). Falsy/unknown inode degrades to old
+behavior. Found by @trigger while disproving another branch's rotation
+claim. 698 trigger tests green.
+
+**fix(ai_mail)** — the 6-week "unreproducible" dispatch failure
+(2×468-adjacent fingerprints, 44 occurrences) root-caused and reproduced on
+demand: sender identity resolves from AIPASS_CALLER_CWD, so running drone
+from a non-branch dir (repo root) fails detection — while the error printed
+the target's perfectly-valid cwd, sending every prior investigation passport
+-hunting. The refusal is CORRECT (silent cwd fallback would forge sender
+identity); the fix is diagnostic truth: the error now names the env var,
+the walked path, and that process cwd is informational. Fingerprint prefix
+preserved for medic grouping. 4 canary-checked tests, 830 green. By @ai_mail.
+
+**fix(hooks)** — engine "complete: 0 hooks" lie fixed: silent gates write no
+stdout, so len(outputs) reported 0 on 97% of dispatches while gates fired
+normally. Now counts executions; hooks_with_output added. Runaway
+hooks_engine.log alert itself verdict'd NOT a hooks bug — fleet load
+(24 claude processes, load 32 on 4 cores). engine.py 1.1.1, 4 canary tests,
+1321 green. By @hooks.
+
+**fix(prax)** — log retention: backup_count 1→3 (rotation was discarding
+history the watchers hadn't drained; ~28MB ceiling accepted), and dead
+prax_logger_config.json read-keys found/wired (settings never matched what
+load read). By @prax under @trigger dispatch. 1084 green.
+
 ## [2026-08-02] — TG slash relay: /context fired from Telegram comes back to the chat
 
 **feat(skills)** — CC informational slash commands now round-trip from
