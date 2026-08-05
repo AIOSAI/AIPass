@@ -57,6 +57,18 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**feat(trigger)** — runaway WARNING tier is observe-only (Patrick ruling:
+"observe only is good"). WARNING runaways record with full fidelity —
+alerts.json, decision log, per-file cooldown — but no longer email or wake
+anyone; CRITICAL keeps its bypass-all-mutes wake path untouched. New
+decision outcome `observed` (not `suppressed` — it was recorded; not
+`delivered` — nobody was told), and a WARNING now records even with no
+email callback, where it previously early-returned recordless. The accepted
+cost is written into the module docstring: a sustained sub-CRITICAL leak
+pages nobody by design. 707 trigger tests green (+13), reverted-split
+canary fails 8, five NO-OVERREACH tests pin the CRITICAL path. By @trigger,
+verified by devpulse.
+
 **fix(trigger)** — follow-up: the seedgo unused_function gate (CI red on
 PR#727) caught `_save_seen_hashes`/`_save_log_positions` orphaned since
 #674's coalesced flush — only tests still called them. Deleted rather than

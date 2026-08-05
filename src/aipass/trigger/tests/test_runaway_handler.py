@@ -84,8 +84,9 @@ class TestPerFileCooldown:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         assert send.call_count == 1
 
@@ -93,8 +94,9 @@ class TestPerFileCooldown:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=120,
+            severity="critical",
         )
         assert send.call_count == 1
 
@@ -116,8 +118,9 @@ class TestCooldownExpired:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         assert send.call_count == 1
 
@@ -126,8 +129,9 @@ class TestCooldownExpired:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=120,
+            severity="critical",
         )
         assert send.call_count == 2
 
@@ -162,8 +166,9 @@ class TestBranchMuted:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         send.assert_called_once()
         assert send.call_args.kwargs["to_branch"] == "@flow"
@@ -192,8 +197,9 @@ class TestBranchMuted:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         send.assert_called_once()
 
@@ -229,7 +235,12 @@ class TestBranchMuted:
         send.assert_called_once()
 
     def test_warning_still_respects_volume_mute(self, tmp_path: Path) -> None:
-        """Non-critical runaways still honour an explicit volume mute."""
+        """Non-critical runaways still honour an explicit volume mute.
+
+        Observe-only made the no-email half of this trivially true, so the
+        assertion that carries weight now is that a volume-muted WARNING is
+        dropped entirely — it does not even reach the observe-only record.
+        """
         send = _setup_happy_path()
 
         _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
@@ -242,6 +253,7 @@ class TestBranchMuted:
             severity="warning",
         )
         send.assert_not_called()
+        assert not (tmp_path / "alerts.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +271,9 @@ class TestUnknownBranch:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="UNKNOWN",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         send.assert_called_once()
         assert send.call_args[1]["to_branch"] == "@prax"
@@ -281,8 +294,9 @@ class TestNoneBranch:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch=None,
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
         send.assert_called_once()
         assert send.call_args[1]["to_branch"] == "@prax"
@@ -294,7 +308,11 @@ class TestNoneBranch:
 
 
 class TestNoEmailCallback:
-    """Handler logs warning and returns when _send_email is None."""
+    """Handler logs warning and returns when _send_email is None.
+
+    Only the CRITICAL path needs a callback — observe-only WARNINGs never
+    reach this guard (see TestObserveOnlyWarning).
+    """
 
     def test_logs_warning_no_dispatch(self) -> None:
         """Logs warning via _append_jsonl when no callback set."""
@@ -302,8 +320,9 @@ class TestNoEmailCallback:
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
 
         calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
@@ -485,8 +504,9 @@ class TestEmailSendFails:
         mod.handle_runaway_log_detected(
             file_path=file_path,
             branch="flow",
-            rate_lines_per_min=500,
+            rate_lines_per_min=5000,
             sustained_duration_sec=60,
+            severity="critical",
         )
 
         send.assert_called_once()
@@ -611,3 +631,316 @@ class TestSetSendEmailCallback:
         mod.set_send_email_callback(first)
         mod.set_send_email_callback(second)
         assert mod._send_email is second
+
+
+# ---------------------------------------------------------------------------
+# 14. Observe-only WARNING — records with full fidelity, wakes nobody
+# ---------------------------------------------------------------------------
+
+
+def _wake_mock() -> MagicMock:
+    """Return the mocked wake_branch installed by the autouse fixture."""
+    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+
+    return wake_branch  # type: ignore[return-value]
+
+
+def _read_alerts(tmp_path: Path) -> list:
+    """Read the alert entries written to the redirected alerts.json."""
+    alerts_file = tmp_path / "alerts.json"
+    if not alerts_file.exists():
+        return []
+    return json.loads(alerts_file.read_text(encoding="utf-8")).get("alerts", [])
+
+
+class TestObserveOnlyWarning:
+    """WARNING tier is observe-only: full record, no email, no wake.
+
+    The 100 lines/min threshold predates routine multi-agent fleets and fires
+    on healthy chatty logs, so a WARNING must never pull an agent out of sleep.
+    """
+
+    def test_warning_never_emails_and_never_wakes(self) -> None:
+        """A WARNING sends no email and wakes no branch."""
+        send = _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        send.assert_not_called()
+        _wake_mock().assert_not_called()
+
+    def test_warning_default_severity_never_wakes(self) -> None:
+        """Severity defaults to 'warning' — the default path wakes nobody either."""
+        send = _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+        )
+
+        send.assert_not_called()
+        _wake_mock().assert_not_called()
+
+    def test_warning_writes_alert_with_full_fidelity(self, tmp_path: Path) -> None:
+        """The durable record keeps file, severity, branch, rate and duration.
+
+        Asserts the no-wake half too: writing the alert alone is what the old
+        dispatch path did as well, so only the pair pins observe-only.
+        """
+        send = _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/chatty.log",
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        alerts = _read_alerts(tmp_path)
+        assert len(alerts) == 1
+        alert = alerts[0]
+        assert alert["severity"] == "warning"
+        assert alert["source"] == "prax"
+        assert "chatty.log" in alert["title"]
+        assert "/var/log/chatty.log" in alert["body"]
+        assert "150 lines/min" in alert["body"]
+        assert "720s" in alert["body"]
+        assert "flow" in alert["body"]
+
+        send.assert_not_called()
+        _wake_mock().assert_not_called()
+
+    def test_warning_writes_observed_decision_entry(self) -> None:
+        """Decision trail records outcome='observed', reason='observe_only'."""
+        _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        entries = _decision_entries("observe_only")
+        assert len(entries) == 1
+        assert entries[0]["outcome"] == "observed"
+        assert entries[0]["branch"] == "flow"
+        assert entries[0]["file"] == "/var/log/test.log"
+        # Not a suppression (we recorded it) and not a delivery (nobody was told)
+        assert entries[0]["outcome"] not in {"suppressed", "delivered"}
+
+    def test_warning_records_file_cooldown(self, tmp_path: Path) -> None:
+        """Observe-only still books the cooldown — the record must not flood itself."""
+        _setup_happy_path()
+        file_path = "/var/log/test.log"
+
+        mod.handle_runaway_log_detected(
+            file_path=file_path,
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+        assert file_path in mod._file_cooldowns
+        assert len(_read_alerts(tmp_path)) == 1
+
+        # Second detection interval for the same file is gated by the cooldown
+        mod.handle_runaway_log_detected(
+            file_path=file_path,
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=780,
+            severity="warning",
+        )
+        assert len(_read_alerts(tmp_path)) == 1
+        assert len(_decision_entries("cooldown")) == 1
+        assert len(_decision_entries("observe_only")) == 1
+
+    def test_warning_records_fully_without_email_callback(self, tmp_path: Path) -> None:
+        """REGRESSION: no email callback must not silence the observe-only record.
+
+        The callback guard predates the split and used to return before any
+        record was written; a WARNING no longer sends, so it must not care.
+        """
+        # _send_email stays None (no set_send_email_callback call)
+        file_path = "/var/log/test.log"
+
+        mod.handle_runaway_log_detected(
+            file_path=file_path,
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        assert len(_read_alerts(tmp_path)) == 1
+        assert len(_decision_entries("observe_only")) == 1
+        assert file_path in mod._file_cooldowns
+        _wake_mock().assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 15. CRITICAL tier — NO-OVERREACH GUARDS (pass before and after the split)
+#
+# These deliberately pass against both the old and new handler: their whole
+# job is to prove the observe-only split did not touch the CRITICAL path.
+# ---------------------------------------------------------------------------
+
+
+class TestCriticalUnchanged:
+    """NO-OVERREACH: CRITICAL keeps email + wake exactly as before the split."""
+
+    def test_critical_emails_and_wakes(self, tmp_path: Path) -> None:
+        """NO-OVERREACH: CRITICAL sends the email and wakes the branch."""
+        send = _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        assert send.call_args.kwargs["to_branch"] == "@flow"
+        _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
+        assert len(_read_alerts(tmp_path)) == 1
+        assert "/var/log/test.log" in mod._file_cooldowns
+
+    def test_critical_bypasses_volume_mute_and_still_wakes(self, tmp_path: Path) -> None:
+        """NO-OVERREACH: a volume mute still does not stop a CRITICAL wake."""
+        send = _setup_happy_path()
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
+        assert _decision_entries("bypass_critical")[0]["outcome"] == "delivered"
+
+    def test_critical_send_failure_logs_and_records_nothing(self, tmp_path: Path) -> None:
+        """NO-OVERREACH: sent=False still logs, returns, and records no dispatch."""
+        send = MagicMock(return_value=False)
+        mod.set_send_email_callback(send)
+        file_path = "/var/log/test.log"
+
+        mod.handle_runaway_log_detected(
+            file_path=file_path,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        _wake_mock().assert_not_called()
+        assert not _read_alerts(tmp_path)
+        assert file_path not in mod._file_cooldowns
+        assert not _decision_entries("observe_only")
+
+        calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
+        warnings = [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
+        assert any("Email delivery failed" in w["msg"] for w in warnings)
+
+    def test_critical_unknown_branch_still_wakes_prax(self) -> None:
+        """NO-OVERREACH: the @prax fallback recipient still gets woken."""
+        send = _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path="/var/log/test.log",
+            branch="UNKNOWN",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert send.call_args.kwargs["to_branch"] == "@prax"
+        _wake_mock().assert_called_once_with("@prax", fresh=False, sender="@trigger")
+
+
+# ---------------------------------------------------------------------------
+# 16. Operation log naming — never log a dispatch that did not happen
+# ---------------------------------------------------------------------------
+
+
+class TestOperationLogNaming:
+    """The two tiers log distinct operation names."""
+
+    def _operations(self, log_mock: MagicMock) -> list[str]:
+        """Extract operation names from a patched log_operation mock."""
+        return [c[0][0] for c in log_mock.call_args_list]
+
+    def test_warning_logs_runaway_observed(self) -> None:
+        """A WARNING logs 'runaway_observed' — never a dispatch that did not happen."""
+        _setup_happy_path()
+
+        with patch.object(mod.json_handler, "log_operation") as log_op:
+            mod.handle_runaway_log_detected(
+                file_path="/var/log/test.log",
+                branch="flow",
+                rate_lines_per_min=150,
+                sustained_duration_sec=720,
+                severity="warning",
+            )
+
+        ops = self._operations(log_op)
+        assert ops == ["runaway_observed"]
+        assert "runaway_dispatch_sent" not in ops
+
+    def test_critical_logs_runaway_dispatch_sent(self) -> None:
+        """NO-OVERREACH: a CRITICAL still logs 'runaway_dispatch_sent'."""
+        _setup_happy_path()
+
+        with patch.object(mod.json_handler, "log_operation") as log_op:
+            mod.handle_runaway_log_detected(
+                file_path="/var/log/test.log",
+                branch="flow",
+                rate_lines_per_min=5000,
+                sustained_duration_sec=60,
+                severity="critical",
+            )
+
+        ops = self._operations(log_op)
+        assert ops == ["runaway_dispatch_sent"]
+        assert "runaway_observed" not in ops
+
+    def test_tier_operation_names_differ(self) -> None:
+        """The same file across both tiers produces two different operation names."""
+        _setup_happy_path()
+
+        with patch.object(mod.json_handler, "log_operation") as log_op:
+            mod.handle_runaway_log_detected(
+                file_path="/var/log/warn.log",
+                branch="flow",
+                rate_lines_per_min=150,
+                sustained_duration_sec=720,
+                severity="warning",
+            )
+            mod.handle_runaway_log_detected(
+                file_path="/var/log/crit.log",
+                branch="flow",
+                rate_lines_per_min=5000,
+                sustained_duration_sec=60,
+                severity="critical",
+            )
+
+        ops = self._operations(log_op)
+        assert len(set(ops)) == 2
+        assert ops == ["runaway_observed", "runaway_dispatch_sent"]
