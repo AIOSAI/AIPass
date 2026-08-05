@@ -382,11 +382,99 @@ class TestDispatch:
         mock_banner.assert_not_called()
 
 
+class TestLogVolume:
+    """Per-hook narration is suppressed in the prax stream by default.
+
+    At ~3 lines per tool call it dominated system_logs/hooks_engine.log and
+    tripped the runaway detector on ordinary multi-agent operation. engine.jsonl
+    keeps the full record either way — these tests pin that split.
+    """
+
+    CONFIG = {
+        "hooks_enabled": True,
+        "PreToolUse": {
+            "rm_gate": {"enabled": True, "command": "true", "matcher": ""},
+            "off_hook": {"enabled": False, "command": "true", "matcher": ""},
+        },
+    }
+
+    def _dispatch(self, mock_logger):
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1}
+            dispatch("PreToolUse", '{"tool_name":"Bash"}', self.CONFIG)
+        return mock_log
+
+    def test_per_hook_lines_are_silent_by_default(self, mock_logger, monkeypatch):
+        """No per-hook fire, no completion line, no skipped-disabled line."""
+        monkeypatch.delenv("AIPASS_HOOKS_VERBOSE_LOG", raising=False)
+        self._dispatch(mock_logger)
+
+        emitted = [c.args[0] for c in mock_logger.info.call_args_list if c.args]
+        assert not [m for m in emitted if "agent=%s" in m]
+        assert not [m for m in emitted if "complete:" in m]
+        assert not [m for m in emitted if "skipped (disabled)" in m]
+
+    def test_jsonl_still_records_everything(self, mock_logger, monkeypatch):
+        """Suppression is stream-only — forensics must be untouched."""
+        monkeypatch.delenv("AIPASS_HOOKS_VERBOSE_LOG", raising=False)
+        mock_log = self._dispatch(mock_logger)
+
+        actions = [c.args[0].get("action") for c in mock_log.call_args_list]
+        assert "skipped_disabled" in actions
+        assert "complete" in actions
+        assert any("hook" in c.args[0] and "exit_code" in c.args[0] for c in mock_log.call_args_list)
+
+    def test_verbose_env_restores_the_lines(self, mock_logger, monkeypatch):
+        """AIPASS_HOOKS_VERBOSE_LOG=1 is the DEBUG-level stand-in."""
+        monkeypatch.setenv("AIPASS_HOOKS_VERBOSE_LOG", "1")
+        self._dispatch(mock_logger)
+
+        emitted = [c.args[0] for c in mock_logger.info.call_args_list if c.args]
+        assert [m for m in emitted if "agent=%s" in m]
+        assert [m for m in emitted if "complete:" in m]
+
+    def test_env_must_be_exactly_one(self, mock_logger, monkeypatch):
+        """A stray truthy value must not accidentally reopen the firehose."""
+        monkeypatch.setenv("AIPASS_HOOKS_VERBOSE_LOG", "0")
+        self._dispatch(mock_logger)
+
+        assert not [c for c in mock_logger.info.call_args_list if c.args and "complete:" in c.args[0]]
+
+    def test_warnings_and_errors_are_never_suppressed(self, mock_logger, monkeypatch):
+        """Blocks stay loud at default verbosity — that is the whole point."""
+        monkeypatch.delenv("AIPASS_HOOKS_VERBOSE_LOG", raising=False)
+        config = {
+            "hooks_enabled": True,
+            "PreToolUse": {"gate": {"enabled": True, "command": "block", "matcher": ""}},
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {
+                "exit_code": 2,
+                "stdout": json.dumps({"decision": "block"}),
+                "stderr": "",
+                "elapsed_ms": 1,
+            }
+            dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
+
+        assert [c for c in mock_logger.warning.call_args_list if c.args and "BLOCKED" in c.args[0]]
+
+
 class TestCompletionCount:
     """The 'complete: N hooks' line must count hooks that RAN, not hooks that
     wrote stdout. Silent gates (rm_gate, git_gate) pass with empty output, so
     counting outputs reported 'complete: 0 hooks' while gates had just run —
     a lie that reads as 'the engine did nothing'."""
+
+    @pytest.fixture(autouse=True)
+    def _verbose(self, monkeypatch):
+        """These assert on the narration lines, so turn them back on."""
+        monkeypatch.setenv("AIPASS_HOOKS_VERBOSE_LOG", "1")
 
     SILENT = {
         "hooks_enabled": True,

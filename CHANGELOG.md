@@ -57,6 +57,18 @@ never a stale backup re-fired). Falsy/unknown inode degrades to old
 behavior. Found by @trigger while disproving another branch's rotation
 claim. 698 trigger tests green.
 
+**feat(hooks)** — hooks_engine.log per-hook narration demoted out of the
+default view (ruling delegated by Patrick, decided by devpulse: quiet noise
+at the source, never mask it). prax's SystemLogger has no debug(), so
+engine 1.2.0 gates the four per-hook narration sites (fire, complete,
+skipped-disabled, budget) behind `AIPASS_HOOKS_VERBOSE_LOG=1` — silent by
+default, restorable live, read per call. Lifecycle INFO, every WARNING and
+ERROR, and engine.jsonl untouched. Measured under fleet load: 1865 of 1869
+lines demoted (~99.8%); the 4 survivors were legitimate git_gate blocks.
+1326 hooks tests green (+5, suppression canary-checked), seedgo 100%. New
+README "Two Log Streams" section. Flagged upstream: SystemLogger's missing
+debug() is a real prax gap. By @hooks, verified by devpulse.
+
 **feat(aipass)** — `aipass init update` provisions external projects for
 manager-class git (DPLAN-0281 P2). New `init/git_auth.py`: plans every
 repair BEFORE writing (a refused run leaves the project untouched), mints
