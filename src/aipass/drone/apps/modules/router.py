@@ -107,7 +107,9 @@ def route_command(
     caller = detect_caller_branch_name(Path.cwd())
     if not caller:
         caller = os.environ.get("AIPASS_BRANCH_NAME")
-    caller_tag = f" [CALLER:{caller.upper()}]" if caller else ""
+    # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
+    # hides the gap. detect_caller_branch_name already logged the cwd.
+    caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds)",
         branch_name,

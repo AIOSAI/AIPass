@@ -9,7 +9,29 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-04] — fleet self-repair day: the error storm's own findings, landed
+## [2026-08-04] — manager-class git auth + fleet self-repair day
+
+**feat(drone)** — owner-tier git is earned, not listed (DPLAN-0281, Patrick
+ruling: "project owners get git"). The hardcoded `allowed_callers:
+["devpulse"]` is gone; a caller holds owner-tier iff all four checks pass:
+manager-class citizen, tenant of THIS repo's registry (passport
+`citizenship.registry_id` == registry `metadata.id`), listed with `owner:
+true`, and presenting its passport from the registry-recorded home
+(path-binding, F59 4.2a). devpulse-in-AIPass authorizes through the general
+rule — no special case — and any external project's manager gains the same
+standing in their own repo once P2 provisioning flips their class. Enforce
+by default (all four checks live-verified against real data before
+flipping); `AIPASS_GIT_AUTH_MODE=warn` for migration triage. AIPass-flow
+verbs (dev-pr/merge/tag/…) refuse honestly in external repos until
+translated — commit and sync work there today. Also: `find_repo_root`
+recognizes any `*_REGISTRY.json` (external projects name theirs),
+dict-authored registries get the same normalization as list-shaped, and the
+dead `ALLOWED_CALLERS` decoy died with the list it shadowed. Router
+caller-identity honesty landed alongside: a lost identity renders
+`[CALLER:UNKNOWN]` plus one WARNING naming the real cwd, and the registry
+fallback for external projects is reachable as documented. 44 new tests
+(16 canaries + unstubbed-auth module tests), 955 drone green. By @drone,
+verified by devpulse.
 
 **fix(trigger)** — rotation tail loss closed in BOTH log watchers. The old
 `size shrank → reset to 0` rotation handling silently skipped every line

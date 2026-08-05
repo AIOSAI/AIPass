@@ -82,11 +82,17 @@ def _pid_alive(pid: int) -> bool:
 
 
 def find_repo_root() -> Path:
-    """Walk up from CWD looking for AIPASS_REGISTRY.json, fallback to git rev-parse."""
+    """Walk up from CWD looking for a *_REGISTRY.json, fallback to git rev-parse.
+
+    Any ``*_REGISTRY.json`` marks a project root, not just AIPass's own —
+    external projects name theirs after themselves (VERA-STUDIO_REGISTRY.json),
+    and hardcoding the AIPass name sent them down the rev-parse fallback while
+    registry resolution found the real root, so the two could disagree.
+    """
     cwd = Path.cwd()
     current = cwd
     while current != current.parent:
-        if (current / "AIPASS_REGISTRY.json").exists():
+        if any(current.glob("*_REGISTRY.json")):
             return current
         current = current.parent
 

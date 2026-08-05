@@ -235,6 +235,25 @@ class TestRouteCommand:
         assert result.exit_code == 0
         assert result.stdout == "done"
 
+    @patch("aipass.drone.apps.modules.router.os.environ.get", return_value=None)
+    @patch("aipass.drone.apps.modules.router.detect_caller_branch_name", return_value=None)
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
+    @patch("aipass.drone.apps.modules.router.resolve_branch")
+    def test_lost_caller_logs_unknown_not_blank(self, mock_resolve, mock_exec, _mock_detect, _mock_env):
+        """An undetected caller routes as UNKNOWN, not as a silently omitted tag.
+
+        A blank tag reads as 'not applicable' and hid the gap that surfaced one
+        second later as a BRANCH DETECTION FAILED in the target branch.
+        """
+        mock_resolve.return_value = "/fake/path/to/branch"
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="ai_mail", command="dispatch")
+
+        with patch("aipass.drone.apps.modules.router.logger") as mock_logger:
+            route_command("@ai_mail", "dispatch")
+
+        logged = mock_logger.info.call_args[0]
+        assert " [CALLER:UNKNOWN]" in logged
+
     @patch("aipass.drone.apps.modules.router.resolve_branch")
     def test_invalid_branch_raises_branch_not_found(self, mock_resolve):
         """route_command propagates BranchNotFoundError from resolver."""
@@ -416,6 +435,74 @@ class TestDetectCallerBranchName:
 
         result = detect_caller_branch_name(sub)
         assert result == "found_it"
+
+
+class TestDetectCallerFallsBackToRegistry:
+    """An unusable passport must not dead-end detection.
+
+    The old code returned None the moment a passport was found but unreadable,
+    silently skipping the registry fallback its own docstring promises — so an
+    external project with a valid registry still lost its caller identity.
+    """
+
+    @staticmethod
+    def _write_registry(root: Path, name: str) -> None:
+        (root / "PROJ_REGISTRY.json").write_text(json.dumps({"metadata": {"name": name}, "branches": []}))
+
+    def test_corrupt_passport_falls_back_to_registry(self, temp_test_dir: Path):
+        """Invalid JSON in the passport still resolves the project from the registry."""
+        trinity = temp_test_dir / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text("{{{not valid json!!!")
+        self._write_registry(temp_test_dir, "Vera Studio")
+
+        assert detect_caller_branch_name(temp_test_dir) == "vera-studio"
+
+    def test_nameless_passport_falls_back_to_registry(self, temp_test_dir: Path):
+        """A passport that parses but names no branch is unusable, not authoritative."""
+        trinity = temp_test_dir / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {}}))
+        self._write_registry(temp_test_dir, "Vera Studio")
+
+        assert detect_caller_branch_name(temp_test_dir) == "vera-studio"
+
+    def test_broken_passport_does_not_inherit_parent_identity(self, temp_test_dir: Path):
+        """The walk-up STOPS at a broken passport — climbing would misattribute identity.
+
+        A nested branch with a corrupt passport must never be reported as its parent.
+        """
+        parent_trinity = temp_test_dir / ".trinity"
+        parent_trinity.mkdir()
+        (parent_trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "parent_branch"}}))
+
+        child = temp_test_dir / "child"
+        child_trinity = child / ".trinity"
+        child_trinity.mkdir(parents=True)
+        (child_trinity / "passport.json").write_text("{{{broken")
+
+        assert detect_caller_branch_name(child) != "parent_branch"
+
+    def test_total_failure_logs_cwd(self, temp_test_dir: Path):
+        """No passport and no registry logs the cwd — without it the failure is invisible.
+
+        The downstream error names the TARGET branch's directory, which sends
+        investigation to the wrong branch entirely (see @ai_mail send-fail 47f50fdb).
+        """
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            assert detect_caller_branch_name(temp_test_dir) is None
+        mock_logger.warning.assert_called_once()
+        assert str(temp_test_dir) in str(mock_logger.warning.call_args)
+
+    def test_successful_detection_is_silent(self, temp_test_dir: Path):
+        """The happy path must not warn — noise in the logs @trigger watches."""
+        trinity = temp_test_dir / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "alpha"}}))
+
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            assert detect_caller_branch_name(temp_test_dir) == "alpha"
+        mock_logger.warning.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

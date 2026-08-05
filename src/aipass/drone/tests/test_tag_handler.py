@@ -17,6 +17,8 @@ import pytest
 
 from aipass.drone.apps.modules.git_module import get_help, handle_command
 
+from .conftest import make_owner_project
+
 _TAG_PATCH = "aipass.drone.apps.handlers.git.tag_handler.subprocess.run"
 
 PYPROJECT_CONTENT = '[project]\nname = "aipass"\nversion = "2.6.1"\n'
@@ -73,11 +75,12 @@ def repo_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture()
 def devpulse_dir(repo_dir: Path) -> Path:
-    """Set up a repo_dir with a devpulse passport."""
-    trinity = repo_dir / ".trinity"
-    trinity.mkdir()
-    passport = trinity / "passport.json"
-    passport.write_text('{"branch_info": {"branch_name": "devpulse"}}', encoding="utf-8")
+    """Set up a repo_dir where devpulse genuinely holds owner-tier.
+
+    A branch-name-only passport no longer authorizes anything (DPLAN-0281) — the
+    owner has to be minted with real credentials for these handlers to be reached.
+    """
+    make_owner_project(repo_dir)
     return repo_dir
 
 

@@ -16,14 +16,28 @@ registry loading and querying operations.
 from typing import List, Optional
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers.exceptions import RegistryError, RegistryMismatchError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.registry_handler import (
+    get_registry_path,
     load_registry,
     get_all_branches,
     get_branch_by_name,
 )
 
-__all__ = ["load_registry", "get_all_branches", "get_branch_by_name"]
+# The registry's public contract. get_registry_path and the error types belong
+# here alongside the readers: a caller that has to say WHICH registry refused it,
+# or handle a tenancy mismatch, cannot do either through the readers alone — and
+# reaching into the handler for them is exactly the encapsulation break this
+# module exists to prevent.
+__all__ = [
+    "load_registry",
+    "get_all_branches",
+    "get_branch_by_name",
+    "get_registry_path",
+    "RegistryError",
+    "RegistryMismatchError",
+]
 
 
 def print_introspection():

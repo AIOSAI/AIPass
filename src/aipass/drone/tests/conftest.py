@@ -27,6 +27,65 @@ def temp_test_dir() -> Generator[Path, None, None]:
         shutil.rmtree(test_dir)
 
 
+OWNER_REGISTRY_ID = "test-registry-0000-0000"
+
+
+def make_owner_project(
+    root: Path,
+    *,
+    branch: str = "devpulse",
+    registry_name: str = "AIPASS_REGISTRY.json",
+    citizen_class: str = "manager",
+    owner: bool = True,
+    registry_id: str = OWNER_REGISTRY_ID,
+    passport_registry_id: str | None = None,
+    branch_dir: Path | None = None,
+    record_path: str | None = None,
+) -> Path:
+    """Mint a project in which *branch* genuinely holds owner-tier, and return its home.
+
+    Owner-tier is earned from four independent facts (DPLAN-0281), so a fixture
+    that forges only a branch name no longer proves anything. This writes all
+    four — manager class, matching tenancy, owner flag, recorded path — and every
+    keyword exists so a test can break exactly ONE of them and watch the gate bite.
+
+    Args:
+        branch_dir: where the passport lives; defaults to *root*.
+        record_path: what the registry records as the branch path. Defaults to
+            the real branch_dir; pass a different value to test path-binding, or
+            a relative string to exercise external-project style registries.
+    """
+    home = branch_dir if branch_dir is not None else root
+    home.mkdir(parents=True, exist_ok=True)
+
+    registry = {
+        "metadata": {"id": registry_id, "name": "TEST-PROJECT", "version": "1.0.0"},
+        "branches": [
+            {
+                "name": branch,
+                "path": record_path if record_path is not None else str(home),
+                "email": f"@{branch}",
+                "status": "active",
+                "owner": owner,
+            }
+        ],
+    }
+    (root / registry_name).write_text(json.dumps(registry, indent=2), encoding="utf-8")
+
+    trinity = home / ".trinity"
+    trinity.mkdir(parents=True, exist_ok=True)
+    passport = {
+        "branch_info": {"branch_name": branch},
+        "identity": {"name": branch, "citizen_class": citizen_class},
+        "citizenship": {
+            "registered": True,
+            "registry_id": passport_registry_id if passport_registry_id is not None else registry_id,
+        },
+    }
+    (trinity / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
+    return home
+
+
 @pytest.fixture
 def sample_registry(temp_test_dir: Path) -> Path:
     """Create a sample AIPASS_REGISTRY.json for testing."""

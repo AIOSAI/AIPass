@@ -58,10 +58,16 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
                 name = data.get("branch_info", {}).get("branch_name")
                 if not name:
                     name = data.get("identity", {}).get("name")
-                return name
+                if name:
+                    return name
+                logger.warning("Passport at %s names no branch — trying registry fallback", passport)
             except Exception as exc:
-                logger.warning("Failed to read passport at %s: %s", passport, exc)
-                return None
+                logger.warning("Failed to read passport at %s: %s — trying registry fallback", passport, exc)
+            # A passport was found but is unusable. Stop the walk-up rather than
+            # continue: a parent branch's passport would misattribute identity.
+            # Fall through to the registry fallback, which the docstring promises
+            # and the old `return None` here silently skipped.
+            break
         parent = current.parent
         if parent == current:
             break
@@ -84,6 +90,13 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
         if parent == current:
             break
         current = parent
+
+    # Single log site for a lost caller identity — every caller of this function
+    # gets the breadcrumb without any of them re-logging it. WARNING, not ERROR:
+    # the branch that actually refuses the work owns the page (see auth.py).
+    # Without the cwd this failure is invisible — the downstream error names the
+    # TARGET's directory, which sends investigation to the wrong branch entirely.
+    logger.warning("Caller branch detection failed — no passport or registry found from cwd %s", cwd)
     return None
 
 
