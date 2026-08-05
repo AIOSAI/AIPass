@@ -492,7 +492,14 @@ class TestDetectCallerFallsBackToRegistry:
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             assert detect_caller_branch_name(temp_test_dir) is None
         mock_logger.warning.assert_called_once()
-        assert str(temp_test_dir) in str(mock_logger.warning.call_args)
+        # Compare as Paths, not reprs: on Windows the logged arg renders as
+        # WindowsPath('C:/...') while str(tmp_path) has backslashes, so a
+        # substring match fails on separator style alone.
+        assert any(
+            Path(str(arg)) == temp_test_dir
+            for arg in mock_logger.warning.call_args.args
+            if isinstance(arg, (str, Path))
+        )
 
     def test_successful_detection_is_silent(self, temp_test_dir: Path):
         """The happy path must not warn — noise in the logs @trigger watches."""

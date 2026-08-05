@@ -41,7 +41,10 @@ fixture — `find_registry`'s cwd walk deliberately skips credential-failing
 registries, so the mismatched fixture was passed over and resolution fell
 through to the real registry locally (right wording, wrong reason) but to
 not-found in CI, where `AIPASS_REGISTRY.json` is gitignored-absent. Seedgo
-1304 green, drone 955 green.
+1304 green, drone 955 green. A third, Windows-only: the new router
+cwd-logging test substring-matched path reprs — `str(tmp_path)` has
+backslashes while the logged arg renders `WindowsPath('C:/...')` with
+forward slashes — now compares Path values, separator-agnostic.
 
 **fix(trigger)** — rotation tail loss closed in BOTH log watchers. The old
 `size shrank → reset to 0` rotation handling silently skipped every line
