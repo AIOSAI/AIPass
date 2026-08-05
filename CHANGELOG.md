@@ -34,11 +34,13 @@ repo root, where caller detection finds no passport and the registry
 fallback rejects a name-less `AIPASS_REGISTRY.json`), so three replies were
 "saved" while delivery silently skipped to `src/aipass/unknown/`. compose.py
 1.1.0: an anonymous send is now told AT SEND TIME that replies cannot reach
-it (with the run-from-your-branch-dir fix named), and `reply` prints the
-delivery outcome — delivered, or NOT delivered with the reason — instead of
-claiming success on a thread-only save. The six stored messages were
-repaired (sender + reply path) and the three stranded replies hand-delivered
-the same evening. 452 devpulse tests green (+5).
+it (with the run-from-your-branch-dir fix named), and `reply` reports the
+delivery outcome — `success()` on delivery, `error()` with the reason on
+failure (which marks the command failed: a reply the sender never sees
+SHOULD flip the exit code) — instead of claiming success on a thread-only
+save. The six stored messages were repaired (sender + reply path) and the
+three stranded replies hand-delivered the same evening. 452 devpulse tests
+green (+5), compose.py 31/31 seedgo standards.
 
 **feat(drone)** — owner-tier git is earned, not listed (DPLAN-0281, Patrick
 ruling: "project owners get git"). The hardcoded `allowed_callers:
