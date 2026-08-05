@@ -242,8 +242,17 @@ class TestOwnerTierIsEarnedPerRepo:
         Asserts the SHARED loader's wording specifically. Both this layer and the
         explicit check below say "belongs to registry", so a loose match passed no
         matter which one fired — and proved neither.
+
+        The AIPASS_REGISTRY pin is load-bearing: find_registry's cwd walk SKIPS
+        registries that fail the credential check, so without it the mismatched
+        fixture is passed over and resolution falls through to whatever exists
+        outside the fixture — the real AIPass registry locally (mismatch, right
+        wording, wrong reason) but nothing in a clean CI checkout (not-found, a
+        different refusal). The env pin is priority 2, ahead of the walk, so the
+        loader is forced to read THIS registry and raise its own mismatch.
         """
         make_owner_project(tmp_path, passport_registry_id="some-other-project-id")
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
         monkeypatch.chdir(tmp_path)
         with pytest.raises(PermissionError, match="does not hold citizenship in this project's registry"):
             verify_git_access("commit")

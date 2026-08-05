@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_hooks_track_e.py
 # Description: DPLAN-0139 Track E — single-path enforcement tests
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-21
-# Modified: 2026-06-05
+# Modified: 2026-08-04
 # =============================================
 """Tests for DPLAN-0139 Track E — single-path enforcement.
 
 Covers:
   - permissions.py: TRUSTED_CROSS_WRITERS, is_trusted_caller(), identify_caller()
-  - drone auth.py: ALLOWED_CALLERS derived from TRUSTED_CROSS_WRITERS
+  - drone auth.py: no name-based caller list (owner-tier is earned per-repo, DPLAN-0281)
   - inbox_audit.py: handle_command routing + _scan_inbox validation
   - delivery.py: deliver_to_inbox_file single-path helper
 """
@@ -116,38 +116,23 @@ def test_identify_caller_falls_back_to_identity_name(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# drone auth.py — ALLOWED_CALLERS derived from permissions
+# drone auth.py — no name-based caller list (DPLAN-0281)
 # ---------------------------------------------------------------------------
 
 
-def test_drone_auth_allowed_callers_matches_permissions():
-    """Hook and drone must reach the same decision for the same caller."""
-    from aipass.drone.apps.plugins.devpulse_ops.auth import ALLOWED_CALLERS
-    from aipass.seedgo.apps.modules.permissions import TRUSTED_CROSS_WRITERS
+def test_drone_auth_has_no_hardcoded_caller_list():
+    """Owner-tier git is earned per-repo, never granted by name (DPLAN-0281).
 
-    for branch in TRUSTED_CROSS_WRITERS:
-        assert branch in ALLOWED_CALLERS, f"'{branch}' in TRUSTED_CROSS_WRITERS but missing from drone ALLOWED_CALLERS"
+    The old ALLOWED_CALLERS constant read as though seedgo and spawn held git
+    write — they never did; verify_git_access ignored it. Its absence is
+    load-bearing: this test failing means someone reintroduced a name-based
+    gate, which is exactly the special-casing the Patrick ruling removed.
+    """
+    from aipass.drone.apps.plugins.devpulse_ops import auth
 
-
-def test_drone_auth_allowed_callers_includes_devpulse():
-    """devpulse must remain in drone ALLOWED_CALLERS."""
-    from aipass.drone.apps.plugins.devpulse_ops.auth import ALLOWED_CALLERS
-
-    assert "devpulse" in ALLOWED_CALLERS
-
-
-def test_drone_auth_allowed_callers_includes_seedgo():
-    """seedgo must be in drone ALLOWED_CALLERS."""
-    from aipass.drone.apps.plugins.devpulse_ops.auth import ALLOWED_CALLERS
-
-    assert "seedgo" in ALLOWED_CALLERS
-
-
-def test_drone_auth_allowed_callers_includes_spawn():
-    """spawn must be in drone ALLOWED_CALLERS."""
-    from aipass.drone.apps.plugins.devpulse_ops.auth import ALLOWED_CALLERS
-
-    assert "spawn" in ALLOWED_CALLERS
+    assert not hasattr(auth, "ALLOWED_CALLERS")
+    for tier in auth.GIT_ACCESS_TIERS.values():
+        assert "allowed_callers" not in tier
 
 
 # ---------------------------------------------------------------------------

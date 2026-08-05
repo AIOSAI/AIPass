@@ -33,6 +33,16 @@ fallback for external projects is reachable as documented. 44 new tests
 (16 canaries + unstubbed-auth module tests), 955 drone green. By @drone,
 verified by devpulse.
 
+**fix(tests)** — CI-only fallout from the auth rewrite, caught by the clean
+checkout: seedgo's four Track-E tests pinned the dead `ALLOWED_CALLERS`
+parity — replaced with one canary asserting no name-based caller list can
+reappear; and drone's wrong-tenancy test now pins `AIPASS_REGISTRY` to its
+fixture — `find_registry`'s cwd walk deliberately skips credential-failing
+registries, so the mismatched fixture was passed over and resolution fell
+through to the real registry locally (right wording, wrong reason) but to
+not-found in CI, where `AIPASS_REGISTRY.json` is gitignored-absent. Seedgo
+1304 green, drone 955 green.
+
 **fix(trigger)** — rotation tail loss closed in BOTH log watchers. The old
 `size shrank → reset to 0` rotation handling silently skipped every line
 between the last read offset and the rotation cut — worst exactly during
