@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-05-19
+# Modified: 2026-08-04
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -231,6 +231,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         return "", 0
 
     outputs = []
+    ran = 0  # hooks that actually executed — outputs only counts those that wrote stdout
     total_start = time.monotonic()
     budget_state = None
     budget_dirty = False
@@ -328,6 +329,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 logger.info("[HOOKS] sound playback failed for timeout %s.%s: %s", event_type, hook_name, exc)
             continue
 
+        ran += 1
         logger.info(
             "[HOOKS] %s.%s agent=%s exit=%d out=%db %dms",
             event_type,
@@ -412,13 +414,14 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         _save_budget_state(budget_state, payload_session_id)
 
     total_ms = (time.monotonic() - total_start) * 1000
-    logger.info("[HOOKS] %s complete: %d hooks %dms", event_type, len(outputs), total_ms)
+    logger.info("[HOOKS] %s complete: %d hooks %dms", event_type, ran, total_ms)
     _log(
         {
             "ts": time.time(),
             "event": event_type,
             "action": "complete",
-            "hooks_run": len(outputs),
+            "hooks_run": ran,
+            "hooks_with_output": len(outputs),
             "total_ms": round(total_ms, 1),
         }
     )
