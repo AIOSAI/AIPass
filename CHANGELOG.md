@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-04] — manager-class git auth + fleet self-repair day
 
+**fix(drone)** — caller detection derives a project name from the registry
+FILENAME when metadata declares none (`AIPASS_REGISTRY.json` → `aipass`,
+`VERA-STUDIO_REGISTRY.json` → `vera-studio`); a declared
+`metadata.project_name`/`name` still wins, and passports still outrank the
+fallback entirely. The old code required a declared name, which AIPass's own
+registry doesn't carry — so the framework repo was the one place the fallback
+could never fire, and it failed in silence: callers at the AIPass root
+(VERA's session, the Telegram scheduler hourly) were `CALLER:UNKNOWN` all
+day, which is what stranded the feedback replies above. Found-but-rejected
+registries now log WARNING naming the file and reason; the glob is sorted for
+deterministic multi-registry resolution; a test asserts a derived name can
+never earn git authority (owner-tier reads passports directly). One canary
+self-caught and rewritten: the bare-suffix test asserted None, which the
+caller's truthiness check made vacuous — now asserts the WARNING. 963 drone
+tests green (+8), seedgo 100%.
+
 **fix(devpulse)** — feedback replies report delivery honestly. Live failure
 caught by Patrick asking why VERA never heard back: all six of her feedback
 messages arrived as `From: unknown` (her session ran drone from the AIPass

@@ -39,11 +39,54 @@ def find_entry_point(branch_path: str, branch_name: str) -> Path:
     return entry_point
 
 
+_REGISTRY_SUFFIX = "_REGISTRY.json"
+
+
+def _project_name_from_registry(reg_file: Path) -> str | None:
+    """Derive a project name from a registry file, or None if it cannot be read.
+
+    Prefers a declared ``metadata.project_name``/``name``, then falls back to the
+    filename: AIPASS_REGISTRY.json → 'aipass', VERA-STUDIO_REGISTRY.json →
+    'vera-studio'. The filename is the one thing every registry provably has —
+    AIPass's own metadata carries only version/last_updated/total_branches/id, so
+    requiring a declared name made the framework repo the one place this fallback
+    could never fire.
+    """
+    try:
+        with open(reg_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        logger.warning("Caller detection: registry %s found but unreadable: %s", reg_file, exc)
+        return None
+
+    meta = data.get("metadata", {}) if isinstance(data, dict) else {}
+    declared = meta.get("project_name") or meta.get("name")
+    if declared:
+        return str(declared).lower().replace(" ", "-")
+
+    derived = reg_file.name[: -len(_REGISTRY_SUFFIX)].lower().replace(" ", "-")
+    if not derived:
+        # A file named exactly '_REGISTRY.json' leaves nothing to derive from.
+        logger.warning("Caller detection: registry %s yields no usable project name", reg_file)
+        return None
+
+    logger.info(
+        "Caller detection: registry %s declares no metadata.name — using filename-derived '%s'",
+        reg_file.name,
+        derived,
+    )
+    return derived
+
+
 def detect_caller_branch_name(cwd: Path) -> str | None:
     """Walk up from cwd to find .trinity/passport.json and extract branch name.
 
-    Falls back to project name from registry if no passport found (external projects
-    calling from project root without a branch-level CWD).
+    Falls back to the project name from the registry when no passport is found —
+    a caller standing at a project root rather than in a branch. That resolves to
+    the PROJECT, never to a citizen, and deliberately so: CWD is identity, and a
+    registry file proves which project you are in, not who you are. Nothing here
+    grants authority; git's owner-tier reads passports directly and a name
+    derived here can never satisfy it.
     """
     current = cwd.resolve()
     for _ in range(10):
@@ -73,19 +116,15 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
             break
         current = parent
 
-    # Fallback: detect project name from registry file (external projects at root)
+    # Fallback: detect project name from registry file (callers at a project root)
     current = cwd.resolve()
     for _ in range(10):
-        for reg_file in current.glob("*_REGISTRY.json"):
-            try:
-                with open(reg_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                meta = data.get("metadata", {})
-                project_name = meta.get("project_name") or meta.get("name")
-                if project_name:
-                    return project_name.lower().replace(" ", "-")
-            except Exception as exc:
-                logger.info("Failed to read registry %s: %s", reg_file, exc)
+        # sorted() so a directory holding two registries resolves the same way
+        # every time, matching registry_handler._first_registry_in.
+        for reg_file in sorted(current.glob(f"*{_REGISTRY_SUFFIX}")):
+            project_name = _project_name_from_registry(reg_file)
+            if project_name:
+                return project_name
         parent = current.parent
         if parent == current:
             break

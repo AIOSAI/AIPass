@@ -512,6 +512,97 @@ class TestDetectCallerFallsBackToRegistry:
         mock_logger.warning.assert_not_called()
 
 
+class TestNamelessRegistryFallback:
+    """A registry with no declared name must still identify its project.
+
+    AIPass's OWN registry carries only version/last_updated/total_branches/id, so
+    requiring metadata.name made the framework repo the single place this
+    fallback could never fire — and it failed silently. Callers at the AIPass
+    root were anonymous all day: six feedback messages arrived From unknown with
+    no reply path, three replies undeliverable for five hours.
+    """
+
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("AIPASS_REGISTRY.json", "aipass"),
+            ("VERA-STUDIO_REGISTRY.json", "vera-studio"),
+            ("EARMARK_REGISTRY.json", "earmark"),
+        ],
+    )
+    def test_filename_identifies_project_when_metadata_is_nameless(
+        self, temp_test_dir: Path, filename: str, expected: str
+    ):
+        """The filename is the one thing every registry provably has."""
+        (temp_test_dir / filename).write_text(
+            json.dumps({"metadata": {"version": "1.0.0", "total_branches": 17, "id": "abc"}, "branches": []})
+        )
+        assert detect_caller_branch_name(temp_test_dir) == expected
+
+    def test_declared_name_beats_the_filename(self, temp_test_dir: Path):
+        """An explicit declaration outranks inference — filename is the fallback, not the rule."""
+        (temp_test_dir / "PROJ_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"name": "Vera Studio"}, "branches": []})
+        )
+        assert detect_caller_branch_name(temp_test_dir) == "vera-studio"
+
+    def test_passport_still_outranks_the_registry(self, temp_test_dir: Path):
+        """Project-level attribution must never shadow a citizen standing in their branch.
+
+        This is the whole safety boundary of the fallback: it fires only when
+        nobody identifiable is home.
+        """
+        trinity = temp_test_dir / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "drone"}}))
+        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}))
+
+        assert detect_caller_branch_name(temp_test_dir) == "drone"
+
+    def test_unreadable_registry_says_so(self, temp_test_dir: Path):
+        """Found-but-rejected must never be silent — that silence cost the diagnosis.
+
+        The old code logged nothing when a registry was found and turned down, so
+        the log showed 'no passport or registry found' while the registry was
+        sitting in the very directory named by the message.
+        """
+        (temp_test_dir / "PROJ_REGISTRY.json").write_text("{{{not json")
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            detect_caller_branch_name(temp_test_dir)
+        assert mock_logger.warning.called
+        assert any("unreadable" in str(c) for c in mock_logger.warning.call_args_list)
+
+    def test_bare_suffix_registry_is_refused_and_named(self, temp_test_dir: Path):
+        """'_REGISTRY.json' leaves nothing to derive — refuse, and SAY which file.
+
+        Asserting the warning, not just the None: the caller's truthiness check
+        already discards an empty name, so returning None proves nothing about
+        the guard. The log line is the part that only this guard can produce, and
+        it is the whole point — a registry turned down in silence is exactly the
+        failure being fixed here.
+        """
+        (temp_test_dir / "_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": []}))
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            assert detect_caller_branch_name(temp_test_dir) is None
+        assert any("no usable project name" in str(c) for c in mock_logger.warning.call_args_list)
+
+    def test_derived_name_cannot_earn_git_authority(self, temp_test_dir: Path, monkeypatch):
+        """A project name is identity for routing, never a credential.
+
+        Filename derivation means any directory with a *_REGISTRY.json now yields
+        a caller name. Owner-tier reads passports directly and must stay unmoved
+        by that — otherwise this convenience would be an escalation path.
+        """
+        from aipass.drone.apps.plugins.devpulse_ops.auth import verify_git_access
+
+        (temp_test_dir / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {"id": "x"}, "branches": []}))
+        assert detect_caller_branch_name(temp_test_dir) == "aipass"
+
+        monkeypatch.chdir(temp_test_dir)
+        with pytest.raises(PermissionError):
+            verify_git_access("commit")
+
+
 # ---------------------------------------------------------------------------
 # AIPASS_CALLER_BRANCH env var
 # ---------------------------------------------------------------------------

@@ -265,9 +265,15 @@ class TestOwnerTierIsEarnedPerRepo:
         fails to read reaches here unverified. Patching it to return mismatched
         data without raising is the only way to stand in that gap: with the shared
         layer quiet, this check alone decides, and it must still fail closed.
+
+        Pinned for the same reason as test_wrong_tenancy_denied (CI 2922a685):
+        this fixture's passport deliberately mismatches, so find_registry's cwd
+        walk skips it and get_registry_path — which is NOT patched here — would
+        otherwise resolve to whatever lives outside the fixture.
         """
         make_owner_project(tmp_path, passport_registry_id="some-other-project-id")
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
         silent = {
             "metadata": {"id": OWNER_REGISTRY_ID},
             "branches": {"devpulse": {"name": "devpulse", "path": str(tmp_path), "owner": True}},
