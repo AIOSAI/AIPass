@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-11
 # Modified: 2026-08-07
 # =============================================
@@ -236,11 +236,19 @@ def _deliver_to_ai_mail(
     # 'from' against branch emails, then falls back to the stored reply_path
     # for cross-project delivery (reply.py). An @-less from with no reply_path
     # made every delivered reply a dead end (@ai_mail wall-2 report 2026-08-07).
+    # 'reply_to' takes precedence over 'from' in that resolution and must NOT
+    # match any registry branch email: a match on '@devpulse' routes the reply
+    # through normal delivery, which refuses cross-project mail (#134) — the
+    # stored reply_path is only consulted on a registry MISS. The feedback loop
+    # is cross-project BY DESIGN and owns its whole round trip (Patrick ruling
+    # 2026-08-07); '@devpulse:feedback' steers replies past the registry onto
+    # the reply_path route.
     mail_message = {
         "id": mail_id,
         "timestamp": now,
         "from": "@devpulse",
         "from_name": "devpulse",
+        "reply_to": "@devpulse:feedback",
         "subject": f"Re: {subject}",
         "message": body,
         "status": "new",

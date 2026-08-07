@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07]
 
+**fix(devpulse)** — wall 3 down, cross-project feedback round trip closed
+(compose 1.3.0): delivered replies now carry `reply_to: "@devpulse:feedback"`.
+Patrick ruling: the feedback loop is cross-project BY DESIGN — no boundary
+protection applies, and the module owns its whole round trip. The last wall
+was routing precedence in ai_mail's reply verb: `reply_to`/`from` resolving
+to a registry branch email routed external replies into normal delivery and
+the #134 cross-project refusal; the stored `reply_path` (the sanctioned
+cross-project route) only fires on a registry MISS. A non-registry reply_to
+forces that miss — zero ai_mail changes, the fix lives where the ownership
+is. Live-proved end to end (the failing operation succeeding, per VERA's
+false-green standard): external send → devpulse reply → external ai_mail
+reply → landed threaded in devpulse's inbox. VERA's three live messages
+patched in place and replyable. 452 devpulse tests green.
+
 **fix(commons)** — external citizens exist in the social space: identity_ops
 1.1.0 falls back to the caller's own registry (walk from AIPASS_CALLER_CWD,
 glob `*_REGISTRY.json`, sorted, AIPass-registry skip by name AND path) when

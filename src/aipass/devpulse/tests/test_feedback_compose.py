@@ -197,6 +197,14 @@ class TestAiMailDelivery:
         # 2026-08-07).
         assert mail_msg["from"] == "@devpulse"
         assert mail_msg["reply_path"].endswith("inbox.json")
+        # reply_to must NOT be a registry branch email: ai_mail's reply verb
+        # resolves reply_to before from, and a registry MATCH routes through
+        # normal delivery which refuses cross-project mail (#134). The
+        # non-registry address forces the registry MISS that activates the
+        # stored reply_path route (wall-3, Patrick ruling 2026-08-07: the
+        # feedback loop is cross-project by design, no boundary protection).
+        assert mail_msg["reply_to"] == "@devpulse:feedback"
+        assert mail_msg["reply_to"] != mail_msg["from"]
         assert mail_msg["subject"] == "Re: Test feedback"
         # v2 schema: the ai_mail viewer reads 'message' and 'status' — writing
         # 'body'/'read' rendered delivered replies as empty (VERA 2026-08-05).
