@@ -9,7 +9,14 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-07]
+## [2026-08-07] — cross-project walls down: the Vera arc lands end to end
+
+*Release v2.7.14 (PR #727, 26 commits) rolls up this section plus
+[2026-08-04] (manager-class git auth + fleet self-repair) and the
+[2026-08-02] TG slash relay section below: the hardcoded-registry bug class
+fixed at all four instances, the cross-project feedback round trip closed
+both directions, external projects provisioned for owner-tier git, and a
+train of trigger/hooks/prax reliability fixes.*
 
 **fix(ai_mail)** — cross-project conversations continue past one round
 (reply.py 1.1.0, by @ai_mail on Patrick's order): (1) outgoing replies now
