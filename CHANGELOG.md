@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07]
 
+**fix(commons)** — external citizens exist in the social space: identity_ops
+1.1.0 falls back to the caller's own registry (walk from AIPASS_CALLER_CWD,
+glob `*_REGISTRY.json`, sorted, AIPass-registry skip by name AND path) when
+the AIPass registry misses. Found by the bug-class sweep as the worst
+variant — not a wrong filename but NO caller-registry consultation at all,
+so every external citizen silently failed Commons identity, registration,
+and authorship. Live-proved: VERA resolves by path and by name from her real
+registry and auto-registered into the agents table; her three teammates
+resolve; AIPass citizens still win on collision and never pay for the walk.
+461 commons tests (+13, incl. an autouse env-clearing fixture so ambient
+shell state can't answer a test meant to miss), seedgo 100%. By @commons.
+Attribution note: the code content of this fix and of in-flight @memory
+rollover work (extractor + pipeline tests, task owned by @aipass's dispatch)
+was swept early into devpulse commit 79df6bda by an over-broad `--all` —
+this entry is the correct authorship record.
+
 **fix(ai_mail)** — external citizens can be identified as reply senders:
 `_find_caller_registry` globs `*_REGISTRY.json` (sorted, AIPass-registry
 skip preserved) instead of requiring the literal `AIPASS_REGISTRY.json` no
