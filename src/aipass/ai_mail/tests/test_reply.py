@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 
 from aipass.ai_mail.apps.handlers.email.reply import (
+    _validate_reply_path,
     get_email_by_id,
     send_reply,
 )
@@ -305,3 +306,154 @@ def test_send_reply_multiline_body_preserved(tmp_path):
     with open(sent_files[0], "r", encoding="utf-8") as f:
         sent_data = json.load(f)
     assert sent_data["message"] == multiline_body
+
+
+# ---- Cross-project reply continuation -------------------------
+#
+# Two gaps found live after the wall-3 fix (devpulse, 2026-08-07):
+#   GAP 1 outgoing replies carried no reply_path, so a cross-project conversation
+#          died after exactly one round — the external citizen could reach us, we
+#          could not reach back.
+#   GAP 2 _validate_reply_path required a literal AIPASS_REGISTRY.json in the
+#          target's ancestors, which no external project has. The validator
+#          rejected precisely the deliveries it exists to permit.
+#
+# These fixtures deliberately name their registry MYPROJ_REGISTRY.json. Every
+# earlier suite in this bug class stayed green because its fixtures used the
+# hardcoded name and so shared the code's assumption.
+
+_PATCH_NOTIFY = "aipass.ai_mail.apps.handlers.email.delivery._send_desktop_notification"
+
+
+def _make_external_project(root, project="myproj", branch="vera"):
+    """Build an external project tree: MYPROJ_REGISTRY.json + branch/.ai_mail.local/inbox.json."""
+    ext_root = root / f"{project}_root"
+    (ext_root).mkdir(parents=True, exist_ok=True)
+    (ext_root / f"{project.upper()}_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+    inbox_dir = ext_root / branch / ".ai_mail.local"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+    inbox_file = inbox_dir / "inbox.json"
+    inbox_file.write_text(json.dumps({"messages": [], "total_messages": 0, "unread_count": 0}), encoding="utf-8")
+    return ext_root / branch, inbox_file
+
+
+# GAP 2 -- validator accepts external registries
+
+
+def test_validate_reply_path_accepts_external_registry(tmp_path):
+    """An ancestor holding only MYPROJ_REGISTRY.json must be accepted."""
+    _branch, inbox_file = _make_external_project(tmp_path)
+
+    valid, reason = _validate_reply_path(str(inbox_file))
+
+    assert valid is True, reason
+
+
+def test_validate_reply_path_still_rejects_wrong_shape(tmp_path):
+    """The .ai_mail.local/inbox.json shape requirement is unchanged."""
+    _branch, inbox_file = _make_external_project(tmp_path)
+    impostor = inbox_file.parent / "notes.json"
+    impostor.write_text("{}", encoding="utf-8")
+
+    valid, reason = _validate_reply_path(str(impostor))
+
+    assert valid is False
+    assert "inbox.json" in reason
+
+
+def test_validate_reply_path_rejects_tree_with_no_registry(tmp_path):
+    """A path with no *_REGISTRY.json anywhere above it is still refused."""
+    stray = tmp_path / "nowhere" / ".ai_mail.local"
+    stray.mkdir(parents=True)
+    (stray / "inbox.json").write_text("{}", encoding="utf-8")
+
+    valid, reason = _validate_reply_path(str(stray / "inbox.json"))
+
+    assert valid is False
+    assert "REGISTRY" in reason
+
+
+# GAP 1 -- outgoing replies carry a return address
+
+
+def test_reply_carries_reply_path_to_own_inbox(tmp_path):
+    """A reply built by send_reply points reply_path at the replying branch's inbox."""
+    from_branch_path = tmp_path / "branch_a"
+    from_branch_path.mkdir()
+    captured = {}
+
+    sender_info = {"email": "@branch_a", "name": "BRANCH_A"}
+    target_branch = {"email": "@devpulse", "name": "DEVPULSE", "path": str(tmp_path / "devpulse")}
+
+    def _capture(dest, payload, **kwargs):
+        captured.update(payload)
+        return True, ""
+
+    with (
+        patch(_PATCH_BRANCH_DETECTION, return_value=sender_info),
+        patch(_PATCH_DELIVERY, side_effect=_capture),
+        patch(_PATCH_ALL_BRANCHES, return_value=[target_branch]),
+        patch(_PATCH_CLOSE_ARCHIVE, return_value=(True, "closed")),
+    ):
+        success, _msg, _rid = send_reply(from_branch_path, _make_original_email(), "Thanks!")
+
+    assert success is True
+    assert captured["reply_path"] == str(from_branch_path / ".ai_mail.local" / "inbox.json")
+
+
+# Full continuation: reply out -> lands externally -> carries a way back -> reply back in
+
+
+def test_cross_project_reply_round_trip(tmp_path):
+    """A replies to an external citizen; the delivered reply carries a working return address.
+
+    Proves the whole verb rather than the layer: the reply must actually arrive in the
+    external inbox (GAP 2 -- the validator has to accept MYPROJ_REGISTRY.json), it must
+    carry reply_path back to A (GAP 1), and a further reply must deliver into A's own
+    inbox using only that stored path.
+    """
+    ext_branch, ext_inbox = _make_external_project(tmp_path)
+
+    branch_a = tmp_path / "aipass_root" / "branch_a"
+    a_inbox_dir = branch_a / ".ai_mail.local"
+    a_inbox_dir.mkdir(parents=True)
+    a_inbox = a_inbox_dir / "inbox.json"
+    a_inbox.write_text(json.dumps({"messages": [], "total_messages": 0, "unread_count": 0}), encoding="utf-8")
+    (tmp_path / "aipass_root" / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+
+    # Leg 1: A replies to a message from an external citizen that carried a reply_path.
+    original = _make_original_email(sender="@vera")
+    original["reply_path"] = str(ext_inbox)
+
+    with (
+        patch(_PATCH_BRANCH_DETECTION, return_value={"email": "@branch_a", "name": "BRANCH_A"}),
+        patch(_PATCH_ALL_BRANCHES, return_value=[]),  # @vera is external -- registry miss is correct
+        patch(_PATCH_CLOSE_ARCHIVE, return_value=(True, "closed")),
+        patch(_PATCH_NOTIFY),
+    ):
+        success, msg, _rid = send_reply(branch_a, original, "Reply outbound")
+
+    assert success is True, msg
+
+    delivered = json.loads(ext_inbox.read_text())["messages"][0]
+    assert delivered["from"] == "@branch_a"
+    assert delivered["message"] == "Reply outbound"
+    # The return address A stamped on the way out.
+    assert delivered["reply_path"] == str(a_inbox)
+
+    # Leg 2: the external citizen replies to THAT message, resolving only via reply_path.
+    with (
+        patch(_PATCH_BRANCH_DETECTION, return_value={"email": "@vera", "name": "VERA"}),
+        patch(_PATCH_ALL_BRANCHES, return_value=[]),  # @branch_a not resolvable from their side
+        patch(_PATCH_CLOSE_ARCHIVE, return_value=(True, "closed")),
+        patch(_PATCH_NOTIFY),
+    ):
+        success2, msg2, _rid2 = send_reply(ext_branch, delivered, "Reply back inbound")
+
+    assert success2 is True, msg2
+
+    landed = json.loads(a_inbox.read_text())["messages"][0]
+    assert landed["from"] == "@vera"
+    assert landed["message"] == "Reply back inbound"
+    # And the conversation can continue past this round too.
+    assert landed["reply_path"] == str(ext_inbox)

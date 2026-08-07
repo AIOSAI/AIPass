@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reply.py
 # Description: Email Reply Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-30
-# Modified: 2025-11-30
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -130,6 +130,14 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
         "message": reply_message,
         "timestamp": timestamp,
         "in_reply_to": original_email.get("id"),  # Link to original message
+        # Return address. Without it a cross-project conversation died after one
+        # round: an external citizen's reply landed here fine, but replying back
+        # missed the registry (correct — they are external) and had no stored path
+        # to fall back on. Stamped unconditionally: internal replies ignore it, and
+        # it is derived from from_branch_path — the branch actually replying —
+        # rather than delivery.py's AIPASS_CALLER_CWD guess, which the sender
+        # misattribution showed can name the wrong branch entirely.
+        "reply_path": str(from_branch_path / ".ai_mail.local" / "inbox.json"),
     }
 
     # Find recipient branch
@@ -177,7 +185,14 @@ def _validate_reply_path(reply_path: str) -> Tuple[bool, str]:
     """Validate that reply_path points to a legitimate inbox.json.
 
     Checks: (a) path resolves, (b) ends with .ai_mail.local/inbox.json,
-    (c) an AIPASS_REGISTRY.json exists in an ancestor directory.
+    (c) a *_REGISTRY.json exists in an ancestor directory.
+
+    The ancestor check globs rather than matching AIPASS_REGISTRY.json literally.
+    This validator guards delivery TOWARD an external project, and external projects
+    name their registry PROJECTNAME_REGISTRY.json — so the literal name rejected
+    exactly the cross-project replies it was written to let through. Same bug class
+    as branch_detection 426a1c04 (compass #229), here in the outbound direction.
+    Existence is all that matters, so no sorted()/ordering concern applies.
     """
     try:
         path = Path(reply_path).resolve()
@@ -189,12 +204,12 @@ def _validate_reply_path(reply_path: str) -> Tuple[bool, str]:
         return False, f"Path does not end with .ai_mail.local/inbox.json: {path}"
 
     for parent in path.parents:
-        if (parent / "AIPASS_REGISTRY.json").exists():
+        if any(parent.glob("*_REGISTRY.json")):
             return True, ""
         if parent == parent.parent:
             break
 
-    return False, f"No AIPASS_REGISTRY.json found in ancestors of {path}"
+    return False, f"No *_REGISTRY.json found in ancestors of {path}"
 
 
 def _deliver_via_reply_path(

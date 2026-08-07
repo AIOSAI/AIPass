@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07]
 
+**fix(ai_mail)** — cross-project conversations continue past one round
+(reply.py 1.1.0, by @ai_mail on Patrick's order): (1) outgoing replies now
+stamp `reply_path` = the replying branch's own inbox — derived from
+from_branch_path, deliberately not caller-env resolution, so a return
+address can never point at someone else's inbox; previously replies-to-
+replies died with "Could not find branch for @vera" because delivered
+replies carried no return address. (2) `_validate_reply_path` accepts any
+`*_REGISTRY.json` ancestor — fourth instance of the hardcoded-registry bug
+class (compass #229), outbound direction: delivery toward external projects
+was rejected because their ancestors hold PROJECTNAME_REGISTRY.json. 860
+ai_mail tests (+5, fixtures use external registry names, canary-reverted to
+prove the tests see the fixes), seedgo 100%. Live-proved by devpulse with a
+two-round conversation through VERA's real inbox: the previously-dead
+reply-to-a-reply delivered, and its own delivered copy carries the return
+address for the next round — the loop is now indefinite in both directions.
+
 **fix(devpulse)** — wall 3 down, cross-project feedback round trip closed
 (compose 1.3.0): delivered replies now carry `reply_to: "@devpulse:feedback"`.
 Patrick ruling: the feedback loop is cross-project BY DESIGN — no boundary
