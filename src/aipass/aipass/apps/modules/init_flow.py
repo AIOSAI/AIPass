@@ -921,6 +921,8 @@ def print_help() -> None:
     console.print("  [green]aipass init run --template <name>[/green]    [dim]# select template[/dim]")
     console.print("  [green]aipass init run --dry-run[/green]            [dim]# walk all stages, no writes[/dim]")
     console.print("  [green]aipass init --list[/green]                   [dim]# list available templates[/dim]")
+    console.print("  [green]aipass init update [target][/green]          [dim]# refresh scaffold + git auth[/dim]")
+    console.print("  [green]aipass init update --dry-run[/green]         [dim]# preview git-auth repairs only[/dim]")
     console.print()
     console.print("[yellow]STAGES:[/yellow] 10 stages, each saved — resume on ctrl-C")
     console.print()
@@ -966,11 +968,64 @@ def _handle_init_scaffold(args: list[str]) -> int:
         return 1
 
 
+def _run_git_auth_provisioning(target: Path, dry_run: bool = False) -> int:
+    """Provision the project for manager-class git; print every repair.
+
+    Returns 0 when the four owner-tier conditions hold (or already held), 1 when
+    the run refused. A refusal is not a crash — it names what a human must add,
+    and nothing was written.
+    """
+    from aipass.aipass.apps.handlers.init.git_auth import GitAuthRefusal, provision_git_auth
+
+    console.print()
+    console.print("[bold]Git authorization (owner-tier)[/bold]")
+    try:
+        result = provision_git_auth(target, dry_run=dry_run)
+    except GitAuthRefusal as exc:
+        cli_error(f"Cannot provision git authorization: {exc}")
+        logger.warning("[init_flow] git-auth provisioning refused: %s", exc)
+        json_handler.log_operation("aipass_git_auth", {"target": str(target), "refusal": str(exc)})
+        return 1
+
+    repairs = result["repairs"]
+    verb = "would repair" if dry_run else "repaired"
+    if repairs:
+        success(f"Owner '{result['owner']}' — {verb} {len(repairs)} item(s):")
+        for item in repairs:
+            console.print(f"  + {item}")
+    else:
+        success(f"Owner '{result['owner']}' already holds owner-tier — nothing to repair.")
+    for item in result["already_ok"]:
+        console.print(f"  [dim]· {item}[/dim]")
+
+    if dry_run:
+        console.print("[dim]Preview only — no files written.[/dim]")
+    elif result["verified"]:
+        success("Verified against all four owner-tier checks.")
+    else:
+        cli_error("Repairs written, but verification still fails:")
+        for item in result["verify_failures"]:
+            console.print(f"  - {item}")
+
+    # No log_operation on this path — the handler already recorded exactly what
+    # it wrote; a second entry here would only duplicate it.
+    return 0 if dry_run or result["verified"] else 1
+
+
 def _handle_init_update(args: list[str]) -> int:
-    """Handle `aipass init update [target]` — refresh managed scaffold files."""
+    """Handle `aipass init update [target] [--dry-run]` — refresh scaffold + git auth."""
     from aipass.aipass.apps.handlers.init.bootstrap import update_project
 
-    target = Path(args[0]) if args else Path.cwd()
+    dry_run = "--dry-run" in args
+    positional = [a for a in args if not a.startswith("--")]
+    target = Path(positional[0]) if positional else Path.cwd()
+
+    if dry_run:
+        # Scaffold refresh has no preview mode, so say so rather than implying
+        # this previewed the whole command.
+        console.print("[dim]Preview mode — scaffold refresh skipped; git-auth provisioning is planned only.[/dim]")
+        return _run_git_auth_provisioning(target, dry_run=True)
+
     try:
         result = update_project(target)
         updated = result.get("updated_files", [])
@@ -1015,11 +1070,15 @@ def _handle_init_update(args: list[str]) -> int:
             logger.warning("[init_flow] registry sync during update skipped: %s", sync_exc)
 
         json_handler.log_operation("aipass_init_update", {"target": str(target), "result": result})
-        return 0
     except Exception as exc:
         logger.warning("[init_flow] update failed: %s", exc)
         cli_error(f"Update failed: {exc}")
         return 1
+
+    # Last, so it wins: sync-registry above may migrate a legacy citizen_class,
+    # and the owner's class must end up 'manager' for drone to grant git. Outside
+    # the try so a git-auth fault is never reported as a scaffold-update failure.
+    return _run_git_auth_provisioning(target)
 
 
 def _handle_init_agent(args: list[str]) -> int:

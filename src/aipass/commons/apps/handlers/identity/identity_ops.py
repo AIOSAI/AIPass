@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -13,15 +13,18 @@ Implementation logic for branch identity detection, registry lookup,
 caller detection, and mention extraction.
 
 Detects which branch is calling The Commons based on CWD by walking
-up the directory tree to find a *.id.json file, then cross-referencing
-with AIPASS_REGISTRY.json.
+up the directory tree to find a .trinity/passport.json branch root, then
+cross-referencing with AIPASS_REGISTRY.json. When the AIPass registry does
+not know the caller, the caller's own project registry (*_REGISTRY.json,
+found by walking up from AIPASS_CALLER_CWD) is consulted — external
+citizens are citizens too, and the social space has to be able to name them.
 """
 
 import os
 import re
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
@@ -104,9 +107,142 @@ def find_branch_root(start_path: Path) -> Optional[Path]:
     return None
 
 
+def _find_caller_registries() -> List[Path]:
+    """
+    Find the registries belonging to the caller's own project.
+
+    Walks up from AIPASS_CALLER_CWD (set by drone) looking for
+    *_REGISTRY.json — external projects name theirs after themselves
+    (VERA-STUDIO_REGISTRY.json). The AIPass registry is skipped: it is
+    already consulted first, and re-reading it here would double the work
+    for every miss. Results are sorted so a directory holding more than
+    one registry always resolves the same way.
+
+    Returns:
+        List of registry paths from the nearest matching directory, or [].
+    """
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
+    if not caller_cwd:
+        return []
+
+    try:
+        caller_path = Path(caller_cwd).resolve()
+    except OSError as exc:
+        logger.warning(f"[commons.identity] Unusable AIPASS_CALLER_CWD '{caller_cwd}': {exc}")
+        return []
+
+    primary = BRANCH_REGISTRY_PATH.resolve() if BRANCH_REGISTRY_PATH.exists() else None
+
+    for directory in [caller_path] + list(caller_path.parents):
+        matches = sorted(
+            path
+            for path in directory.glob("*_REGISTRY.json")
+            if path.name != "AIPASS_REGISTRY.json" and path.resolve() != primary
+        )
+        if matches:
+            return matches
+
+    return []
+
+
+def _branches_from_registry(registry_path: Path) -> List[Dict[str, Any]]:
+    """
+    Read the branches list out of a registry file.
+
+    Args:
+        registry_path: Path to a *_REGISTRY.json file.
+
+    Returns:
+        List of branch dicts (dict-shaped registries are flattened to
+        their values), or [] if the file is missing or unreadable.
+    """
+    if not registry_path.exists():
+        return []
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(f"[commons.identity] Unreadable registry {registry_path.name}: {exc}")
+        return []
+
+    raw_branches = registry.get("branches", [])
+    if isinstance(raw_branches, dict):
+        raw_branches = list(raw_branches.values())
+    if not isinstance(raw_branches, list):
+        logger.warning(f"[commons.identity] Registry {registry_path.name} has a malformed branches field")
+        return []
+
+    return [branch for branch in raw_branches if isinstance(branch, dict)]
+
+
+def _match_by_path(registry_path: Path, branch_path: Path) -> Optional[Dict[str, Any]]:
+    """Find the branch in this registry whose path is branch_path."""
+    target = str(branch_path.resolve())
+    registry_root = registry_path.parent
+
+    for branch in _branches_from_registry(registry_path):
+        raw_path = branch.get("path", "")
+        if not raw_path:
+            continue
+        # Registry paths are relative to the registry file's own directory
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = registry_root / candidate
+        if str(candidate.resolve()) == target:
+            return branch
+
+    return None
+
+
+def _match_by_name(registry_path: Path, branch_name: str) -> Optional[Dict[str, Any]]:
+    """Find the branch in this registry named branch_name (case-insensitive)."""
+    name_upper = branch_name.upper()
+
+    for branch in _branches_from_registry(registry_path):
+        if branch.get("name", "").upper() == name_upper:
+            return branch
+
+    return None
+
+
+def _search_registries(matcher: Callable[[Path], Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """
+    Run a matcher against the AIPass registry, then the caller's own.
+
+    AIPass citizens resolve on the first lookup and never pay for the
+    walk-up. External citizens — a whole project's worth of branches with
+    passports and mailboxes that the AIPass registry has never heard of —
+    resolve on the fallback instead of falling through to None.
+
+    Args:
+        matcher: Callable taking a registry path, returning a branch dict.
+
+    Returns:
+        The first branch dict any registry matched, or None.
+    """
+    found = matcher(BRANCH_REGISTRY_PATH)
+    if found:
+        return found
+
+    for registry_path in _find_caller_registries():
+        found = matcher(registry_path)
+        if found:
+            logger.info(
+                f"[commons.identity] Resolved external citizen "
+                f"'{found.get('name', 'unknown')}' via {registry_path.name}"
+            )
+            return found
+
+    return None
+
+
 def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict[str, Any]]:
     """
-    Look up branch information in AIPASS_REGISTRY.json by path.
+    Look up branch information by path, AIPass registry first.
+
+    Falls back to the caller's project registry so external citizens are
+    identifiable in The Commons.
 
     Args:
         branch_path: Path to branch directory.
@@ -114,32 +250,15 @@ def get_branch_info_from_registry(branch_path: Path) -> Optional[Dict[str, Any]]
     Returns:
         Dict with branch info from registry, or None if not found.
     """
-    if not BRANCH_REGISTRY_PATH.exists():
-        return None
-
-    try:
-        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-
-        branch_path_str = str(branch_path.resolve())
-        registry_root = BRANCH_REGISTRY_PATH.parent
-
-        for branch in registry.get("branches", []):
-            # Registry paths are relative to the registry file's parent
-            candidate = (registry_root / branch["path"]).resolve()
-            if str(candidate) == branch_path_str:
-                return branch
-
-        return None
-
-    except Exception:
-        logger.warning("[identity_ops] Failed to look up branch in registry")
-        return None
+    return _search_registries(lambda registry_path: _match_by_path(registry_path, branch_path))
 
 
 def get_branch_info_by_name(branch_name: str) -> Optional[Dict[str, Any]]:
     """
-    Look up branch information in AIPASS_REGISTRY.json by name.
+    Look up branch information by name, AIPass registry first.
+
+    Falls back to the caller's project registry so external citizens are
+    identifiable in The Commons.
 
     Args:
         branch_name: Branch name to look up (case-insensitive).
@@ -147,23 +266,7 @@ def get_branch_info_by_name(branch_name: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict with branch info from registry, or None if not found.
     """
-    if not BRANCH_REGISTRY_PATH.exists():
-        return None
-
-    try:
-        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-
-        name_upper = branch_name.upper()
-        for branch in registry.get("branches", []):
-            if branch.get("name", "").upper() == name_upper:
-                return branch
-
-        return None
-
-    except Exception:
-        logger.warning("[identity_ops] Failed to look up branch by name in registry")
-        return None
+    return _search_registries(lambda registry_path: _match_by_name(registry_path, branch_name))
 
 
 def get_caller_branch() -> Optional[Dict[str, Any]]:

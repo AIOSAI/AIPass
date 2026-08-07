@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-05-19
+# Modified: 2026-08-04
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -29,6 +29,26 @@ BRANCH_ROOT = Path(__file__).resolve().parent.parent.parent
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),
 ]
+
+VERBOSE_LOG_ENV = "AIPASS_HOOKS_VERBOSE_LOG"
+
+
+def _log_detail(message: str, *args) -> None:
+    """Per-hook narration — DEBUG-tier detail, suppressed by default.
+
+    Every hook execution is already recorded in full (agent, exit code, timing,
+    stderr, cwd) in logs/engine.jsonl, which is the source of truth for hook
+    diagnostics. These lines are the human-readable echo of that, and at ~3 per
+    tool call they dominated system_logs/hooks_engine.log — enough to trip
+    prax's runaway detector on ordinary multi-agent operation.
+
+    prax's SystemLogger exposes only info/warning/error, so there is no DEBUG
+    level to demote to; the switch lives here instead. Set
+    AIPASS_HOOKS_VERBOSE_LOG=1 to restore them. Read per call so tests and live
+    sessions can toggle it without re-importing.
+    """
+    if os.environ.get(VERBOSE_LOG_ENV) == "1":
+        logger.info(message, *args)
 
 
 def _run_hook(hook_cmd: str, stdin_data: str, timeout_s: int = 30) -> dict:
@@ -231,13 +251,14 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         return "", 0
 
     outputs = []
+    ran = 0  # hooks that actually executed — outputs only counts those that wrote stdout
     total_start = time.monotonic()
     budget_state = None
     budget_dirty = False
 
     for hook_name, hook_def in event_hooks.items():
         if not hook_def.get("enabled", True):
-            logger.info("[HOOKS] %s.%s skipped (disabled)", event_type, hook_name)
+            _log_detail("[HOOKS] %s.%s skipped (disabled)", event_type, hook_name)
             _log({"ts": time.time(), "event": event_type, "hook": hook_name, "action": "skipped_disabled"})
             continue
 
@@ -285,7 +306,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             budget_dirty = True
             allowed, reason = _check_budget(hook_name, budget_cfg, budget_state)
             if not allowed:
-                logger.info("[HOOKS] %s.%s budget: %s", event_type, hook_name, reason)
+                _log_detail("[HOOKS] %s.%s budget: %s", event_type, hook_name, reason)
                 _log(
                     {
                         "ts": time.time(),
@@ -328,7 +349,8 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 logger.info("[HOOKS] sound playback failed for timeout %s.%s: %s", event_type, hook_name, exc)
             continue
 
-        logger.info(
+        ran += 1
+        _log_detail(
             "[HOOKS] %s.%s agent=%s exit=%d out=%db %dms",
             event_type,
             hook_name,
@@ -412,13 +434,14 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
         _save_budget_state(budget_state, payload_session_id)
 
     total_ms = (time.monotonic() - total_start) * 1000
-    logger.info("[HOOKS] %s complete: %d hooks %dms", event_type, len(outputs), total_ms)
+    _log_detail("[HOOKS] %s complete: %d hooks %dms", event_type, ran, total_ms)
     _log(
         {
             "ts": time.time(),
             "event": event_type,
             "action": "complete",
-            "hooks_run": len(outputs),
+            "hooks_run": ran,
+            "hooks_with_output": len(outputs),
             "total_ms": round(total_ms, 1),
         }
     )

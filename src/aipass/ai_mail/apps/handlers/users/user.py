@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: user.py
 # Description: User Info Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2025-11-30
-# Modified: 2025-11-30
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -18,6 +18,7 @@ PHILOSOPHY: Fail hard if detection fails. Fallbacks hide bugs.
 # =============================================
 # IMPORTS
 # =============================================
+import os
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -30,6 +31,37 @@ from .branch_detection import detect_branch_from_pwd
 # =============================================
 # USER INFO FUNCTIONS
 # =============================================
+
+
+def _detection_failure_reason() -> str:
+    """Explain WHY sender detection failed, naming the path actually walked.
+
+    Sender identity comes from the AIPASS_CALLER_* env vars that drone sets,
+    NOT from this process's working directory — drone runs the target branch
+    with cwd=<target branch>, so Path.cwd() here is always a valid branch and
+    is never the thing that failed. Reporting it as the cause sent two separate
+    investigations chasing a phantom passport problem (error 0bd8b4f5).
+    """
+    caller_branch = os.environ.get("AIPASS_CALLER_BRANCH")
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
+
+    if caller_branch:
+        return (
+            f"AIPASS_CALLER_BRANCH={caller_branch!r} is not a known sender: no matching "
+            "contact, no entry in the AIPass or caller registry, and AIPASS_CALLER_CWD "
+            "is unset so no external identity could be synthesized."
+        )
+    if caller_cwd:
+        return (
+            f"AIPASS_CALLER_CWD={caller_cwd} is not inside a branch — no "
+            ".trinity/passport.json at or above it. The caller invoked drone from "
+            "outside any branch directory (e.g. the repo root); re-run from within "
+            "the sending branch."
+        )
+    return (
+        "No AIPASS_CALLER_BRANCH or AIPASS_CALLER_CWD was set, and no "
+        ".trinity/passport.json was found at or above the working directory."
+    )
 
 
 def get_current_user() -> Dict:
@@ -58,9 +90,10 @@ def get_current_user() -> Dict:
 
     if not branch_info:
         raise RuntimeError(
-            "BRANCH DETECTION FAILED: Could not detect branch from current directory.\n"
-            "AI_MAIL must be called from within a branch directory (with .trinity/passport.json).\n"
-            f"Current directory: {Path.cwd()}\n"
+            "BRANCH DETECTION FAILED: Could not resolve the sending branch.\n"
+            f"{_detection_failure_reason()}\n"
+            f"(This process's working directory is {Path.cwd()} — informational only, "
+            "sender identity is NOT resolved from it.)\n"
             "No fallback configured - this is intentional to catch bugs."
         )
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2025-11-07
-# Modified: 2026-04-14
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -201,9 +201,26 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 DEFAULT_LOG_LEVEL = "INFO"
 
-DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 1, "log_level": "INFO"}
+# backup_count raised 1 -> 3 on 2026-08-04. Retained history is not a fixed
+# span: it swings between backup_count x threshold (just after a roll, when the
+# live file is empty) and backup_count+1 x threshold (just before the next one).
+# At 1 backup that is 200,000-400,000 bytes, so the bump triples the guaranteed
+# floor and doubles the ceiling. Measured 2026-08-04: hooks_engine.log held
+# 45 minutes across .log.1 + .log under fleet load; only 51 of 308 system logs
+# have ever rotated at all, and just 4 of those retain under an hour, so this
+# buys the hot tail without touching the quiet majority. Cost is a ~28 MB
+# ceiling on a ~36 MB footprint.
+#
+# This does NOT rescue a true firehose — prax_event_queue.log kept 45 seconds
+# during the 07-31 event-queue flood, and 3 backups only makes that ~2 minutes.
+# Surviving that needs evidence capture at detection time, not a retention knob.
+DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"}
 
-DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 1, "log_level": "INFO"}
+DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
+
+# Set once per process when the config file is present but missing its
+# system_logs/local_logs sections — see load_log_config().
+_config_schema_warned: bool = False
 
 # =============================================
 # HANDLER FUNCTIONS
@@ -211,14 +228,28 @@ DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 1, "log_level": "INFO"}
 
 
 def lines_to_bytes(num_lines: int, avg_line_length: int = 200) -> int:
-    """Convert number of lines to approximate bytes for log rotation
+    """Convert a line budget to a byte threshold for log rotation.
+
+    The 200-byte default is a deliberate over-estimate, not a measurement.
+    Real lines across system_logs/ average 115 bytes (median per-file 116, as
+    measured 2026-08-04 over 301 files), so ``max_lines`` behaves as a floor:
+    a 1000-line budget retains roughly 1,700 typical lines. That is the point.
+    31 files average above 200 bytes/line and one reaches 700, and for those a
+    tighter estimate would starve the line budget rather than honour it.
+
+    So do not "correct" this to the observed average. Lowering it shrinks every
+    log's byte budget — 200,000 to 115,000 bytes for system logs — which
+    narrows the retention window instead of widening it. To retain more, raise
+    ``max_lines`` or ``backup_count``; both change bytes in the intended
+    direction.
 
     Args:
-        num_lines: Number of lines to convert
-        avg_line_length: Average line length in characters (default 200)
+        num_lines: Line budget to convert.
+        avg_line_length: Bytes per line to assume. Default 200, intentionally
+            above the observed 115 so verbose logs still get their lines.
 
     Returns:
-        Approximate number of bytes
+        Byte threshold for the rotating handler.
     """
     return num_lines * avg_line_length
 
@@ -247,39 +278,66 @@ def load_log_config() -> Dict[str, Any]:
         {
             "system_logs": {
                 "max_lines": 1000,
-                "backup_count": 1,
+                "backup_count": 3,
                 "log_level": "INFO"
             },
             "local_logs": {
                 "max_lines": 250,
-                "backup_count": 1,
+                "backup_count": 3,
                 "log_level": "INFO"
             },
             "log_format": "%(asctime)s - ...",
             "date_format": "%Y-%m-%d %H:%M:%S"
         }
 
-    If config file missing or invalid, returns code defaults.
+    If config file missing or invalid, returns code defaults. A config file that
+    exists but omits the system_logs/local_logs sections also gets code defaults,
+    and warns once per process rather than falling back silently.
 
     Example:
         >>> config = load_log_config()
         >>> max_lines = config['system_logs']['max_lines']
         >>> print(f"System logs max lines: {max_lines}")
     """
+    global _config_schema_warned
     try:
         if PRAX_LOGGER_CONFIG_FILE.exists():
             with open(PRAX_LOGGER_CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
 
+                # A config file that exists but carries neither key silently
+                # yields code defaults, so anyone reading it believes settings
+                # are live that never reach a handler. Found 2026-08-04: the
+                # file create_config_file() generates (prax_json/ is gitignored,
+                # so this is per-install, not in git) declared backup_count=5 and
+                # max_log_size_mb=10 at the top level of "config", where nothing
+                # reads them — effective retention was 1 backup of 200,000 bytes,
+                # 250x less than the file advertised. Say so instead of falling
+                # back quietly. Guarded to once per process: this runs on every
+                # logger init fleet-wide, and prax's own log is inside the
+                # directory prax watches (see DPLAN-0280).
+                section = config.get("config", {})
+                missing = [k for k in ("system_logs", "local_logs") if k not in section]
+                if missing and not _config_schema_warned:
+                    _config_schema_warned = True
+                    logger.warning(
+                        "[config] %s has no %s section — those settings are IGNORED, "
+                        "using code defaults (system: %s, local: %s)",
+                        PRAX_LOGGER_CONFIG_FILE.name,
+                        " or ".join(missing),
+                        DEFAULT_SYSTEM_LOGS,
+                        DEFAULT_LOCAL_LOGS,
+                    )
+
                 # Extract system and local log settings
-                system_logs = config.get("config", {}).get("system_logs", DEFAULT_SYSTEM_LOGS)
-                local_logs = config.get("config", {}).get("local_logs", DEFAULT_LOCAL_LOGS)
+                system_logs = section.get("system_logs", DEFAULT_SYSTEM_LOGS)
+                local_logs = section.get("local_logs", DEFAULT_LOCAL_LOGS)
 
                 result = {
                     "system_logs": system_logs,
                     "local_logs": local_logs,
-                    "log_format": config.get("config", {}).get("log_format", LOG_FORMAT),
-                    "date_format": config.get("config", {}).get("date_format", DATE_FORMAT),
+                    "log_format": section.get("log_format", LOG_FORMAT),
+                    "date_format": section.get("date_format", DATE_FORMAT),
                 }
                 json_handler.log_operation("config_loaded", {"source": str(PRAX_LOGGER_CONFIG_FILE)})
                 return result

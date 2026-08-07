@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-14
-# Modified: 2026-07-21
+# Modified: 2026-08-04
 # =============================================
 
 """
@@ -20,6 +20,22 @@ Event payload from prax:
     - severity: "warning" or "critical"
     - branch: Responsible branch name
 
+Severity doctrine — WARNING observes, CRITICAL wakes:
+    - WARNING (100 lines/min sustained 12 intervals) is OBSERVE-ONLY. It writes
+      the alert and the decision entry with full fidelity and records the
+      per-file cooldown, but it sends no email and wakes nobody. The 100/min
+      threshold predates routine multi-agent fleets: it fires overwhelmingly on
+      healthy chatty logs under normal load, and agents were being woken out of
+      sleep for a system behaving exactly as designed.
+    - CRITICAL (600 lines/min sustained 6 intervals) is unchanged. Email plus
+      wake_branch, bypassing a volume mute if one is set.
+
+    Accepted trade-off, ruled deliberately and not an oversight: a sustained
+    moderate leak — say ~150 lines/min for days — never climbs to CRITICAL, so
+    under observe-only nobody is ever woken for it. It lands in alerts.json and
+    in the decision log, plainly visible to anyone who looks, but nobody is
+    told. We chose a quiet record over a fleet that stops trusting the wake.
+
 Gating:
     - Per-file cooldown (30min default) — independent of medic circuit breaker
     - VOLUME mute check (volume_muted_branches in trigger_config.json)
@@ -33,9 +49,11 @@ A volume mute must be set deliberately, and CRITICAL runaways bypass even that
 — a machine-eating flood is never something you asked to silence.
 
 Every gating decision is appended to logs/runaway_suppressed.jsonl with an
-`outcome` field ("suppressed" or "delivered") so suppressed-by-design and
-delivered-by-bypass are distinguishable in the trail. Entries written before
-this field existed are all suppressions.
+`outcome` field ("suppressed", "delivered" or "observed") so suppressed-by-design,
+delivered-by-bypass and recorded-but-untold are distinguishable in the trail.
+"observed" is the observe-only WARNING outcome: we did record it, so it is not a
+suppression, and nobody was told, so it is not a delivery — it needed its own
+word. Entries written before the `outcome` field existed are all suppressions.
 
 Alerts written to .aipass/alerts.json expire after 24h by default (same TTL
 convention as medic_state.py's DEFAULT_MUTE_SECONDS) — pass forever=True to
@@ -172,7 +190,8 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
     """Write a gating decision to the runaway decision trail.
 
     Args:
-        outcome: "suppressed" (alert dropped) or "delivered" (alert sent anyway)
+        outcome: "suppressed" (alert dropped), "delivered" (alert sent anyway)
+            or "observed" (recorded, nobody woken — observe-only WARNING)
         reason: Machine-readable cause, e.g. "cooldown", "volume_muted"
         file_path: Path to the runaway log file
         branch: Responsible branch name
@@ -240,10 +259,14 @@ def handle_runaway_log_detected(
     forever: bool = False,
     **kwargs: Any,
 ) -> None:
-    """Handle runaway_log_detected event — dispatch to responsible branch.
+    """Handle runaway_log_detected event — observe WARNING, dispatch CRITICAL.
 
     Volume-based detection, independent of medic error_detected pipeline.
     Uses per-file cooldown (30min) instead of the medic circuit breaker.
+
+    WARNING is observe-only: alert, decision entry and cooldown are recorded,
+    but no email is sent and no branch is woken. CRITICAL keeps the full
+    dispatch path — email, wake_branch, alert, cooldown.
 
     Args:
         file_path: Path to the runaway log file — REQUIRED
@@ -272,6 +295,18 @@ def handle_runaway_log_detected(
                 return
             # A machine-eating flood is never something you asked to silence.
             _write_decision_log("delivered", "bypass_critical", file_path, target_branch)
+
+        if not is_critical:
+            # Observe-only: record with full fidelity, wake nobody. The cooldown
+            # is recorded too — without it every detection interval would append
+            # another alert and the record would become its own flood.
+            _write_alert(
+                file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever
+            )
+            _write_decision_log("observed", "observe_only", file_path, target_branch)
+            _record_file_dispatch(file_path)
+            json_handler.log_operation("runaway_observed", {"branch": target_branch, "file": file_path})
+            return
 
         if _send_email is None:
             _log_warning("No email callback — cannot dispatch runaway alert")

@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for branch log watcher event producer
-# Version: 1.0.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-08-04
 # =============================================
 
 import json
@@ -408,7 +408,7 @@ class TestReadNewLines:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"{now} | mod | ERROR | New failure\n")
 
-        # Patch _save_log_positions to avoid touching the real file
+        # Patch _mark_data_dirty to avoid touching the real file
         with patch.object(lw, "_mark_data_dirty"):
             watcher._read_new_lines(file_path)
 
@@ -434,6 +434,520 @@ class TestReadNewLines:
             watcher._read_new_lines(file_path)
 
         # Position should be at the end of the new content
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+
+# ---------------------------------------------------------------------------
+# Tests -- BranchLogWatcher rotation tail drain
+# ---------------------------------------------------------------------------
+
+
+def _rotate_log(log_file: Path) -> Path:
+    """
+    Perform a real RotatingFileHandler-style rotation.
+
+    Renames the live log to '<name>.log.1' (inode travels with the rename)
+    and creates a fresh empty '<name>.log'.
+
+    Args:
+        log_file: Path to the live log file
+
+    Returns:
+        Path to the rotated-out backup file
+    """
+    backup = Path(f"{log_file}.1")
+    if backup.exists():
+        backup.unlink()
+    log_file.rename(backup)
+    log_file.write_text("", encoding="utf-8")
+    return backup
+
+
+def _rotate_chain(log_file: Path, backup_count: int = 3) -> Path:
+    """
+    Perform a real RotatingFileHandler rotation including backup shifting.
+
+    Shifts '<name>.log.N' -> '<name>.log.N+1' (dropping the oldest), renames
+    the live log to '<name>.log.1', then creates a fresh empty '<name>.log'.
+    Inodes travel with the renames exactly as they do in production.
+
+    Args:
+        log_file: Path to the live log file
+        backup_count: Number of backups kept (prax uses 3)
+
+    Returns:
+        Path to the newest backup file ('<name>.log.1')
+    """
+    for index in range(backup_count - 1, 0, -1):
+        source = Path(f"{log_file}.{index}")
+        target = Path(f"{log_file}.{index + 1}")
+        if source.exists():
+            if target.exists():
+                target.unlink()
+            source.rename(target)
+    backup = Path(f"{log_file}.1")
+    if backup.exists():
+        backup.unlink()
+    log_file.rename(backup)
+    log_file.write_text("", encoding="utf-8")
+    return backup
+
+
+def _processed_lines(mock_proc) -> list:
+    """Extract the log-line argument from every _process_log_line call."""
+    return [call.args[0] for call in mock_proc.call_args_list]
+
+
+def _error_line(message: str) -> str:
+    """Build a fresh-timestamped ERROR line in Prax format."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+    return f"{now} | mod | ERROR | {message}\n"
+
+
+class TestRotationDrain:
+    """Tests for draining the unread tail of a rotated-out branch log."""
+
+    def test_rotation_drains_unread_tail(self, tmp_path):
+        """Lines written between last position and rotation ARE processed."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        # Bulk of the file is already processed (mirrors a log near its size cap)
+        log_file.write_text(_error_line("already seen") * 20, encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Unread tail: written after last position, before rotation
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("missed one"))
+            f.write(_error_line("missed two"))
+
+        _rotate_log(log_file)
+        log_file.write_text(_error_line("after rotation"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("missed one" in line for line in lines)
+        assert any("missed two" in line for line in lines)
+        assert any("after rotation" in line for line in lines)
+        assert not any("already seen" in line for line in lines)
+        assert all(call.args[1] == file_path for call in mock_proc.call_args_list)
+
+    def test_stale_backup_inode_mismatch_not_reprocessed(self, tmp_path):
+        """A stale '.log.1' from an earlier rotation is never re-read."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("ancient"), encoding="utf-8")
+        # Earlier rotation happened before we started tracking the live file
+        _rotate_log(log_file)
+
+        log_file.write_text(_error_line("live line one"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Live file shrinks but the stale backup still sits there
+        log_file.write_text(_error_line("fresh"), encoding="utf-8")
+        watcher.log_positions[file_path] = 9999
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert not any("ancient" in line for line in lines)
+        assert any("fresh" in line for line in lines)
+
+    def test_missing_backup_file_still_reads_new_file(self, tmp_path):
+        """No '.log.1' present: no crash, the new file is still read."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("plenty of old content in here"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        log_file.write_text(_error_line("tiny"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "tiny" in lines[0]
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_in_place_truncation_no_duplicate_processing(self, tmp_path):
+        """Truncation in place (same inode) never re-fires the old content."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        file_path = str(log_file)
+        old_content = _error_line("first pass line with plenty of length")
+        log_file.write_text(old_content, encoding="utf-8")
+
+        # A stale backup exists holding a copy of the same text, different inode
+        Path(f"{file_path}.1").write_text(old_content, encoding="utf-8")
+
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        # Truncate in place - inode is unchanged
+        inode_before = log_file.stat().st_ino
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write(_error_line("short"))
+        assert log_file.stat().st_ino == inode_before
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "short" in lines[0]
+
+    def test_normal_append_never_drains(self, tmp_path):
+        """No-overreach guard: an ordinary append never touches the drain path.
+
+        This test passes with and without the fix - it exists to prove the
+        drain does not run on the normal (non-shrink) path.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("first"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher.log_positions[file_path] = log_file.stat().st_size
+
+        # A backup with other content exists but must be ignored
+        Path(f"{file_path}.1").write_text(_error_line("backup only"), encoding="utf-8")
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("appended"))
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "appended" in lines[0]
+
+    def test_repeat_shrink_event_does_not_drain_twice(self, tmp_path):
+        """Two events after one rotation drain the tail exactly once."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("tail line"))
+
+        # Rotate, leaving the new live file EMPTY (nothing written yet)
+        _rotate_log(log_file)
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len([line for line in lines if "tail line" in line]) == 1
+
+    def test_unknown_inode_skips_drain(self, tmp_path):
+        """Position recorded without an inode (old state) disables the drain.
+
+        No-overreach guard: passes with and without the fix - it proves an
+        unknown inode degrades to exactly the pre-fix behaviour.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("tail line that is fairly long"), encoding="utf-8")
+        file_path = str(log_file)
+        # Position only - exactly what older on-disk state restores
+        watcher.log_positions[file_path] = log_file.stat().st_size
+
+        _rotate_log(log_file)
+        log_file.write_text(_error_line("new"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "new" in lines[0]
+
+    def test_rotated_file_smaller_than_position_skipped(self, tmp_path):
+        """A backup shorter than the recorded position is not drained."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("content"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        watcher.log_positions[file_path] = 9999
+
+        _rotate_log(log_file)
+        log_file.write_text(_error_line("new"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "new" in lines[0]
+
+    def test_drain_failure_does_not_block_new_file(self, tmp_path):
+        """An exception inside the drain never prevents reading the new file."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("old content that is long enough"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        _rotate_log(log_file)
+        log_file.write_text(_error_line("new"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_drain_rotated_tail", side_effect=RuntimeError("boom")):
+                with patch.object(watcher, "_process_log_line") as mock_proc:
+                    watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "new" in lines[0]
+
+    def test_record_position_tracks_inode(self, tmp_path):
+        """_record_position stores the current inode alongside the offset."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text("data\n", encoding="utf-8")
+        file_path = str(log_file)
+
+        watcher._record_position(file_path, 4)
+
+        assert watcher.log_positions[file_path] == 4
+        assert watcher.log_inodes[file_path] == log_file.stat().st_ino
+
+
+# ---------------------------------------------------------------------------
+# Tests -- BranchLogWatcher inode-based rotation detection
+# ---------------------------------------------------------------------------
+
+
+def _fresh_lines(count: int) -> list:
+    """Build a list of distinct full ERROR lines for the post-rotation file."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+    return [f"{now} | mod | ERROR | after rotation {i:03d}" for i in range(count)]
+
+
+class TestInodeRotationDetection:
+    """Tests for rotation detected by inode and located across the backup chain."""
+
+    def test_rotation_detected_when_new_file_already_grew(self, tmp_path):
+        """A fresh log already past the old offset is still detected as rotated.
+
+        The size-only check missed this entirely and seeked into the middle of
+        the brand new file, yielding a partial line.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("already seen") * 20, encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        recorded_pos = watcher.log_positions[file_path]
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("missed one"))
+
+        _rotate_chain(log_file)
+
+        # New file is LARGER than the recorded offset - there is no shrink to see
+        fresh = _fresh_lines(40)
+        log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
+        assert log_file.stat().st_size > recorded_pos
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("missed one" in line for line in lines)
+        # Read from position 0: every fresh line whole, none dropped, none partial
+        assert [line for line in lines if "after rotation" in line] == fresh
+        assert not any("already seen" in line for line in lines)
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_rotated_file_found_at_second_backup(self, tmp_path):
+        """Two rotations: the tail is drained from '.log.2' and a warning is emitted."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header line\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("tail from two rotations ago"))
+
+        tracked_inode = log_file.stat().st_ino
+        _rotate_chain(log_file)  # tracked file -> .log.1
+        _rotate_chain(log_file)  # tracked file -> .log.2
+        assert Path(f"{file_path}.2").stat().st_ino == tracked_inode
+
+        log_file.write_text(_error_line("brand new"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(lw, "logger") as mock_logger:
+                with patch.object(watcher, "_process_log_line") as mock_proc:
+                    watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert any("tail from two rotations ago" in line for line in lines)
+        assert any("brand new" in line for line in lines)
+
+        warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
+        assert any("not replayed" in warning and ".log.2" in warning for warning in warnings)
+
+    def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
+        """Inode matching nothing within the chain: nothing drained, new file read whole."""
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text("header\n", encoding="utf-8")
+        file_path = str(log_file)
+        watcher._record_position(file_path, log_file.stat().st_size)
+        tracked_inode = log_file.stat().st_ino
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("lost tail"))
+
+        # Four rotations push the tracked file to '.log.4' - past the depth cap
+        for _ in range(4):
+            _rotate_chain(log_file, backup_count=5)
+        assert Path(f"{file_path}.4").stat().st_ino == tracked_inode
+
+        fresh = _fresh_lines(40)
+        log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert not any("lost tail" in line for line in lines)
+        assert lines == fresh
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
+
+    def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
+        """No-overreach guard: same inode plus a full backup chain never drains.
+
+        Passes with and without the fix - it proves walking the chain did not
+        turn an in-place truncation into a false rotation.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        file_path = str(log_file)
+        for name in ("chain three", "chain two", "chain one"):
+            log_file.write_text(_error_line(name), encoding="utf-8")
+            _rotate_chain(log_file)
+
+        log_file.write_text(_error_line("live content line"), encoding="utf-8")
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        inode_before = log_file.stat().st_ino
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write(_error_line("short"))
+        assert log_file.stat().st_ino == inode_before
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "short" in lines[0]
+
+    def test_normal_append_with_backup_chain_never_drains(self, tmp_path):
+        """No-overreach guard: an append with backups present stays on the normal path.
+
+        Passes with and without the fix - it proves the chain walk only runs
+        when the inode actually changed.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        file_path = str(log_file)
+        for name in ("chain three", "chain two", "chain one"):
+            log_file.write_text(_error_line(name), encoding="utf-8")
+            _rotate_chain(log_file)
+
+        log_file.write_text(_error_line("first"), encoding="utf-8")
+        watcher._record_position(file_path, log_file.stat().st_size)
+
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_error_line("appended"))
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "appended" in lines[0]
+
+    def test_zero_inode_falls_back_to_size_check(self, tmp_path):
+        """No-overreach guard: a recorded inode of 0 is treated as unknown.
+
+        Passes with and without the fix - some Windows filesystems report
+        st_ino 0, which must never be trusted as a rotation signal.
+        """
+        lw = _import_log_watcher()
+        watcher = lw.BranchLogWatcher()
+
+        log_file = tmp_path / "core.log"
+        log_file.write_text(_error_line("tail line that is fairly long"), encoding="utf-8")
+        file_path = str(log_file)
+        watcher.log_positions[file_path] = log_file.stat().st_size
+        watcher.log_inodes[file_path] = 0
+
+        _rotate_chain(log_file)
+        log_file.write_text(_error_line("new"), encoding="utf-8")
+
+        with patch.object(lw, "_mark_data_dirty"):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
+
+        lines = _processed_lines(mock_proc)
+        assert len(lines) == 1
+        assert "new" in lines[0]
         assert watcher.log_positions[file_path] == log_file.stat().st_size
 
 
@@ -667,49 +1181,6 @@ class TestLoadSeenHashes:
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _save_seen_hashes
-# ---------------------------------------------------------------------------
-
-
-class TestSaveSeenHashes:
-    """Tests for _save_seen_hashes persistence."""
-
-    def test_saves_to_new_file(self, tmp_path):
-        """Creates trigger_data.json when it does not exist yet."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"hash1", "hash2"}
-        lw._save_seen_hashes()
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert set(written["seen_error_hashes"]) == {"hash1", "hash2"}
-
-    def test_merges_with_existing_data(self, tmp_path):
-        """Preserves other keys already in trigger_data.json."""
-        lw = _import_log_watcher()
-        data_file = tmp_path / "trigger_data.json"
-        data_file.write_text(
-            json.dumps({"log_positions": {"/a.log": 100}}),
-            encoding="utf-8",
-        )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"x"}
-        lw._save_seen_hashes()
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert written["log_positions"] == {"/a.log": 100}
-        assert written["seen_error_hashes"] == ["x"]
-
-    def test_handles_write_error(self, tmp_path):
-        """Write failure logs warning but does not raise."""
-        lw = _import_log_watcher()
-        bad_path = tmp_path / "nope" / "nope" / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = bad_path
-        lw._seen_error_hashes = {"z"}
-        with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
-            lw._save_seen_hashes()
-
-
-# ---------------------------------------------------------------------------
 # Tests -- _load_log_positions
 # ---------------------------------------------------------------------------
 
@@ -769,42 +1240,147 @@ class TestLoadLogPositions:
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _save_log_positions
+# Tests -- log_inodes persistence (parallel key, backward compatible)
 # ---------------------------------------------------------------------------
 
 
-class TestSaveLogPositions:
-    """Tests for _save_log_positions persistence."""
+class TestLogInodesPersistence:
+    """Tests for the 'log_inodes' key alongside 'log_positions'."""
 
-    def test_saves_positions_to_new_file(self, tmp_path):
-        """Creates file with log_positions key."""
+    def test_flush_and_load_round_trip(self, tmp_path):
+        """Positions and inodes round-trip through trigger_data.json."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         lw.TRIGGER_DATA_FILE = data_file
-        lw._save_log_positions({"/a.log": 50})
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/a.log": 50}
+        lw._active_watcher.log_inodes = {"/a.log": 4242}
+        lw._seen_error_hashes = set()
+
+        lw._flush_trigger_data(force=True)
+
+        assert lw._load_log_positions() == {"/a.log": 50}
+        assert lw._load_log_inodes() == {"/a.log": 4242}
+
+    def test_position_shape_unchanged(self, tmp_path):
+        """log_positions stays a plain Dict[str, int] - inodes live elsewhere."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        lw.TRIGGER_DATA_FILE = data_file
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/a.log": 50}
+        lw._active_watcher.log_inodes = {"/a.log": 4242}
+        lw._seen_error_hashes = set()
+
+        lw._flush_trigger_data(force=True)
+
         written = json.loads(data_file.read_text(encoding="utf-8"))
         assert written["log_positions"] == {"/a.log": 50}
+        assert written["log_inodes"] == {"/a.log": 4242}
 
-    def test_merges_with_existing_data(self, tmp_path):
-        """Preserves other keys in trigger_data.json."""
+    def test_old_format_state_loads_without_error(self, tmp_path):
+        """State written before this change (no log_inodes) still loads."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(
-            json.dumps({"seen_error_hashes": ["abc"]}),
+            json.dumps({"log_positions": {"/a.log": 12}, "seen_error_hashes": ["abc"]}),
             encoding="utf-8",
         )
         lw.TRIGGER_DATA_FILE = data_file
-        lw._save_log_positions({"/b.log": 77})
-        written = json.loads(data_file.read_text(encoding="utf-8"))
-        assert written["seen_error_hashes"] == ["abc"]
-        assert written["log_positions"] == {"/b.log": 77}
 
-    def test_handles_write_error(self, tmp_path):
-        """Write failure logs warning but does not raise."""
+        assert lw._load_log_positions() == {"/a.log": 12}
+        assert lw._load_log_inodes() == {}
+
+    def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path):
+        """A flush with no active watcher does not wipe on-disk position state.
+
+        With no watcher there is no in-memory position state to write, so
+        log_positions/log_inodes already on disk must survive the hash-only
+        flush rather than being clobbered with empty dicts.
+        """
         lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "trigger_data.json"
-        with patch.object(lw, "atomic_write_json", side_effect=OSError("disk full")):
-            lw._save_log_positions({"/c.log": 10})
+        data_file = tmp_path / "trigger_data.json"
+        data_file.write_text(
+            json.dumps({"log_positions": {"/a.log": 50}, "log_inodes": {"/a.log": 7}}),
+            encoding="utf-8",
+        )
+        lw.TRIGGER_DATA_FILE = data_file
+        lw._active_watcher = None
+        lw._seen_error_hashes = {"h1"}
+
+        lw._flush_trigger_data(force=True)
+
+        written = json.loads(data_file.read_text(encoding="utf-8"))
+        assert written["log_positions"] == {"/a.log": 50}
+        assert written["log_inodes"] == {"/a.log": 7}
+        assert written["seen_error_hashes"] == ["h1"]
+
+    def test_load_returns_empty_for_missing_file(self, tmp_path):
+        """Missing trigger_data.json yields an empty inode map."""
+        lw = _import_log_watcher()
+        lw.TRIGGER_DATA_FILE = tmp_path / "nope.json"
+        assert lw._load_log_inodes() == {}
+
+    def test_load_returns_empty_when_not_dict(self, tmp_path):
+        """Non-dict log_inodes value is ignored."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        data_file.write_text(json.dumps({"log_inodes": "nope"}), encoding="utf-8")
+        lw.TRIGGER_DATA_FILE = data_file
+        assert lw._load_log_inodes() == {}
+
+    def test_flush_persists_inodes(self, tmp_path):
+        """_flush_trigger_data writes the watcher's inodes to disk."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        lw.TRIGGER_DATA_FILE = data_file
+        lw._data_dirty = True
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/x.log": 42}
+        lw._active_watcher.log_inodes = {"/x.log": 909}
+        lw._seen_error_hashes = set()
+
+        lw._flush_trigger_data(force=True)
+
+        assert lw._load_log_inodes() == {"/x.log": 909}
+
+    def test_initialize_positions_records_inodes(self, tmp_path):
+        """initialize_positions records an inode for every tracked file."""
+        lw = _import_log_watcher()
+        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
+        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
+        lw._load_log_positions = MagicMock(return_value={})
+        branch_logs = tmp_path / "aipass" / "flow" / "logs"
+        branch_logs.mkdir(parents=True)
+        log_file = branch_logs / "core.log"
+        log_file.write_text("line1\nline2\n")
+
+        watcher = lw.BranchLogWatcher()
+        watcher.initialize_positions()
+
+        assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
+
+    def test_initialize_positions_with_old_state(self, tmp_path):
+        """Old-format persisted state (no log_inodes) initializes cleanly."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        lw.TRIGGER_DATA_FILE = data_file
+        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
+        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
+        branch_logs = tmp_path / "aipass" / "flow" / "logs"
+        branch_logs.mkdir(parents=True)
+        log_file = branch_logs / "core.log"
+        log_file.write_text("line1\nline2\n")
+        data_file.write_text(
+            json.dumps({"log_positions": {str(log_file): 6}}),
+            encoding="utf-8",
+        )
+
+        watcher = lw.BranchLogWatcher()
+        watcher.initialize_positions()
+
+        assert watcher.log_positions[str(log_file)] == 6
+        assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +1400,7 @@ class TestDebouncedWriter:
         lw._data_dirty = False
         lw._active_watcher = MagicMock()
         lw._active_watcher.log_positions = {"/a.log": 100}
+        lw._active_watcher.log_inodes = {"/a.log": 111}
 
         write_count = 0
         real_write = lw.atomic_write_json
@@ -848,6 +1425,7 @@ class TestDebouncedWriter:
         lw._data_dirty = True
         lw._active_watcher = MagicMock()
         lw._active_watcher.log_positions = {"/x.log": 42}
+        lw._active_watcher.log_inodes = {"/x.log": 4242}
         lw._seen_error_hashes = {"hash1", "hash2"}
 
         lw._flush_trigger_data(force=True)
@@ -856,6 +1434,45 @@ class TestDebouncedWriter:
         assert data["log_positions"] == {"/x.log": 42}
         assert set(data["seen_error_hashes"]) == {"hash1", "hash2"}
 
+    def test_flush_merges_with_existing_data(self, tmp_path):
+        """Unrelated keys already in trigger_data.json survive a flush."""
+        lw = _import_log_watcher()
+        data_file = tmp_path / "trigger_data.json"
+        data_file.write_text(
+            json.dumps({"unrelated_key": {"keep": "me"}}),
+            encoding="utf-8",
+        )
+        lw.TRIGGER_DATA_FILE = data_file
+        lw._data_dirty = True
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/b.log": 77}
+        lw._active_watcher.log_inodes = {"/b.log": 7777}
+        lw._seen_error_hashes = {"x"}
+
+        lw._flush_trigger_data(force=True)
+
+        written = json.loads(data_file.read_text(encoding="utf-8"))
+        assert written["unrelated_key"] == {"keep": "me"}
+        assert written["log_positions"] == {"/b.log": 77}
+        assert written["seen_error_hashes"] == ["x"]
+
+    def test_flush_handles_write_error(self, tmp_path):
+        """Write failure logs a warning but does not raise."""
+        lw = _import_log_watcher()
+        lw.TRIGGER_DATA_FILE = tmp_path / "trigger_data.json"
+        lw._data_dirty = True
+        lw._active_watcher = MagicMock()
+        lw._active_watcher.log_positions = {"/c.log": 10}
+        lw._active_watcher.log_inodes = {"/c.log": 1010}
+        lw._seen_error_hashes = {"z"}
+
+        with patch.object(lw, "logger") as mock_logger:
+            with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
+                lw._flush_trigger_data(force=True)
+
+        warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
+        assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
+
     def test_restart_survival(self, tmp_path):
         """Flushed data survives reload — positions and hashes intact."""
         lw = _import_log_watcher()
@@ -863,6 +1480,7 @@ class TestDebouncedWriter:
         lw.TRIGGER_DATA_FILE = data_file
         lw._active_watcher = MagicMock()
         lw._active_watcher.log_positions = {"/srv.log": 999}
+        lw._active_watcher.log_inodes = {"/srv.log": 777}
         lw._seen_error_hashes = {"abc", "def"}
         lw._data_dirty = True
 
@@ -882,6 +1500,7 @@ class TestDebouncedWriter:
         lw._data_dirty = False
         lw._active_watcher = MagicMock()
         lw._active_watcher.log_positions = {"/f.log": 10}
+        lw._active_watcher.log_inodes = {"/f.log": 1010}
         lw._seen_error_hashes = set()
 
         lw._flush_trigger_data(force=True)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-08-04
 # =============================================
 
 """Tests for prax config handlers — covers load.py functions
@@ -14,6 +14,7 @@ get_debug_prints_enabled, load_log_config) and ignore_patterns.py
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 
 # =============================================
@@ -405,6 +406,80 @@ class TestLoadLogConfig:
         result = load_mod.load_log_config()
         assert "asctime" in result["log_format"]
         assert "%Y-%m-%d" in result["date_format"]
+
+    def test_defaults_keep_three_backups(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        # Retained history scales with backup_count, so this number IS the
+        # forensic window: 1 -> 3 triples the floor and doubles the ceiling.
+        # Measured 2026-08-04, hooks_engine.log held 45 min at 1 backup.
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        assert load_mod.DEFAULT_SYSTEM_LOGS["backup_count"] == 3
+        assert load_mod.DEFAULT_LOCAL_LOGS["backup_count"] == 3
+
+    def test_warns_when_config_file_has_no_log_sections(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(load_mod, "logger", mock_logger)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        # The exact shape the shipped file had: retention keys one level too
+        # high, where no reader ever looks.
+        config_file.write_text(json.dumps({"config": {"backup_count": 5, "max_log_size_mb": 10}}), encoding="utf-8")
+
+        result = load_mod.load_log_config()
+
+        assert result["system_logs"] == load_mod.DEFAULT_SYSTEM_LOGS
+        assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args[0][2] == "system_logs or local_logs"
+
+    def test_warning_names_only_the_missing_section(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(load_mod, "logger", mock_logger)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_data = {"config": {"system_logs": {"max_lines": 3000, "backup_count": 5, "log_level": "ERROR"}}}
+        config_file.write_text(json.dumps(config_data), encoding="utf-8")
+
+        load_mod.load_log_config()
+
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args[0][2] == "local_logs"
+
+    def test_schema_warning_fires_once_per_process(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        # Every logger init fleet-wide calls this, and prax's own log sits in the
+        # directory prax watches — an unguarded warning would feed itself.
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(load_mod, "logger", mock_logger)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(json.dumps({"config": {}}), encoding="utf-8")
+
+        for _ in range(5):
+            load_mod.load_log_config()
+
+        assert mock_logger.warning.call_count == 1
+
+    def test_no_warning_when_both_sections_present(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(load_mod, "logger", mock_logger)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_data = {
+            "config": {
+                "system_logs": {"max_lines": 2000, "backup_count": 4, "log_level": "DEBUG"},
+                "local_logs": {"max_lines": 500, "backup_count": 2, "log_level": "WARNING"},
+            }
+        }
+        config_file.write_text(json.dumps(config_data), encoding="utf-8")
+
+        result = load_mod.load_log_config()
+
+        assert result["system_logs"]["backup_count"] == 4
+        assert result["local_logs"]["backup_count"] == 2
+        mock_logger.warning.assert_not_called()
 
 
 # =============================================

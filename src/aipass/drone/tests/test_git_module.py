@@ -41,6 +41,8 @@ from aipass.drone.apps.modules.git_module import (
 )
 from aipass.trigger.apps.modules import core as trigger_core
 
+from .conftest import make_owner_project
+
 
 # ===========================================================================
 # Fixtures
@@ -199,6 +201,20 @@ class TestFindRepoRoot:
         os.chdir(str(subdir))
         root = find_repo_root()
         assert root == lock_dir
+
+    def test_finds_external_project_registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Any *_REGISTRY.json marks a root, not only AIPass's own (DPLAN-0281).
+
+        External projects name theirs after themselves. Matching only the AIPass
+        filename sent them to the rev-parse fallback while registry resolution
+        (find_registry, which globs) found the real root — so the lock and the
+        registry could disagree about where the project even is.
+        """
+        (tmp_path / "VERA-STUDIO_REGISTRY.json").write_text("{}", encoding="utf-8")
+        subdir = tmp_path / "src" / "vera"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+        assert find_repo_root() == tmp_path
 
     def test_fallback_to_git(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Falls back to git rev-parse when no registry found."""
@@ -870,6 +886,45 @@ class TestGitModuleRouting:
         monkeypatch.chdir(tmp_path)
         result = handle_command("pr", ["some description"])
         assert result["exit_code"] == 1
+
+
+class TestGitModuleRealAuth:
+    """End-to-end routing with the REAL gate — nothing patched.
+
+    Every other test in this file stubs verify_git_access, so a gate that
+    authorized nobody at all would still show a green suite. These commands are
+    chosen to stop at a harmless error AFTER the auth check, so they exercise the
+    real path without touching a repo (DPLAN-0281, dispatch 05b22424).
+    """
+
+    def test_owner_reaches_the_handler(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A genuine manager at home clears auth and lands in the handler.
+
+        The '--force' complaint is the proof: that error is raised past the gate.
+        """
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        result = handle_command("unlock")
+        assert result["exit_code"] == 1
+        assert "--force" in result["stderr"]
+        assert "not authorized" not in result["stderr"].lower()
+
+    def test_non_manager_stopped_at_the_gate(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The same command, one fact broken — refused before the handler runs."""
+        make_owner_project(tmp_path, citizen_class="builder")
+        monkeypatch.chdir(tmp_path)
+        result = handle_command("unlock")
+        assert result["exit_code"] == 1
+        assert "not authorized" in result["stderr"].lower()
+        assert "--force" not in result["stderr"]
+
+    def test_global_tier_needs_no_ownership(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Read-only routing still works for a citizen who owns nothing."""
+        make_owner_project(tmp_path, branch="seedgo", citizen_class="builder", owner=False)
+        monkeypatch.chdir(tmp_path)
+        result = handle_command("lock")
+        assert result["exit_code"] == 0
+        assert json.loads(result["stdout"])["locked"] is False
 
 
 class TestDetectBranchDir:

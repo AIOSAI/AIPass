@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.5.2
+version: 1.6.0
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]
@@ -88,6 +88,23 @@ Root-privileged pieces live as reviewable repo files in `tools/suspend/`, instal
 - `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: masking those wakes made suspend real and trapped the conversation (ruling 2026-08-02, compass #216). Compass #217 later superseded the reasoning — the machine now stays awake 24/7 and `/lock` replaces `/suspend` entirely — but the opt-in default stands, and the unit is disabled on this machine.
 
 **Honest status:** `/suspend` is **retired from daily use and grounded** as of 2026-08-02 (Patrick's ruling, compass #217) — do not live-test it without him. The v1.5.0 rework worked as designed in a live soak, and Patrick still hit the wall: fixed suspend is still suspend, and real sleep is real disconnect. So the machine now stays awake 24/7 and `/lock` is the daily driver. The verb stays shipped and tested as a battery-saver, with `suspend_enabled` as the parking brake; it has still never passed a hands-off overnight soak (DPLAN-0270 test-matrix step T4). Full deployment picture: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).
+
+## Slash passthrough and the /context relay
+
+An unregistered `/xyz` message must never reach tmux raw — the TUI's slash menu fuzzy-autocompletes unknown commands into unrelated registered ones. `_guard_slash_injection()` prefixes a space to anything not on the exact-match allowlist, so the TUI treats it as plain text. Two allowlists feed that one guard:
+
+- **Side-effect commands** (`DEFAULT_PASSTHROUGH_COMMANDS` — `clear`, `compact`, `prep`, `memo`; config key `passthrough_commands`) — injected as-is, fire and forget, normal pending-file flow.
+- **Informational commands** (`DEFAULT_INFORMATIONAL_COMMANDS` — `context`; config key `informational_commands`) — injected as-is, then their stdout is relayed back to the chat.
+
+**Why informational commands need their own completion path.** A CC local command produces **no assistant turn** — the caveat wrapper suppresses a reply — so the Stop hook never fires. Writing a pending file for one would leave it undelivered until `PENDING_STUCK_TIMEOUT_SECONDS` gave up: a fresh flavour of the S179 stuck-pending bug. So `_handle_informational_command()` writes **no pending file and starts no heartbeat**. It captures a transcript line-count baseline, injects, and hands off to `_relay_slash_stdout()` on a daemon thread, which polls every `SLASH_STDOUT_POLL_INTERVAL` (1s) up to `SLASH_STDOUT_TIMEOUT_SECONDS` (90s) and then either relays the panel or edits the placeholder to an honest "no output appeared" message. Either way it terminates.
+
+**Two transcript shapes, both handled.** CC writes a local command's stdout as `type=system, subtype=local_command` with the payload at the **top-level `content`** key (older builds used `message.content` — both are read), wrapped in `<local-command-stdout>…</local-command-stdout>`. Current CC emits `/context` *twice*: the ANSI-art TUI panel, immediately followed by an `isMeta` user entry carrying the same content as clean markdown. The twin is preferred; the search for it is bounded to `TWIN_LOOKAHEAD_ENTRIES` (3) so a later command's meta entry can't be mistaken for this one's output. If only the ANSI panel is present the relay spends exactly one extra poll waiting for the twin, then relays the escape-stripped panel rather than losing the output.
+
+**Scope guard — no surprise echo.** The relay only ever runs for a command the bot itself injected, enforced twice over: the watcher starts only from `handle_message` (a TG-inbound message), and the scan is bounded to transcript lines written *after* the injection baseline. A `/context` run at the desk or via remote control cannot reach the phone.
+
+**Formatting.** Output is markdown tables, which Telegram does not render at all, so `_format_stdout_for_telegram()` strips ANSI, escapes `&`/`<`/`>`, and wraps in `<pre>` — sent with `parse_mode="HTML"` via the optional `send_message(..., parse_mode=...)` argument. Everything else still sends as plain text with no parse mode. Chunking wraps each chunk separately, so a `<pre>` is never split across two messages.
+
+**`/cost` is deliberately not allowlisted.** It has never been run on this machine, so its transcript shape is unverified — the allowlist takes only commands whose output shape has actually been observed. Add it via the `informational_commands` config key once someone has confirmed it behaves like `/context`.
 
 ## Streaming replies (DPLAN-0229)
 

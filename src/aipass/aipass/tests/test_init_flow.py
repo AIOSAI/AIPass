@@ -681,6 +681,9 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
+            # Subject here is the sync-registry branch; git-auth provisioning
+            # (which needs a real project on disk) has its own suite below.
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=check_proc) as mock_run,
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.success") as mock_success,
@@ -703,6 +706,9 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
+            # Subject here is the sync-registry branch; git-auth provisioning
+            # (which needs a real project on disk) has its own suite below.
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(
                 f"{_MOD_UPDATE}.subprocess.run",
                 side_effect=[check_proc, fix_proc],
@@ -729,6 +735,9 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
+            # Subject here is the sync-registry branch; git-auth provisioning
+            # (which needs a real project on disk) has its own suite below.
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(
                 f"{_MOD_UPDATE}.subprocess.run",
                 side_effect=[check_proc, fix_proc],
@@ -747,6 +756,9 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
+            # Subject here is the sync-registry branch; git-auth provisioning
+            # (which needs a real project on disk) has its own suite below.
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=FileNotFoundError("drone not found")),
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.json_handler"),
@@ -763,12 +775,127 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
+            # Subject here is the sync-registry branch; git-auth provisioning
+            # (which needs a real project on disk) has its own suite below.
+            patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=_sp.TimeoutExpired(cmd="drone", timeout=30)),
             patch(f"{_MOD_UPDATE}.console"),
             patch(f"{_MOD_UPDATE}.json_handler"),
         ):
             rc = _handle_init_update([str(tmp_path)])
         assert rc == 0
+
+
+class TestInitUpdateGitAuth:
+    """Tests for git-auth provisioning wired into `aipass init update` (DPLAN-0281 P2)."""
+
+    @staticmethod
+    def _project(root: Path, citizen_class: str = "builder") -> None:
+        """Write a minimal external project whose owner is one flip from git."""
+        (root / "DEMO_REGISTRY.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {"id": "abc-123"},
+                    "branches": [{"name": "VERA", "path": "src/demo/vera", "owner": True}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        passport = root / "src" / "demo" / "vera" / ".trinity" / "passport.json"
+        passport.parent.mkdir(parents=True)
+        passport.write_text(
+            json.dumps(
+                {
+                    "branch_info": {"branch_name": "VERA"},
+                    "identity": {"citizen_class": citizen_class},
+                    "citizenship": {"registry_id": "abc-123"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_update_provisions_git_auth_after_sync(self, tmp_path: Path) -> None:
+        """The class flip lands, and it runs AFTER sync-registry (which may migrate it)."""
+        self._project(tmp_path)
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.init.bootstrap.update_project",
+                return_value={"updated_files": [], "already_current": []},
+            ),
+            patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+            patch(f"{_MOD_UPDATE}.console"),
+            patch(f"{_MOD_UPDATE}.success") as mock_success,
+            patch(f"{_MOD_UPDATE}.json_handler"),
+        ):
+            rc = _handle_init_update([str(tmp_path)])
+
+        assert rc == 0
+        passport = json.loads(
+            (tmp_path / "src" / "demo" / "vera" / ".trinity" / "passport.json").read_text(encoding="utf-8")
+        )
+        assert passport["identity"]["citizen_class"] == "manager"
+        assert any("Verified against all four" in str(c) for c in mock_success.call_args_list)
+
+    def test_update_reports_honest_no_op(self, tmp_path: Path) -> None:
+        """An already-provisioned owner is reported as nothing to repair, not as a repair."""
+        self._project(tmp_path, citizen_class="manager")
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.init.bootstrap.update_project",
+                return_value={"updated_files": [], "already_current": []},
+            ),
+            patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+            patch(f"{_MOD_UPDATE}.console"),
+            patch(f"{_MOD_UPDATE}.success") as mock_success,
+            patch(f"{_MOD_UPDATE}.json_handler"),
+        ):
+            rc = _handle_init_update([str(tmp_path)])
+
+        assert rc == 0
+        assert any("nothing to repair" in str(c) for c in mock_success.call_args_list)
+
+    def test_refusal_exits_nonzero_and_names_the_fix(self, tmp_path: Path) -> None:
+        """No citizen marked owner — update refuses instead of guessing one."""
+        (tmp_path / "DEMO_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"id": "abc-123"}, "branches": [{"name": "VERA", "path": "src/demo/vera"}]}),
+            encoding="utf-8",
+        )
+        with (
+            patch(
+                "aipass.aipass.apps.handlers.init.bootstrap.update_project",
+                return_value={"updated_files": [], "already_current": []},
+            ),
+            patch(f"{_MOD_UPDATE}.subprocess.run", return_value=MagicMock(returncode=0, stdout="", stderr="")),
+            patch(f"{_MOD_UPDATE}.console"),
+            patch(f"{_MOD_UPDATE}.success"),
+            patch(f"{_MOD_UPDATE}.cli_error") as mock_error,
+            patch(f"{_MOD_UPDATE}.json_handler"),
+        ):
+            rc = _handle_init_update([str(tmp_path)])
+
+        assert rc == 1
+        assert any('"owner": true' in str(c) for c in mock_error.call_args_list)
+
+    def test_dry_run_skips_the_scaffold_refresh_and_writes_nothing(self, tmp_path: Path) -> None:
+        """--dry-run touches nothing: no scaffold refresh, no sync-registry, no writes."""
+        self._project(tmp_path)
+        passport_path = tmp_path / "src" / "demo" / "vera" / ".trinity" / "passport.json"
+        before = passport_path.read_text(encoding="utf-8")
+
+        with (
+            patch("aipass.aipass.apps.handlers.init.bootstrap.update_project") as mock_update,
+            patch(f"{_MOD_UPDATE}.subprocess.run") as mock_run,
+            patch(f"{_MOD_UPDATE}.console"),
+            patch(f"{_MOD_UPDATE}.success") as mock_success,
+            patch(f"{_MOD_UPDATE}.json_handler"),
+        ):
+            rc = _handle_init_update([str(tmp_path), "--dry-run"])
+
+        assert rc == 0
+        mock_update.assert_not_called()
+        mock_run.assert_not_called()
+        assert passport_path.read_text(encoding="utf-8") == before
+        assert any("would repair" in str(c) for c in mock_success.call_args_list)
 
 
 # =============================================================================

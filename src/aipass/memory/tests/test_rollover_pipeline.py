@@ -892,6 +892,155 @@ class TestAutoCompactSnapshotBudget:
         assert "regular newest" in remaining_summaries
 
 
+class TestNewestFirstOrderingGuard:
+    """Rollover must not trust stored order — the tail is only 'oldest' if the array is newest-first."""
+
+    def test_oldest_first_array_is_reordered_before_archiving(self, monkeypatch, tmp_path):
+        """An oldest-first sessions[] must be re-sorted so the newest entry is never archived."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        # Stored OLDEST-first: #1 at head, #4 (newest) at the tail
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 1, "date": "2026-01-01", "summary": "oldest", "status": "completed"},
+                {"number": 2, "date": "2026-01-02", "summary": "second", "status": "completed"},
+                {"number": 3, "date": "2026-01-03", "summary": "third", "status": "completed"},
+                {"number": 4, "date": "2026-01-04", "summary": "NEWEST", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 3}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        archived = [e["summary"] for e in result["extracted"]]
+        # Without the guard the tail (#4 NEWEST) would have been archived
+        assert "NEWEST" not in archived
+        assert archived == ["oldest"]
+        assert [e["number"] for e in data["sessions"]] == [4, 3, 2]
+
+    def test_commons_mixed_order_regression(self, monkeypatch, tmp_path):
+        """Regression: newest correctly prepended above an oldest-first legacy block.
+
+        This is the live @commons shape that the safety valve alone could not catch —
+        head #16 makes the misordered legacy tail (#13) look like plausible old history.
+        """
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        sessions = [{"number": 16, "date": "2026-08-07", "summary": "newest prepended", "status": "completed"}]
+        sessions += [
+            {"number": n, "date": "2026-03-28", "summary": f"legacy-{n}", "status": "completed"} for n in range(1, 14)
+        ]
+        data = {"document_metadata": {"schema_version": "3.0.0", "status": {}}, "sessions": sessions}
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 13}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        archived = [e["summary"] for e in result["extracted"]]
+        # legacy-13 was the stored tail and would have been eaten as "oldest"
+        assert "legacy-13" not in archived
+        assert archived == ["legacy-1"]
+        assert data["sessions"][0]["number"] == 16
+        assert data["sessions"][-1]["number"] == 2
+
+    def test_order_repair_persisted_when_nothing_archived(self, monkeypatch, tmp_path):
+        """A reorder with no excess must still be written, or the fault recurs next run."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 1, "date": "2026-01-01", "summary": "oldest", "status": "completed"},
+                {"number": 2, "date": "2026-01-02", "summary": "newest", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        # count=10 -> nothing exceeds the limit, so nothing is archived
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 10}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        writer = mocks["memory_files"].write_memory_file_simple
+        writer.reset_mock()
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is True
+        # the repair must be handed to the writer even though nothing was archived
+        writer.assert_called_once()
+        written_data = writer.call_args[0][1]
+        assert [e["number"] for e in written_data["sessions"]] == [2, 1]
+
+    def test_correctly_ordered_array_is_left_untouched(self, monkeypatch, tmp_path):
+        """No spurious rewrite when the array is already newest-first."""
+        ext, mocks = _import_extractor(monkeypatch)
+        branch_key = tmp_path.name.lower()
+
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": [
+                {"number": 3, "date": "2026-01-03", "summary": "newest", "status": "completed"},
+                {"number": 2, "date": "2026-01-02", "summary": "middle", "status": "completed"},
+                {"number": 1, "date": "2026-01-01", "summary": "oldest", "status": "completed"},
+            ],
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {branch_key: {"local": {"sessions": {"count": 10}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        writer = mocks["memory_files"].write_memory_file_simple
+        writer.reset_mock()
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is True
+        # already correct — no repair write should be issued at all
+        writer.assert_not_called()
+        assert [e["number"] for e in data["sessions"]] == [3, 2, 1]
+
+    def test_entries_without_numbers_are_not_reordered(self, monkeypatch, tmp_path):
+        """Arrays lacking numeric 'number' fields must pass through unchanged."""
+        ext, _ = _import_extractor(monkeypatch)
+        entries = [{"summary": "a"}, {"summary": "b"}]
+        result, repaired = ext._ensure_newest_first(entries, "sessions", "test")
+        assert repaired is False
+        assert result == entries
+
+
 # ===========================================================================
 # Tests: modules.rollover.run_rollover
 # ===========================================================================

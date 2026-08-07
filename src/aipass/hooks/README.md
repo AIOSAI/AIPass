@@ -132,6 +132,23 @@ src/aipass/hooks/
 6. Exit code 2 without JSON = crash (log error, continue to next hook)
 7. All hook stdout concatenated and returned to platform
 
+## Two Log Streams
+
+Hook execution is recorded twice, at different levels of detail:
+
+| Stream | Contents | Default |
+|--------|----------|---------|
+| `logs/engine.jsonl` | Every hook — agent, exit code, timing, stderr, cwd. Source of truth for diagnostics. | Always on |
+| `system_logs/hooks_engine.log` (prax) | Warnings, errors, blocks, engine lifecycle. Per-hook narration suppressed. | Quiet |
+
+Per-hook narration ran ~3 lines per tool call, which dominated the prax stream and tripped the runaway detector during ordinary multi-agent operation. It is off by default; nothing is lost, since `engine.jsonl` carries strictly more detail.
+
+```bash
+AIPASS_HOOKS_VERBOSE_LOG=1    # restore per-hook lines in the prax stream
+```
+
+prax's `SystemLogger` exposes only `info`/`warning`/`error`, so there is no DEBUG level to demote to — the switch lives in `engine._log_detail()`. Blocks, crashes, timeouts, and trust-break banners are never suppressed.
+
 ## Dynamic Dispatch
 
 Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used. Each handler has been verified wired in `hooks.json` and confirmed firing in `engine.jsonl`.

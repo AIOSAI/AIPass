@@ -414,3 +414,36 @@ class TestInfrastructureMocking:
 def test_unknown_returns_false():
     """validate_json_structure returns False for unrecognized json_type."""
     assert jh_mod.validate_json_structure({}, "bogus") is False
+
+
+# =============================================================================
+# save_path / load_path: arbitrary-path round trip
+# =============================================================================
+
+
+class TestSavePath:
+    """Tests for save_path — the atomic writer git-auth provisioning relies on."""
+
+    def test_round_trips_through_load_path(self, tmp_path):
+        """Data written by save_path reads back identically via load_path."""
+        target = tmp_path / "nested" / "DEMO_REGISTRY.json"
+        payload = {"metadata": {"id": "abc-123"}, "branches": [{"name": "VERA", "owner": True}]}
+
+        assert jh_mod.save_path(target, payload) is True
+        assert jh_mod.load_path(target) == payload
+
+    def test_overwrite_leaves_no_temp_files(self, tmp_path):
+        """A second write replaces the file without leaving .tmp debris behind."""
+        target = tmp_path / "state.json"
+        jh_mod.save_path(target, {"v": 1})
+        jh_mod.save_path(target, {"v": 2})
+
+        assert jh_mod.load_path(target) == {"v": 2}
+        assert [p.name for p in tmp_path.iterdir()] == ["state.json"]
+
+    def test_returns_false_when_the_path_is_unwritable(self, tmp_path):
+        """An OS error is reported as False, never as a silent success."""
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+
+        assert jh_mod.save_path(blocker / "child.json", {"a": 1}) is False

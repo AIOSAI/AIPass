@@ -28,7 +28,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from aipass.ai_mail.apps.handlers.users.user import get_user_by_email, get_all_users
+from aipass.ai_mail.apps.handlers.users.user import get_all_users, get_current_user, get_user_by_email
 
 
 # ─── Fixtures ────────────────────────────────────────────
@@ -267,3 +267,62 @@ class TestGetAllUsersPaths:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", fake_path):
             users = get_all_users()
             assert users == {}
+
+
+# ─── Detection-failure diagnostics (error 0bd8b4f5) ──────
+#
+# drone runs the target branch with cwd=<target branch>, so Path.cwd() inside
+# ai_mail is ALWAYS a valid branch dir and is never the cause of failure.
+# Sender identity comes from the AIPASS_CALLER_* env vars. The old message
+# blamed the (valid) working directory and sent two investigations chasing a
+# phantom passport problem.
+
+
+class TestDetectionFailureDiagnostics:
+    """get_current_user()'s failure message must name the real cause."""
+
+    def test_non_branch_caller_cwd_names_the_env_var(self, tmp_path, monkeypatch):
+        """Caller ran drone from outside a branch — say so, and name the path."""
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        with pytest.raises(RuntimeError) as exc_info:
+            get_current_user()
+
+        msg = str(exc_info.value)
+        assert "AIPASS_CALLER_CWD" in msg
+        assert str(tmp_path) in msg
+        assert "not inside a branch" in msg
+
+    def test_failure_message_does_not_blame_the_valid_cwd(self, tmp_path, monkeypatch):
+        """The process CWD is valid — it must not be presented as the cause."""
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        with pytest.raises(RuntimeError) as exc_info:
+            get_current_user()
+
+        msg = str(exc_info.value)
+        # The old wording told the reader to go look for a passport in cwd
+        assert "must be called from within a branch directory" not in msg
+        assert "informational only" in msg
+
+    def test_unknown_caller_branch_reported(self, monkeypatch):
+        """An unresolvable AIPASS_CALLER_BRANCH is named explicitly."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ghostbranch")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            get_current_user()
+
+        msg = str(exc_info.value)
+        assert "ghostbranch" in msg
+        assert "not a known sender" in msg
+
+    def test_fingerprint_prefix_preserved(self, tmp_path, monkeypatch):
+        """Keep the BRANCH DETECTION FAILED prefix — trigger fingerprints on it."""
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+        with pytest.raises(RuntimeError, match="BRANCH DETECTION FAILED"):
+            get_current_user()

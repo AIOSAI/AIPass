@@ -42,7 +42,7 @@ aipass/
 │   ├── handlers/
 │   │   ├── cross_os/                      # Cross-OS pre-flight: gap_registry, preflight, run_record
 │   │   ├── handoff_platform/              # Platform-specific handoff detection
-│   │   ├── init/                          # bootstrap.py, scaffold_content.py
+│   │   ├── init/                          # bootstrap.py, scaffold_content.py, git_auth.py
 │   │   ├── new_project/                   # Project creation logic (registry, template, scaffold, git init)
 │   │   │   └── adopt.py                   # Project adoption logic (additive scaffold onto an existing dir)
 │   │   ├── json/                          # JSON read/write utilities
@@ -53,7 +53,7 @@ aipass/
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
 │   │   └── ui/                            # Progress bars, menus, banners
 │   └── plugins/
-├── tests/                                 # 785 passing
+├── tests/                                 # 934 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -72,6 +72,8 @@ aipass/
 | `aipass doctor --cross-os --e2e` | ...also runs the real e2e wiring suite (heavy, opt-in) |
 | `aipass doctor --cross-os --record [PATH]` | Write a machine-filled Run Record for the human acceptance pass |
 | `aipass init` | 10-stage guided setup (resumable) |
+| `aipass init update [target]` | Refresh managed scaffold + provision owner-tier git auth |
+| `aipass init update --dry-run` | Preview the git-auth repairs only — writes nothing |
 | `aipass install` | One-command bootstrap — clone + setup.sh + hooks, then hand off to init |
 | `aipass profile` | Show/edit user profile |
 | `aipass new <name>` | Create a project in projects/ — own git repo, AIPass scaffold, resident agent |
@@ -103,7 +105,7 @@ Humans only. Nothing in AIPass depends on this branch.
 
 ## Tests
 
-723 passing — `pytest src/aipass/aipass/tests/`
+934 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 
@@ -111,4 +113,4 @@ Humans only. Nothing in AIPass depends on this branch.
 
 ## Last Updated
 
-Last Updated: 2026-07-17
+Last Updated: 2026-08-04

@@ -9,6 +9,298 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-07] — cross-project walls down: the Vera arc lands end to end
+
+*Release v2.7.14 (PR #727, 26 commits) rolls up this section plus
+[2026-08-04] (manager-class git auth + fleet self-repair) and the
+[2026-08-02] TG slash relay section below: the hardcoded-registry bug class
+fixed at all four instances, the cross-project feedback round trip closed
+both directions, external projects provisioned for owner-tier git, and a
+train of trigger/hooks/prax reliability fixes.*
+
+**fix(ai_mail)** — cross-project conversations continue past one round
+(reply.py 1.1.0, by @ai_mail on Patrick's order): (1) outgoing replies now
+stamp `reply_path` = the replying branch's own inbox — derived from
+from_branch_path, deliberately not caller-env resolution, so a return
+address can never point at someone else's inbox; previously replies-to-
+replies died with "Could not find branch for @vera" because delivered
+replies carried no return address. (2) `_validate_reply_path` accepts any
+`*_REGISTRY.json` ancestor — fourth instance of the hardcoded-registry bug
+class (compass #229), outbound direction: delivery toward external projects
+was rejected because their ancestors hold PROJECTNAME_REGISTRY.json. 860
+ai_mail tests (+5, fixtures use external registry names, canary-reverted to
+prove the tests see the fixes), seedgo 100%. Live-proved by devpulse with a
+two-round conversation through VERA's real inbox: the previously-dead
+reply-to-a-reply delivered, and its own delivered copy carries the return
+address for the next round — the loop is now indefinite in both directions.
+
+**fix(devpulse)** — wall 3 down, cross-project feedback round trip closed
+(compose 1.3.0): delivered replies now carry `reply_to: "@devpulse:feedback"`.
+Patrick ruling: the feedback loop is cross-project BY DESIGN — no boundary
+protection applies, and the module owns its whole round trip. The last wall
+was routing precedence in ai_mail's reply verb: `reply_to`/`from` resolving
+to a registry branch email routed external replies into normal delivery and
+the #134 cross-project refusal; the stored `reply_path` (the sanctioned
+cross-project route) only fires on a registry MISS. A non-registry reply_to
+forces that miss — zero ai_mail changes, the fix lives where the ownership
+is. Live-proved end to end (the failing operation succeeding, per VERA's
+false-green standard): external send → devpulse reply → external ai_mail
+reply → landed threaded in devpulse's inbox. VERA's three live messages
+patched in place and replyable. 452 devpulse tests green.
+
+**fix(commons)** — external citizens exist in the social space: identity_ops
+1.1.0 falls back to the caller's own registry (walk from AIPASS_CALLER_CWD,
+glob `*_REGISTRY.json`, sorted, AIPass-registry skip by name AND path) when
+the AIPass registry misses. Found by the bug-class sweep as the worst
+variant — not a wrong filename but NO caller-registry consultation at all,
+so every external citizen silently failed Commons identity, registration,
+and authorship. Live-proved: VERA resolves by path and by name from her real
+registry and auto-registered into the agents table; her three teammates
+resolve; AIPass citizens still win on collision and never pay for the walk.
+461 commons tests (+13, incl. an autouse env-clearing fixture so ambient
+shell state can't answer a test meant to miss), seedgo 100%. By @commons.
+Attribution note: the code content of this fix and of in-flight @memory
+rollover work (extractor + pipeline tests, task owned by @aipass's dispatch)
+was swept early into devpulse commit 79df6bda by an over-broad `--all` —
+this entry is the correct authorship record.
+
+**fix(ai_mail)** — external citizens can be identified as reply senders:
+`_find_caller_registry` globs `*_REGISTRY.json` (sorted, AIPass-registry
+skip preserved) instead of requiring the literal `AIPASS_REGISTRY.json` no
+external project carries. Third confirmed instance of the hardcoded-registry
+-filename class (after drone's find_repo_root and router fallback); found
+via VERA's retraction of her own false "confirmed fixed" — her live-id
+A/B/C (reply fails, send works, same shell) pinpointed the layer. Their
+report's sharpest find: all 5 pre-existing tests named their fixture
+`AIPASS_REGISTRY.json`, sharing the code's assumption — the suite was green
+because it couldn't see the bug. 844 ai_mail tests (+5), reverted-glob
+canary bites, live-verified sender resolves to VERA from her branch. By
+@ai_mail. NOTE: reply round-trip still blocked one layer later — the
+stored-reply_path route (validated, boundary-free, built for this) is
+shadowed by the registry-email match that hits the ruling-#134 cross-project
+refusal first; routing precedence is a Patrick call (DPLAN-0232).
+
+**fix(devpulse)** — feedback-delivered replies are replyable (compose
+1.2.0): `from` is the canonical `@devpulse` and every delivered reply
+carries `reply_path` back to devpulse's inbox, so ai_mail's stored-path
+reply route has a return address to use. Wall-2 of @ai_mail's round-trip
+report; the three live messages in VERA's inbox were patched in place.
+452 devpulse tests green.
+
+**fix(devpulse)** — feedback reply delivery writes the ai_mail v2 message
+schema (compose.py 1.1.1). The delivery function wrote `body`/`read` where
+the ai_mail viewer reads `message`/`status`, so delivered replies rendered
+as EMPTY bodies under `drone @ai_mail view` while the data sat intact in
+inbox.json — VERA read hers via raw JSON and filed the display/data
+contradiction. Messages now carry `message`, `from_name`, `status: "new"`,
+prepend newest-first, and recompute `unread_count` the same way delivery.py
+does. 452 devpulse tests green, compose.py 31/31 seedgo standards.
+
+## [2026-08-04] — manager-class git auth + fleet self-repair day
+
+**fix(drone)** — caller detection derives a project name from the registry
+FILENAME when metadata declares none (`AIPASS_REGISTRY.json` → `aipass`,
+`VERA-STUDIO_REGISTRY.json` → `vera-studio`); a declared
+`metadata.project_name`/`name` still wins, and passports still outrank the
+fallback entirely. The old code required a declared name, which AIPass's own
+registry doesn't carry — so the framework repo was the one place the fallback
+could never fire, and it failed in silence: callers at the AIPass root
+(VERA's session, the Telegram scheduler hourly) were `CALLER:UNKNOWN` all
+day, which is what stranded the feedback replies above. Found-but-rejected
+registries now log WARNING naming the file and reason; the glob is sorted for
+deterministic multi-registry resolution; a test asserts a derived name can
+never earn git authority (owner-tier reads passports directly). One canary
+self-caught and rewritten: the bare-suffix test asserted None, which the
+caller's truthiness check made vacuous — now asserts the WARNING. 963 drone
+tests green (+8), seedgo 100%.
+
+**fix(devpulse)** — feedback replies report delivery honestly. Live failure
+caught by Patrick asking why VERA never heard back: all six of her feedback
+messages arrived as `From: unknown` (her session ran drone from the AIPass
+repo root, where caller detection finds no passport and the registry
+fallback rejects a name-less `AIPASS_REGISTRY.json`), so three replies were
+"saved" while delivery silently skipped to `src/aipass/unknown/`. compose.py
+1.1.0: an anonymous send is now told AT SEND TIME that replies cannot reach
+it (with the run-from-your-branch-dir fix named), and `reply` reports the
+delivery outcome — `success()` on delivery, `error()` with the reason on
+failure (which marks the command failed: a reply the sender never sees
+SHOULD flip the exit code) — instead of claiming success on a thread-only
+save. The six stored messages were repaired (sender + reply path) and the
+three stranded replies hand-delivered the same evening. 452 devpulse tests
+green (+5), compose.py 31/31 seedgo standards.
+
+**feat(drone)** — owner-tier git is earned, not listed (DPLAN-0281, Patrick
+ruling: "project owners get git"). The hardcoded `allowed_callers:
+["devpulse"]` is gone; a caller holds owner-tier iff all four checks pass:
+manager-class citizen, tenant of THIS repo's registry (passport
+`citizenship.registry_id` == registry `metadata.id`), listed with `owner:
+true`, and presenting its passport from the registry-recorded home
+(path-binding, F59 4.2a). devpulse-in-AIPass authorizes through the general
+rule — no special case — and any external project's manager gains the same
+standing in their own repo once P2 provisioning flips their class. Enforce
+by default (all four checks live-verified against real data before
+flipping); `AIPASS_GIT_AUTH_MODE=warn` for migration triage. AIPass-flow
+verbs (dev-pr/merge/tag/…) refuse honestly in external repos until
+translated — commit and sync work there today. Also: `find_repo_root`
+recognizes any `*_REGISTRY.json` (external projects name theirs),
+dict-authored registries get the same normalization as list-shaped, and the
+dead `ALLOWED_CALLERS` decoy died with the list it shadowed. Router
+caller-identity honesty landed alongside: a lost identity renders
+`[CALLER:UNKNOWN]` plus one WARNING naming the real cwd, and the registry
+fallback for external projects is reachable as documented. 44 new tests
+(16 canaries + unstubbed-auth module tests), 955 drone green. By @drone,
+verified by devpulse.
+
+**fix(tests)** — CI-only fallout from the auth rewrite, caught by the clean
+checkout: seedgo's four Track-E tests pinned the dead `ALLOWED_CALLERS`
+parity — replaced with one canary asserting no name-based caller list can
+reappear; and drone's wrong-tenancy test now pins `AIPASS_REGISTRY` to its
+fixture — `find_registry`'s cwd walk deliberately skips credential-failing
+registries, so the mismatched fixture was passed over and resolution fell
+through to the real registry locally (right wording, wrong reason) but to
+not-found in CI, where `AIPASS_REGISTRY.json` is gitignored-absent. Seedgo
+1304 green, drone 955 green. A third, Windows-only: the new router
+cwd-logging test substring-matched path reprs — `str(tmp_path)` has
+backslashes while the logged arg renders `WindowsPath('C:/...')` with
+forward slashes — now compares Path values, separator-agnostic.
+
+**fix(trigger)** — rotation tail loss closed in BOTH log watchers. The old
+`size shrank → reset to 0` rotation handling silently skipped every line
+between the last read offset and the rotation cut — worst exactly during
+incidents, when the unread tail is largest; a second defect seeked stale
+offsets INTO the fresh file, reading garbage fragments. Now: inode identity
+recorded beside the offset, rotation detected by inode change, and the
+rotated-out file's unread tail drained before moving on (inode-matched, so
+never a stale backup re-fired). Falsy/unknown inode degrades to old
+behavior. Found by @trigger while disproving another branch's rotation
+claim. 698 trigger tests green.
+
+**fix(hooks)** — edit_gate's newest-first guard no longer hard-blocks
+legacy `session_number` branches from ever writing session memory (found by
+VERA — the gate was stricter than the schema the rest of the fleet still
+honors, with no compliance path). Two halves, both proven load-bearing by
+staged canaries: a number-key alias (`number` wins over `session_number`
+when both exist) so legacy arrays stay *guarded*, and an unreadable-schema
+pass-through so an unrecognized future schema degrades to the
+ordinal-independent ordering check instead of a permanent lockout. Block
+messages now name the accepted keys. Live-proved through the real Claude
+bridge: legacy prepend exits 0, tail-append and number-reuse still exit 2.
+1335 hooks tests green (+9). By @hooks, verified by devpulse.
+
+**fix(ai_mail)** — wake-back no longer claims "woken" when the manager gate
+skipped it (found by VERA in Vera-Studio field telemetry after her manager
+flip; diagnosis exact, line for line). The gate's bool means "the dispatch
+did what it should," not "an agent was woken" — a manager returns True
+having deliberately woken nobody, and `_wake_sender` read that as woken.
+New `skipped_manager` result tag keyed on the status object's structural
+step (not prose-sniffing — substring matching is what let this hide),
+docstrings now tell the truth about managers, and the unreachable @daemon
+exception on wake-backs is explained in place. Gate behavior untouched.
+839 ai_mail tests green (+9, canary-checked both directions). By @ai_mail,
+verified by devpulse.
+
+**docs(flow)** — weekly_update playbook template v2, authored by VERA
+(Vera-Studio) from her PPLAN-0017 run and landed from flow/dropbox: new
+Step 0 reads the live subreddit for the last posted number before anything
+else (an empty playbook is not evidence its post never fired — trusting one
+cost a delete-and-repost of an immutable Reddit title), and a cold-tested
+"Driving Chrome" section including the `pgrep -x chrome` correction
+(`pgrep -f google-chrome` false-positives on the caller's own command
+line). First cross-project template contribution.
+
+**feat(hooks)** — hooks_engine.log per-hook narration demoted out of the
+default view (ruling delegated by Patrick, decided by devpulse: quiet noise
+at the source, never mask it). prax's SystemLogger has no debug(), so
+engine 1.2.0 gates the four per-hook narration sites (fire, complete,
+skipped-disabled, budget) behind `AIPASS_HOOKS_VERBOSE_LOG=1` — silent by
+default, restorable live, read per call. Lifecycle INFO, every WARNING and
+ERROR, and engine.jsonl untouched. Measured under fleet load: 1865 of 1869
+lines demoted (~99.8%); the 4 survivors were legitimate git_gate blocks.
+1326 hooks tests green (+5, suppression canary-checked), seedgo 100%. New
+README "Two Log Streams" section. Flagged upstream: SystemLogger's missing
+debug() is a real prax gap. By @hooks, verified by devpulse.
+
+**feat(aipass)** — `aipass init update` provisions external projects for
+manager-class git (DPLAN-0281 P2). New `init/git_auth.py`: plans every
+repair BEFORE writing (a refused run leaves the project untouched), mints
+registry `metadata.id`, backfills the owner citizen's
+`citizenship.registry_id`, flips builder→manager, records the branch path —
+then `verify_git_auth()` independently re-reads disk and re-derives all
+four owner-tier checks. Refuses honestly instead of guessing: no owner
+marked, more than one owner, root-ish recorded paths (@drone's guardrail —
+at-or-under binding would degrade to repo-wide), paths outside the repo, or
+missing passports. `--dry-run` prints the plan, writes nothing. Canaried
+against drone's real P1 gate: repaired fixture authorizes, un-repaired
+refuses on class, a passport copied to a non-recorded dir refuses on
+path-binding. 934 aipass tests green (+37), seedgo 100%. By @aipass,
+verified by devpulse. P3 (run it on Vera-Studio live) is next.
+
+**feat(trigger)** — runaway WARNING tier is observe-only (Patrick ruling:
+"observe only is good"). WARNING runaways record with full fidelity —
+alerts.json, decision log, per-file cooldown — but no longer email or wake
+anyone; CRITICAL keeps its bypass-all-mutes wake path untouched. New
+decision outcome `observed` (not `suppressed` — it was recorded; not
+`delivered` — nobody was told), and a WARNING now records even with no
+email callback, where it previously early-returned recordless. The accepted
+cost is written into the module docstring: a sustained sub-CRITICAL leak
+pages nobody by design. 707 trigger tests green (+13), reverted-split
+canary fails 8, five NO-OVERREACH tests pin the CRITICAL path. By @trigger,
+verified by devpulse.
+
+**fix(trigger)** — follow-up: the seedgo unused_function gate (CI red on
+PR#727) caught `_save_seen_hashes`/`_save_log_positions` orphaned since
+#674's coalesced flush — only tests still called them. Deleted rather than
+wired-to-nothing (the None-watcher "gap" doesn't exist: the flush merges
+with existing on-disk JSON, preserving positions untouched). Their test
+blocks repointed at the real write path `_flush_trigger_data`, and got
+stronger: the old write-error tests asserted nothing; the replacements
+assert the warning reaches the logger, canary-checked three ways. 694
+green, trigger audit back to 100%.
+
+**fix(ai_mail)** — the 6-week "unreproducible" dispatch failure
+(2×468-adjacent fingerprints, 44 occurrences) root-caused and reproduced on
+demand: sender identity resolves from AIPASS_CALLER_CWD, so running drone
+from a non-branch dir (repo root) fails detection — while the error printed
+the target's perfectly-valid cwd, sending every prior investigation passport
+-hunting. The refusal is CORRECT (silent cwd fallback would forge sender
+identity); the fix is diagnostic truth: the error now names the env var,
+the walked path, and that process cwd is informational. Fingerprint prefix
+preserved for medic grouping. 4 canary-checked tests, 830 green. By @ai_mail.
+
+**fix(hooks)** — engine "complete: 0 hooks" lie fixed: silent gates write no
+stdout, so len(outputs) reported 0 on 97% of dispatches while gates fired
+normally. Now counts executions; hooks_with_output added. Runaway
+hooks_engine.log alert itself verdict'd NOT a hooks bug — fleet load
+(24 claude processes, load 32 on 4 cores). engine.py 1.1.1, 4 canary tests,
+1321 green. By @hooks.
+
+**fix(prax)** — log retention: backup_count 1→3 (rotation was discarding
+history the watchers hadn't drained; ~28MB ceiling accepted), and dead
+prax_logger_config.json read-keys found/wired (settings never matched what
+load read). By @prax under @trigger dispatch. 1084 green.
+
+## [2026-08-02] — TG slash relay: /context fired from Telegram comes back to the chat
+
+**feat(skills)** — CC informational slash commands now round-trip from
+Telegram (Patrick ask: stop pick-and-choosing which builtins work remotely).
+The bot injects an allowlisted informational command (`/context`; extend via
+`informational_commands` config) as raw text — no relay prefix, or CC would
+read it as prose — then a daemon-thread watcher tails the CC transcript from
+the injection baseline and relays the command's stdout back to the chat as
+HTML `<pre>` chunks. Local commands produce no assistant turn, so this path
+deliberately writes NO pending file and starts NO heartbeat (nothing for the
+Stop hook to strand — the stuck-pending lesson applied, not relearned);
+90s timeout edits the placeholder to an honest failure. Scope-guarded twice:
+watcher only starts from TG-inbound handling and the scan is bounded to
+lines after the baseline — a desk or remote-control `/context` can never
+surprise-echo to the phone. Found en route: current CC emits `/context`
+twice (ANSI TUI panel + clean-markdown isMeta twin); the twin is preferred.
+`/cost` verified-not-assumed and left OUT (zero invocations exist on this
+machine to pin its shape). Side-effect passthrough (`clear`/`compact`/
+`prep`/`memo`) byte-identical behavior. 51 new tests (canary-checked: each
+guarantee broken in turn, tests bite), 1010 telegram green, seedgo 100%.
+Built by @skills; live-proven end-to-end including a real Telegram hop.
+
 ## [2026-08-02] — install ends with hooks alive: setup enrolls itself; hook test runner stops ghost-arming live sessions
 
 **feat(setup)** — setup.sh now enrolls the repo it just installed in the hook
