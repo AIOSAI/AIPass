@@ -678,7 +678,7 @@ class TestFindCallerRegistry:
         assert result is None
 
     def test_returns_none_when_no_registry_in_tree(self, clean_env, tmp_path):
-        """Returns None when no AIPASS_REGISTRY.json found under AIPASS_CALLER_CWD."""
+        """Returns None when no *_REGISTRY.json found under AIPASS_CALLER_CWD."""
         os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
         result = _find_caller_registry()
         assert result is None
@@ -723,6 +723,94 @@ class TestFindCallerRegistry:
             result = _find_caller_registry()
 
         assert result is None
+
+    # ─── External project registries (VERA reply bug, S31/S33) ───
+    #
+    # External projects name their registry PROJECTNAME_REGISTRY.json. Matching the
+    # single hardcoded name meant this fallback could never fire for any external
+    # project — the only callers it exists to serve. Every test above named the file
+    # AIPASS_REGISTRY.json, so the suite encoded the same assumption as the bug and
+    # stayed green while the function was unreachable in production.
+
+    def test_finds_external_project_registry(self, clean_env, tmp_path):
+        """A PROJECTNAME_REGISTRY.json is found, not just AIPASS_REGISTRY.json."""
+        registry = tmp_path / "VERA-STUDIO_REGISTRY.json"
+        registry.write_text('{"branches": []}', encoding="utf-8")
+        nested = tmp_path / "src" / "vera_studio" / "vera"
+        nested.mkdir(parents=True)
+
+        os.environ["AIPASS_CALLER_CWD"] = str(nested)
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
+            result = _find_caller_registry()
+
+        assert result == registry
+
+    def test_prefers_external_registry_over_aipass_one(self, clean_env, tmp_path):
+        """The double-lookup guard still skips the AIPass registry when both sit together."""
+        aipass_registry = tmp_path / "AIPASS_REGISTRY.json"
+        aipass_registry.write_text('{"branches": []}', encoding="utf-8")
+        external = tmp_path / "VERA-STUDIO_REGISTRY.json"
+        external.write_text('{"branches": []}', encoding="utf-8")
+
+        os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            aipass_registry,
+        ):
+            result = _find_caller_registry()
+
+        assert result == external
+
+    def test_multiple_registries_resolve_deterministically(self, clean_env, tmp_path):
+        """sorted() so a dir holding several registries always yields the same one."""
+        for name in ("ZEBRA_REGISTRY.json", "ALPHA_REGISTRY.json", "MIDDLE_REGISTRY.json"):
+            (tmp_path / name).write_text('{"branches": []}', encoding="utf-8")
+
+        os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
+            results = [_find_caller_registry() for _ in range(3)]
+
+        assert results == [tmp_path / "ALPHA_REGISTRY.json"] * 3
+
+    def test_unrelated_json_is_not_treated_as_a_registry(self, clean_env, tmp_path):
+        """The glob is *_REGISTRY.json — arbitrary JSON in the tree is ignored."""
+        (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "REGISTRY.json").write_text("{}", encoding="utf-8")
+
+        os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
+            result = _find_caller_registry()
+
+        assert result is None
+
+    def test_external_branch_resolves_by_relative_path(self, clean_env, tmp_path):
+        """End of the sender-detection chain: relative path resolves against the registry dir."""
+        branch_dir = tmp_path / "src" / "vera_studio" / "vera"
+        branch_dir.mkdir(parents=True)
+        registry = tmp_path / "VERA-STUDIO_REGISTRY.json"
+        registry.write_text(
+            json.dumps({"branches": [{"name": "VERA", "path": "src/vera_studio/vera", "email": "@vera"}]}),
+            encoding="utf-8",
+        )
+
+        os.environ["AIPASS_CALLER_CWD"] = str(branch_dir)
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
+            tmp_path / "other" / "AIPASS_REGISTRY.json",
+        ):
+            info = get_branch_info_from_registry(branch_dir)
+
+        assert info is not None
+        assert info["email"] == "@vera"
 
 
 # ─── Caller registry fallback tests ──────────────────────

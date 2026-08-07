@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detection.py
 # Description: Branch Auto-Detection Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-18
-# Modified: 2025-11-18
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -72,9 +72,16 @@ def _get_contact_info(branch_name: str) -> Optional[Dict]:
 
 
 def _find_caller_registry() -> Optional[Path]:
-    """Find the caller's AIPASS_REGISTRY.json by walking up from AIPASS_CALLER_CWD.
+    """Find the caller's project registry by walking up from AIPASS_CALLER_CWD.
 
     Used to resolve external project branches that aren't in the AIPass registry.
+    External projects name their registry PROJECTNAME_REGISTRY.json — Vera-Studio's
+    is VERA-STUDIO_REGISTRY.json — so this globs *_REGISTRY.json. Matching the one
+    hardcoded name meant the fallback could never fire for any external project,
+    i.e. it could never serve the only callers it exists for. Same bug class @drone
+    fixed twice in their own resolution paths (2d1a5ff7, 60a3fb72); sorted() for the
+    same reason they used it — deterministic pick when a dir holds several.
+
     Skips the AIPass registry itself to avoid redundant double-lookup.
 
     Returns:
@@ -86,8 +93,7 @@ def _find_caller_registry() -> Optional[Path]:
     candidate = Path(caller_cwd)
     aipass_registry = BRANCH_REGISTRY_PATH.resolve()
     for path in [candidate] + list(candidate.parents)[:10]:
-        registry = path / "AIPASS_REGISTRY.json"
-        if registry.exists():
+        for registry in sorted(path.glob("*_REGISTRY.json")):
             try:
                 if registry.resolve() != aipass_registry:
                     return registry
