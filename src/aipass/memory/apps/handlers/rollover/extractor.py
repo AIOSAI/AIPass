@@ -187,6 +187,37 @@ def _is_misplaced_entry(entry: Any, head_number: int | None) -> bool:
     return False
 
 
+def _ensure_newest_first(entries: list, array_name: str, branch_key: str) -> tuple[list, bool]:
+    """
+    Guarantee an array is newest-first before the tail is treated as oldest.
+
+    Rollover's whole contract is "the tail is the oldest history". A branch
+    storing its entries oldest-first inverts that, so the tail is the NEWEST
+    entry and rollover eats fresh memories one run at a time. The safety valve
+    alone cannot catch this: once a correctly-prepended entry sits at the head,
+    the misordered legacy block below it looks perfectly plausible.
+
+    Returns (entries_newest_first, repaired) — `repaired` is True when the
+    stored order was wrong and had to be corrected.
+    """
+    if not isinstance(entries, list) or len(entries) < 2:
+        return entries, False
+    if not all(isinstance(e, dict) and isinstance(e.get("number"), int) for e in entries):
+        return entries, False
+
+    ordered = sorted(entries, key=lambda e: e["number"], reverse=True)
+    if ordered == entries:
+        return entries, False
+
+    logger.warning(
+        f"[extractor] {branch_key}/{array_name}: stored order was NOT newest-first — "
+        f"re-sorted by number before archiving (head #{entries[0].get('number')} -> "
+        f"#{ordered[0].get('number')}). Rollover would otherwise have archived the newest "
+        f"entries as oldest history."
+    )
+    return ordered, True
+
+
 def _extract_tail_excess(
     entries: list, limit: int | None, head_number: int | None, array_name: str, branch_key: str
 ) -> list:
@@ -246,8 +277,14 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     # Extract from sessions array (newest first, oldest at end). AUTO-COMPACT
     # SNAPSHOT entries (status == "auto-compact") get their own small cap and
     # never count against the regular session budget.
+    order_repaired = False
+
     sessions = data.get("sessions", [])
     if isinstance(sessions, list) and sessions:
+        sessions, repaired = _ensure_newest_first(sessions, "sessions", branch_key)
+        if repaired:
+            data["sessions"] = sessions
+            order_repaired = True
         session_limits = file_limits.get("sessions", {})
         head_number = sessions[0].get("number") if isinstance(sessions[0], dict) else None
 
@@ -275,6 +312,11 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Extract from key_learnings list (sorted newest-first; oldest at end)
     key_learnings = data.get("key_learnings", [])
+    if isinstance(key_learnings, list) and key_learnings:
+        key_learnings, repaired = _ensure_newest_first(key_learnings, "key_learnings", branch_key)
+        if repaired:
+            data["key_learnings"] = key_learnings
+            order_repaired = True
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None and isinstance(key_learnings, list) and key_learnings:
         kl_head_number = key_learnings[0].get("number") if isinstance(key_learnings[0], dict) else None
@@ -288,6 +330,11 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Extract from observations array (if v2 observations file)
     observations = data.get("observations", [])
+    if isinstance(observations, list) and observations:
+        observations, repaired = _ensure_newest_first(observations, "observations", branch_key)
+        if repaired:
+            data["observations"] = observations
+            order_repaired = True
     max_observations = file_limits.get("observations", {}).get("count")
     if max_observations is not None and isinstance(observations, list) and observations:
         obs_head_number = observations[0].get("number") if isinstance(observations[0], dict) else None
@@ -298,6 +345,15 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             all_extracted.extend(archived_obs)
 
     if not all_extracted:
+        # An order repair with nothing to archive must still be persisted, or the
+        # file stays misordered and the next run re-detects the same fault.
+        if order_repaired:
+            try:
+                _write_memory_file(file_path, data)
+                logger.info(f"[extractor] {branch_key}: persisted newest-first order repair (nothing archived)")
+            except Exception as e:
+                logger.error(f"[extractor] Failed to persist order repair: {e}")
+                return {"success": False, "error": f"Failed to write file: {e}"}
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
     # Update metadata

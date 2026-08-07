@@ -46,6 +46,7 @@ except ImportError:
     sys.modules.setdefault("aipass.cli.apps.modules", MagicMock())
 
 from aipass.commons.apps.modules import commons_identity as _id_mod  # noqa: E402
+from aipass.commons.apps.handlers.identity import identity_ops as _ops  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,47 @@ def _patch_db_for_mentions(initialized_db: sqlite3.Connection):
         ),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_caller_env(monkeypatch: pytest.MonkeyPatch):
+    """
+    Keep ambient drone env vars out of registry resolution.
+
+    Registry lookup now walks up from AIPASS_CALLER_CWD, so a value
+    inherited from the shell running pytest would let a real registry
+    answer a lookup a test meant to miss. Tests that exercise the walk
+    set the var themselves.
+    """
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+
+
+def _write_registry(path: Path, branches) -> Path:
+    """Write a registry file with the given branches payload."""
+    import json as json_mod
+
+    path.write_text(json_mod.dumps({"branches": branches}), encoding="utf-8")
+    return path
+
+
+def _make_external_project(root: Path, name: str = "VERA", email: str = "@vera") -> Path:
+    """
+    Build a minimal external project: a named registry plus a passported branch.
+
+    Mirrors the real shape of an external citizen's project — registry at
+    the project root named after the project, branch paths relative to it,
+    each branch a real directory carrying .trinity/passport.json.
+    """
+    branch_dir = root / "src" / "vera_studio" / name.lower()
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+
+    _write_registry(
+        root / "VERA-STUDIO_REGISTRY.json",
+        [{"name": name, "path": f"src/vera_studio/{name.lower()}", "email": email, "description": "CEO"}],
+    )
+    return branch_dir
 
 
 # ===========================================================================
@@ -379,3 +421,185 @@ def test_get_caller_branch_returns_none_when_no_detection(
 
     result = _id_mod.get_caller_branch()
     assert result is None
+
+
+# ===========================================================================
+# External citizens — fallback to the caller's own project registry
+# ===========================================================================
+
+_REGISTRY_ATTR = "aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH"
+
+
+@pytest.fixture
+def aipass_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An AIPass registry that knows @drone and nobody else."""
+    aipass_root = tmp_path / "AIPass"
+    aipass_root.mkdir()
+    registry = _write_registry(
+        aipass_root / "AIPASS_REGISTRY.json",
+        [{"name": "DRONE", "path": "src/aipass/drone", "email": "@drone"}],
+    )
+    monkeypatch.setattr(_REGISTRY_ATTR, registry)
+    return registry
+
+
+def test_external_citizen_resolves_by_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """A branch absent from the AIPass registry resolves from the caller's registry."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is not None, "external citizen resolved to None — the bug this fix closes"
+    assert result["name"] == "VERA"
+    assert result["email"] == "@vera"
+
+
+def test_external_citizen_resolves_by_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """Name lookup (drone's AIPASS_CALLER_BRANCH path) also reaches the caller's registry."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_by_name("vera")
+
+    assert result is not None
+    assert result["email"] == "@vera"
+
+
+def test_external_citizen_absolute_registry_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path
+):
+    """Registries that store absolute branch paths resolve without being re-rooted."""
+    project = tmp_path / "Vera-Studio"
+    branch_dir = project / "branches" / "writer"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    _write_registry(
+        project / "VERA-STUDIO_REGISTRY.json",
+        [{"name": "WRITER", "path": str(branch_dir), "email": "@writer"}],
+    )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is not None
+    assert result["name"] == "WRITER"
+
+
+def test_aipass_registry_wins_over_caller_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path
+):
+    """On a name collision the AIPass registry answers first — the fallback is a fallback."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project, name="DRONE", email="@not-our-drone")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_by_name("drone")
+
+    assert result is not None
+    assert result["email"] == "@drone"
+
+
+def test_unknown_branch_still_returns_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """A branch in neither registry still resolves to None — no silent invention."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    assert _id_mod.get_branch_info_by_name("nobody") is None
+
+
+@patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler")
+@patch("aipass.commons.apps.handlers.identity.identity_ops._ensure_agent_registered")
+def test_get_caller_branch_end_to_end_for_external_citizen(
+    mock_register: MagicMock,
+    mock_json: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+):
+    """
+    Full caller detection for an external citizen.
+
+    This is the operation that used to fail: passport walk-up succeeded,
+    every registry strategy returned None, and the citizen got no Commons
+    identity at all. Name must come back normalized for authorship.
+    """
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_caller_branch()
+
+    assert result is not None
+    assert result["name"] == "vera"
+    assert result["email"] == "@vera"
+    mock_register.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _find_caller_registries / _branches_from_registry
+# ---------------------------------------------------------------------------
+
+
+def test_find_caller_registries_skips_the_aipass_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The AIPass registry is consulted first, never again during the walk."""
+    _write_registry(tmp_path / "AIPASS_REGISTRY.json", [])
+    _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [])
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+    found = _ops._find_caller_registries()
+
+    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
+
+
+def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Multiple registries in one directory resolve in deterministic order."""
+    _write_registry(tmp_path / "ZEBRA_REGISTRY.json", [])
+    _write_registry(tmp_path / "ALPHA_REGISTRY.json", [])
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+
+    found = _ops._find_caller_registries()
+
+    assert [p.name for p in found] == ["ALPHA_REGISTRY.json", "ZEBRA_REGISTRY.json"]
+
+
+def test_find_caller_registries_without_env(monkeypatch: pytest.MonkeyPatch):
+    """No AIPASS_CALLER_CWD means no walk — nothing to search from."""
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+    assert _ops._find_caller_registries() == []
+
+
+def test_branches_from_registry_dict_shape(tmp_path: Path):
+    """Dict-keyed branches are flattened to a list, like the list shape."""
+    import json as json_mod
+
+    path = tmp_path / "X_REGISTRY.json"
+    path.write_text(
+        json_mod.dumps({"branches": {"vera": {"name": "VERA", "path": "src/vera"}}}),
+        encoding="utf-8",
+    )
+
+    branches = _ops._branches_from_registry(path)
+
+    assert [b["name"] for b in branches] == ["VERA"]
+
+
+def test_branches_from_registry_malformed_json(tmp_path: Path):
+    """A corrupt registry is reported and skipped, never raised."""
+    path = tmp_path / "X_REGISTRY.json"
+    path.write_text("{not json", encoding="utf-8")
+
+    assert _ops._branches_from_registry(path) == []
+
+
+def test_branches_from_registry_missing_file(tmp_path: Path):
+    """A registry path that doesn't exist yields no branches."""
+    assert _ops._branches_from_registry(tmp_path / "nope.json") == []

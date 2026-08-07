@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-11
 # Modified: 2026-08-07
 # =============================================
@@ -32,6 +32,10 @@ console = err_console
 
 # AIPass src/aipass/ directory (four levels up from compose.py)
 _AIPASS_ROOT = Path(__file__).resolve().parents[4]
+
+# Devpulse's own ai_mail inbox — stamped as reply_path on delivered replies so
+# external recipients can reply cross-project via ai_mail's stored-path route.
+_DEVPULSE_INBOX = Path(__file__).resolve().parents[3] / ".ai_mail.local" / "inbox.json"
 
 
 def _resolve_sender() -> tuple[str, str]:
@@ -227,14 +231,20 @@ def _deliver_to_ai_mail(
     # reads 'message' and 'status'. Writing 'body'/'read' here left delivered
     # replies rendering as EMPTY under view while the data sat intact in
     # inbox.json (VERA field report 2026-08-05).
+    # 'from' must be the @-prefixed email and 'reply_path' must point back at
+    # our inbox: ai_mail's reply verb resolves the destination by matching
+    # 'from' against branch emails, then falls back to the stored reply_path
+    # for cross-project delivery (reply.py). An @-less from with no reply_path
+    # made every delivered reply a dead end (@ai_mail wall-2 report 2026-08-07).
     mail_message = {
         "id": mail_id,
         "timestamp": now,
-        "from": "devpulse",
+        "from": "@devpulse",
         "from_name": "devpulse",
         "subject": f"Re: {subject}",
         "message": body,
         "status": "new",
+        "reply_path": str(_DEVPULSE_INBOX),
         "metadata": {
             "source": "feedback",
             "thread_id": thread_id,

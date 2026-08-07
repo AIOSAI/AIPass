@@ -191,7 +191,12 @@ class TestAiMailDelivery:
         assert mail_data["unread_count"] == 1
 
         mail_msg = mail_data["messages"][0]
-        assert mail_msg["from"] == "devpulse"
+        # '@'-prefixed from + reply_path are what make the message REPLYABLE:
+        # ai_mail's reply verb matches from against branch emails, then falls
+        # back to the stored reply_path for cross-project delivery (wall-2,
+        # 2026-08-07).
+        assert mail_msg["from"] == "@devpulse"
+        assert mail_msg["reply_path"].endswith("inbox.json")
         assert mail_msg["subject"] == "Re: Test feedback"
         # v2 schema: the ai_mail viewer reads 'message' and 'status' — writing
         # 'body'/'read' rendered delivered replies as empty (VERA 2026-08-05).

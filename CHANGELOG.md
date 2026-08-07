@@ -11,6 +11,29 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07]
 
+**fix(ai_mail)** — external citizens can be identified as reply senders:
+`_find_caller_registry` globs `*_REGISTRY.json` (sorted, AIPass-registry
+skip preserved) instead of requiring the literal `AIPASS_REGISTRY.json` no
+external project carries. Third confirmed instance of the hardcoded-registry
+-filename class (after drone's find_repo_root and router fallback); found
+via VERA's retraction of her own false "confirmed fixed" — her live-id
+A/B/C (reply fails, send works, same shell) pinpointed the layer. Their
+report's sharpest find: all 5 pre-existing tests named their fixture
+`AIPASS_REGISTRY.json`, sharing the code's assumption — the suite was green
+because it couldn't see the bug. 844 ai_mail tests (+5), reverted-glob
+canary bites, live-verified sender resolves to VERA from her branch. By
+@ai_mail. NOTE: reply round-trip still blocked one layer later — the
+stored-reply_path route (validated, boundary-free, built for this) is
+shadowed by the registry-email match that hits the ruling-#134 cross-project
+refusal first; routing precedence is a Patrick call (DPLAN-0232).
+
+**fix(devpulse)** — feedback-delivered replies are replyable (compose
+1.2.0): `from` is the canonical `@devpulse` and every delivered reply
+carries `reply_path` back to devpulse's inbox, so ai_mail's stored-path
+reply route has a return address to use. Wall-2 of @ai_mail's round-trip
+report; the three live messages in VERA's inbox were patched in place.
+452 devpulse tests green.
+
 **fix(devpulse)** — feedback reply delivery writes the ai_mail v2 message
 schema (compose.py 1.1.1). The delivery function wrote `body`/`read` where
 the ai_mail viewer reads `message`/`status`, so delivered replies rendered
