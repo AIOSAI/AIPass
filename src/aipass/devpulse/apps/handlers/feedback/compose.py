@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-11
-# Modified: 2026-08-04
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -223,23 +223,31 @@ def _deliver_to_ai_mail(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
     mail_id = generate_id()
 
+    # ai_mail v2 message schema (see ai_mail email/delivery.py) — the viewer
+    # reads 'message' and 'status'. Writing 'body'/'read' here left delivered
+    # replies rendering as EMPTY under view while the data sat intact in
+    # inbox.json (VERA field report 2026-08-05).
     mail_message = {
         "id": mail_id,
-        "from": "devpulse",
-        "to": to_branch,
-        "subject": f"Re: {subject}",
-        "body": body,
         "timestamp": now,
-        "read": False,
+        "from": "devpulse",
+        "from_name": "devpulse",
+        "subject": f"Re: {subject}",
+        "message": body,
+        "status": "new",
         "metadata": {
             "source": "feedback",
             "thread_id": thread_id,
         },
     }
 
-    inbox.setdefault("messages", []).append(mail_message)
+    inbox.setdefault("messages", []).insert(0, mail_message)
     inbox["total_messages"] = len(inbox["messages"])
-    inbox["unread_count"] = inbox.get("unread_count", 0) + 1
+    inbox["unread_count"] = sum(
+        1
+        for m in inbox["messages"]
+        if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
+    )
 
     try:
         with open(ai_mail_path, "w", encoding="utf-8") as f:

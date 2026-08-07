@@ -9,6 +9,17 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-07]
+
+**fix(devpulse)** — feedback reply delivery writes the ai_mail v2 message
+schema (compose.py 1.1.1). The delivery function wrote `body`/`read` where
+the ai_mail viewer reads `message`/`status`, so delivered replies rendered
+as EMPTY bodies under `drone @ai_mail view` while the data sat intact in
+inbox.json — VERA read hers via raw JSON and filed the display/data
+contradiction. Messages now carry `message`, `from_name`, `status: "new"`,
+prepend newest-first, and recompute `unread_count` the same way delivery.py
+does. 452 devpulse tests green, compose.py 31/31 seedgo standards.
+
 ## [2026-08-04] — manager-class git auth + fleet self-repair day
 
 **fix(drone)** — caller detection derives a project name from the registry

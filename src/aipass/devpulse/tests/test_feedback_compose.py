@@ -192,9 +192,12 @@ class TestAiMailDelivery:
 
         mail_msg = mail_data["messages"][0]
         assert mail_msg["from"] == "devpulse"
-        assert mail_msg["to"] == "seedgo"
         assert mail_msg["subject"] == "Re: Test feedback"
-        assert mail_msg["body"] == "Thanks for the feedback!"
+        # v2 schema: the ai_mail viewer reads 'message' and 'status' — writing
+        # 'body'/'read' rendered delivered replies as empty (VERA 2026-08-05).
+        assert mail_msg["message"] == "Thanks for the feedback!"
+        assert mail_msg["status"] == "new"
+        assert "body" not in mail_msg
         assert mail_msg["metadata"]["source"] == "feedback"
         assert mail_msg["metadata"]["thread_id"] == "aaa11111"
 
