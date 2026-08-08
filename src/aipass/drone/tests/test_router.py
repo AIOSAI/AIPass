@@ -17,6 +17,7 @@ from aipass.drone.apps.handlers.router_handler import (
     detect_caller_branch_name,
     execute_branch_command,
     find_entry_point,
+    resolve_caller_identity,
 )
 from aipass.drone.apps.modules.router import handle_command, route_command, route_all
 
@@ -235,11 +236,10 @@ class TestRouteCommand:
         assert result.exit_code == 0
         assert result.stdout == "done"
 
-    @patch("aipass.drone.apps.modules.router.os.environ.get", return_value=None)
-    @patch("aipass.drone.apps.modules.router.detect_caller_branch_name", return_value=None)
+    @patch("aipass.drone.apps.modules.router.resolve_caller_identity", return_value=None)
     @patch("aipass.drone.apps.modules.router.execute_branch_command")
     @patch("aipass.drone.apps.modules.router.resolve_branch")
-    def test_lost_caller_logs_unknown_not_blank(self, mock_resolve, mock_exec, _mock_detect, _mock_env):
+    def test_lost_caller_logs_unknown_not_blank(self, mock_resolve, mock_exec, _mock_identity):
         """An undetected caller routes as UNKNOWN, not as a silently omitted tag.
 
         A blank tag reads as 'not applicable' and hid the gap that surfaced one
@@ -604,6 +604,130 @@ class TestNamelessRegistryFallback:
 
 
 # ---------------------------------------------------------------------------
+# Caller identity precedence
+# ---------------------------------------------------------------------------
+
+
+def _plant_passport(directory: Path, branch_name: str) -> Path:
+    """Create directory/.trinity/passport.json naming branch_name."""
+    trinity = directory / ".trinity"
+    trinity.mkdir(parents=True, exist_ok=True)
+    (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": branch_name}}))
+    return directory
+
+
+class TestCallerIdentityPrecedence:
+    """Assigned identity (AIPASS_BRANCH_NAME) outranks the cwd passport.
+
+    Every test here sets or deletes AIPASS_BRANCH_NAME explicitly. The var is
+    live in any dispatched agent's shell, so a test that reads it from the
+    ambient environment passes or fails on who ran pytest.
+    """
+
+    def test_assigned_identity_beats_cwd_passport(self, temp_test_dir: Path, monkeypatch):
+        """An agent standing in another branch is still itself (S102)."""
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+
+        assert resolve_caller_identity(home) == "commons"
+
+    def test_cwd_answers_when_nothing_is_assigned(self, temp_test_dir: Path, monkeypatch):
+        """A human in a terminal has no assigned identity — cwd still speaks."""
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+
+        assert resolve_caller_identity(home) == "AIPASS"
+
+    def test_assigned_identity_survives_a_cwd_with_no_passport(self, temp_test_dir: Path, monkeypatch):
+        """cd'ing somewhere unmarked must not erase who you are."""
+        nowhere = temp_test_dir / "nowhere"
+        nowhere.mkdir()
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+
+        assert resolve_caller_identity(nowhere) == "commons"
+
+    def test_conflict_is_logged_naming_both_signals(self, temp_test_dir: Path, monkeypatch):
+        """This process is the only place both signals coexist.
+
+        ai_mail cannot see the conflict downstream — it receives the winner
+        only — so an unlogged disagreement is unrecoverable.
+        """
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            resolve_caller_identity(home)
+
+        warnings = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "commons" in warnings and "AIPASS" in warnings
+
+    def test_agreement_is_not_logged(self, temp_test_dir: Path, monkeypatch):
+        """Passports carry display casing; the env var carries the directory name.
+
+        'AIPASS' and 'aipass' are the same citizen — comparing them exactly
+        would warn on every well-behaved call.
+        """
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "aipass")
+
+        with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
+            result = resolve_caller_identity(home)
+
+        assert result == "aipass"
+        conflicts = [c for c in mock_logger.warning.call_args_list if "conflict" in str(c)]
+        assert conflicts == []
+
+    def test_no_signal_at_all_returns_none(self, temp_test_dir: Path, monkeypatch):
+        """Fail to None, never to a guess — the CALLER:UNKNOWN tag says so."""
+        nowhere = temp_test_dir / "nowhere"
+        nowhere.mkdir()
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(temp_test_dir / "absent_REGISTRY.json"))
+
+        assert resolve_caller_identity(nowhere) is None
+
+    @patch("aipass.drone.apps.handlers.router_handler.execute_command")
+    def test_stamped_caller_is_the_assigned_identity(self, mock_exec, temp_test_dir: Path, monkeypatch):
+        """End to end: the env var the child receives is what ai_mail stamps."""
+        apps_dir = temp_test_dir / "apps"
+        apps_dir.mkdir()
+        (apps_dir / "testbranch.py").write_text("# stub")
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
+
+        with patch("aipass.drone.apps.handlers.router_handler.Path") as mock_path_cls:
+            mock_path_cls.cwd.return_value = home
+            mock_path_cls.side_effect = Path
+            execute_branch_command(branch_path=str(temp_test_dir), branch_name="testbranch", command="status")
+
+        assert mock_exec.call_args.kwargs["env"]["AIPASS_CALLER_BRANCH"] == "commons"
+
+    @patch("aipass.drone.apps.modules.router.execute_branch_command")
+    @patch("aipass.drone.apps.modules.router.resolve_branch")
+    def test_log_tag_names_the_same_caller_that_is_stamped(
+        self, mock_resolve, mock_exec, temp_test_dir: Path, monkeypatch
+    ):
+        """router.py logs the CALLER: tag from its own lookup.
+
+        Two copies of the precedence means the tag can name one branch while
+        the work is stamped with another — the log would exonerate the very
+        caller under investigation.
+        """
+        home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
+        mock_resolve.return_value = str(temp_test_dir)
+        mock_exec.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="", command="")
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
+        monkeypatch.chdir(home)
+
+        with patch("aipass.drone.apps.modules.router.logger") as mock_logger:
+            route_command("@testbranch", "status")
+
+        routing = " ".join(str(c) for c in mock_logger.info.call_args_list)
+        assert "CALLER:COMMONS" in routing
+
+
+# ---------------------------------------------------------------------------
 # AIPASS_CALLER_BRANCH env var
 # ---------------------------------------------------------------------------
 
@@ -612,8 +736,14 @@ class TestCallerBranchEnvVar:
     """Tests that execute_branch_command sets AIPASS_CALLER_BRANCH."""
 
     @patch("aipass.drone.apps.handlers.router_handler.execute_command")
-    def test_sets_caller_branch_from_passport(self, mock_exec, temp_test_dir: Path):
-        """AIPASS_CALLER_BRANCH is set when passport.json exists in cwd."""
+    def test_sets_caller_branch_from_passport(self, mock_exec, temp_test_dir: Path, monkeypatch):
+        """AIPASS_CALLER_BRANCH is set when passport.json exists in cwd.
+
+        The delenv is load-bearing: AIPASS_BRANCH_NAME now outranks the passport
+        and is set in every dispatched agent's shell, so without it this test
+        asserts on whoever ran pytest rather than on the fixture.
+        """
+        monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
         # Set up branch entry point
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir()

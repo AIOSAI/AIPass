@@ -139,6 +139,52 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
     return None
 
 
+def resolve_caller_identity(cwd: Path) -> str | None:
+    """Resolve who is CALLING drone. Assigned identity beats location.
+
+    Two signals can answer "who is calling", and they are not the same kind of
+    claim:
+
+      - ``AIPASS_BRANCH_NAME`` — identity ASSIGNED to this process when it was
+        created. ai_mail's dispatch_monitor sets it from the dispatched address,
+        a branch entry point setdefaults its own name, and drone's own executor
+        sets it to the target below. All three mean the same thing: who this
+        process IS.
+      - the cwd passport — identity INFERRED from where the process happens to
+        be standing.
+
+    The env var wins. An agent that cds into another branch to read its code or
+    run its tests is still itself; the passport under its feet belongs to
+    whoever lives there. The inference is only ever as good as the assumption
+    "an agent works in its own home" — and agents legitimately leave home.
+    Trusting it stamped a commons-authored dispatch as @aipass, filed it in
+    aipass's sent store, and routed the reply to the wrong citizen (S102).
+
+    cwd still answers when nothing was assigned: a human in a terminal has no
+    AIPASS_BRANCH_NAME, and standing in a branch is the only signal they give.
+
+    Nothing here grants authority — git's owner-tier reads passports directly
+    (see plugins/devpulse_ops/auth.py) and never consults this. That is what
+    makes preferring an env var acceptable: it decides attribution, not access.
+    """
+    assigned = os.environ.get("AIPASS_BRANCH_NAME") or None
+    standing = detect_caller_branch_name(cwd)
+
+    if assigned and standing and assigned.lower() != standing.lower():
+        # A real conflict, not a preference — and the only process where both
+        # signals coexist, so if this is not logged here it is unrecoverable
+        # downstream (ai_mail sees only the winner).
+        logger.warning(
+            "Caller identity conflict: AIPASS_BRANCH_NAME=%r but the passport at cwd %s says %r — using %r",
+            assigned,
+            cwd,
+            standing,
+            assigned,
+        )
+
+    return assigned or standing
+
+
 def execute_branch_command(
     branch_path: str,
     branch_name: str,
@@ -170,11 +216,8 @@ def execute_branch_command(
         "AIPASS_BRANCH_NAME": branch_name,
     }
 
-    # Detect caller branch name from passport.json, fall back to env var
-    # (dispatched agents set AIPASS_BRANCH_NAME which survives cd)
-    caller_branch = detect_caller_branch_name(Path.cwd())
-    if not caller_branch:
-        caller_branch = os.environ.get("AIPASS_BRANCH_NAME")
+    # Who is calling: assigned identity first, cwd passport only as fallback.
+    caller_branch = resolve_caller_identity(Path.cwd())
     if caller_branch:
         caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
 

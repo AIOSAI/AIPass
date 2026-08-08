@@ -49,7 +49,7 @@ Three enforcement layers: hooks block raw git/gh, drone tier restricts write com
 
  - `apps/drone.py` — entry point, routing decision tree, interactive command lists.
  - `apps/modules/git_module.py` — git orchestrator, tier dispatch, adapter for `_MODULE_REGISTRY`.
- - `apps/plugins/devpulse_ops/auth.py` — passport-based identity gate, `ALLOWED_CALLERS` list.
+ - `apps/plugins/devpulse_ops/auth.py` — passport-based identity gate. Owner tier is EARNED per-repo from four facts (manager class + registry tenancy + owner flag + passport path-binding), not a hardcoded name list.
  - `apps/handlers/registry_handler.py` — dual registry lookup (local project + `AIPASS_HOME` fallback).
  - `apps/handlers/executor.py` — safe subprocess execution (no shell, timeout, capture).
 
@@ -57,7 +57,7 @@ Three enforcement layers: hooks block raw git/gh, drone tier restricts write com
 
  - Module routing captures output (dicts). Branch routing can inherit TTY. Commands needing live terminal (Rich progress, TUI) must be in `INTERACTIVE_COMMANDS` or `INTERACTIVE_BRANCHES` — checked before `is_module()`.
  - Routed command output uses `sys.stdout.write()`, not `console.print()`. Rich wraps at 80 cols when piped.
- - Branch detection uses `.trinity/` marker walk-up, not hardcoded paths. `detect_caller_branch_name()` with `AIPASS_BRANCH_NAME` env var fallback.
+ - Caller identity: `resolve_caller_identity()` prefers `AIPASS_BRANCH_NAME` (assigned at spawn) over the cwd passport (inferred from location) — an agent that cds is still itself. Disagreements are logged. Attribution only; git authority reads passports directly.
  - External project support: dual registry merges local + AIPASS_HOME registries. Local entries win on collision.
 
 # Integration Points

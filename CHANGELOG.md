@@ -11,6 +11,34 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**fix(drone)** — caller identity: assigned beats inferred (router_handler
+1.1.0). `AIPASS_BRANCH_NAME` (who the process IS) now outranks the cwd
+passport (where it's standing); cwd stays as the human-shell fallback. The
+inverted precedence stamped any agent standing in another branch's directory
+with THAT branch's identity — S102 damage: a commons agent's mail landed as
+@aipass and corrupted a citizen's sent store. The bug lived in TWO places
+(the env builder at router_handler.py and a second copy feeding the
+`[CALLER:X]` routing-log tag in router.py) — a half-fix would have made the
+log exonerate the caller under investigation; both now share one resolver
+with a tag-matches-stamp test. Conflicts log a WARNING naming both signals
+(case-insensitive — passports carry display casing). Authority unaffected
+and now test-asserted: git owner-tier resolves from passports only. Also:
+ambient-env test pinned (outward-lean class), stale ALLOWED_CALLERS docs
+corrected to the earned owner tier. Found by @ai_mail/@aipass, ruled and
+built by @drone. 971 tests (+8), 5 canaries, seedgo 100%; live-proved under
+the original S102 conditions and independently re-verified by devpulse.
+
+**fix(flow)** — SOP templates stop exploding on braces (get_template loader):
+`str.format()` over the whole template body read every literal `{...}` in
+documented code snippets as a replacement field — weekly_update.md's
+`{createIfEmpty: true}` MCP example made the template 100% un-instantiable
+with a bare KeyError. Escaping the one brace would have left the trap armed
+for every future SOP, so the loader now substitutes ONLY the seven known
+placeholder names via regex; all other braces pass through verbatim.
+Template file untouched. Caught by @trigger's error watch, fixed by @flow.
+772 tests (+2), verified end-to-end (PPLAN-0030 created + closed through the
+full pipeline), seedgo 100%; suite re-verified by devpulse.
+
 **fix(trigger)** — dispatch notifications report the true occurrence count
 (error_detected 2.3.0, found by @drone): line 563 hardcoded `occurrences=1`
 while threading every other field through from the handler. Gate 3 refuses to

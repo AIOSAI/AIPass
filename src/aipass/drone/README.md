@@ -57,7 +57,7 @@ drone @git issue view 42         # Passthrough to gh issue view 42
 drone @git run list              # Passthrough to gh run list
 drone @git workflow list         # Passthrough to gh workflow list
 
-# Git workflow — owner tier (devpulse only)
+# Git workflow — owner tier (the project's registry-declared owner)
 drone @git commit "message"      # Commit whatever is already staged
 drone @git commit "msg" --all    # Stage ALL repo changes and commit
 drone @git commit "msg" f1 f2    # Stage only f1 f2, then commit
@@ -198,7 +198,7 @@ drone/
 │   │       └── tag_handler.py               # Release tagging (version + exists guards)
 │   └── plugins/
 │       ├── devpulse_ops/          # Privileged git operations (auth-gated)
-│       │   ├── auth.py            # Passport-based identity gate (ALLOWED_CALLERS)
+│       │   ├── auth.py            # Passport-based identity gate (owner tier earned per-repo)
 │       │   ├── pr_plugin.py       # System-wide PR (git add -A, system/ branches)
 │       │   ├── merge_plugin.py    # PR merge (--merge) + local sync
 │       │   ├── sync_plugin.py     # Smart sync (fetch, divergence detect, rebase)
@@ -253,7 +253,7 @@ All work happens on `dev`. Only devpulse has write access. Agents build and repo
 
 Enforcement layers:
 - Git gate (PreToolUse hook) blocks ALL raw git/gh commands
-- Drone tier system restricts write commands to devpulse only
+- Drone tier system restricts write commands to the project's registry-declared owner
 - Prompt instructions tell agents they have zero git access
 
 ---
@@ -297,7 +297,7 @@ Plugins live in `apps/plugins/{name}/` — outside the 3-layer structure by desi
 
 ### devpulse_ops
 
-Auth-gated operations for system administration. `auth.py` walks CWD for `.trinity/passport.json` and checks `branch_name` against `ALLOWED_CALLERS` (devpulse, seedgo, spawn).
+Auth-gated operations for system administration. `auth.py` walks CWD for `.trinity/passport.json`, then earns owner tier from four facts in the caller's own project registry: `citizen_class: manager`, registry tenancy, an `owner: true` entry, and path-binding of the passport to the recorded home. No hardcoded caller list — the owner is devpulse in AIPass and whoever owns elsewhere.
 
 | Plugin | Command | Purpose |
 |--------|---------|---------|
