@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-02-10
-# Modified: 2026-08-02
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -560,7 +560,7 @@ def handle_error_detected(
             message=message,
             timestamp=timestamp,
             log_path=effective_log_path,
-            occurrences=1,
+            occurrences=count,
             first_seen=first_seen or timestamp,
             last_seen=last_seen or timestamp,
             log_context=error_log_context,

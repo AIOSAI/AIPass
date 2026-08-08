@@ -9,6 +9,20 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-07] — post-v2.7.14 train (in progress)
+
+**fix(trigger)** — dispatch notifications report the true occurrence count
+(error_detected 2.3.0, found by @drone): line 563 hardcoded `occurrences=1`
+while threading every other field through from the handler. Gate 3 refuses to
+dispatch below count ≥ 2, so no dispatched mail could ever truthfully read 1 —
+every notification understated recurrence and readers triaged recurring errors
+as one-offs (@drone read a count-9 error as a single). The registry's number
+(error_reporter.py) was always right, which is why the two disagreed and the
+bug survived. 710 trigger tests (+3, canary-verified: reverting the line fails
+all three), seedgo 100%. By @trigger; suite re-verified by devpulse.
+
+---
+
 ## [2026-08-07] — cross-project walls down: the Vera arc lands end to end
 
 *Release v2.7.14 (PR #727, 26 commits) rolls up this section plus

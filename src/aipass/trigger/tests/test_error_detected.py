@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-08-07
 # =============================================
 
 """Tests for error_detected event handler: set_send_email_callback, handle_error_detected, and fallback stubs."""
@@ -703,3 +703,65 @@ class TestProbeSucceeded:
         send.assert_called_once()
         mod.registry_record_dispatch.assert_called_once_with("fp_probe")  # type: ignore[attr-defined]
         mod.circuit_breaker_probe_succeeded.assert_called_once()  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Occurrences field fidelity (reported by @drone 2026-08-04)
+# ---------------------------------------------------------------------------
+
+
+class TestOccurrencesReportsTrueCount:
+    """The dispatched notification must report the registry count, not a literal 1.
+
+    The call site hardcoded occurrences=1 while threading every other field
+    through, so every dispatch told its reader a recurring error was a one-off.
+    """
+
+    def test_occurrences_matches_count(self) -> None:
+        """Notification body reports the count it was dispatched with."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=9
+        )
+
+        body = send.call_args.kwargs["message"]
+        assert "Occurrences: 9" in body
+
+    def test_occurrences_never_reports_one(self) -> None:
+        """Gate 3 requires count >= 2, so a dispatched mail can never truthfully say 1."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=2
+        )
+
+        body = send.call_args.kwargs["message"]
+        assert "Occurrences: 1" not in body
+        assert "Occurrences: 2" in body
+
+    def test_occurrences_consistent_with_seen_window(self) -> None:
+        """A count spanning a first/last-seen window stays internally consistent.
+
+        The inconsistency @drone spotted -- 'Occurrences: 1' against a month-long
+        window -- was the tell that two different sources fed one payload.
+        """
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow",
+            module="cfg",
+            message="err",
+            error_hash="h1",
+            count=9,
+            first_seen="2026-07-06T08:13:26",
+            last_seen="2026-08-04T18:27:38",
+        )
+
+        body = send.call_args.kwargs["message"]
+        assert "Occurrences: 9" in body
+        assert "First seen: 2026-07-06T08:13:26" in body
+        assert "Last seen: 2026-08-04T18:27:38" in body
