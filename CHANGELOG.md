@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**feat(skills)** — TG `/rc <target>`: recover a dark Claude Code remote from
+the phone (remote_control.py, control-bot family). Born from the day Vera's
+rc died with Patrick phone-only and no path back: the bot resolves the target
+to its tmux session and types CC's built-in `/rc` (`/remote-control`) into
+it — the one injected string, module constant, TG-inbound and control-bot
+gated like `/context`. Safety learned the hard way and baked in: palette top
+match verified before Enter, never a bare Enter on an empty composer (ghost
+prompt-suggestions), busy sessions get a refusal not a queue, success read
+from the footer indicator only. Live-test discovery: the "second step" is
+state-dependent — an already-connected session pops a modal status panel
+that would wedge the target's composer, so the verb Escapes it and verifies
+dismissal. Deploy proven live via getMyCommands before/after fleet restart:
+`rc` present on exactly the two control bots, absent on all three branch
+bots (the gate holds in production). 48 new tests, 1058 telegram + 252
+skills green, seedgo 100%. By @skills; suites re-verified by devpulse.
+
 **fix(drone)** — caller identity: assigned beats inferred (router_handler
 1.1.0). `AIPASS_BRANCH_NAME` (who the process IS) now outranks the cwd
 passport (where it's standing); cwd stays as the human-shell fallback. The

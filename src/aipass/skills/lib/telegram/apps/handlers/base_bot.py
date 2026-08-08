@@ -99,6 +99,7 @@ from .bot_registry import (
     get_bot_by_branch,
 )
 from .log_streamer import LogStreamer
+from . import remote_control
 
 # Optional — botfather_client may not be ported yet
 _BOTFATHER_AVAILABLE = False
@@ -313,6 +314,8 @@ class BaseBot:
         # Most recent informational-command watcher — kept for test observability
         # and shutdown inspection; the thread is a daemon and owns its own exit.
         self._slash_stdout_thread: threading.Thread | None = None
+        # Most recent /rc recovery worker — same rationale as the watcher above.
+        self._rc_worker_thread: threading.Thread | None = None
         self._heartbeat_gen: int = 0
 
         # /suspend control verb state (DPLAN-0270 P5) — heartbeat mode only;
@@ -849,6 +852,10 @@ class BaseBot:
 
         if cmd_name == "lock" and self._is_control_bot():
             self._handle_control_lock(chat_id)
+            return True
+
+        if cmd_name == "rc" and self._is_control_bot():
+            self._handle_control_rc(chat_id, cmd_args)
             return True
 
         # /stop — every bot, not just control bots (interrupts THIS bot's own
@@ -1932,6 +1939,197 @@ class BaseBot:
         logger.info("Control /stop: sent Escape to '%s'", self.session_name)
         self._settle_pending_on_stop()
         self.send_message(chat_id, "stopped - session interrupted")
+
+    def _handle_control_rc(self, chat_id: int, target_arg: str) -> None:
+        """
+        /rc <target> control verb — recover a tmux-hosted agent's Remote Control.
+
+        Types the built-in /remote-control command into another agent's live
+        Claude Code session so a dropped phone connection can be restored
+        without touching the machine. Requires an explicit target: there is no
+        default, because the wrong guess types into someone else's session.
+
+        Validation runs inline (cheap, and the user gets an immediate error);
+        the injection itself moves to a worker thread because it spends up to
+        ~15s waiting on the TUI, and the poll loop must keep serving messages.
+        """
+        target = remote_control.normalize_target(target_arg)
+        if not target:
+            self.send_message(
+                chat_id,
+                "Usage: /rc <target> — e.g. /rc vera\nNo default target: /rc types into a live session.",
+            )
+            return
+
+        sessions = remote_control.list_tmux_sessions()
+        session = remote_control.resolve_agent_session(target, sessions)
+        if not session:
+            listing = ", ".join(sorted(sessions)) if sessions else "none"
+            self.send_message(chat_id, f"No tmux session for '{target}'.\nRunning sessions: {listing}")
+            logger.info("Control /rc: no session for '%s' (running: %s)", target, listing)
+            return
+
+        processing = self.send_message(chat_id, f"Recovering remote control for {target}...")
+        processing_msg_id = processing.get("message_id") if processing else None
+
+        worker = threading.Thread(
+            target=self._run_rc_recovery,
+            args=(chat_id, target, session, processing_msg_id),
+            daemon=True,
+            name=f"rc-recovery-{self.bot_id}",
+        )
+        worker.start()
+        self._rc_worker_thread = worker
+        logger.info("Control /rc: recovering '%s' via session '%s'", target, session)
+
+    def _rc_reply(self, chat_id: int, processing_msg_id: Optional[int], text: str) -> None:
+        """Deliver an /rc outcome, replacing the placeholder when there is one."""
+        if processing_msg_id:
+            self.edit_message(chat_id, processing_msg_id, text)
+        else:
+            self.send_message(chat_id, text)
+
+    def _wait_for_rc_idle(self, session: str, pane: str) -> str:
+        """
+        Poll until the target finishes its turn, returning the latest pane text.
+
+        Gives up after RC_IDLE_WAIT_SECONDS and returns the still-busy pane —
+        the caller decides what to do, this only waits.
+        """
+        deadline = time.time() + remote_control.IDLE_WAIT_SECONDS
+        while remote_control.pane_is_busy(pane) and time.time() < deadline:
+            time.sleep(remote_control.IDLE_POLL_SECONDS)
+            latest = remote_control.capture_pane(session)
+            if latest is None:
+                return pane
+            pane = latest
+        return pane
+
+    def _run_rc_recovery(
+        self,
+        chat_id: int,
+        target: str,
+        session: str,
+        processing_msg_id: Optional[int],
+    ) -> None:
+        """
+        Drive the /rc injection against *session* and report what the pane showed.
+
+        Every exit path sends exactly one outcome message, and none of them
+        claim success without having seen the footer indicator — an absent
+        indicator is reported as a failure with the pane tail attached, not
+        smoothed over.
+        """
+        pane = remote_control.capture_pane(session)
+        if pane is None:
+            self._rc_reply(chat_id, processing_msg_id, f"Could not read '{session}' — capture-pane failed. See logs.")
+            return
+
+        pane = self._wait_for_rc_idle(session, pane)
+        if remote_control.pane_is_busy(pane):
+            # Refusing beats queueing: mid-turn the palette never opens, so the
+            # Enter that follows would submit "/rc" to the agent as an ordinary
+            # prompt — arbitrary text in someone else's chat, which this verb
+            # must never produce.
+            logger.info("Control /rc: '%s' still mid-turn after wait, not injecting", target)
+            self._rc_reply(
+                chat_id,
+                processing_msg_id,
+                f"{target} is mid-turn — not injecting (a queued /rc cannot be verified).\n"
+                f"Try again when the turn ends.",
+            )
+            return
+
+        if not remote_control.send_literal(session, remote_control.RC_COMMAND_TEXT):
+            self._rc_reply(chat_id, processing_msg_id, f"Failed to type /rc into '{session}'. See logs.")
+            return
+
+        time.sleep(remote_control.PALETTE_SETTLE_SECONDS)
+        pane = remote_control.capture_pane(session)
+        if pane is None:
+            remote_control.clear_composer(session)
+            self._rc_reply(chat_id, processing_msg_id, f"Lost the pane for '{session}' after typing. See logs.")
+            return
+
+        if not remote_control.palette_top_entry_is_rc(pane):
+            # The fuzzy palette ranks something else first — pressing Enter here
+            # runs whatever that is (2026-07-31 incident). Back out instead.
+            remote_control.clear_composer(session)
+            logger.warning("Control /rc: palette top entry was not /remote-control for '%s'", session)
+            self._rc_reply(
+                chat_id,
+                processing_msg_id,
+                f"Aborted — /remote-control was not the top palette entry in {target}'s session.\n"
+                f"Nothing was sent; the composer was cleared.",
+            )
+            return
+
+        if not remote_control.send_key(session, "Enter"):
+            remote_control.clear_composer(session)
+            self._rc_reply(chat_id, processing_msg_id, f"Failed to submit /rc in '{session}'. See logs.")
+            return
+
+        time.sleep(remote_control.CONNECT_SETTLE_SECONDS)
+        pane = remote_control.capture_pane(session)
+        if pane is None:
+            self._rc_reply(
+                chat_id,
+                processing_msg_id,
+                f"Sent /rc to {target}, but could not read the result — outcome unverified.",
+            )
+            return
+
+        self._report_rc_outcome(chat_id, target, session, pane, processing_msg_id)
+
+    def _report_rc_outcome(
+        self,
+        chat_id: int,
+        target: str,
+        session: str,
+        pane: str,
+        processing_msg_id: Optional[int],
+    ) -> None:
+        """
+        Read the post-Enter pane and report the honest result.
+
+        Three shapes land here: the status panel (target was already
+        connected), the footer indicator (recovered), or neither (failed).
+        """
+        if remote_control.status_panel_showing(pane):
+            # Already connected — /rc opened the status panel instead of
+            # reconnecting. That panel is modal, so it MUST be dismissed or the
+            # target's composer stays wedged behind it.
+            url = remote_control.extract_session_url(pane)
+            remote_control.send_key(session, "Escape")
+            time.sleep(1)
+            after = remote_control.capture_pane(session)
+            dismissed = after is not None and not remote_control.status_panel_showing(after)
+            logger.info("Control /rc: '%s' already connected (panel dismissed=%s)", target, dismissed)
+
+            text = f"{target} was already connected — nothing to recover."
+            if url:
+                text += f"\n{url}"
+            if not dismissed:
+                text += "\n⚠️ The status panel may still be open in that session — check the terminal."
+            self._rc_reply(chat_id, processing_msg_id, text)
+            return
+
+        if remote_control.rc_indicator_present(pane):
+            url = remote_control.extract_session_url(pane)
+            logger.info("Control /rc: recovered '%s' (url=%s)", target, url or "unknown")
+            text = f"✅ {target} reconnected — /rc indicator is back in the footer."
+            if url:
+                text += f"\n{url}"
+            self._rc_reply(chat_id, processing_msg_id, text)
+            return
+
+        logger.warning("Control /rc: no indicator after /rc on '%s'", session)
+        tail = remote_control.pane_tail(pane)
+        self._rc_reply(
+            chat_id,
+            processing_msg_id,
+            f"❌ /rc ran on {target} but the footer shows no connection.\n\nPane showed:\n{tail}",
+        )
 
     def _settle_pending_on_stop(self) -> None:
         """Settle an in-flight pending placeholder after a /stop interrupt — never leave it spinning."""
@@ -3720,6 +3918,10 @@ class BaseBot:
             commands["lock"] = {
                 "description": "Lock the screen — agents keep running behind the password wall",
                 "menu_text": "Lock screen",
+            }
+            commands["rc"] = {
+                "description": "Recover an agent's Claude Code remote — /rc <target>, e.g. /rc vera",
+                "menu_text": "Recover remote",
             }
         return commands
 
