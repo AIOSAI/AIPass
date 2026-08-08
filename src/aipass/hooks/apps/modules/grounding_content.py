@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-08-01
+# Modified: 2026-08-07
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
@@ -24,6 +24,21 @@ from aipass.cli.apps.modules import err_console
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
 CONSOLE = err_console
+
+# The ACTIVE half of grounding. The passive half (kernel/navmap/branch/identity)
+# re-injects itself on fresh context and after a compact; re-reading .trinity and
+# refreshing the dashboard only ever happened because a greeting triggered the
+# startup protocol. A mid-task continuation never gets a greeting, so without this
+# the agent resumes with re-injected prompts but stale memory of its own state.
+STARTUP_REGROUND_INSTRUCTION = (
+    "ACTIVE RE-GROUNDING — do this BEFORE resuming the task, silently, no narration:\n"
+    " 1. Read your memory: .trinity/passport.json, .trinity/local.json, .trinity/observations.json\n"
+    " 2. Refresh and read your dashboard: drone @prax dashboard refresh @<self>, "
+    "then read DASHBOARD.local.json\n"
+    "The context below is re-injected automatically; this half normally only runs off a greeting, and a "
+    "mid-task continuation never gets one. If what you read contradicts what you believe about your own "
+    "state, SAY SO in your reply before acting on it.\n"
+)
 
 
 def print_introspection() -> None:

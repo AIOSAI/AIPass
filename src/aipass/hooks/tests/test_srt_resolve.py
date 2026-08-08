@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_srt_resolve.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-08-01
+# Modified: 2026-08-07
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs (DPLAN-0279).
@@ -36,6 +36,12 @@ pytestmark = pytest.mark.skipif(_NODE is None, reason="requires a real node bina
 # SYSTEMROOT (exit 134, "Assertion failed: ncrypto::CSPRNG").
 _posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX-layout scenario")
 
+# A hang backstop, not a latency assertion. 15s flaked red on a cold Windows
+# runner (CI run 31202533460) purely on node.EXE process startup; the identical
+# rerun passed. Nothing here should take seconds, so a wide margin still catches
+# a genuine deadlock while refusing to fail a green build over runner warm-up.
+_NODE_TIMEOUT_S = 60
+
 
 def _make_package(node_modules_dir: Path) -> Path:
     """Create a fake @anthropic-ai/sandbox-runtime/dist/index.js under node_modules_dir."""
@@ -64,7 +70,7 @@ def _run_resolve(tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
         [_node(), str(_MJS), "--resolve"],
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=_NODE_TIMEOUT_S,
         check=False,
         cwd=str(tmp_path),
         env=env,
@@ -154,7 +160,7 @@ class TestSrtResolveCandidates:
             [_node(), str(_MJS)],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=_NODE_TIMEOUT_S,
             check=False,
             cwd=str(tmp_path),
         )

@@ -11,6 +11,32 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**feat(hooks)** — two grounding gaps closed, Patrick-ruled the same evening
+(email.py 1.2.0, cadence.py 2.1.0, grounding_content.py 1.1.0,
+post_compact_regrounding.py 1.1.0). (1) Mail banner on a 5-turn cadence
+loop: announces the turn mail arrives, repeats every 5th turn while it
+stays new, fully silent at zero — and zero CLEARS the loop state so the
+next arrival announces immediately instead of serving out the old period.
+Built as an elapsed-turns loop off the last fire, not a modulo slot (a
+banner four turns late is not a notification); state in its own per-session
+file because the turn-counter file's every-turn truncation is load-bearing
+for the post-compact regroup token. Fails OPEN — a broken counter can't
+hide someone's mail. Previously the banner stacked on every single turn
+(11 turns with mail = 11 banners). (2) Post-compact re-grounding is now
+ACTIVE, not just passive: the PostToolUse backstop prepends an explicit
+instruction — re-read .trinity, refresh + read the dashboard, and SAY SO
+if memory contradicts reality — because the startup protocol only ever ran
+off a greeting and a mid-task continuation never gets one. Live-proved
+twice: once on @hooks during the build itself, once on devpulse during
+this very verification (the backstop fired mid-turn and the instruction
+was followed). Known gap flagged, not fixed (their call was right): a
+compact followed by a real UserPromptSubmit gets passive grounding only —
+fix queued, touches DPLAN-0278 machinery. Plus a drive-by: srt_resolve
+node timeouts 15s→60s named constant (Windows runner cold-start flaked a
+docs-only commit; it's a hang backstop, not a latency budget). 1360 tests
+(+25, canary-verified: forced-fire + instruction-removal each break their
+own tests), seedgo 100%. By @hooks; suite re-verified by devpulse.
+
 **fix(ai_mail)** — mail can no longer be invisible or crash its reader: four
 live defects fixed (format.py 1.2.0, email.py, email_send.py, ai_mail.py).
 (1) The listing truncated the WRONG END — reverse-then-slice kept the oldest

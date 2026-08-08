@@ -118,3 +118,59 @@ class TestPostCompactRegrounding:
 
         assert "KERNEL" in first["stdout"]
         assert second == {"stdout": "", "exit_code": 0}
+
+
+class TestActiveStartupInstruction:
+    """The passive half (kernel/navmap/branch/identity) re-injects itself; the ACTIVE
+    half — re-read .trinity, refresh the dashboard — only ever ran off a greeting,
+    and a mid-task post-compact continuation never gets one."""
+
+    def _ground(self, tmp_path):
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value=""),
+        ):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+        return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+
+    def test_instruction_is_present(self, tmp_path):
+        assert "ACTIVE RE-GROUNDING" in self._ground(tmp_path)
+
+    def test_names_the_trinity_files_to_read(self, tmp_path):
+        context = self._ground(tmp_path)
+        for name in ("passport.json", "local.json", "observations.json"):
+            assert name in context
+
+    def test_names_the_dashboard_refresh(self, tmp_path):
+        context = self._ground(tmp_path)
+        assert "drone @prax dashboard refresh" in context
+        assert "DASHBOARD.local.json" in context
+
+    def test_instruction_precedes_the_injected_content(self, tmp_path):
+        """It says 'do this BEFORE resuming' — it has to arrive before the wall of
+        re-injected prompt text, not buried under it."""
+        context = self._ground(tmp_path)
+        assert context.index("ACTIVE RE-GROUNDING") < context.index("KERNEL")
+
+    def test_keeps_the_newest_first_memory_reminder(self, tmp_path):
+        """The active instruction is additive — it must not displace what was there."""
+        assert "NEWEST-FIRST" in self._ground(tmp_path)
+
+    def test_tells_the_agent_to_surface_contradictions(self, tmp_path):
+        """Kernel rule: memory vs reality mismatch gets SAID, not silently reconciled."""
+        assert "SAY SO" in self._ground(tmp_path)
+
+    def test_still_silent_when_not_pending(self, tmp_path):
+        """The instruction rides the existing one-shot token — it must not turn the
+        backstop into something that fires on every tool call."""
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+        with patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=False):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+        assert result["stdout"] == ""

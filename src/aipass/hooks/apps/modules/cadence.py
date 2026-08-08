@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-06-08
+# Modified: 2026-08-07
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -48,8 +48,11 @@ DEFAULTS = {
         "tier0": {"period": 5, "offset": 0},
         "navmap": {"period": 5, "offset": 0},
         "branch": {"offset": 0},
+        "email": {"period": 5},
     },
 }
+
+MAIL_LOADER = "email"
 
 _turn: int | None = None
 _config: dict | None = None
@@ -227,6 +230,99 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     return fired
 
 
+def _mail_state_path() -> Path | None:
+    """Per-session state for the mail notification loop.
+
+    Deliberately a separate file from the turn counter: _load_and_increment()
+    truncates its state to {turn, token} every turn, and that truncation is
+    load-bearing — it is what disarms the post-compact regroup token once a real
+    UserPromptSubmit arrives. Storing mail state there would either be wiped
+    every turn or force that wipe to stop, changing regroup semantics.
+    """
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not session_id:
+        return None
+    return _GUARD_DIR / f"aipass-mailcadence-{session_id}.json"
+
+
+def _read_last_mail_turn(path: Path) -> int | None:
+    """Last turn the mail banner fired this session, or None if never/unreadable."""
+    if not path.exists():
+        return None  # never fired this session — the normal first-sighting path
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.info("[HOOKS] cadence: mail state read failed, treating as never fired: %s", exc)
+        return None
+    try:
+        value = json.loads(content).get("last_fired_turn") if content.strip() else None
+    except json.JSONDecodeError as exc:
+        logger.info("[HOOKS] cadence: mail state unreadable, treating as never fired: %s", exc)
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _write_last_mail_turn(path: Path, turn: int | None) -> None:
+    """Record (or clear) the last turn the mail banner fired."""
+    try:
+        if turn is None:
+            path.write_text(json.dumps({}), encoding="utf-8")
+        else:
+            path.write_text(json.dumps({"last_fired_turn": turn}), encoding="utf-8")
+    except OSError as exc:
+        logger.info("[HOOKS] cadence: mail state write failed: %s", exc)
+
+
+def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
+    """Mail banner cadence: announce on arrival, then at most once every Nth turn.
+
+    Zero new mail is fully silent AND clears the state, so the next arrival
+    announces on the turn it lands rather than waiting out the rest of a period.
+    A banner that shows up four turns after the mail did is not a notification.
+
+    Cadence disabled, or period <= 0, restores the previous fire-every-turn
+    behaviour — same convention as should_fire() returning True when disabled.
+    """
+    config = _load_config()
+    if new_count <= 0:
+        path = _mail_state_path()
+        if path is not None and path.exists():
+            _write_last_mail_turn(path, None)
+        return False
+
+    if not config.get("enabled", True):
+        return True
+
+    loader_config = config.get("loaders", {}).get(MAIL_LOADER, {})
+    period = loader_config.get("period", config.get("period", 5))
+    if period <= 0:
+        return True
+
+    path = _mail_state_path()
+    if path is None:
+        return True
+
+    turn = _load_and_increment(hook_data or {})
+    last_fired = _read_last_mail_turn(path)
+
+    # turn < last_fired means the counter was reset under us (compact / new session);
+    # the banner belongs to the old numbering, so re-announce rather than stay silent.
+    fired = last_fired is None or turn < last_fired or (turn - last_fired) >= period
+    if fired:
+        _write_last_mail_turn(path, turn)
+
+    logger.info(
+        "[HOOKS] cadence mail %s count=%d turn=%d last_fired=%s period=%d",
+        "fired" if fired else "skipped",
+        new_count,
+        turn,
+        last_fired,
+        period,
+    )
+    return fired
+
+
 _REGROUP_DEBOUNCE_S = 30.0
 
 
@@ -392,7 +488,12 @@ def print_introspection() -> None:
     loaders = config.get("loaders", {})
     for name, lcfg in loaders.items():
         lp = lcfg.get("period", global_period)
-        CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)}")
+        if name == MAIL_LOADER:
+            # No offset: the mail banner is an elapsed-turns loop off its own last
+            # fire, not a modulo slot, so it can announce the turn mail arrives.
+            CONSOLE.print(f"  Loader '{name}': period={lp} (elapsed-turns loop, announces on arrival)")
+        else:
+            CONSOLE.print(f"  Loader '{name}': period={lp} offset={lcfg.get('offset', 0)}")
     path = _state_path()
     if path and path.exists():
         try:

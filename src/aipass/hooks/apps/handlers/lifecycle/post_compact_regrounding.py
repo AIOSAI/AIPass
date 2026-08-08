@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Mid-turn grounding backstop after compaction (PostToolUse, DPLAN-0276)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-07-31
+# Modified: 2026-08-07
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -64,8 +64,9 @@ def handle(hook_data: dict) -> dict:
             "grounding didn't fire yet. Re-grounding now via PostToolUse.\n"
             "Reminder: .trinity sessions[]/key_learnings[] are NEWEST-FIRST — insert new "
             "entries at index 0 with number = max existing + 1, never append at the tail.\n"
+            "\n" + grounding_content.STARTUP_REGROUND_INSTRUCTION
         )
-        context = header + "\n\n".join(sections)
+        context = header + "\n" + "\n\n".join(sections)
 
         result = {
             "hookSpecificOutput": {
