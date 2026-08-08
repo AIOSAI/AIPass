@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2025-11-16
 # Modified: 2026-08-07
 # =============================================
@@ -525,15 +525,30 @@ def extract_with_metadata(file_path: Path, percentage: int | None = None) -> Dic
 
     enriched = []
     for item in extracted:
+        item_metadata = {
+            "branch": branch,
+            "type": memory_type,
+            "array_field": array_field,
+            "extracted_at": extraction_timestamp,
+            "source_file": file_path.name,
+        }
+
+        # Carry the entry's OWN identity into vector metadata. Without it an
+        # archived entry can only be matched on exact text, which silently
+        # stops working the moment two entries share wording — and a recovered
+        # entry cannot be renumbered without guessing. ChromaDB metadata takes
+        # scalars only, so skip anything missing or of an unexpected type.
+        if isinstance(item, dict):
+            entry_number = item.get("number")
+            if isinstance(entry_number, int) and not isinstance(entry_number, bool):
+                item_metadata["entry_number"] = entry_number
+            entry_date = item.get("date")
+            if isinstance(entry_date, str) and entry_date:
+                item_metadata["entry_date"] = entry_date
+
         enriched_item = {
             **item,  # Preserve original item data
-            "_metadata": {
-                "branch": branch,
-                "type": memory_type,
-                "array_field": array_field,
-                "extracted_at": extraction_timestamp,
-                "source_file": file_path.name,
-            },
+            "_metadata": item_metadata,
         }
         enriched.append(enriched_item)
 

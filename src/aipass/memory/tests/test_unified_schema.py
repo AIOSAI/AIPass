@@ -361,6 +361,95 @@ class TestExtractorKeyLearningsList:
         assert [e["number"] for e in data["key_learnings"]] == [5, 4, 3, 2]
 
 
+class TestExtractWithMetadataEntryIdentity:
+    """extract_with_metadata must carry each entry's own number/date into
+    _metadata, which becomes the ChromaDB metadata for the archived vector.
+
+    Without it, an archived entry can only be matched on exact text — which
+    stops working as soon as two entries share wording, and makes renumbering
+    a recovered entry guesswork.
+    """
+
+    def _run(self, ext, tmp_path, sessions):
+        mem_file = tmp_path / ".trinity" / "local.json"
+        mem_file.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {"current_lines": 100}},
+            "todos": [],
+            "key_learnings": [],
+            "sessions": sessions,
+        }
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        def fake_write(fp, d):
+            fp.write_text(json.dumps(d, indent=2), encoding="utf-8")
+
+        def fake_read(fp):
+            return json.loads(fp.read_text(encoding="utf-8"))
+
+        with (
+            patch.object(ext, "_write_memory_file", side_effect=fake_write),
+            patch.object(ext, "_read_memory_file", side_effect=fake_read),
+        ):
+            return ext.extract_with_metadata(mem_file)
+
+    def _sessions(self, count, **overrides):
+        out = []
+        for i in range(count):
+            n = count - i
+            entry = {
+                "number": n,
+                "date": f"2026-01-{(count - i):02d}",
+                "summary": f"summary {n}",
+                "status": "completed",
+            }
+            if n <= overrides.get("apply_to_below", 0):
+                entry.update(overrides.get("patch", {}))
+            out.append(entry)
+        return out
+
+    def test_entry_number_and_date_land_in_metadata(self, monkeypatch, tmp_path):
+        ext, mocks = _import_extractor(monkeypatch)
+        mocks["config_loader"].section.return_value = {
+            "defaults": {"local": {"sessions": {"count": 2}}},
+            "per_branch": {},
+        }
+
+        result = self._run(ext, tmp_path, self._sessions(4))
+
+        assert result["success"] is True
+        assert result["count"] == 2
+        archived = {e["_metadata"]["entry_number"]: e["_metadata"] for e in result["entries"]}
+        assert sorted(archived) == [1, 2]
+        assert archived[1]["entry_date"] == "2026-01-01"
+        assert archived[2]["entry_date"] == "2026-01-02"
+        # existing metadata must survive untouched
+        assert archived[1]["type"] == "local"
+        assert archived[1]["source_file"] == "local.json"
+
+    def test_missing_number_or_date_is_omitted_not_none(self, monkeypatch, tmp_path):
+        """ChromaDB rejects None metadata values — absent keys must stay absent."""
+        ext, mocks = _import_extractor(monkeypatch)
+        mocks["config_loader"].section.return_value = {
+            "defaults": {"local": {"sessions": {"count": 2}}},
+            "per_branch": {},
+        }
+
+        sessions = self._sessions(4)
+        # strip identity off the two oldest (the ones that get archived)
+        sessions[-1].pop("date")
+        sessions[-2].pop("number")
+
+        result = self._run(ext, tmp_path, sessions)
+
+        assert result["count"] == 2
+        for entry in result["entries"]:
+            meta = entry["_metadata"]
+            assert "entry_number" not in meta or isinstance(meta["entry_number"], int)
+            assert "entry_date" not in meta or isinstance(meta["entry_date"], str)
+            assert None not in meta.values()
+
+
 # ===========================================================================
 # 3. Entry limits: list-kind key_learnings char-limit enforcement
 # ===========================================================================

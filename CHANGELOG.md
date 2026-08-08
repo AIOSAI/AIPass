@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**fix(memory)** — archived entries recover by identity, not by guesswork
+(extractor 0.6.0, search display; @commons' finding fixed at the source).
+Archived vectors carried branch/type/source but never the entry's own
+number or date — a recovered entry matched on text alone, ambiguous the
+moment two entries share wording. extract_with_metadata now lifts
+entry_number + entry_date into vector metadata (scalars only; missing or
+mistyped values skipped, never written as None — a None fails the whole
+Chroma store). Chased to the surface: search had been printing a bare
+"Time:" for every archived .trinity entry since forever (rollover writes
+empty timestamp; entries carry `date`) — now renders "Entry: #14 | Dated:
+…". Canary-verified both ways; live unmocked run archived 3 entries
+printing numbered+dated. Honest caveats kept: ~8437 existing vectors have
+no backfill (only possible from versioned backups — on @memory's board),
+and their earlier "restore on request" offer is withdrawn as unactionable
+(the index-0-only write hook would misorder restored entries — correct
+guardrail, wrong offer). 1029 tests (+5). By @memory; suite + lint
+re-verified by devpulse.
+
 **fix(memory)** — the stale-snapshot trap closed at its source, and the
 reframe that came with it (FPLAN-0380 workstream 4 of 4). config_loader
 1.1.0 no longer writes anything on a missing file (the self_heal parameter

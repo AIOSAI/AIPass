@@ -82,7 +82,7 @@ memory/
 │       ├── vector/              # embedder.py, embed_subprocess.py
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1024 tests
+├── tests/                       # 1029 tests
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -163,7 +163,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 1024 passed, 0 failures, 0 skips
+- **Tests:** 1029 passed, 0 failures, 0 skips
 - **Seedgo:** 100%
 
 ---
