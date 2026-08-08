@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo.py
 # Description: SEEDGO - Standards Platform for AIPass
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-09
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -250,7 +250,7 @@ def print_help() -> None:
     console.print("  [green]drone @seedgo audit aipass @flow[/green]")
     console.print()
     console.print("  [dim]# Look up what a standard checks[/dim]")
-    console.print("  [green]drone @seedgo standards_query aipass_standards cli[/green]")
+    console.print("  [green]drone @seedgo standard cli[/green]")
     console.print()
 
     console.print("─" * 70)
@@ -258,7 +258,7 @@ def print_help() -> None:
 
     # Commands line for drone discovery
     console.print(
-        "[dim]Commands: audit, standards_audit, standards_query, checklist, diagnostics,"
+        "[dim]Commands: audit, standards_audit, standards_query, standard, checklist, diagnostics,"
         " diagnostics_audit, proof, proof_query, test_map, readme, readme_update, --help[/dim]"
     )
     console.print()

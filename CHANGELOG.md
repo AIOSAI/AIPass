@@ -11,6 +11,34 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**feat(seedgo)** — the audit can now SAY things without scoring them, and
+the trio standard closed its blind spot (FPLAN-0380 workstream 1 of 4,
+Patrick-ruled: seedgo never audits custom_config content — signpost only).
+A new non-scored info channel: checkers may expose `check_branch_info()`,
+collected into `info_lines` (structurally impossible to affect a score)
+and rendered dim ALWAYS — including at 100%, where the old
+violations-only display would have hidden an info line on exactly the
+healthy branches it describes. First consumer lists custom_config
+operator files + a guide pointer; audit cache now fingerprints
+custom_config names/mtimes so the line can't go stale on a cache hit.
+Standard text gains the house-pattern section (5 rules + the
+never-snapshot rule with memory's 6-key drift named). Trio completeness
+is now bidirectional — any `{stem}_{config|data|log}.json` implies the
+other two; live-proved both directions on @trigger in real time (19:45
+red 66% on the genuine gap, 19:50 green 100% after their parallel fix —
+neither branch touching the other). Plus, born from devpulse's typo'd
+pointer in the brief: `drone @seedgo standard <name>` now exists as a
+pack-resolving alias (refuses to guess on ambiguity), and a canary test
+parses the embedded pointer constant and resolves it for real — an
+embedded command string is untested code, which is how the typo could
+exist at all. Their attempt-1 process died after replying (exit 1);
+attempt 2 honestly flagged the tree-state mismatch before commit. 1339
+tests (+36 across both passes), fleet 16/17 at 100%. Found-not-fixed,
+queued: log_structure's branch post-check has been dead fleet-wide
+(bypass_rules TypeError swallowed by a bare except) — reviving it can
+move scores, held for a ruling. By @seedgo; suite + alias + live @hooks
+info line re-verified by devpulse.
+
 **fix(memory)** — archived entries recover by identity, not by guesswork
 (extractor 0.6.0, search display; @commons' finding fixed at the source).
 Archived vectors carried branch/type/source but never the entry's own

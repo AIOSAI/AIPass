@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-17
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -48,6 +48,11 @@ def get_json_structure_standards() -> str:
         "  The sanctioned subdir for human-editable runtime settings.",
         "  Separates operator-tunable config from auto-generated logs/data.",
         "  [dim]Examples: cadence_config.json, memory.config.json[/dim]",
+        "",
+        "  [yellow]Operator-owned — seedgo never audits the CONTENT.[/yellow]",
+        "  The audit prints a non-scored info line naming the files it finds",
+        "  there, so an override is visible instead of invisible. That line",
+        "  can never change a score. The house pattern below is on you.",
         "",
         "─" * 70,
         "",
@@ -165,6 +170,33 @@ def get_json_structure_standards() -> str:
         "",
         "  Any other subdir is a split violation and will be flagged.",
         "  Hidden dirs (e.g. [dim].archive/[/dim]) are exempt.",
+        "",
+        "─" * 70,
+        "",
+        "[bold cyan]custom_config/ HOUSE PATTERN:[/bold cyan]",
+        "",
+        "  seedgo lists what lives here and stops. These rules are how the",
+        "  code that READS an operator config must behave:",
+        "",
+        "  [green]1.[/green] [bold]Code holds the defaults.[/bold] The shipped values live in the",
+        "     module as a DEFAULTS dict — that is the truth, in git, reviewable.",
+        "  [green]2.[/green] [bold]The file holds ONLY overrides.[/bold] Just the keys the operator",
+        "     deliberately changed. Nothing else belongs in it.",
+        "  [green]3.[/green] [bold]Deep-merge at load.[/bold] Overrides merge over defaults key by key,",
+        "     nested dicts included — never a wholesale replace of a subtree.",
+        "  [green]4.[/green] [bold]Missing file = defaults = safe.[/bold] No file is the normal state.",
+        "     Absence is never an error and never blocks startup.",
+        "  [green]5.[/green] [bold]Readers fail soft.[/bold] Unparseable or half-written file → log it,",
+        "     fall back to defaults, keep running. An operator typo is not an outage.",
+        "",
+        "  [red]NEVER self-heal-write the full defaults to disk.[/red]",
+        "  Writing a complete snapshot back makes deliberate operator tuning",
+        "  indistinguishable from a stale copy of last release's defaults —",
+        "  every key looks intentional, so no key can be safely updated again.",
+        "  [dim]Live case: memory.config.json snapshotted a full default set and[/dim]",
+        "  [dim]drifted 6 keys behind the code, with nothing to say which were meant.[/dim]",
+        "  Write to the file only when the OPERATOR (or an explicit set command)",
+        "  changes a value, and write only that key.",
         "",
         "─" * 70,
         "",

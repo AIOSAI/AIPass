@@ -442,6 +442,27 @@ class TestEquivalence:
         full_result = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
         assert second == full_result
 
+    def test_custom_config_addition_busts_cache_hit(self, tmp_path, monkeypatch):
+        """Adding an operator file under {branch}_json/custom_config/ must not
+        serve a stale cache-hit output -- the audit's custom_config info line
+        names those files, so a cached run would keep reporting the old list."""
+        branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        custom_config = branch_path / f"{branch_path.name}_json" / "custom_config"
+        custom_config.mkdir(parents=True)
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert first.pop("_cache_hit") is False
+
+        (custom_config / "tuning_config.json").write_text('{"a": 1}', encoding="utf-8")
+
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert second.pop("_cache_hit") is False  # dirty -- NOT a stale cache hit
+
+        full_result = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
+        assert second == full_result
+
     def test_bypass_content_edit_busts_full_rescan(self, tmp_path, monkeypatch):
         """Editing bypass.json's CONTENT (not just creating it) must also
         bust the whole-branch cache to a full re-scan -- compute_bypass_stamp()

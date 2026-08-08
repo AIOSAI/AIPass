@@ -170,6 +170,19 @@ def _render_test_map(audit_result: dict, console_obj) -> None:
     )
 
 
+def _render_info_lines(audit_result: dict, console_obj) -> None:
+    """Show non-scored signpost lines from checkers (informational, not scored).
+
+    Always rendered, including at 100% — an info line is context, not a
+    failure, so hiding it behind a below-100 score would make it invisible
+    on exactly the healthy branches it describes.
+    """
+    for entry in audit_result.get("info_lines", []):
+        message = entry.get("message", "")
+        if message:
+            console_obj.print(f"  [dim]ⓘ {message}[/dim]")
+
+
 def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
     """Special renderer for deprecated patterns — different structure."""
     deprecated_patterns = audit_result.get("deprecated_patterns", [])
@@ -265,6 +278,9 @@ def print_branch_summary(
 
     # Custom function test coverage (informational)
     _render_test_map(audit_result, console)
+
+    # Checker signposts (informational, never scored)
+    _render_info_lines(audit_result, console)
 
     # Deprecated patterns
     _render_deprecated_patterns(audit_result, console)

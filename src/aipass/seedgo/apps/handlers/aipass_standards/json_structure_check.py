@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-17
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -32,6 +32,13 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 AUDIT_SCOPE = "all_files"
 
 ALLOWED_JSON_SUBDIRS: frozenset[str] = frozenset({"custom_config"})
+
+CUSTOM_CONFIG_DIR = "custom_config"
+
+# The custom_config/ README is scaffolding, not an operator override.
+CUSTOM_CONFIG_SKIP_FILES: frozenset[str] = frozenset({"README.md"})
+
+CUSTOM_CONFIG_GUIDE = "Guide: drone @seedgo standard json_structure"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -346,3 +353,37 @@ def check_branch_post(branch_path: str, bypass_rules: list | None = None) -> tup
     violations = _check_json_dir_structure(branch_path, bypass_rules=bypass_rules)
     scores = [0] if violations else [100]
     return violations, scores
+
+
+# ------------------------------------------------------------------
+# Branch-level info channel: custom_config/ signpost (never scored)
+# ------------------------------------------------------------------
+
+
+def _custom_config_files(branch_path: str) -> list[str]:
+    """Filenames the operator put in {branch}_json/custom_config/ (README excluded)."""
+    json_dir = _find_json_dir(branch_path)
+    if json_dir is None:
+        return []
+    custom_config = json_dir / CUSTOM_CONFIG_DIR
+    if not custom_config.is_dir():
+        return []
+    return sorted(p.name for p in custom_config.iterdir() if p.is_file() and p.name not in CUSTOM_CONFIG_SKIP_FILES)
+
+
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored signpost lines for the json_structure standard.
+
+    custom_config/ is operator-owned: seedgo never reads or judges its
+    contents. This lists the filenames only, so a live operator override is
+    visible in the audit instead of invisible. Returns plain strings on the
+    audit's info channel — it can never reach a score by construction.
+    """
+    files = _custom_config_files(branch_path)
+    if not files:
+        return []
+    noun = "file" if len(files) == 1 else "files"
+    return [
+        f"{Path(branch_path).name}_json/{CUSTOM_CONFIG_DIR}/: {len(files)} operator {noun} "
+        f"({', '.join(files)}) — content not audited. {CUSTOM_CONFIG_GUIDE}"
+    ]

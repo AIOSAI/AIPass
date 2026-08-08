@@ -14,7 +14,7 @@
 ```bash
 drone @seedgo audit aipass              # Audit all branches against all standards
 drone @seedgo checklist <file>          # Check a single file
-drone @seedgo standards_query aipass_standards cli  # Look up what a standard checks
+drone @seedgo standard cli              # Look up what a standard checks
 ```
 
 ---
@@ -54,7 +54,9 @@ drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
-drone @seedgo standards_query aipass_standards         # List all 33 standards in pack
+drone @seedgo standard                                 # List all 42 standards
+drone @seedgo standard cli                             # Show standard content (short form)
+drone @seedgo standards_query aipass_standards         # List all 42 standards in pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
 
 # Per-file Check
@@ -128,7 +130,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 38 test files, 1217 tests
+├── tests/                           # 43 test files, 1328 tests
 ├── drone_adapter.py                 # Drone routing bridge
 ├── .trinity/                        # Identity + memory
 ├── .seedgo/                         # Self-bypass rules
@@ -143,6 +145,8 @@ seedgo/
 **Pack discovery:** Checker packs live in `handlers/*_standards/` directories. `standards_audit` strips the `_standards` suffix for command routing (`aipass_standards/` -> `audit aipass`). `standards_query` uses the full directory name (`standards_query aipass_standards`).
 
 **CWD-first registry:** `_find_registry()` walks CWD parents first (for external project support), falls back to `__file__` parents, uses `*_REGISTRY.json` glob (not hardcoded name).
+
+**Info channel (non-scored):** a checker may expose `check_branch_info(branch_path) -> list[str]`. `branch_audit` collects those lines into `info_lines` and `audit_display` renders them dim, always — including at 100%. They carry no score and no pass/fail by construction, so a checker can surface context it deliberately does not audit. First use: `json_structure` lists the operator files in `{branch}_json/custom_config/` (names only — the content is operator-owned and never judged).
 
 **Bypass system:** `.seedgo/bypass.json` per branch. Each entry has file, standard, optional lines, and required reason. Checkers call `is_bypassed()` per violation. Bypass is intentional documented deviation, not ignoring.
 
@@ -171,7 +175,7 @@ seedgo/
 | help_text | all_files | --help content quality |
 | imports | all_files | Import ordering and grouping |
 | introspection | entry_point | No-args introspection gate |
-| json_handler | branch_level | JSON handler test coverage validation |
+| json_handler | branch_level | Canonical json_handler.py + bidirectional config/data/log triplet completeness |
 | json_structure | all_files | json_handler import + log_operation calls |
 | log_handler | all_files | Prax logger usage (not stdlib logging) |
 | log_level | all_files | Correct log level usage |
@@ -224,7 +228,7 @@ Provider settings route all events through the bridge (`claude.py`), which dispa
 
 ## Tests
 
-- **38 test files**, all passing
+- **43 test files**, all passing
 - **0 type errors** (pyright)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 
@@ -256,16 +260,16 @@ Provider settings route all events through the bridge (`claude.py`), which dispa
 
 ---
 
-## Latest Audit (2026-07-11)
+## Latest Audit (2026-08-07)
 
-- **Seedgo score:** 100% (40/40 + diagnostics) — all standards green
-- **Tests:** 1217 passed, 0 failed, 0 skipped
-- **Coverage:** 208 public functions, 197 tested (95%)
+- **Seedgo score:** 100% (42/42 + diagnostics) — all standards green
+- **Tests:** 1328 passed, 0 failed, 0 skipped
+- **Coverage:** 226 public functions, 214 tested (94%)
 - **Type errors:** 0
 
 ---
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-08-07
 
 ---
 [<- Back to AIPass](../../../README.md)

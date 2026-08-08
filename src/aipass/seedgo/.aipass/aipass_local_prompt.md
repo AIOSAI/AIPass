@@ -8,7 +8,8 @@ Standards compliance platform. Audits branches, queries standard content, manage
 ```
 seedgo audit aipass                              # Audit all 11 agents (33 audit lines)
 seedgo audit aipass flow                         # Single branch
-seedgo standards_query aipass_standards cli      # Show standard content
+seedgo standard cli                              # Show standard content (short form)
+seedgo standards_query aipass_standards cli      # Show standard content (explicit pack)
 seedgo checklist <file>                          # Per-file standards check (hook consumer)
 seedgo diagnostics                               # Pyright type errors (runs via audit pipeline)
 seedgo proof aipass                              # Proof certification

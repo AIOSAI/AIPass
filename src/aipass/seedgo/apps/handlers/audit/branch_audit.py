@@ -89,6 +89,12 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     result gets served forever. .seedgo/bypass.json and .seedgoignore
     files are deliberately NOT included here — they're already covered
     by compute_bypass_stamp()'s separate whole-branch stamp-bust.
+
+    Also fingerprints {branch}_json/custom_config/ entries: the audit's
+    custom_config info line names those files, so an operator adding or
+    removing one must mark the branch dirty — otherwise a cache hit keeps
+    reporting the old list. Only the name/mtime/size is read; the content
+    of an operator config file is never audited.
     """
     root = branch_path.resolve()
     files = _collect_py_files(branch_path, include_init=True)
@@ -98,7 +104,33 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     tests_dir = branch_path / "tests"
     if tests_dir.exists():
         files.extend({"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in tests_dir.rglob("*.py"))
+    custom_config = branch_path / f"{branch_path.name}_json" / "custom_config"
+    if custom_config.is_dir():
+        files.extend(
+            {"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in custom_config.iterdir() if f.is_file()
+        )
     return files
+
+
+def _collect_branch_info(checkers: Dict[str, Any], branch_path: Path, branch_name: str) -> List[Dict[str, str]]:
+    """Gather non-scored signpost lines from checkers exposing check_branch_info().
+
+    A separate channel from violations on purpose: info lines carry no score
+    and no pass/fail, so a checker can surface context (e.g. operator-owned
+    custom_config/ files it deliberately does NOT audit) with no way to move
+    a branch's number. Nothing here is ever merged into scores.
+    """
+    info: List[Dict[str, str]] = []
+    for name, checker in sorted(checkers.items()):
+        if not hasattr(checker, "check_branch_info"):
+            continue
+        try:
+            lines = checker.check_branch_info(str(branch_path))
+        except Exception as e:
+            logger.info("Info check %s failed for branch %s: %s", name, branch_name, e)
+            continue
+        info.extend({"standard": name, "message": str(line)} for line in lines or [])
+    return info
 
 
 def _extract_branch_level_violations(result: dict) -> list:
@@ -331,6 +363,8 @@ def audit_branch(
             except Exception:
                 logger.info("Post-check %s failed for branch %s", name, branch["name"])
 
+    info_lines = _collect_branch_info(checkers, branch_path, branch["name"])
+
     json_handler.log_operation("branch_audit_completed", {"branch": branch["name"], "checkers": len(checkers)})
     advisory_standards = [name for name, mod in checkers.items() if getattr(mod, "ADVISORY", False) is True]
     gating_scores = {k: v for k, v in scores.items() if k not in advisory_standards}
@@ -357,6 +391,7 @@ def audit_branch(
         "type_errors": diag_result.get("total_errors", 0),
         "type_error_files": diag_result.get("results", []),
         "test_map": test_map_result,
+        "info_lines": info_lines,
     }
     for name in checkers:
         output[f"{name}_violations"] = all_violations.get(name, [])
