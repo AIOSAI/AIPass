@@ -82,7 +82,7 @@ memory/
 │       ├── vector/              # embedder.py, embed_subprocess.py
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 978 tests
+├── tests/                       # 1024 tests
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -117,7 +117,7 @@ Every `.trinity/local.json` and `.trinity/observations.json` carries inline `*_m
 "sessions_meta": "⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars ⟧"
 ```
 
-**Source of truth:** `memory.config.json` — rollover counts (defaults + per-branch overrides) and entry char limits. Tab strings are *generated*, never hand-written.
+**Source of truth:** `config_loader.DEFAULT_CONFIG` in code — rollover counts and entry char limits. `memory_json/custom_config/memory.config.json` is an **override slot only**: absent is the normal case, and whatever it does contain is deep-merged on top of the code defaults. `load()` never writes it (a snapshot of the defaults freezes today's values and silently overrides every future change to them). Tab strings are *generated* from the effective config, never hand-written.
 
 **Sections:** `todos_meta` (rollover OFF — operational, never trimmed), `key_learnings_meta`, `sessions_meta`, `observations_meta` (all rollover ON).
 
@@ -163,7 +163,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 978 passed, 0 failures, 0 skips
+- **Tests:** 1024 passed, 0 failures, 0 skips
 - **Seedgo:** 100%
 
 ---
@@ -176,7 +176,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ---
 
-*Last Updated: 2026-06-25*
+*Last Updated: 2026-08-07*
 
 ---
 [← Back to AIPass](../../../README.md)

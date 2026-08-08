@@ -10,9 +10,8 @@
 Tests for the config_loader handler (Phase 1 of FPLAN-0271).
 
 Covers:
-  1. Missing file + self_heal=True  -- creates dirs, writes defaults, returns defaults.
-  2. Missing file + self_heal=False -- no disk write, returns defaults, logs warning.
-  3. Malformed JSON                 -- does NOT overwrite, logs ERROR, returns defaults.
+  1. Missing file      -- NEVER writes to disk, returns defaults, logs the absence.
+  2. Malformed JSON    -- does NOT overwrite, logs ERROR, returns defaults.
   4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
   5. Full config                    -- passthrough of file values.
   6. section()                      -- returns named section or empty dict for unknown.
@@ -69,70 +68,14 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
 
 
 # ===========================================================================
-# 1. Missing file + self_heal=True -- creates dirs, writes defaults, returns defaults
+# 1+2. Missing file -- NEVER writes, returns defaults, logs
 # ===========================================================================
 
 
-class TestMissingFileSelfHealTrue:
-    """When the config file is missing and self_heal=True, load() should
-    create parent directories, write DEFAULT_CONFIG to disk, and return defaults.
-    """
-
-    def test_creates_parent_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "nonexistent" / "deep" / "memory.config.json"
-        mod = _get_module()
-        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-
-        mod.load(self_heal=True)
-
-        assert missing_path.parent.exists()
-
-    def test_writes_file_to_disk(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "nonexistent" / "memory.config.json"
-        mod = _get_module()
-        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-
-        mod.load(self_heal=True)
-
-        assert missing_path.exists()
-
-    def test_written_file_matches_default_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "auto_created" / "memory.config.json"
-        mod = _get_module()
-        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-
-        mod.load(self_heal=True)
-
-        written = json.loads(missing_path.read_text(encoding="utf-8"))
-        assert written == mod.DEFAULT_CONFIG
-
-    def test_returns_default_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "auto_created" / "memory.config.json"
-        mod = _get_module()
-        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-
-        result = mod.load(self_heal=True)
-
-        assert result == mod.DEFAULT_CONFIG
-
-    def test_returned_dict_is_not_same_object_as_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "auto_created" / "memory.config.json"
-        mod = _get_module()
-        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-
-        result = mod.load(self_heal=True)
-
-        assert result is not mod.DEFAULT_CONFIG
-
-
-# ===========================================================================
-# 2. Missing file + self_heal=False -- no disk write, returns defaults, logs warning
-# ===========================================================================
-
-
-class TestMissingFileSelfHealFalse:
-    """When the config file is missing and self_heal=False, load() should
-    NOT write to disk, should return defaults, and should log a warning.
+class TestMissingFile:
+    """A missing config file means "no overrides", which resolves to
+    DEFAULT_CONFIG.  load() must never repair the absence by writing:
+    snapshotting defaults to disk is what lets code and disk drift apart.
     """
 
     def test_does_not_create_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,16 +83,16 @@ class TestMissingFileSelfHealFalse:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
-        mod.load(self_heal=False)
+        mod.load()
 
         assert not missing_path.exists()
 
     def test_does_not_create_parent_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        missing_path = tmp_path / "nope" / "memory.config.json"
+        missing_path = tmp_path / "nope" / "deep" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
-        mod.load(self_heal=False)
+        mod.load()
 
         assert not missing_path.parent.exists()
 
@@ -158,19 +101,40 @@ class TestMissingFileSelfHealFalse:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
-        result = mod.load(self_heal=False)
+        result = mod.load()
 
         assert result == mod.DEFAULT_CONFIG
 
-    def test_logs_warning(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returned_dict_is_not_same_object_as_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        missing_path = tmp_path / "nope" / "memory.config.json"
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+
+        result = mod.load()
+
+        assert result is not mod.DEFAULT_CONFIG
+
+    def test_repeated_loads_never_materialize_a_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression: the old self-heal wrote on the FIRST load, so every
+        later read silently served a frozen snapshot instead of code defaults.
+        """
+        missing_path = tmp_path / "nope" / "memory.config.json"
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+
+        for _ in range(3):
+            assert mod.load() == mod.DEFAULT_CONFIG
+            assert not missing_path.exists()
+
+    def test_logs_absence(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
         mock_logger = mod.logger
-        mod.load(self_heal=False)
+        mod.load()
 
-        mock_logger.warning.assert_called()
+        mock_logger.info.assert_called()
 
 
 # ===========================================================================
@@ -192,7 +156,7 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        result = mod.load(self_heal=True)
+        result = mod.load()
 
         assert result == mod.DEFAULT_CONFIG
 
@@ -206,9 +170,9 @@ class TestMalformedJson:
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
-        mod.load(self_heal=True)
+        mod.load()
 
-        # File content must be UNCHANGED -- self_heal must NOT overwrite existing files
+        # File content must be UNCHANGED -- load() must NOT overwrite existing files
         assert bad_config.read_text(encoding="utf-8") == garbage
 
     def test_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,7 +185,7 @@ class TestMalformedJson:
         monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
 
         mock_logger = mod.logger
-        mod.load(self_heal=True)
+        mod.load()
 
         mock_logger.error.assert_called()
 

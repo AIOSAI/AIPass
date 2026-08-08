@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2025-11-16
-# Modified: 2026-03-06
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -271,6 +271,11 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
 
     cfg = config_loader.section("rollover")
     file_limits = cfg.get("per_branch", {}).get(branch_key, {}).get(file_type, {})
+    if not file_limits:
+        # Same defaults fallback the extract_items gate uses. Without it a
+        # branch with no per_branch entry passes the gate on defaults and
+        # then archives NOTHING here — a silent no-op rollover.
+        file_limits = cfg.get("defaults", {}).get(file_type, {})
 
     all_extracted = []
 

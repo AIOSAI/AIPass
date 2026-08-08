@@ -11,6 +11,27 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**fix(memory)** — the stale-snapshot trap closed at its source, and the
+reframe that came with it (FPLAN-0380 workstream 4 of 4). config_loader
+1.1.0 no longer writes anything on a missing file (the self_heal parameter
+removed entirely — a flag that never heals is a lie in the signature);
+code DEFAULT_CONFIG aligned to the operating values (enforce=True, todos
+150, observations 300, rollover keep 15/15/15). The reframe: that config
+file was NEVER in git — `**/*_json/` ignored — so the divergence was
+never disk-vs-code, it was THIS MACHINE vs EVERY FRESH INSTALL, which had
+been running the old lax defaults all along. The alignment is the entire
+shipped fix. And archiving the local file exposed a masked fleet bug:
+extractor _extract_items_v2 had no defaults fallback, so without
+per_branch entries (i.e., on every clone that ever ran rollover) it
+archived nothing while returning success — a silent no-op wearing a green
+badge. Fixed (extractor 0.5.0, canary-verified: revert reproduces the
+exact skipped:True dict). Live proof fileless: *_meta cap lines
+byte-identical across 21 branches before/after, end-to-end archive run
+kept 15 newest/archived 6 oldest (first attempt correctly refused —
+same-day entries hit the DPLAN-0278 safety valve, working as designed).
+1024 tests, seedgo 100%. By @memory; suite + fileless live rollover +
+rendered caps re-verified by devpulse.
+
 **fix(trigger)** — latent data-loss defused, and the defect had a twin
 (FPLAN-0380 workstream 3 of 4). Two hand-written live-state files squatted
 on json_handler's trio paths for module `trigger`: `trigger_config.json`

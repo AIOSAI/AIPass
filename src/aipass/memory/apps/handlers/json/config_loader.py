@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-13
-# Modified: 2026-06-13
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -14,7 +14,10 @@ ad-hoc readers that previously loaded the file independently, each
 with subtly different defaults and error handling.
 
 Provides a canonical DEFAULT_CONFIG, a non-mutating deep_merge, and a
-self-healing load() that guarantees callers always receive a usable dict.
+load() that guarantees callers always receive a usable dict.
+
+DEFAULT_CONFIG is the single source of truth for baseline values; the
+file on disk carries OVERRIDES ONLY and is never written by load().
 
 Usage:
     from aipass.memory.apps.handlers.json.config_loader import load, section
@@ -70,7 +73,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "entry_limits": {
         "enabled": True,
-        "enforce": False,
+        "enforce": True,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",
@@ -91,14 +94,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "container": "todos",
                 "kind": "list",
                 "field": "task",
-                "max_chars": 200,
+                "max_chars": 150,
             },
             "observations": {
                 "file": "observations.json",
                 "container": "observations",
                 "kind": "list",
                 "field": "note",
-                "max_chars": 600,
+                "max_chars": 300,
             },
         },
         "per_branch": {},
@@ -112,11 +115,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "rollover": {
         "defaults": {
             "local": {
-                "sessions": {"count": 20, "auto_compact_cap": 3},
-                "key_learnings": {"count": 25},
+                "sessions": {"count": 15, "auto_compact_cap": 3},
+                "key_learnings": {"count": 15},
             },
             "observations": {
-                "observations": {"count": 25},
+                "observations": {"count": 15},
             },
             "_note": "DEFAULTS — edit then `drone @memory rollover push` to apply system-wide."
             " Char caps live in entry_limits.",
@@ -137,28 +140,20 @@ def deep_merge(base: dict, overrides: dict) -> dict:
     return result
 
 
-def load(self_heal: bool = True) -> dict[str, Any]:
+def load() -> dict[str, Any]:
     """Load memory.config.json, deep-merged over DEFAULT_CONFIG.
 
-    Args:
-        self_heal: If True and the file is missing, create it from defaults.
+    The file on disk is OVERRIDES ONLY.  An absent file means "nothing is
+    overridden", which resolves to DEFAULT_CONFIG — so absence is safe and
+    is never repaired by writing.  Snapshotting the whole of DEFAULT_CONFIG
+    to disk is what previously let code and disk drift apart with no way to
+    tell deliberate operator tuning from a stale copy of old defaults.
 
     Returns:
         The effective config dict (always safe to use).
     """
     if not _CONFIG_PATH.exists():
-        if self_heal:
-            _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2) + "\n", encoding="utf-8")
-            logger.info(f"[config_loader] Created default config at {_CONFIG_PATH}")
-            json_handler.log_operation(
-                "config_load_self_heal",
-                {"path": str(_CONFIG_PATH), "action": "created_default"},
-                module_name="config_loader",
-            )
-            return copy.deepcopy(DEFAULT_CONFIG)
-
-        logger.warning(f"[config_loader] Config not found at {_CONFIG_PATH}, using defaults")
+        logger.info(f"[config_loader] No overrides at {_CONFIG_PATH}, using defaults")
         json_handler.log_operation(
             "config_load_missing",
             {"path": str(_CONFIG_PATH)},

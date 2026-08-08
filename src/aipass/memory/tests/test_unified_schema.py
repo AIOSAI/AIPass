@@ -296,6 +296,70 @@ class TestExtractorKeyLearningsList:
         # All entries should still be present
         assert len(data["key_learnings"]) == 2
 
+    def test_falls_back_to_defaults_when_branch_has_no_per_branch_entry(self, monkeypatch, tmp_path):
+        """Regression: per_branch-only lookup made rollover a silent no-op.
+
+        With config carrying defaults but no per_branch entry for this branch,
+        the extract_items gate passes on defaults — so _extract_items_v2 must
+        read the same defaults, or it archives nothing and reports success.
+        """
+        ext, mocks = _import_extractor(monkeypatch)
+        data = self._make_kl_data(num_kl=5, max_kl=3)
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {
+                "local": {"sessions": {"count": 100}, "key_learnings": {"count": 3}},
+            },
+            "per_branch": {},
+        }
+
+        mem_file = tmp_path / ".trinity" / "local.json"
+        mem_file.parent.mkdir(parents=True)
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        def fake_write(fp, d):
+            fp.write_text(json.dumps(d, indent=2), encoding="utf-8")
+
+        with patch.object(ext, "_write_memory_file", side_effect=fake_write):
+            result = ext._extract_items_v2(mem_file, data)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True
+        assert result["extracted_count"] == 2
+        assert [e["number"] for e in result["extracted"]] == [2, 1]
+        assert [e["number"] for e in data["key_learnings"]] == [5, 4, 3]
+
+    def test_per_branch_entry_still_wins_over_defaults(self, monkeypatch, tmp_path):
+        """The defaults fallback must not shadow a real per-branch override."""
+        ext, mocks = _import_extractor(monkeypatch)
+        data = self._make_kl_data(num_kl=5, max_kl=4)
+
+        branch_name = tmp_path.name.lower()
+        mocks["config_loader"].section.return_value = {
+            "defaults": {
+                "local": {"sessions": {"count": 100}, "key_learnings": {"count": 1}},
+            },
+            "per_branch": {
+                branch_name: {
+                    "local": {"sessions": {"count": 100}, "key_learnings": {"count": 4}},
+                },
+            },
+        }
+
+        mem_file = tmp_path / ".trinity" / "local.json"
+        mem_file.parent.mkdir(parents=True)
+        mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        def fake_write(fp, d):
+            fp.write_text(json.dumps(d, indent=2), encoding="utf-8")
+
+        with patch.object(ext, "_write_memory_file", side_effect=fake_write):
+            result = ext._extract_items_v2(mem_file, data)
+
+        # keep 4 (per_branch), not 1 (defaults)
+        assert result["extracted_count"] == 1
+        assert [e["number"] for e in data["key_learnings"]] == [5, 4, 3, 2]
+
 
 # ===========================================================================
 # 3. Entry limits: list-kind key_learnings char-limit enforcement

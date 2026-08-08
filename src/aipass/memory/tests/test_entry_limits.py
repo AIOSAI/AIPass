@@ -145,7 +145,8 @@ class TestNormalConfig:
 
         assert result["enabled"] is True
 
-    def test_enforce_is_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_enforce_false_on_disk_overrides_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Code defaults to enforce=True; an explicit False on disk must win."""
         config_path = _write_config(tmp_path, _full_config())
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
@@ -277,12 +278,12 @@ class TestMissingConfig:
         result = mod.load_entry_limits("any_branch")
 
         assert result["enabled"] is True
-        assert result["enforce"] is False
+        assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
         assert result["entry_types"]["sessions"]["max_chars"] == 300
 
-    def test_missing_config_logs_info_on_self_heal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """config_loader self-heals (creates defaults) when file is missing, logging at INFO level."""
+    def test_missing_config_logs_info_and_writes_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """config_loader serves defaults at INFO level and never creates the file."""
         missing_path = tmp_path / "nonexistent" / "memory.config.json"
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", missing_path)
@@ -293,6 +294,7 @@ class TestMissingConfig:
         mock_logger.info.assert_called()
         info_msg = mock_logger.info.call_args[0][0]
         assert "config" in info_msg.lower()
+        assert not missing_path.exists()
 
 
 # ===========================================================================
@@ -315,7 +317,7 @@ class TestMalformedJson:
         result = mod.load_entry_limits("any_branch")
 
         assert result["enabled"] is True
-        assert result["enforce"] is False
+        assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
 
     def test_malformed_json_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,5 +348,5 @@ class TestMalformedJson:
         result = mod.load_entry_limits("any_branch")
 
         assert result["enabled"] is True
-        assert result["enforce"] is False
+        assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
