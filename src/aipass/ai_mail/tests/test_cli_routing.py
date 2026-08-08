@@ -155,3 +155,65 @@ def test_output_capture_with_stringio():
     buf = StringIO()
     buf.write("test output")
     assert "test output" in buf.getvalue()
+
+
+# ---- exit-code honesty ----------------------------------------------
+#
+# Handlers return True for "I recognised this command", which is NOT the
+# same as "it worked". Before the resolve_exit flip, a reply that failed
+# validation printed its error and exited 0 — callers' scripts read the
+# reply as sent. error() sets the process failure flag; main() must
+# translate that into a nonzero exit.
+
+
+def test_main_routed_but_failed_command_exits_nonzero(monkeypatch):
+    """CANARY: a handled-but-failed command must not exit 0."""
+    from aipass.cli.apps.modules import error as cli_error
+
+    class FailingModule:
+        __name__ = "failing_module"
+
+        @staticmethod
+        def handle_command(command, args):
+            cli_error("Invalid reply_path: /gone/inbox.json")
+            return True
+
+    monkeypatch.setattr(sys, "argv", ["ai_mail", "reply", "abc123", "text"])
+    with patch.object(ai_mail_mod, "discover_modules", return_value=[FailingModule]):
+        result = main()
+    assert result != 0, "failed delivery exited 0 — the exit code lied"
+    assert result == 2
+
+
+def test_main_routed_and_succeeded_exits_zero(monkeypatch):
+    """A handled command that printed no error still exits 0."""
+
+    class OkModule:
+        __name__ = "ok_module"
+
+        @staticmethod
+        def handle_command(command, args):
+            return True
+
+    monkeypatch.setattr(sys, "argv", ["ai_mail", "inbox"])
+    with patch.object(ai_mail_mod, "discover_modules", return_value=[OkModule]):
+        result = main()
+    assert result == 0
+
+
+def test_main_resets_failure_flag_between_runs(monkeypatch):
+    """A previous command's failure must not leak into this process's exit."""
+    from aipass.cli.apps.modules import error as cli_error
+
+    class OkModule:
+        __name__ = "ok_module"
+
+        @staticmethod
+        def handle_command(command, args):
+            return True
+
+    cli_error("stale failure from an earlier command")
+    monkeypatch.setattr(sys, "argv", ["ai_mail", "inbox"])
+    with patch.object(ai_mail_mod, "discover_modules", return_value=[OkModule]):
+        result = main()
+    assert result == 0

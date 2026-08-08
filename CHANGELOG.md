@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**fix(ai_mail)** — mail can no longer be invisible or crash its reader: four
+live defects fixed (format.py 1.2.0, email.py, email_send.py, ai_mail.py).
+(1) The listing truncated the WRONG END — reverse-then-slice kept the oldest
+20, so any inbox over 20 silently hid every NEW arrival behind a benign
+"Showing 20 of 25" footer (found when @skills' reply vanished from devpulse's
+box, the busiest in the fleet). (2) `view latest` served the OLDEST mail.
+(3) Rich markup ate subjects — `[dim]` silently swallowed, `[/rc]` crashed
+the entire listing — and after the first fix the view BODY still crashed on
+`[/rc]` (caught live by devpulse viewing the fix report itself): bodies now
+render with markup=False (no parse step, can never raise), listings escape
+at the formatter, send-confirmation echo hardened (same class, found by
+sweeping the branch). (4) Sent listing skipped unreadable files silently —
+placeholder rows now. Fail-honest rule throughout: a row can render ugly,
+it can no longer be absent. Plus VERA's exit-code report folded in: failed
+replies exit 2 (nothing read the failure flag error() set). One complicit
+test fixture reordered (matched the bug, not delivery's write order — 4th
+logged instance of that class). 881 tests (+21 across both passes, canary-
+verified), seedgo 100%. By @ai_mail; suite + live read-back re-verified by
+devpulse.
+
 **feat(skills)** — TG `/rc <target>`: recover a dark Claude Code remote from
 the phone (remote_control.py, control-bot family). Born from the day Vera's
 rc died with Patrick phone-only and no path back: the bot resolves the target

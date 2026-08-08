@@ -154,7 +154,13 @@ def _send_interactive() -> bool:
         return False
 
     console.print("\n" + "=" * 50)
-    console.print(f"To: {result['to']}\nSubject: {result['subject']}\nMessage:\n{result['message']}")
+    # Same rule as the view body: this echoes text the user just typed, so it
+    # renders with markup off. A subject or body containing "[/rc]" must not
+    # blow up the confirmation step of the send that carries it.
+    console.print(
+        f"To: {result['to']}\nSubject: {result['subject']}\nMessage:\n{result['message']}",
+        markup=False,
+    )
     console.print("=" * 50)
     return _send_direct(result["to"], result["subject"], result["message"])
 

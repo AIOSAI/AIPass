@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2025-12-02
-# Modified: 2025-12-02
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -23,6 +23,8 @@ import os
 import sys
 from pathlib import Path
 from typing import List
+
+from rich.markup import escape
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
@@ -53,11 +55,31 @@ if sys.platform == "win32":
 _AI_MAIL_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = find_repo_root()
 
+# Max rows any bulk listing prints. Applied to the NEWEST end of the store.
+LIST_LIMIT = 20
+
 try:
     from aipass.ai_mail.apps.handlers.central_writer import update_central
 except ImportError as e:
     logger.warning("[email] central_writer import unavailable: %s", e)
     update_central = None
+
+
+def _print_row(row: str) -> None:
+    """Print one listing row, never letting a render failure hide it.
+
+    Rows carry sender-controlled text. format.py escapes it, but a row that
+    still fails to render must degrade visibly, not vanish: an invisible
+    message is the worst failure shape mail has — the sender believes it was
+    delivered and the recipient never sees it. On failure the row is
+    reprinted with markup disabled behind a marker.
+    """
+    try:
+        console.print(row)
+    except Exception as e:
+        logger.warning("[email] row render failed, printing raw: %s", e)
+        console.print(f"[!! RAW — markup render failed: {e} !!]", markup=False)
+        console.print(row, markup=False)
 
 
 def _resolve_branch_path() -> Path:
@@ -168,12 +190,20 @@ def handle_inbox(args: List[str]) -> bool:
             console.print(f"Inbox{label} is empty")
             return True
 
-        display = list(reversed(messages))[:20]
+        # delivery.py inserts new mail at index 0, so messages[:LIST_LIMIT] is
+        # the NEWEST slice. Reversing first and then slicing kept the OLDEST 20
+        # and silently hid every new message in any inbox holding more than 20.
+        # Slice first, then reverse for oldest-first reading order.
+        newest = messages[:LIST_LIMIT]
+        display = list(reversed(newest))
         console.print(f"\nInbox{label}\n" + "=" * 70)
         for i, msg in enumerate(display, 1):
-            console.print(format_email_list_item(i, msg, show_unread=True))
+            _print_row(format_email_list_item(i, msg, show_unread=True))
         console.print("\n" + "=" * 70)
-        console.print(f"Showing {len(display)} of {len(messages)} messages")
+        if len(messages) > len(display):
+            console.print(f"Showing {len(display)} most recent of {len(messages)} messages")
+        else:
+            console.print(f"Showing {len(display)} of {len(messages)} messages")
         return True
     except BrokenPipeError as e:
         logger.warning("[email] inbox view broken pipe: %s", e)
@@ -201,8 +231,10 @@ def handle_view(args: List[str]) -> bool:
             if not inbox_data or not inbox_data.get("messages"):
                 error("Inbox is empty")
                 return True
-            # Get the most recent message (last in the list)
-            message_id = inbox_data["messages"][-1].get("id")
+            # delivery.py inserts at index 0 — the most recent message is the
+            # FIRST entry, not the last. Reading [-1] served up the OLDEST mail
+            # in the inbox under the name "latest".
+            message_id = inbox_data["messages"][0].get("id")
             if not message_id:
                 error("Could not find latest message")
                 return True
@@ -213,7 +245,12 @@ def handle_view(args: List[str]) -> bool:
             return True
         header = format_email_header(email_data)
         console.print(f"\n{header}")
-        console.print(f"\n{email_data.get('message', '')}\n{'=' * 70}")
+        # The body is raw sender text and never carries styling of its own, so
+        # it renders with markup off entirely. Escaping would work too, but
+        # markup=False cannot raise MarkupError at all — and this is the
+        # primary read surface: it must survive any content a sender can type.
+        console.print(f"\n{email_data.get('message', '')}", markup=False)
+        console.print("=" * 70)
         console.print(f"[dim]Status: opened | ID: {args[0]}[/dim]")
         console.print(f'[dim]To reply: drone @ai_mail reply {args[0]} "your message"[/dim]')
         console.print(f"[dim]To close: drone @ai_mail close {args[0]}[/dim]")
@@ -239,7 +276,7 @@ def handle_close(args: List[str]) -> bool:
         if args[0].lower() == "all":
             success, message, count = mark_all_read_and_archive(branch_path)
             if success:
-                console.print(f"[green]{message}[/green]")
+                console.print(f"[green]{escape(message)}[/green]")
                 json_handler.log_operation("email_closed_all", {"count": count})
             else:
                 error(message)
@@ -248,7 +285,7 @@ def handle_close(args: List[str]) -> bool:
         results, closed, failed = batch_close(branch_path, args, mark_as_closed_and_archive)
         for msg_id, success, message in results:
             if success:
-                console.print(f"[green]{message}[/green]")
+                console.print(f"[green]{escape(message)}[/green]")
             else:
                 error(message)
             if success:
@@ -285,7 +322,7 @@ def handle_reply(args: List[str]) -> bool:
         reply_message = " ".join(args[1:])
         success, message, reply_id = send_reply(branch_path, original, reply_message)
         if success:
-            console.print(f"[green]{message}[/green]")
+            console.print(f"[green]{escape(message)}[/green]")
         else:
             error(message)
         if success:
@@ -305,7 +342,7 @@ def handle_sent(args: List[str]) -> bool:
         if not sent_folder.exists():
             console.print("No sent messages")
             return True
-        files = sorted(sent_folder.glob("*.json"), reverse=True)[:20]
+        files = sorted(sent_folder.glob("*.json"), reverse=True)[:LIST_LIMIT]
         if not files:
             console.print("No sent messages")
             return True
@@ -313,7 +350,12 @@ def handle_sent(args: List[str]) -> bool:
         for i, f in enumerate(files, 1):
             data = load_email_file(f)
             if data:
-                console.print(format_email_list_item(i, data, show_unread=False))
+                _print_row(format_email_list_item(i, data, show_unread=False))
+            else:
+                # An unreadable sent file still gets a row — dropping it would
+                # under-report what was sent with no error anywhere.
+                logger.warning("[email] sent file unreadable, listing as placeholder: %s", f.name)
+                console.print(f"\n{i}. [UNREADABLE FILE] {f.name}", markup=False)
         console.print("\n" + "=" * 70 + f"\nShowing {len(files)} sent messages")
         return True
     except Exception as e:

@@ -16,6 +16,7 @@ All handler dependencies are mocked -- these tests verify orchestration
 logic, not business logic.
 """
 
+import io
 import json
 import sys
 import pytest
@@ -259,11 +260,19 @@ class TestHandleView:
         assert any("not found" in e.lower() for e in errors)
 
     def test_view_latest_shortcut(self, tmp_path, monkeypatch):
-        """'latest' arg resolves to most recent message ID."""
+        """'latest' arg resolves to most recent message ID.
+
+        The fixture is ordered newest-first because that is what
+        delivery.py writes (it inserts at index 0). It previously listed
+        the newest entry LAST, which matched the old messages[-1] read
+        rather than the store — fixture and code shared one wrong
+        assumption, so the test stayed green while 'latest' returned the
+        oldest mail in the inbox.
+        """
         inbox_data = {
             "messages": [
-                {"id": "old1", "subject": "Old"},
                 {"id": "newest", "subject": "Latest"},
+                {"id": "old1", "subject": "Old"},
             ]
         }
         email_data = {"id": "newest", "subject": "Latest", "message": "Latest body", "from": "@x"}
@@ -1814,3 +1823,258 @@ class TestHandleReplyMultiArg:
         result = handle_reply(["msg1", "Complete single-line reply"])
         assert result is True
         assert captured_msg[0] == "Complete single-line reply"
+
+
+class TestListingNeverHidesMail:
+    """The listing surfaces must never silently drop a message.
+
+    delivery.py inserts new mail at index 0, so messages[0] is the NEWEST.
+    The old listing did reversed(messages)[:20], which kept the OLDEST 20 —
+    in any inbox holding more than 20 messages every new arrival was
+    invisible with no error anywhere. Fixtures here are ordered
+    newest-first to match what delivery actually writes; an oldest-first
+    fixture would share the bug's assumption and pass either way.
+    """
+
+    def _run_inbox(self, monkeypatch, tmp_path, messages):
+        """Run handle_inbox over the given store, return printed lines."""
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.resolve_inbox_target",
+            lambda first_arg, repo_root, get_branch_fn, get_user_fn: (
+                True,
+                {
+                    "inbox_file": tmp_path / ".ai_mail.local" / "inbox.json",
+                    "display_name": "TEST",
+                    "target_branch": None,
+                    "error": None,
+                },
+            ),
+        )
+        inbox_file = tmp_path / ".ai_mail.local" / "inbox.json"
+        inbox_file.parent.mkdir(parents=True, exist_ok=True)
+        inbox_file.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.load_inbox",
+            lambda f: {"messages": messages},
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.format_email_list_item",
+            lambda i, msg, show_unread=True: f"{i}. {msg['subject']}",
+        )
+        printed: list[str] = []
+        mock_console = MagicMock()
+        mock_console.print = lambda msg, **kw: printed.append(str(msg))
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+
+        from aipass.ai_mail.apps.modules.email import handle_inbox
+
+        assert handle_inbox([]) is True
+        return printed
+
+    def test_newest_message_listed_when_store_exceeds_limit(self, monkeypatch, tmp_path):
+        """CANARY: the newest arrival must be visible in an over-limit inbox."""
+        # Newest first, exactly as delivery.py writes it.
+        messages = [{"id": f"m{i:03d}", "subject": f"subject-{i:03d}", "status": "new"} for i in range(25)]
+        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        blob = "\n".join(printed)
+
+        assert "subject-000" in blob, "newest message was dropped from the listing"
+        assert "subject-019" in blob, "20th-newest message should still list"
+        assert "subject-024" not in blob, "oldest message should fall off, not the newest"
+
+    def test_over_limit_listing_says_it_truncated(self, monkeypatch, tmp_path):
+        """Truncation is reported as 'most recent of N', not a bare count."""
+        messages = [{"id": f"m{i:03d}", "subject": f"subject-{i:03d}", "status": "new"} for i in range(25)]
+        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        assert any("20 most recent of 25 messages" in p for p in printed)
+
+    def test_under_limit_lists_every_message_oldest_first(self, monkeypatch, tmp_path):
+        """Nothing is dropped under the limit; display order stays oldest-first."""
+        messages = [{"id": f"m{i}", "subject": f"subject-{i}", "status": "new"} for i in range(3)]
+        printed = self._run_inbox(monkeypatch, tmp_path, messages)
+        rows = [p for p in printed if p.strip().startswith(("1.", "2.", "3."))]
+        assert [r.strip() for r in rows] == ["1. subject-2", "2. subject-1", "3. subject-0"]
+        assert any("Showing 3 of 3 messages" in p for p in printed)
+
+    def test_row_that_fails_to_render_is_shown_raw_not_hidden(self, monkeypatch):
+        """CANARY: a row the console rejects degrades visibly instead of vanishing."""
+        printed: list[str] = []
+
+        def exploding_print(msg, **kw):
+            if kw.get("markup") is False:
+                printed.append(str(msg))
+                return
+            raise ValueError("closing tag '[/rc]' doesn't match any open tag")
+
+        mock_console = MagicMock()
+        mock_console.print = exploding_print
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+
+        from aipass.ai_mail.apps.modules.email import _print_row
+
+        _print_row("1. Subject: RE: [/rc] recovered")
+
+        blob = "\n".join(printed)
+        assert "RE: [/rc] recovered" in blob, "unrenderable row vanished instead of degrading"
+        assert "RAW" in blob, "degraded row must carry a visible marker"
+
+    def test_unreadable_sent_file_still_gets_a_row(self, monkeypatch, tmp_path):
+        """CANARY: a sent file that will not load is listed as a placeholder."""
+        sent_folder = tmp_path / ".ai_mail.local" / "sent"
+        sent_folder.mkdir(parents=True)
+        (sent_folder / "aaaa1111.json").write_text("{}", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.load_email_file",
+            lambda f: None,
+        )
+        printed: list[str] = []
+        mock_console = MagicMock()
+        mock_console.print = lambda msg, **kw: printed.append(str(msg))
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+
+        from aipass.ai_mail.apps.modules.email import handle_sent
+
+        assert handle_sent([]) is True
+        blob = "\n".join(printed)
+        assert "aaaa1111.json" in blob, "unreadable sent file was silently skipped"
+        assert "UNREADABLE FILE" in blob
+
+
+class TestViewLatestResolvesNewest:
+    """'latest' must mean newest. delivery.py inserts at index 0, so reading
+    messages[-1] served the OLDEST mail in the inbox under that name."""
+
+    def test_view_latest_picks_index_zero(self, monkeypatch, tmp_path):
+        """CANARY: 'latest' resolves the newest message, not the oldest."""
+        # Newest first, as delivery writes it.
+        messages = [
+            {"id": "newest01", "subject": "arrived 17:31"},
+            {"id": "middle01", "subject": "arrived 15:18"},
+            {"id": "oldest01", "subject": "arrived 12:31"},
+        ]
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.load_inbox",
+            lambda f: {"messages": messages},
+        )
+        opened: list[str] = []
+
+        def fake_mark_as_opened(branch_path, message_id):
+            opened.append(message_id)
+            return True, "ok", {"subject": "s", "message": "m", "from_name": "X", "from": "@x"}
+
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.mark_as_opened",
+            fake_mark_as_opened,
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.format_email_header",
+            lambda data: "HEADER",
+        )
+        mock_console = MagicMock()
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+
+        from aipass.ai_mail.apps.modules.email import handle_view
+
+        assert handle_view(["latest"]) is True
+        assert opened == ["newest01"], f"'latest' opened {opened}, expected the newest message"
+
+
+class TestBodyRendersWhateverTheSenderTyped:
+    """The view body is the primary read surface and carries raw sender text.
+
+    Escaping the listing but rendering the body as markup only moved the
+    failure: a body containing "[/rc]" raised MarkupError and the message
+    could not be read at all. Bodies never carry styling of their own, so
+    they render with markup disabled — which cannot raise rather than
+    merely being escaped correctly.
+    """
+
+    def _view_message(self, monkeypatch, tmp_path, body):
+        """Run handle_view over a message with the given body."""
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        email_data = {
+            "id": "body0001",
+            "subject": "RE: /rc <target>",
+            "message": body,
+            "from_name": "SKILLS",
+            "from": "@skills",
+            "timestamp": "2026-08-07 17:40:20",
+        }
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.mark_as_opened",
+            lambda bp, mid: (True, "Opened", email_data),
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.format_email_header",
+            lambda ed: "HEADER",
+        )
+
+        from rich.console import Console
+
+        buffer = io.StringIO()
+        real_console = Console(file=buffer, width=200, no_color=True, highlight=False)
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", real_console)
+
+        from aipass.ai_mail.apps.modules.email import handle_view
+
+        assert handle_view(["body0001"]) is True
+        return buffer.getvalue()
+
+    def test_body_with_closing_tag_renders_instead_of_raising(self, monkeypatch, tmp_path):
+        """CANARY: a body containing [/rc] must render, not abort the view."""
+        body = "SHIPPED — [/rc] is live on the control bot. Re-verified this session."
+        out = self._view_message(monkeypatch, tmp_path, body)
+        assert "[/rc] is live on the control bot" in out
+
+    def test_body_with_style_tag_keeps_its_text(self, monkeypatch, tmp_path):
+        """A body containing [dim] renders the tag literally, text intact."""
+        body = "Line one [dim]note kept[/dim] and [skills] tag kept."
+        out = self._view_message(monkeypatch, tmp_path, body)
+        assert "[dim]note kept[/dim]" in out
+        assert "[skills] tag kept" in out
+
+    def test_body_renders_with_markup_disabled(self, monkeypatch, tmp_path):
+        """The body print explicitly passes markup=False rather than escaping."""
+        printed: list[tuple] = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email._resolve_branch_path",
+            lambda: tmp_path,
+        )
+        email_data = {
+            "id": "body0002",
+            "subject": "s",
+            "message": "raw [/rc] body",
+            "from_name": "X",
+            "from": "@x",
+            "timestamp": "t",
+        }
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.mark_as_opened",
+            lambda bp, mid: (True, "Opened", email_data),
+        )
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.modules.email.format_email_header",
+            lambda ed: "HEADER",
+        )
+        mock_console = MagicMock()
+        mock_console.print = lambda msg, **kw: printed.append((str(msg), kw))
+        monkeypatch.setattr("aipass.ai_mail.apps.modules.email.console", mock_console)
+
+        from aipass.ai_mail.apps.modules.email import handle_view
+
+        assert handle_view(["body0002"]) is True
+        body_calls = [(m, kw) for m, kw in printed if "raw [/rc] body" in m]
+        assert body_calls, "body was never printed"
+        assert body_calls[0][1].get("markup") is False, "body printed as markup — it can raise"

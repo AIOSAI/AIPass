@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (34/34) | **Tests:** 826 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (34/34) | **Tests:** 878 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -59,6 +59,30 @@ drone @ai_mail sent                                       # View sent messages
 drone @ai_mail contacts                                   # List all known branches
 drone @ai_mail --help                                     # Full help
 ```
+
+## Listing Rules
+
+Bulk listings (`inbox`, `sent`) must never hide a message — an invisible new mail is
+the worst failure shape mail has, because the sender believes it was delivered.
+
+- **Newest-end truncation** — `delivery.py` inserts new mail at index 0, so listings
+  slice `messages[:20]` (the newest) and then reverse for oldest-first reading order.
+  Reversing before slicing kept the oldest 20 and hid every new arrival in a busy inbox.
+- **`view latest`** reads `messages[0]`, not `[-1]`, for the same reason.
+- **Markup escaping** — subject, preview, sender and recipient are sender-controlled and
+  are escaped in `format.py`. Unescaped, `[dim]` silently swallows text and `[/rc]`
+  raises `MarkupError` that aborts the whole listing.
+- **Fail honest** — a row that still cannot render is reprinted raw behind a marker, and
+  an unreadable `sent/` file lists as a placeholder. Never a silent skip.
+
+## Exit Codes
+
+`0` success · `1` unroutable command · `2` routed but failed.
+
+Handlers return `True` for "I recognised this command", which is not "it worked".
+`error()` sets a process failure flag that `main()` maps through `resolve_exit()`, so a
+failed delivery or an invalid reply_path exits nonzero instead of reporting success to
+the caller's script.
 
 ## Email Lifecycle
 
