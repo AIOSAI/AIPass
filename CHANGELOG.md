@@ -11,6 +11,21 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**docs(spawn)** — custom_config/ README grows from 3-line stub to the
+operator-override guide (FPLAN-0380 workstream 2 of 4). Every branch's
+`{branch}_json/custom_config/` now explains the house pattern in-place:
+code holds defaults (shipped truth), a file here holds ONLY deliberately
+overridden keys deep-merged at load, missing file = defaults = safe, and
+never write defaults to disk (the snapshot anti-pattern that made
+@memory's config undiagnosable, named as the failure mode). Template +
+registry hash regenerated, plus a one-pass fleet refresh of all 17 live
+branches' copies — those are gitignored, so spawn's render pass is the
+only propagation path (two hand-written READMEs at @cli/@skills replaced,
+content preserved in the reply for their owners). 380 tests (+2, both
+canary-verified: stub-revert reds the rules test, placeholder-typo reds
+the render test). By @spawn; suite re-run + rendered copy + registry hash
+re-verified by devpulse.
+
 **feat(hooks)** — two grounding gaps closed, Patrick-ruled the same evening
 (email.py 1.2.0, cadence.py 2.1.0, grounding_content.py 1.1.0,
 post_compact_regrounding.py 1.1.0). (1) Mail banner on a 5-turn cadence
