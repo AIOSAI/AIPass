@@ -10,4 +10,4 @@
 #
 # Regenerate:
 #   pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=pip.txt pip.in
-pip==26.1.2
+pip==26.2.1
