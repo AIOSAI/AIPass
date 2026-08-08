@@ -722,9 +722,7 @@ class TestOccurrencesReportsTrueCount:
         mod = _import_module()
         send = _setup_happy_path(mod)
 
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="err", error_hash="h1", count=9
-        )
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=9)
 
         body = send.call_args.kwargs["message"]
         assert "Occurrences: 9" in body
@@ -734,9 +732,7 @@ class TestOccurrencesReportsTrueCount:
         mod = _import_module()
         send = _setup_happy_path(mod)
 
-        mod.handle_error_detected(
-            branch="flow", module="cfg", message="err", error_hash="h1", count=2
-        )
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         body = send.call_args.kwargs["message"]
         assert "Occurrences: 1" not in body
