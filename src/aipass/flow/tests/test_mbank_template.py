@@ -778,6 +778,42 @@ class TestGetTemplate:
         assert len(date_part) == 10
         assert date_part[4] == "-" and date_part[7] == "-"
 
+    def test_literal_braces_in_prose_survive(self, tmp_path):
+        """ERROR d3de39ba: SOP templates document code with braces.
+
+        weekly_update.md carries a literal ``{createIfEmpty: true}`` MCP call,
+        which str.format() read as a replacement field and raised KeyError on --
+        making the whole template un-instantiable. Unknown braces must pass
+        through verbatim instead of blowing up template loading.
+        """
+        tpl = tmp_path / "sop.md"
+        tpl.write_text(
+            'Run `tabs_context_mcp {createIfEmpty: true}` for {subject}.\nJSON: {"a": 1}\nSet: {}',
+            encoding="utf-8",
+        )
+
+        from aipass.flow.apps.handlers.template.get_template import get_template
+
+        result = get_template(template_path=tpl, number=1, subject="Weekly")
+
+        # Known placeholder still substituted...
+        assert "for Weekly." in result
+        # ...while every non-placeholder brace form is preserved untouched.
+        assert "{createIfEmpty: true}" in result
+        assert 'JSON: {"a": 1}' in result
+        assert "Set: {}" in result
+
+    def test_unknown_placeholder_is_not_substituted(self, tmp_path):
+        """A brace token that is not a known placeholder is left alone, not blanked."""
+        tpl = tmp_path / "unknown.md"
+        tpl.write_text("{plan_number} {not_a_placeholder}", encoding="utf-8")
+
+        from aipass.flow.apps.handlers.template.get_template import get_template
+
+        result = get_template(template_path=tpl, number=2)
+
+        assert result == "FPLAN-0002 {not_a_placeholder}"
+
 
 # ===================================================================
 # 8. template/plan_type_loader.py — discover_plan_types

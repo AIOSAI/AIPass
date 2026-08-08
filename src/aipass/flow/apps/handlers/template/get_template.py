@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: get_template.py
 # Description: Get Template Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-30
-# Modified: 2025-11-30
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -14,6 +14,7 @@ Loads and formats PLAN templates from template directories.
 Features:
 - Loads templates from the flow/templates/ directory (package-relative)
 - Supports placeholder replacement ({number}, {subject}, {location}, {today})
+- Literal braces in template prose (code snippets, JSON) pass through untouched
 - Automatic fallback to default template
 - Multi-directory search support
 - Reusable across Flow modules
@@ -25,6 +26,7 @@ Usage:
     content = get_template("master", number=102, location="flow/DOCUMENTS", subject="Big Project")
 """
 
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -42,9 +44,35 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 TEMPLATES_DIR = FLOW_ROOT / "templates"
 DEFAULT_TEMPLATE = "default"
 
+# The only brace tokens treated as placeholders. Everything else in a template
+# is literal prose and passes through untouched.
+PLACEHOLDER_NAMES = ("number", "subject", "location", "today", "prefix", "plan_number", "tag")
+_PLACEHOLDER_PATTERN = re.compile(r"\{(" + "|".join(PLACEHOLDER_NAMES) + r")\}")
+
 # =============================================
 # HELPER FUNCTIONS
 # =============================================
+
+
+def _substitute_placeholders(content: str, values: dict[str, str]) -> str:
+    """
+    Replace known placeholders, leaving every other brace sequence verbatim.
+
+    Templates are documentation as much as scaffolding — SOP/playbook templates
+    legitimately contain code snippets, JSON, and tool-call syntax with braces
+    (``{createIfEmpty: true}``). ``str.format()`` treats each of those as a
+    replacement field and raises KeyError, which made whole templates
+    un-instantiable. Matching only the known names cannot raise, so a template
+    can never be broken by the prose it documents.
+
+    Args:
+        content: Raw template text
+        values: Placeholder name -> replacement value
+
+    Returns:
+        Template text with known placeholders substituted
+    """
+    return _PLACEHOLDER_PATTERN.sub(lambda match: values[match.group(1)], content)
 
 
 def _template_search_dirs() -> list[Path]:
@@ -147,15 +175,18 @@ def get_template(
         formatted_number = f"{number:0{digits}d}"
         plan_number = f"{prefix}-{formatted_number}"
 
-        # Format template with placeholders
-        formatted_content = template_content.format(
-            number=formatted_number,
-            subject=subject,
-            location=location,
-            today=today,
-            prefix=prefix,
-            plan_number=plan_number,
-            tag="",
+        # Substitute placeholders (literal braces in template prose are preserved)
+        formatted_content = _substitute_placeholders(
+            template_content,
+            {
+                "number": formatted_number,
+                "subject": subject,
+                "location": location,
+                "today": today,
+                "prefix": prefix,
+                "plan_number": plan_number,
+                "tag": "",
+            },
         )
 
         json_handler.log_operation(
