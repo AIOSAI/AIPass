@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-02-10
 # Modified: 2026-08-07
 # =============================================
@@ -38,7 +38,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
 from aipass.trigger.apps.handlers.json import json_handler
 
 try:
@@ -71,7 +71,10 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 
 BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
-TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
+
+# Live medic state — see medic_state.py for why it is not on the trio path.
+MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
+LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
 # Email send callback (set by module layer, avoids handler importing from modules)
 _send_email: Optional[Callable[..., bool]] = None
@@ -122,11 +125,24 @@ MAX_DISPATCHES_PER_WINDOW = 3
 RATE_LIMIT_WINDOW_SECONDS = 600  # 10 minutes
 
 
+def _read_medic_state() -> Dict[str, Any]:
+    """
+    Read medic_state.json, migrating off the legacy path on first read.
+
+    Returns:
+        Parsed state dict, or empty dict if missing or unreadable
+    """
+    migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
+    if not MEDIC_STATE_FILE.exists():
+        return {}
+    return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
+
+
 def _is_medic_enabled() -> bool:
     """
     Check if medic (auto-healing dispatch) is enabled.
 
-    Reads medic_enabled from trigger_config.json. If disabled with a TTL
+    Reads medic_enabled from medic_state.json. If disabled with a TTL
     (medic_disabled_until timestamp), treats an expired TTL as enabled.
     Defaults to True if config is missing or unreadable.
 
@@ -134,10 +150,7 @@ def _is_medic_enabled() -> bool:
         True if medic dispatch is enabled
     """
     try:
-        if not TRIGGER_CONFIG_FILE.exists():
-            return True
-        data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
-        config = data.get("config", {})
+        config = _read_medic_state().get("config", {})
         enabled = bool(config.get("medic_enabled", True))
         if enabled:
             return True
@@ -168,7 +181,7 @@ def _is_branch_muted(branch_name: str) -> bool:
     """
     Check if a specific branch is muted for medic dispatch.
 
-    Reads muted_branches list from trigger_config.json. Supports both
+    Reads muted_branches list from medic_state.json. Supports both
     legacy plain-string entries (permanent) and new dict entries with
     optional expires_at timestamp. Expired TTL mutes are treated as
     unmuted.
@@ -180,10 +193,7 @@ def _is_branch_muted(branch_name: str) -> bool:
         True if branch is actively muted
     """
     try:
-        if not TRIGGER_CONFIG_FILE.exists():
-            return False
-        data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
-        muted = data.get("config", {}).get("muted_branches", [])
+        muted = _read_medic_state().get("config", {}).get("muted_branches", [])
         branch_lower = branch_name.lower()
         now = datetime.now()
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)

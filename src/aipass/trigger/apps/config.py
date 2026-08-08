@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package path configuration
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -11,6 +11,14 @@ Trigger package path configuration.
 
 Provides package-relative paths for trigger data directories.
 Works in both pip-installed and development environments.
+
+Also provides migrate_json_file() — the lossless move used to get
+hand-written live state OFF the trio-owned filename pattern in
+trigger_json/. json_handler owns every `<module>_<config|data|log>.json`
+in that directory: it validates such a file against a template and
+REGENERATES it when the shape does not match. Live state parked on one of
+those names is one caller-name resolution away from being overwritten with
+a blank template.
 """
 
 import json
@@ -43,6 +51,12 @@ def _log_warning(message: str) -> None:
 
 # AIPass package root: .../aipass/
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
+
+# Runtime state directory — also the directory json_handler's trio machinery owns.
+TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
+
+# Retired files land here rather than being deleted.
+ARCHIVE_DIR_NAME = ".archive"
 
 
 def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
@@ -97,6 +111,76 @@ def json_file_lock(path: Path):
                 yield
             finally:
                 fcntl.flock(lock_f, fcntl.LOCK_UN)
+
+
+def _archive_legacy_file(path: Path) -> bool:
+    """Move a retired state file into a sibling .archive/ directory.
+
+    Never deletes. A name collision keeps both copies by suffixing the
+    archived file with the source mtime.
+
+    Args:
+        path: The file to retire (must exist)
+
+    Returns:
+        True if the file was moved
+    """
+    archive_dir = path.parent / ARCHIVE_DIR_NAME
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    target = archive_dir / path.name
+    try:
+        if target.exists():
+            stamp = int(path.stat().st_mtime)
+            target = archive_dir / f"{path.stem}.{stamp}{path.suffix}"
+        os.replace(path, target)
+        return True
+    except OSError as exc:
+        _log_warning(f"archive of {path.name} failed: {exc}")
+        return False
+
+
+def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
+    """Move live JSON state from a legacy path to its new home, losslessly.
+
+    Idempotent and safe to call on every read — it stats the legacy path and
+    returns immediately when there is nothing to move. Behaviour:
+
+    - new present               -> no-op, whatever the legacy name holds. The
+                                   move already happened, so that name belongs
+                                   to json_handler's trio machinery again — a
+                                   blank template it regenerates there is its
+                                   file, not stale state of ours. Archiving it
+                                   on every read would fight the trio owner
+                                   forever and grow .archive/ without bound.
+    - new absent, legacy present-> copy contents to new, archive legacy
+    - legacy missing            -> no-op
+    - legacy unreadable         -> left in place untouched, warning logged.
+                                   Fail honest: a human decides, not a guess.
+
+    The lock is taken on the LEGACY path, not the new one: the legacy file is
+    the resource being claimed, and callers already hold the new file's lock
+    around their own read-modify-write cycles — flock on a second descriptor
+    for the same file would deadlock the process against itself.
+
+    Args:
+        legacy_path: Old file location
+        new_path: New file location
+
+    Returns:
+        True if the legacy file was migrated or archived on this call
+    """
+    if new_path.exists() or not legacy_path.exists():
+        return False
+    with json_file_lock(legacy_path):
+        if new_path.exists() or not legacy_path.exists():  # another process won the race
+            return False
+        try:
+            data = json.loads(legacy_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            _log_warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
+            return False
+        atomic_write_json(new_path, data)
+        return _archive_legacy_file(legacy_path)
 
 
 def read_text_file(path: Path, encoding: str = "utf-8") -> str:

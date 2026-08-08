@@ -11,6 +11,29 @@ PyPI version — not the changelog header.
 
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
+**fix(trigger)** — latent data-loss defused, and the defect had a twin
+(FPLAN-0380 workstream 3 of 4). Two hand-written live-state files squatted
+on json_handler's trio paths for module `trigger`: `trigger_config.json`
+(12 branch mutes + circuit breaker) and — found by @trigger, not in the
+brief — `trigger_data.json` (the error catch-up hash set, whose loss would
+re-dispatch every already-handled error). Neither carried the trio's
+required keys, so any `ensure_json_exists('trigger', ...)` call judged
+them corrupt and template-blanked them. Moved to `medic_state.json` /
+`error_catchup.json` (config.py 1.1.0, medic_state.py 1.2.0,
+error_detected.py 2.4.0, startup.py/runaway_handler.py 1.1.0/1.2.0);
+one-shot migration, legacy archived never deleted, unreadable legacy left
+in place with a warning. Proof by attempted destruction: fired
+`ensure_module_jsons('trigger')` live — it recreated blank templates while
+all 12 mutes, TTLs, breaker state, and 32/32 catch-up hashes survived
+(pre-fix, that single call destroys everything). Two self-caught traps:
+a nested-flock deadlock the mocked test lock could never expose (lock made
+real in the fixture), and the first-cut migration fighting @seedgo's new
+bidirectional trio check in an infinite create/archive loop (now one-shot,
+placeholders left to their owner — trigger audit 100%). A dead
+TRIGGER_CONFIG_FILE constant removed rather than repointed; one test that
+passed for the wrong reason fixed. 723 tests (+13). By @trigger; suite +
+live medic read-back re-verified by devpulse.
+
 **docs(spawn)** — custom_config/ README grows from 3-line stub to the
 operator-override guide (FPLAN-0380 workstream 2 of 4). Every branch's
 `{branch}_json/custom_config/` now explains the house pattern in-place:

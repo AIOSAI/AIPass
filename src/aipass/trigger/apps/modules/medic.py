@@ -337,7 +337,7 @@ def _handle_mute(console, args: list) -> None:
             hours = int(duration_secs) // 3600
             console.print(f"  [yellow]Muted[/yellow] @{branch_name} — auto-expires in {hours}h")
     else:
-        error(f"Failed to mute @{branch_name}", suggestion="Check trigger_config.json")
+        error(f"Failed to mute @{branch_name}", suggestion="Check medic_state.json")
 
 
 def _handle_unmute(console, args: list) -> None:
@@ -355,7 +355,7 @@ def _handle_unmute(console, args: list) -> None:
         logger.info(f"[MEDIC] Unmuted branch: {branch_name}")
         console.print(f"  [green]Unmuted[/green] @{branch_name} — dispatch resumed")
     else:
-        error(f"Failed to unmute @{branch_name}", suggestion="Check trigger_config.json")
+        error(f"Failed to unmute @{branch_name}", suggestion="Check medic_state.json")
 
 
 def _handle_volume_mute(console, args: list) -> None:
@@ -381,7 +381,7 @@ def _handle_volume_mute(console, args: list) -> None:
             console.print(f"  [yellow]Volume-muted[/yellow] @{branch_name} — auto-expires in {hours}h")
         console.print("  [dim]Runaway alerts suppressed. CRITICAL runaways still deliver.[/dim]")
     else:
-        error(f"Failed to volume-mute @{branch_name}", suggestion="Check trigger_config.json")
+        error(f"Failed to volume-mute @{branch_name}", suggestion="Check medic_state.json")
 
 
 def _handle_volume_unmute(console, args: list) -> None:
@@ -400,7 +400,7 @@ def _handle_volume_unmute(console, args: list) -> None:
         logger.info(f"[MEDIC] Volume-unmuted branch: {branch_name}")
         console.print(f"  [green]Volume-unmuted[/green] @{branch_name} — runaway alerts resumed")
     else:
-        error(f"Failed to volume-unmute @{branch_name}", suggestion="Check trigger_config.json")
+        error(f"Failed to volume-unmute @{branch_name}", suggestion="Check medic_state.json")
 
 
 def _fmt_mute_list(detail: list) -> str:
@@ -464,7 +464,7 @@ def _handle_on(console) -> None:
     from aipass.cli.apps.modules import error
 
     if not set_enabled(True):
-        error("Failed to enable Medic", suggestion="Check trigger_config.json")
+        error("Failed to enable Medic", suggestion="Check medic_state.json")
         return
 
     logger.info("[MEDIC] Medic ENABLED - error dispatch active")
@@ -499,7 +499,7 @@ def _handle_off(console, args: list | None = None) -> None:
 
     if is_forever:
         if not set_enabled(False):
-            error("Failed to disable Medic", suggestion="Check trigger_config.json")
+            error("Failed to disable Medic", suggestion="Check medic_state.json")
             return
         logger.info("[MEDIC] Medic DISABLED permanently")
         if _is_service_active():
@@ -517,7 +517,7 @@ def _handle_off(console, args: list | None = None) -> None:
     else:
         hours = DEFAULT_OFF_SECONDS // 3600
         if not set_enabled(False, duration_seconds=float(DEFAULT_OFF_SECONDS)):
-            error("Failed to disable Medic", suggestion="Check trigger_config.json")
+            error("Failed to disable Medic", suggestion="Check medic_state.json")
             return
         logger.info("[MEDIC] Medic DISABLED for %dh", hours)
         console.print(

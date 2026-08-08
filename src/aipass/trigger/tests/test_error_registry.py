@@ -1022,10 +1022,12 @@ class TestEmptyJsonResilience:
         assert "errors" in result
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
-        """_load_circuit_breaker_state returns default when config is empty."""
+        """_load_circuit_breaker_state returns default when its state file is empty."""
         config_dir = tmp_path / "trigger_json"
         config_dir.mkdir(parents=True, exist_ok=True)
-        config_file = config_dir / "trigger_config.json"
+        # The breaker persists to trigger_cb_state.json — writing any other
+        # file here would leave this test passing without reading anything.
+        config_file = config_dir / "trigger_cb_state.json"
         config_file.write_text("", encoding="utf-8")
 
         er = _import_registry()

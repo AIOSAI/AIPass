@@ -27,11 +27,13 @@ import pytest
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock config, json_handler, error_registry, and wake_branch before import."""
-    from aipass.trigger.apps.config import atomic_write_json
+    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
+    mock_config.TRIGGER_JSON_DIR = tmp_path / "trigger_json"
+    mock_config.migrate_json_file = migrate_json_file
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
     mock_json_handler = MagicMock()
@@ -474,7 +476,7 @@ class TestMedicEnabledTTL:
         send = _setup_happy_path(mod)
         mod._is_medic_enabled = real_is_medic_enabled  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         past = (datetime.now() - timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -507,7 +509,7 @@ class TestMedicEnabledTTL:
         send = _setup_happy_path(mod)
         mod._is_medic_enabled = real_is_medic_enabled  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         future = (datetime.now() + timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -550,7 +552,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         future = (datetime.now() + timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -584,7 +586,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         past = (datetime.now() - timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -618,7 +620,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -651,7 +653,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.TRIGGER_CONFIG_FILE
+        config_file = mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(

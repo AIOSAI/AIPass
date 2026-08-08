@@ -23,7 +23,8 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     mod._file_cooldowns.clear()
     mod._send_email = None
 
-    monkeypatch.setattr(mod, "TRIGGER_CONFIG_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(mod, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(mod, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
     monkeypatch.setattr(mod, "ALERTS_FILE", tmp_path / "alerts.json")
     monkeypatch.setattr(mod, "_append_jsonl", MagicMock())
 
@@ -142,8 +143,8 @@ class TestCooldownExpired:
 
 
 def _write_config(tmp_path: Path, config: dict) -> None:
-    """Write a trigger_config.json with the given config section."""
-    (tmp_path / "trigger_config.json").write_text(
+    """Write a medic_state.json with the given config section."""
+    (tmp_path / "medic_state.json").write_text(
         json.dumps({"config": config}),
         encoding="utf-8",
     )
@@ -944,3 +945,18 @@ class TestOperationLogNaming:
         ops = self._operations(log_op)
         assert len(set(ops)) == 2
         assert ops == ["runaway_observed", "runaway_dispatch_sent"]
+
+
+class TestVolumeMuteMigration:
+    """Volume mutes are read through the legacy-path migration."""
+
+    def test_volume_mute_survives_migration(self, tmp_path: Path) -> None:
+        """A volume mute written under the old filename still silences the alert."""
+        mod.LEGACY_MEDIC_STATE_FILE.write_text(
+            json.dumps({"config": {"volume_muted_branches": [{"name": "hooks", "expires_at": None}]}}),
+            encoding="utf-8",
+        )
+
+        assert mod._is_branch_volume_muted("hooks") is True
+        assert mod.MEDIC_STATE_FILE.exists()
+        assert not mod.LEGACY_MEDIC_STATE_FILE.exists()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-14
-# Modified: 2026-08-04
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -38,7 +38,7 @@ Severity doctrine — WARNING observes, CRITICAL wakes:
 
 Gating:
     - Per-file cooldown (30min default) — independent of medic circuit breaker
-    - VOLUME mute check (volume_muted_branches in trigger_config.json)
+    - VOLUME mute check (volume_muted_branches in medic_state.json)
     - UNKNOWN/missing branch → dispatch to @prax as fallback
 
 Mute classes are deliberately separate. Medic CONTENT mutes (muted_branches)
@@ -67,7 +67,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    atomic_write_json,
+    json_file_lock,
+    migrate_json_file,
+)
 from aipass.trigger.apps.handlers.json import json_handler
 
 try:
@@ -103,7 +109,9 @@ def _find_repo_root() -> Path:
 
 _REPO_ROOT = _find_repo_root()
 ALERTS_FILE = _REPO_ROOT / ".aipass" / "alerts.json"
-TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
+# Live medic state — see medic_state.py for why it is not on the trio path.
+MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
+LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
 _send_email: Optional[Callable[..., bool]] = None
 
@@ -163,7 +171,7 @@ def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
 def _is_branch_volume_muted(branch_name: str) -> bool:
     """Check if a branch is VOLUME-muted for runaway dispatch.
 
-    Reads volume_muted_branches from trigger_config.json — deliberately NOT
+    Reads volume_muted_branches from medic_state.json — deliberately NOT
     muted_branches, which is the medic content-mute list. Supports both
     plain-string entries (permanent) and dict entries with TTL.
 
@@ -174,9 +182,10 @@ def _is_branch_volume_muted(branch_name: str) -> bool:
         True if branch is actively volume-muted
     """
     try:
-        if not TRIGGER_CONFIG_FILE.exists():
+        migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
+        if not MEDIC_STATE_FILE.exists():
             return False
-        data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        data = json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         muted = data.get("config", {}).get(VOLUME_MUTE_KEY, [])
         branch_lower = branch_name.lower()
         now = datetime.now()

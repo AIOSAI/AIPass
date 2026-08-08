@@ -18,12 +18,14 @@ import pytest
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock heavy infrastructure imports for all six handler modules."""
-    from aipass.trigger.apps.config import atomic_write_json
+    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.AIPASS_PKG_ROOT = tmp_path / "aipass"
     mock_config.atomic_write_json = atomic_write_json
+    mock_config.TRIGGER_JSON_DIR = tmp_path / "trigger_json"
+    mock_config.migrate_json_file = migrate_json_file
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
     mock_json_handler = MagicMock()

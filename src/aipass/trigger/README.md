@@ -4,8 +4,8 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
-**Version:** 2.3.0
-**Last Updated:** 2026-08-02
+**Version:** 2.4.0
+**Last Updated:** 2026-08-07
 
 ## Quick Start
 
@@ -178,7 +178,7 @@ trigger/
 │       ├── error_registry.py       # SHA1 fingerprinting, circuit breaker, suppression gate, backoff
 │       ├── error_reporter.py       # report_error() API + source fix emails
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
-│       ├── medic_state.py          # Medic config persistence (trigger_config.json)
+│       ├── medic_state.py          # Medic state persistence (medic_state.json)
 │       ├── json/
 │       │   └── json_handler.py     # JSON structure logging
 │       ├── events/
@@ -198,19 +198,40 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 655 tests across 20 modules
+├── tests/                          # 723 tests across 21 modules
 ├── trigger_json/                   # Runtime state files
-│   ├── trigger_config.json         # Medic state, muted branches
+│   ├── medic_state.json            # Medic state, muted branches, breaker
+│   ├── error_catchup.json          # Startup catch-up scan position + hashes
 │   ├── error_registry.json         # All tracked errors
-│   └── trigger_cb_state.json       # Circuit breaker persistence
+│   ├── trigger_cb_state.json       # Circuit breaker persistence
+│   ├── trigger_<config|data|log>.json  # Inert json_handler trio placeholders
+│   └── .archive/                   # Retired state files, never deleted
 └── trigger_data.json               # Log watcher positions + dedup hashes
 ```
+
+**Live state never sits on a trio filename.** `json_handler` owns every
+`<module>_<config|data|log>.json` name in `trigger_json/`: it validates such a
+file against its template and regenerates it when the shape does not match.
+Medic state and catch-up state used to live at `trigger_config.json` and
+`trigger_data.json` — both trio names for module `trigger`, both hand-written,
+neither matching the template. Any trio call resolving to caller module
+`trigger` would have replaced them with blank templates, dropping every live
+mute, the persisted breaker state, and the processed-hash set that stops
+already-handled errors being re-dispatched. The state moved to
+`medic_state.json` and `error_catchup.json`; the trio names are now inert
+placeholders that `json_handler` is free to own.
+
+`config.migrate_json_file()` performs the move on first read: it is one-shot
+(a file re-created at a legacy name afterwards belongs to its owner and is left
+alone), never deletes — the old file moves to `trigger_json/.archive/` — and
+leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Data Safety
 
 - **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then `os.replace()` for atomic rename. No partial writes on crash.
 - **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` using `fcntl.flock` with `.lock` sidecar files. Prevents concurrent corruption from watcher + CLI.
 - **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
+- **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the Architecture section.
 
 ## Integration Points
 
@@ -226,13 +247,13 @@ trigger/
 
 ## Testing
 
-655 tests across 20 test modules, all passing. Coverage: 87/87 public functions (100%).
+723 tests across 21 test modules, all passing. Coverage: 87/87 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`
+Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`
 
 ## Compliance
 
@@ -240,7 +261,7 @@ Seedgo: 100% (41/41 standards). Zero type errors. All categories at 100%.
 
 ---
 
-*Last Updated: 2026-08-02*
+*Last Updated: 2026-08-07*
 
 ---
 [← Back to AIPass](../../../README.md)
