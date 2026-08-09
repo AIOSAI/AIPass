@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_telegram_relay.py
 # Description: Tests for the Telegram relay handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-24
 # Modified: 2026-08-08
 # =============================================
@@ -24,6 +24,9 @@ Covers:
 
 import importlib
 import json
+import ntpath
+import os
+import posixpath
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,6 +35,11 @@ from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Captured at import, before any fixture redirects the home directory: this is the
+# real operator's file on this machine, and the one no test may ever touch.
+_REAL_HOME = Path.home()
+_OPERATOR_CONTROL_FILE = _REAL_HOME / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
 
 
 @dataclass
@@ -60,18 +68,43 @@ class FakeEvent:
 # red on a machine where the bot is paused, green on CI where no control file exists.
 # Tests assert on relay behavior, never on operator state, so every import is aimed
 # at a per-test tmp path and _import_relay refuses to return a module still aimed
-# at HOME.
+# at the operator's home.
+#
+# Isolation is belt AND braces, because each covers a different failure:
+#   braces — _import_relay re-points CONTROL_FILE after every reload (the module
+#            default is recomputed by the reload, so a one-time patch would lapse).
+#   belt   — the home directory itself is redirected while the reload runs, so even
+#            the recomputed default lands in tmp. If someone deletes the re-point
+#            line, the tests still cannot reach the operator's file.
+#
+# The belt must set HOME *and* USERPROFILE. Path.home() calls os.path.expanduser("~"),
+# which reads HOME on POSIX but USERPROFILE on Windows (ntpath.expanduser checks
+# USERPROFILE first, then HOMEDRIVE+HOMEPATH — HOME is never consulted). Setting only
+# HOME would leave Windows resolving the real profile. Pinned by
+# TestHomeRedirectIsPlatformHonest, which exercises both resolvers by name so the
+# Windows branch is proven on any platform.
 
 _ISOLATED_CONTROL_FILE: Optional[Path] = None
+_ISOLATED_HOME: Optional[Path] = None
+# CONTROL_FILE as the reload computed it, before _import_relay re-points it.
+_LAST_RELOAD_DEFAULT: Optional[Path] = None
 
 
 @pytest.fixture(autouse=True)
 def isolate_control_file(tmp_path):
     """Point every relay import at a throwaway control file, never the operator's."""
-    global _ISOLATED_CONTROL_FILE
+    global _ISOLATED_CONTROL_FILE, _ISOLATED_HOME, _LAST_RELOAD_DEFAULT
     _ISOLATED_CONTROL_FILE = tmp_path / "relay_control.json"
+    _ISOLATED_HOME = tmp_path / "home"
     yield
     _ISOLATED_CONTROL_FILE = None
+    _ISOLATED_HOME = None
+    _LAST_RELOAD_DEFAULT = None
+
+
+def _isolated_home_env() -> dict:
+    """Env overrides that move Path.home() into tmp on every platform."""
+    return {"HOME": str(_ISOLATED_HOME), "USERPROFILE": str(_ISOLATED_HOME)}
 
 
 def _import_relay():
@@ -82,17 +115,22 @@ def _import_relay():
             "the relay would read the operator's live control file"
         )
 
+    global _LAST_RELOAD_DEFAULT
+
     fresh_mocks = {
         "aipass.prax.apps.modules.logger": MagicMock(),
         "aipass.prax.apps.handlers.json": MagicMock(),
         "aipass.prax.apps.handlers.json.json_handler": MagicMock(),
     }
-    with patch.dict(sys.modules, fresh_mocks):
+    # The home redirect wraps the reload because that is the only moment the module
+    # default is computed — scoping it here keeps every other test's environment real.
+    with patch.dict(os.environ, _isolated_home_env()), patch.dict(sys.modules, fresh_mocks):
         if "aipass.prax.apps.handlers.monitoring.telegram_relay" in sys.modules:
             mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.telegram_relay"])
         else:
             mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.telegram_relay")
 
+    _LAST_RELOAD_DEFAULT = mod.CONTROL_FILE
     setattr(mod, "CONTROL_FILE", _ISOLATED_CONTROL_FILE)
 
     lock_mock = MagicMock()
@@ -487,8 +525,6 @@ class TestReadControl:
 
     def test_mtime_cache_avoids_reread(self, tmp_path):
         """Same mtime returns cached result without re-reading the file."""
-        import os
-
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
         ctrl.write_text(json.dumps({"paused": False}))
@@ -502,8 +538,6 @@ class TestReadControl:
 
     def test_mtime_change_triggers_reread(self, tmp_path):
         """Changed mtime causes re-read of the control file."""
-        import os
-
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
         ctrl.write_text(json.dumps({"paused": False, "level": "all"}))
@@ -785,17 +819,40 @@ class TestControlFileIsolation:
     """Tests must never inherit the operator's live pause state from HOME."""
 
     def test_import_never_points_at_operator_file(self, tmp_path):
-        """A freshly imported relay reads a tmp control file, not the one in HOME."""
+        """A freshly imported relay reads a tmp control file, not the operator's."""
         relay = _import_relay()
-        operator_file = Path.home() / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
-        assert relay.CONTROL_FILE != operator_file
+        assert relay.CONTROL_FILE != _OPERATOR_CONTROL_FILE
         assert relay.CONTROL_FILE == tmp_path / "relay_control.json"
 
     def test_reimport_re_isolates(self):
-        """Reload restores the HOME default, so every import must re-point after it."""
+        """Reload recomputes the default, so every import must re-point after it.
+
+        Asserted by path identity, never by ancestry. "not under home" was the
+        original check and it is a POSIX-only proxy: on Windows pytest's tmp_path
+        lives *inside* the user profile (…/AppData/Local/Temp/pytest-of-…), so the
+        home directory is an ancestor of the isolated file too. That check cannot
+        tell working isolation from lapsed isolation there, and it failed CI on
+        2026-08-08 while isolation was in fact holding.
+        """
         _import_relay()
         relay = _import_relay()
-        assert Path.home() not in relay.CONTROL_FILE.parents
+        assert relay.CONTROL_FILE == _ISOLATED_CONTROL_FILE
+        assert relay.CONTROL_FILE != _OPERATOR_CONTROL_FILE
+
+    def test_reload_default_is_recomputed_not_inherited(self):
+        """The re-point is load-bearing: the reload really does rebuild the default."""
+        relay = _import_relay()
+        assert _LAST_RELOAD_DEFAULT is not None
+        assert _LAST_RELOAD_DEFAULT != _ISOLATED_CONTROL_FILE, "re-point would be decorative"
+        assert relay.CONTROL_FILE == _ISOLATED_CONTROL_FILE
+
+    def test_reload_default_lands_in_tmp_without_the_re_point(self):
+        """Belt alone holds: even the recomputed default is inside the isolated home."""
+        _import_relay()
+        assert _LAST_RELOAD_DEFAULT is not None
+        assert _ISOLATED_HOME is not None
+        assert _LAST_RELOAD_DEFAULT.is_relative_to(_ISOLATED_HOME)
+        assert _LAST_RELOAD_DEFAULT != _OPERATOR_CONTROL_FILE
 
     def test_flush_ignores_a_paused_operator_file(self, tmp_path):
         """paused=true in the isolated file suppresses; the real file is never consulted."""
@@ -820,3 +877,37 @@ class TestControlFileIsolation:
         monkeypatch.setattr(sys.modules[__name__], "_ISOLATED_CONTROL_FILE", None)
         with pytest.raises(RuntimeError, match="operator's live control file"):
             _import_relay()
+
+
+class TestHomeRedirectIsPlatformHonest:
+    """The home redirect must hold on Windows, which nobody here can run locally.
+
+    Path.home() delegates to os.path.expanduser("~"), which is posixpath.expanduser
+    on Linux/macOS and ntpath.expanduser on Windows — two functions reading two
+    different environment variables. Calling both by name proves the Windows branch
+    from any platform, so this stays honest without a Windows box.
+    """
+
+    def test_both_resolvers_land_in_the_isolated_home(self):
+        """HOME covers POSIX, USERPROFILE covers Windows — the redirect sets both."""
+        with patch.dict(os.environ, _isolated_home_env()):
+            assert posixpath.expanduser("~") == str(_ISOLATED_HOME)
+            assert ntpath.expanduser("~") == str(_ISOLATED_HOME)
+
+    def test_home_alone_lapses_on_windows(self):
+        """The CI failure class, reproduced on any platform: HOME is not enough.
+
+        Setting only HOME leaves ntpath.expanduser reading the real USERPROFILE, so
+        a reload on Windows would rebuild CONTROL_FILE from the operator's profile.
+        This is why _isolated_home_env sets both.
+        """
+        operator_profile = r"C:\Users\runneradmin"
+        with patch.dict(os.environ, {"HOME": str(_ISOLATED_HOME), "USERPROFILE": operator_profile}):
+            assert posixpath.expanduser("~") == str(_ISOLATED_HOME)
+            assert ntpath.expanduser("~") == operator_profile
+
+    def test_import_relay_redirects_home_for_both_resolvers(self):
+        """The env the helper actually applies, not a hand-built copy."""
+        env = _isolated_home_env()
+        assert env["HOME"] == env["USERPROFILE"] == str(_ISOLATED_HOME)
+        assert not Path(env["HOME"]).is_relative_to(_REAL_HOME / ".aipass")

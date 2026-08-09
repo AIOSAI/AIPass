@@ -11,6 +11,25 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(prax)** — Windows CI red root-caused to the assertion, not the
+isolation (test_telegram_relay.py 1.2.0, by @prax — correcting
+devpulse's brief). `assert Path.home() not in CONTROL_FILE.parents` is
+a POSIX-only proxy: on Windows pytest's tmp_path lives INSIDE the user
+profile, so the check is False whether isolation works or not — and
+the sibling exact-equality test passing on the same CI job proves
+isolation was holding. Assertions now state path IDENTITY (== isolated
+path, != operator path). The HOME+USERPROFILE redirect went in anyway
+as belt to the re-point's braces, scoped to the reload; platform
+honesty pinned by Linux-runnable tests calling posixpath/ntpath
+expanduser BY NAME (ntpath never reads HOME — drop USERPROFILE and the
+Linux runners go red, not Windows six weeks later). Canary: Windows-
+shaped layout on Linux (tmp nested under home) reproduced the verbatim
+CI error with the old assertion, 62/62 green with the new. Process
+honesty: their first simulation (swapping os.path.expanduser) was a
+no-op harness — caught, discarded, replaced. Fleet lesson: assert
+isolation by identity, never ancestry. 1098 passed / 1 skipped, audit
+100%. Re-verified by devpulse: suite + audit.
+
 **fix(drone)** — seedgo unused_function flag resolved by deletion, not
 bypass (by @drone). `reset_identity_log_dedupe()` was a public
 production function whose only callers were tests — exactly what the
