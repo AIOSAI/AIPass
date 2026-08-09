@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(flow)** — template stamping hardened against partial placeholder
+values + VERA's weekly_update v2.1 landed (get_template 1.3.1). VERA's
+createIfEmpty KeyError report turned out already fixed 08-07 (her field
+report predated the fix — flow live-stamped to prove it before touching
+anything). The one real remaining hole: `_substitute_placeholders` used
+a raw dict index, safe today only because every known placeholder
+happens to be supplied — now `.get` with literal-token passthrough, so
+a template that loaded when registered always loads when stamped,
+structurally. v2.1 landed byte-identical from the dropbox (full
+clickable https://aipass.ai URLs per Patrick's directive, Bluesky step
+fires from the caller's own branch dir post-v2.7.14). +2 tests (774,
+one pinning the REAL shipped template through a live stamp), canary red
+with the exact KeyError shape VERA hit. README truth-up: PPLAN/
+playbook_plans was entirely undocumented. Live-stamped PPLAN-0032 as
+proof, both test artifacts closed through the pipeline. Seedgo 100%.
+By @flow; suite + lint re-verified by devpulse.
+
 **fix(prax)** — telegram relay tests no longer read the operator's live
 control file (test_telegram_relay.py 1.1.0, tests only). Five tests went
 red on the dev machine the moment Patrick paused the prax monitor bot

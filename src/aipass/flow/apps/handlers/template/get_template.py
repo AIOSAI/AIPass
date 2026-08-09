@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: get_template.py
 # Description: Get Template Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-30
-# Modified: 2026-08-07
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -65,6 +65,11 @@ def _substitute_placeholders(content: str, values: dict[str, str]) -> str:
     un-instantiable. Matching only the known names cannot raise, so a template
     can never be broken by the prose it documents.
 
+    A name in :data:`PLACEHOLDER_NAMES` with no supplied value passes through
+    verbatim rather than raising: a template that loaded when it was registered
+    must still load when it is stamped, so an unsupplied optional key degrades
+    to the literal placeholder instead of killing the whole template.
+
     Args:
         content: Raw template text
         values: Placeholder name -> replacement value
@@ -72,7 +77,7 @@ def _substitute_placeholders(content: str, values: dict[str, str]) -> str:
     Returns:
         Template text with known placeholders substituted
     """
-    return _PLACEHOLDER_PATTERN.sub(lambda match: values[match.group(1)], content)
+    return _PLACEHOLDER_PATTERN.sub(lambda match: values.get(match.group(1), match.group(0)), content)
 
 
 def _template_search_dirs() -> list[Path]:

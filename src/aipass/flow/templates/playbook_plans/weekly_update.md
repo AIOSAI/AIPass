@@ -26,7 +26,8 @@ tags, anything that broke) becomes a searchable trail. Costs nothing, gives hist
 ## Steps
 
 *The weekly-update multi-channel SOP (Update #N). Owner: VERA. Refined from
-PPLAN-0008 / 0011 / 0015 / 0017 runs.*
+PPLAN-0008 / 0011 / 0015 / 0017 / 0029 runs. v2.1: full clickable URLs
+(https://aipass.ai), Bluesky fires from own branch dir since v2.7.14.*
 
 ### Ground truth first
 
@@ -48,12 +49,14 @@ PPLAN-0008 / 0011 / 0015 / 0017 runs.*
 - [ ] 2. Draft the r/AIPass body: through-line first, receipts per claim, hyphens
       not em dashes, no banned words, durable numbers. Report losses and misses,
       not only wins — a dev log that only reports wins reads as marketing.
-      EVERY post on EVERY channel includes the website: aipass.ai (Patrick
-      directive 2026-07-27).
+      EVERY post on EVERY channel includes the website as a FULL clickable URL:
+      https://aipass.ai (Patrick directives 2026-07-27 + 2026-08-07). Bare
+      'aipass.ai' only auto-links on X — Reddit and API-posted Bluesky render
+      it as dead plain text.
       Body ENDS with the series footer BEFORE first fire (bot posts cannot be
       author-edited): Fresh numbers (stars w/ delta, forks, citizens, latest
-      release, tests, CI), Website: aipass.ai, changelog link, 'Raw dev logs
-      always here at r/AIPass.'
+      release, tests, CI), Website: https://aipass.ai, changelog link, 'Raw dev
+      logs always here at r/AIPass.'
       Title: `AIPass Update #N - ...` using the number confirmed in step 0.
 - [ ] 3. Fact-check pass: every number/claim verified against the repo before
       posting. Re-verify anything carried over from an older draft — it may sit in
@@ -70,12 +73,14 @@ PPLAN-0008 / 0011 / 0015 / 0017 runs.*
       it NOW while the post is minutes old: `--delete <id>`, correct the body, re-fire.
       Content-only mistakes are a 60s `--edit <id>` (title stays immutable).
 - [ ] 6. Bluesky: short promo via `drone @api integrations call publish_bluesky
-      "text"` from the AIPass project root (#618). ONE text argument only — every
-      argument posts verbatim, there is no --help. Verify via public.api.bsky.app
-      XRPC getPostThread. Check `atproto` imports first (declared in the `[bluesky]`
-      extra since 2026-07-28, but confirm after any venv rebuild).
-- [ ] 7. X: Chrome MCP post as @AIPassSystem, verify on the profile. The aipass.ai
-      link card renders automatically — free real estate, keep the URL in.
+      "text"` from YOUR OWN branch dir (works cross-project since v2.7.14 —
+      the old cd-to-AIPass-root #618 workaround is dead; never cd, it makes you
+      ANONYMOUS). ONE text argument only — every argument posts verbatim, there
+      is no --help. The driver returns the post URL on success. Use the full
+      https://aipass.ai URL in the text — bare domains are not clickable there.
+- [ ] 7. X: Chrome MCP post as @AIPassSystem, verify on the profile. The
+      https://aipass.ai link card renders automatically — free real estate,
+      keep the URL in.
 - [ ] 8. Leave mod-approve for Patrick; log any cleanup items.
 - [ ] 9. Fill Run Summary + Listen, update `.trinity`, close the plan (auto-vectorizes).
       Post-mortem within 24h → `docs/reference/post_mortems/YYYY-MM-DD_slug.md`.
