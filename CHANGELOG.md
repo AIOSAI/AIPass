@@ -9,6 +9,28 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-08] — post-v2.7.14 train (in progress)
+
+**fix(memory)** — the config file is the authority again: self-heal
+restored (config_loader 1.2.0, Patrick ruling S193 reversing the
+doctrine half of Thursday's ws4). The never-snapshot change had archived
+the operator's `memory.config.json` and made the loader write nothing on
+a missing file — inverting the June-shipped design (DPLAN-0206 /
+FPLAN-0271): configs live in JSONs; code's `DEFAULT_CONFIG` exists only
+as the regeneration seed. Restored to that spec: genuinely-missing file
+→ full config written to disk (atomic write); malformed or wrong-shape
+JSON → ERROR + defaults served in memory, the operator's file never
+touched; `push_defaults_to_per_branch` now refuses over an unreadable
+file instead of silently rebuilding it. `enforce: true` in the seed per
+ruling — regenerate what we operate. Kept from ws4 because correct
+regardless: the extractor defaults-fallback (the regen path is only safe
+because it stayed) and the aligned seed values. Live-proven twice:
+delete the file, run any memory command, watch the full config reborn —
+second run carries `enforce: true`. 1036 tests, seedgo 100%. Queued: the
+never-snapshot text in the seedgo standard + spawn README guide now
+contradicts the ruling; correction pass to follow. By @memory;
+suite + lint + live regen ×2 re-verified by devpulse.
+
 ## [2026-08-07] — post-v2.7.14 train (in progress)
 
 **feat(seedgo)** — the audit can now SAY things without scoring them, and

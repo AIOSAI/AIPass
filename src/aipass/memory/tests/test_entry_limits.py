@@ -145,8 +145,12 @@ class TestNormalConfig:
 
         assert result["enabled"] is True
 
-    def test_enforce_false_on_disk_overrides_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Code defaults to enforce=True; an explicit False on disk must win."""
+    def test_enforce_false_on_disk_overrides_the_code_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The file is the authority: code seeds enforce=True, but an operator
+        who sets False in the file gets warn-only.
+        """
         config_path = _write_config(tmp_path, _full_config())
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
@@ -278,12 +282,19 @@ class TestMissingConfig:
         result = mod.load_entry_limits("any_branch")
 
         assert result["enabled"] is True
+        # Seed mirrors what the fleet actually operates, not a warn-only stand-in
         assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
         assert result["entry_types"]["sessions"]["max_chars"] == 300
 
-    def test_missing_config_logs_info_and_writes_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """config_loader serves defaults at INFO level and never creates the file."""
+    def test_missing_config_logs_info_and_regenerates_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """config_loader serves defaults at INFO level and restores the file.
+
+        The caps an operator edits live in that file, so a caller reaching
+        limits through a missing config must leave a real file behind to edit.
+        """
         missing_path = tmp_path / "nonexistent" / "memory.config.json"
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", missing_path)
@@ -294,7 +305,8 @@ class TestMissingConfig:
         mock_logger.info.assert_called()
         info_msg = mock_logger.info.call_args[0][0]
         assert "config" in info_msg.lower()
-        assert not missing_path.exists()
+        assert missing_path.exists()
+        assert json.loads(missing_path.read_text(encoding="utf-8"))["entry_limits"]["enforce"] is True
 
 
 # ===========================================================================
@@ -309,7 +321,8 @@ class TestMalformedJson:
         config_dir = tmp_path / "config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
-        bad_config.write_text("{this is not valid json!!!", encoding="utf-8")
+        original = "{this is not valid json!!!"
+        bad_config.write_text(original, encoding="utf-8")
 
         mod, loader = _get_modules()
         monkeypatch.setattr(loader, "_CONFIG_PATH", bad_config)
@@ -319,6 +332,8 @@ class TestMalformedJson:
         assert result["enabled"] is True
         assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
+        # Defaults are served in memory only — the operator's file is theirs
+        assert bad_config.read_text(encoding="utf-8") == original
 
     def test_malformed_json_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """config_loader logs malformed JSON at ERROR level (not warning)."""

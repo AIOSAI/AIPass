@@ -9,9 +9,12 @@
 """
 Tests for the config_loader handler (Phase 1 of FPLAN-0271).
 
+Doctrine (Patrick, S193): the JSON file is the runtime authority; code
+carries DEFAULT_CONFIG so that file can be regenerated when lost.
+
 Covers:
-  1. Missing file      -- NEVER writes to disk, returns defaults, logs the absence.
-  2. Malformed JSON    -- does NOT overwrite, logs ERROR, returns defaults.
+  1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
+  2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
   4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
   5. Full config                    -- passthrough of file values.
   6. section()                      -- returns named section or empty dict for unknown.
@@ -68,33 +71,81 @@ def _write_config(tmp_path: Path, data: dict) -> Path:
 
 
 # ===========================================================================
-# 1+2. Missing file -- NEVER writes, returns defaults, logs
+# 1+2. Missing file -- REGENERATES the full file from defaults
 # ===========================================================================
 
 
 class TestMissingFile:
-    """A missing config file means "no overrides", which resolves to
-    DEFAULT_CONFIG.  load() must never repair the absence by writing:
-    snapshotting defaults to disk is what lets code and disk drift apart.
+    """The file on disk is the runtime authority the operator edits.  When it
+    is missing, load() regenerates it in full from DEFAULT_CONFIG — that is
+    the reason code carries defaults at all.
     """
 
-    def test_does_not_create_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_creates_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
         mod.load()
 
-        assert not missing_path.exists()
+        assert missing_path.exists()
 
-    def test_does_not_create_parent_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_creates_parent_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         missing_path = tmp_path / "nope" / "deep" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
 
         mod.load()
 
-        assert not missing_path.parent.exists()
+        assert missing_path.parent.is_dir()
+        assert missing_path.exists()
+
+    def test_regenerated_file_is_the_full_default_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Not a stub and not a subset -- every section, with default values."""
+        missing_path = tmp_path / "nope" / "memory.config.json"
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+
+        mod.load()
+        on_disk = json.loads(missing_path.read_text(encoding="utf-8"))
+
+        assert on_disk == mod.DEFAULT_CONFIG
+        for expected_section in ("memory_pool", "entry_limits", "plans", "rollover"):
+            assert expected_section in on_disk
+
+    def test_regenerated_file_reloads_identically(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The regenerated file must parse back to the same effective config.
+
+        A regen that produced a file the loader then read differently would
+        make the on-disk authority and the running config disagree.
+        """
+        missing_path = tmp_path / "nope" / "memory.config.json"
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+
+        first = mod.load()
+        second = mod.load()
+
+        assert first == second == mod.DEFAULT_CONFIG
+
+    def test_operator_edit_survives_the_next_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regeneration happens ONCE, on absence -- it must never re-stamp
+        defaults over a file the operator has since edited.
+        """
+        missing_path = tmp_path / "nope" / "memory.config.json"
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+
+        mod.load()
+        edited = json.loads(missing_path.read_text(encoding="utf-8"))
+        edited["rollover"]["defaults"]["local"]["sessions"]["count"] = 42
+        missing_path.write_text(json.dumps(edited, indent=2), encoding="utf-8")
+
+        result = mod.load()
+
+        assert result["rollover"]["defaults"]["local"]["sessions"]["count"] == 42
+        on_disk = json.loads(missing_path.read_text(encoding="utf-8"))
+        assert on_disk["rollover"]["defaults"]["local"]["sessions"]["count"] == 42
 
     def test_returns_default_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         missing_path = tmp_path / "nope" / "memory.config.json"
@@ -114,17 +165,19 @@ class TestMissingFile:
 
         assert result is not mod.DEFAULT_CONFIG
 
-    def test_repeated_loads_never_materialize_a_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Regression: the old self-heal wrote on the FIRST load, so every
-        later read silently served a frozen snapshot instead of code defaults.
+    def test_still_usable_when_the_write_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A read-only filesystem must not take the branch down: log the
+        failure, hand back a working config anyway.
         """
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
+        monkeypatch.setattr(mod, "_write_config_file", lambda config: False)
 
-        for _ in range(3):
-            assert mod.load() == mod.DEFAULT_CONFIG
-            assert not missing_path.exists()
+        result = mod.load()
+
+        assert result == mod.DEFAULT_CONFIG
+        mod.logger.error.assert_not_called()  # _write_config_file owns that log
 
     def test_logs_absence(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         missing_path = tmp_path / "nope" / "memory.config.json"
@@ -138,13 +191,16 @@ class TestMissingFile:
 
 
 # ===========================================================================
-# 3. Malformed JSON -- does NOT overwrite, logs ERROR, returns defaults
+# 3. Unreadable file -- NEVER written over; ERROR logged, defaults in memory
 # ===========================================================================
 
 
 class TestMalformedJson:
-    """When the config file exists but contains invalid JSON, load() must
-    NOT overwrite it, must log an ERROR, and must return defaults.
+    """A file that EXISTS but will not parse is the operator's problem to fix,
+    not the loader's to heal (DPLAN-0206 red flag, seedgo-consulted).  It may
+    be one stray comma from correct and carry hand-tuned per_branch limits.
+    load() logs an ERROR, serves defaults in memory, and leaves the bytes on
+    disk untouched.
     """
 
     def test_returns_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,11 +216,12 @@ class TestMalformedJson:
 
         assert result == mod.DEFAULT_CONFIG
 
-    def test_does_not_overwrite_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_original_bytes_are_left_untouched(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Healing a typo must never cost the operator their tuning."""
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
-        garbage = "{broken json 12345"
+        garbage = '{"rollover": {"per_branch": {"seedgo": {"count": 99,}}}'
         bad_config.write_text(garbage, encoding="utf-8")
 
         mod = _get_module()
@@ -172,8 +229,77 @@ class TestMalformedJson:
 
         mod.load()
 
-        # File content must be UNCHANGED -- load() must NOT overwrite existing files
         assert bad_config.read_text(encoding="utf-8") == garbage
+
+    def test_writes_nothing_at_all_beside_the_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No regen, no archive copy, no stray temp -- the directory is inert."""
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        bad_config = config_dir / "memory.config.json"
+        bad_config.write_text("{broken json 12345", encoding="utf-8")
+
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        mod.load()
+
+        assert sorted(p.name for p in config_dir.iterdir()) == ["memory.config.json"]
+
+    def test_valid_json_of_the_wrong_shape_is_also_left_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A JSON list parses fine and then explodes in deep_merge -- it is
+        corruption by any useful definition, so it takes the same no-clobber path.
+        """
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        bad_config = config_dir / "memory.config.json"
+        original = '["not", "an", "object"]'
+        bad_config.write_text(original, encoding="utf-8")
+
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        result = mod.load()
+
+        assert result == mod.DEFAULT_CONFIG
+        assert bad_config.read_text(encoding="utf-8") == original
+
+    def test_repeated_loads_never_wear_the_file_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The watcher calls load() on a loop -- corruption must stay a
+        no-op every time, not repair itself on the second pass.
+        """
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        bad_config = config_dir / "memory.config.json"
+        original = "still corrupt"
+        bad_config.write_text(original, encoding="utf-8")
+
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        for _ in range(3):
+            assert mod.load() == mod.DEFAULT_CONFIG
+
+        assert bad_config.read_text(encoding="utf-8") == original
+
+    def test_fixing_the_file_takes_effect_immediately(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Serving defaults must not latch -- the moment the operator fixes
+        their typo, their values are live again.
+        """
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        bad_config = config_dir / "memory.config.json"
+        bad_config.write_text('{"entry_limits": {"enforce": false},', encoding="utf-8")
+
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        assert mod.load()["entry_limits"]["enforce"] is True  # the default, not their value
+
+        bad_config.write_text('{"entry_limits": {"enforce": false}}', encoding="utf-8")
+
+        assert mod.load()["entry_limits"]["enforce"] is False
 
     def test_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         config_dir = tmp_path / "custom_config"
@@ -202,7 +328,7 @@ class TestPartialConfig:
 
     def test_fills_missing_sections(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """File with only entry_limits should get all other sections from defaults."""
-        partial = {"entry_limits": {"enforce": True}}
+        partial = {"entry_limits": {"enforce": False}}
         config_path = _write_config(tmp_path, partial)
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
@@ -215,19 +341,19 @@ class TestPartialConfig:
         assert "plans" in result
 
     def test_preserves_file_value_over_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """File has enforce: true (default is false) -- merged result must be true."""
-        partial = {"entry_limits": {"enforce": True}}
+        """File has enforce: false (default is true) -- merged result must be false."""
+        partial = {"entry_limits": {"enforce": False}}
         config_path = _write_config(tmp_path, partial)
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
 
         result = mod.load()
 
-        assert result["entry_limits"]["enforce"] is True
+        assert result["entry_limits"]["enforce"] is False
 
     def test_fills_missing_keys_within_section(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Partial entry_limits section should get enabled, entry_types, etc. from defaults."""
-        partial = {"entry_limits": {"enforce": True}}
+        partial = {"entry_limits": {"enforce": False}}
         config_path = _write_config(tmp_path, partial)
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
@@ -259,7 +385,7 @@ class TestPartialConfig:
         mod = _get_module()
         original_default = copy.deepcopy(mod.DEFAULT_CONFIG)
 
-        partial = {"entry_limits": {"enforce": True}}
+        partial = {"entry_limits": {"enforce": False}}
         config_path = _write_config(tmp_path, partial)
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
 
@@ -283,7 +409,7 @@ class TestFullConfig:
         full = copy.deepcopy(mod.DEFAULT_CONFIG)
         # Customize some values to differentiate from defaults
         full["memory_pool"]["chunk_size"] = 2000
-        full["entry_limits"]["enforce"] = True
+        full["entry_limits"]["enforce"] = False
 
         config_path = _write_config(tmp_path, full)
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
@@ -291,7 +417,7 @@ class TestFullConfig:
         result = mod.load()
 
         assert result["memory_pool"]["chunk_size"] == 2000
-        assert result["entry_limits"]["enforce"] is True
+        assert result["entry_limits"]["enforce"] is False
 
     def test_full_config_matches_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         mod = _get_module()
