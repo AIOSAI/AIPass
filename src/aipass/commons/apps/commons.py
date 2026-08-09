@@ -267,7 +267,7 @@ def print_help() -> None:
     console.print("    [dim]drone @commons thread 42[/dim]")
     console.print()
 
-    console.print("  [yellow]Comment on a post:[/yellow]")
+    console.print("  [yellow]Add a comment:[/yellow]")
     console.print('    [dim]drone @commons comment 42 "Great point!"[/dim]')
     console.print()
 
