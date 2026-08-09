@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-08] — post-v2.7.14 train (in progress)
+## [2026-08-09] — v2.7.15: scope-aware standards, streamer loop kill, Windows tie data-loss fix, aipass read train
 
 **feat(aipass)** — `aipass read` + version truth + Telegram readiness at
 doctor time (by @aipass). New `read` command renders any branch README in
