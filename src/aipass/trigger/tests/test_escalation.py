@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation.py
 # Description: Tests for the escalation digest lane and its CLI module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-08-09
 # =============================================
 
 """Tests for handlers/escalation.py — repeat-signature counting, digest gating, and modules/escalation.py."""
@@ -126,11 +126,17 @@ def cli(monkeypatch: pytest.MonkeyPatch, lane) -> SimpleNamespace:
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Inert fixture data — nothing ever opens this path, it only rides along in the
+# event payload and gets asserted back out. Kept branch-relative and built with
+# Path: an absolute /home/... literal is a hardcoded path in any file, tests
+# included, and it hardcodes a separator the Windows lane then has to survive.
+FLOW_LOG = str(Path("flow") / "logs" / "flow.log")
+
 ERROR_EVENT = {
     "branch": "flow",
     "module": "cfg",
     "message": "connection refused",
-    "log_file": "/home/user/src/aipass/flow/logs/flow.log",
+    "log_file": FLOW_LOG,
     "fingerprint": "fp-connection-refused",
 }
 
@@ -138,7 +144,7 @@ WARNING_EVENT = {
     "branch": "flow",
     "module": "watcher",
     "message": "queue depth at 91%",
-    "log_file": "/home/user/src/aipass/flow/logs/flow.log",
+    "log_file": FLOW_LOG,
     "raw_line": "2026-08-08 10:00:00.000 | watcher | WARNING | queue depth at 91%",
 }
 
@@ -159,6 +165,23 @@ def _fire_warning(lane, times: int = 1, **overrides: Any) -> Any:
     for _ in range(times):
         decision = lane.record_warning(**payload)
     return decision
+
+
+def _freeze_clock(monkeypatch: pytest.MonkeyPatch, lane) -> None:
+    """Pin datetime.now() so every last_seen string comes out byte-identical.
+
+    This is the Windows CI clock reproduced deterministically on any platform:
+    its granularity is ~15.6ms, so signatures written back-to-back tie on
+    last_seen. Ties are what sent both ordering paths — newest-first listing
+    and oldest-first pruning — back to dict insertion order, which is creation
+    order, not touch order.
+    """
+    frozen = datetime(2026, 8, 9, 12, 0, 0)
+    monkeypatch.setattr(
+        lane,
+        "datetime",
+        SimpleNamespace(now=lambda: frozen, fromisoformat=datetime.fromisoformat),
+    )
 
 
 def _read_state(lane) -> Dict[str, Any]:
@@ -798,6 +821,25 @@ class TestPruning:
 
         assert oldest in _read_state(lane)["signatures"]
 
+    def test_a_refreshed_signature_survives_a_tied_prune(self, lane, cfg, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Re-seeing a signature protects it even when last_seen cannot record that.
+
+        Creation order is A, B, C; touch order puts A last. On a tied clock the
+        pre-fix code pruned by creation order and dropped the entry that had
+        just been re-seen.
+        """
+        cfg["max_signatures"] = 3
+        _freeze_clock(monkeypatch, lane)
+        first = _fire_warning(lane, times=1, message="warning number 0")["signature"]
+        second = _fire_warning(lane, times=1, message="warning number 1")["signature"]
+        _fire_warning(lane, times=1, message="warning number 2")
+        _fire_warning(lane, times=1, message="warning number 0")
+        _fire_warning(lane, times=1, message="warning number 3")
+
+        stored = _read_state(lane)["signatures"]
+        assert first in stored, "the re-seen signature is the newest, not the oldest"
+        assert second not in stored
+
 
 # ---------------------------------------------------------------------------
 # Reporting: get_signatures / get_stats
@@ -815,6 +857,32 @@ class TestReporting:
         rows = lane.get_signatures()
         assert rows[0]["signature"] == newest
         assert len(rows) == 2
+
+    def test_ordering_holds_when_last_seen_ties(self, lane, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The Windows CI flake: identical last_seen must still list newest first."""
+        _freeze_clock(monkeypatch, lane)
+        _fire_warning(lane, times=1, message="older warning")
+        newest = _fire_warning(lane, times=1, message="newer warning")["signature"]
+
+        rows = lane.get_signatures()
+        assert len({row["last_seen"] for row in rows}) == 1, "clock must be tied for this to test anything"
+        assert rows[0]["signature"] == newest
+
+    def test_re_seeing_a_signature_moves_it_to_the_front_on_a_tied_clock(
+        self, lane, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Touch order, not creation order, decides the listing.
+
+        The re-seen signature is deliberately the MIDDLE one: if creation order
+        still leaked through, the first-created would head the list instead.
+        """
+        _freeze_clock(monkeypatch, lane)
+        _fire_warning(lane, times=1, message="warning number 0")
+        middle = _fire_warning(lane, times=1, message="warning number 1")["signature"]
+        _fire_warning(lane, times=1, message="warning number 2")
+        _fire_warning(lane, times=1, message="warning number 1")
+
+        assert lane.get_signatures()[0]["signature"] == middle
 
     def test_signature_rows_carry_the_window_count(self, lane) -> None:
         """A row reports occurrences inside the window as well as lifetime total."""

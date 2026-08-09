@@ -1,10 +1,11 @@
 {
   "metadata": {
-    "version": "2.0.0",
+    "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
     "updated": "2026-08-09",
-    "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1)",
-    "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers."
+    "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
+    "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
+    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead."
   },
   "bypass": [
     {
@@ -41,19 +42,13 @@
       "file": "apps/config.py",
       "standard": "error_handling",
       "pattern": "atomic_write_json tmp cleanup",
-      "reason": "Reported as line 169, actually L170-171: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
+      "reason": "Reported as line 170, body at L170-171: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/modules/core.py",
       "standard": "error_handling",
-      "pattern": "checker misattribution — no except:pass exists",
-      "reason": "FALSE POSITIVE. Reported at 'line 73' (the `except ImportError` in _ensure_initialized) — which logs a warning. core.py's only bare `pass` is L97, the deliberately disabled body of _ensure_log_watcher, six lines of comment explaining why. error_handling_check only clears its in_except flag on a column-0 line, so a `pass` in a later method of the same class is attributed to an earlier except. Reported to @seedgo."
-    },
-    {
-      "file": "apps/handlers/events/error_detected.py",
-      "standard": "error_handling",
-      "pattern": "no-op fallback stubs inside the guarded import",
-      "reason": "Reported at 'line 90' — the `pass` it found is L100, the body of circuit_breaker_record_error(), one of six no-op fallback stubs defined inside the ImportError handler. A no-op stub is the point of a fallback, not a swallowed error. FILE-WIDE: error_handling_check passes no line."
+      "pattern": "_coerce_value int-then-float probe",
+      "reason": "L185-186: `except ValueError: pass` in _coerce_value, falling through from the int() attempt to the float() attempt. Nothing is swallowed — the last branch returns the raw string. Re-derived 2026-08-09: the old reason here described a checker misattribution at 'line 73' that no longer occurs. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/error_reporter.py",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -159,7 +159,50 @@ def _empty_state() -> Dict[str, Any]:
             "managed_by": "handlers/escalation.py",
         },
         "signatures": {},
+        "write_seq": 0,
     }
+
+
+def _next_write_seq(state: Dict[str, Any]) -> int:
+    """Return the next write-ordering number for this state document.
+
+    Ordering here is by `last_seen`, an ISO timestamp — and on Windows the
+    clock only advances in ~15.6ms steps, so two signatures touched inside one
+    tick get byte-identical strings. Python's sort is stable, so every tie then
+    falls back to dict insertion order: the order signatures were FIRST
+    created, not last touched. That is backwards for both callers — the newest
+    signature sorts last in `get_signatures`, and `_prune` drops the one just
+    written instead of the genuinely stale one.
+
+    The counter lives in the state file rather than coming from
+    time.monotonic(), whose epoch is per-process: persisted across a restart a
+    monotonic value is not comparable to anything, and would order worse than
+    the tie it was meant to break.
+
+    Args:
+        state: Mutable state document, updated in place
+
+    Returns:
+        A number strictly greater than every previous write to this file
+    """
+    seq = int(state.get("write_seq", 0)) + 1
+    state["write_seq"] = seq
+    return seq
+
+
+def _seen_order(entry: Dict[str, Any]) -> tuple:
+    """Return the sort key for "how recently was this signature touched".
+
+    Timestamp first so entries written before this file carried a write_seq
+    still order correctly against each other; the counter only decides ties.
+
+    Args:
+        entry: Signature state entry
+
+    Returns:
+        (last_seen, write_seq) — ascending is oldest-first
+    """
+    return (entry.get("last_seen", ""), int(entry.get("last_seen_seq", 0)))
 
 
 def _load_state() -> Dict[str, Any]:
@@ -192,7 +235,7 @@ def _prune(signatures: Dict[str, Any], max_signatures: int) -> None:
     """
     if max_signatures <= 0 or len(signatures) <= max_signatures:
         return
-    ordered = sorted(signatures.items(), key=lambda kv: kv[1].get("last_seen", ""))
+    ordered = sorted(signatures.items(), key=lambda kv: _seen_order(kv[1]))
     for sig, _entry in ordered[: len(signatures) - max_signatures]:
         signatures.pop(sig, None)
 
@@ -360,6 +403,7 @@ def _record(
                     "log_file": log_file,
                     "fingerprint": fingerprint,
                     "first_seen": datetime.now().isoformat(),
+                    "last_seen_seq": 0,
                     "occurrences": [],
                     "total_count": 0,
                     "digests_sent": 0,
@@ -370,6 +414,7 @@ def _record(
 
             # Bookkeeping first, unconditionally — a mute must never stop this.
             entry["last_seen"] = datetime.now().isoformat()
+            entry["last_seen_seq"] = _next_write_seq(state)
             entry["total_count"] = int(entry.get("total_count", 0)) + 1
             if log_file:
                 entry["log_file"] = log_file
@@ -612,7 +657,7 @@ def get_signatures(level: Optional[str] = None, limit: int = 20) -> List[Dict[st
         row["signature"] = sig
         row["window_count"] = len(entry.get("occurrences", []))
         rows.append(row)
-    rows.sort(key=lambda r: r.get("last_seen", ""), reverse=True)
+    rows.sort(key=_seen_order, reverse=True)
     return rows[:limit]
 
 

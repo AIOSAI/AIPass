@@ -11,7 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
-**fix(skills)** — FPLAN-0385: prax_monitor Telegram self-feed loop killed at
+**fix(trigger)** — Windows escalation flake was data loss, not display (by
+@trigger). datetime.now() ties on the 15.6ms Windows clock made the
+last_seen sort non-deterministic — and _prune sorts by the same key to pick
+evictions, so a tied clock dropped the signature just written and kept the
+stale one. Fix: the state document carries a write_seq counter and both call
+sites sort on one shared (last_seen, last_seen_seq) key — deliberately NOT
+time.monotonic(), whose per-process epoch is meaningless after a restart.
+No migration; missing keys default to 0. Three regression tests with a
+frozen clock reproduce the Windows tie on any platform, red-green probed
+(two initial tests passed for the wrong reason via insertion order and were
+rewritten to make creation and touch order diverge). Post-0384 settlement,
+measured NOW = OLD = NONE: the deleted tests/ bypass rules are formally
+moot — nothing left to restore. Bypass file 25 → 24 (one leave-one-out-dead
+rule dropped, two reasons re-derived to match present code); liveness sweep
+says all 24 earn their keep. Caveat for the audit info channel:
+functions-scoped rules read DEAD under record-field attribution because
+unused_function records bury names in issue strings — auto-pruning on that
+signal would delete working rules fleet-wide.
 source (by @skills). The streamer logged "Found N new log lines, sending to
 Telegram" every cycle; with system_wide=True that INFO landed in its own
 capture file inside its own watch glob, so each cycle manufactured the fuel
