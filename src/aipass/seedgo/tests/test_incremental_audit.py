@@ -442,6 +442,27 @@ class TestEquivalence:
         full_result = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
         assert second == full_result
 
+    def test_custom_config_addition_busts_cache_hit(self, tmp_path, monkeypatch):
+        """Adding an operator file under {branch}_json/custom_config/ must not
+        serve a stale cache-hit output -- the audit's custom_config info line
+        names those files, so a cached run would keep reporting the old list."""
+        branch_audit, _cache, branch, branch_path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        custom_config = branch_path / f"{branch_path.name}_json" / "custom_config"
+        custom_config.mkdir(parents=True)
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert first.pop("_cache_hit") is False
+
+        (custom_config / "tuning_config.json").write_text('{"a": 1}', encoding="utf-8")
+
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert second.pop("_cache_hit") is False  # dirty -- NOT a stale cache hit
+
+        full_result = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
+        assert second == full_result
+
     def test_bypass_content_edit_busts_full_rescan(self, tmp_path, monkeypatch):
         """Editing bypass.json's CONTENT (not just creating it) must also
         bust the whole-branch cache to a full re-scan -- compute_bypass_stamp()
@@ -598,6 +619,44 @@ class TestStamps:
         (branch_path / ".seedgoignore").write_text("tools/\n", encoding="utf-8")
         stamp2 = incremental_cache.compute_bypass_stamp(branch_path)
         assert stamp1 != stamp2
+
+    def test_machinery_stamp_changes_when_bypass_package_edited(self, tmp_path, monkeypatch):
+        """A bypass/ edit must re-scan every branch, not just seedgo's own tree.
+
+        FPLAN-0382 changed is_bypassed's matching semantics and nothing in the
+        stamp noticed: all 17 branches kept serving results computed under the
+        old rules, reading 17/17 green while uncached CI showed 99%.
+        """
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        machinery = tmp_path / "bypass"
+        machinery.mkdir()
+        utils = machinery / "utils.py"
+        utils.write_text("def is_bypassed(): ...\n", encoding="utf-8")
+        monkeypatch.setattr(incremental_cache, "MACHINERY_DIRS", (machinery,))
+
+        stamp1 = incremental_cache.compute_machinery_stamp()
+        utils.write_text("def is_bypassed(): ...  # comment only\n", encoding="utf-8")
+        stamp2 = incremental_cache.compute_machinery_stamp()
+        assert stamp1 != stamp2
+
+    def test_current_stamp_includes_the_machinery_stamp(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        pack_dir = tmp_path / "pack"
+        pack_dir.mkdir()
+        branch_path = tmp_path / "branch"
+        branch_path.mkdir()
+        machinery = tmp_path / "bypass"
+        machinery.mkdir()
+        (machinery / "utils.py").write_text("x = 1\n", encoding="utf-8")
+        monkeypatch.setattr(incremental_cache, "MACHINERY_DIRS", (machinery,))
+
+        stamp1 = incremental_cache.current_stamp(branch_path, pack_dir)
+        # Size must change, not just content: the fingerprint is (mtime_ns, size)
+        # and two writes inside one filesystem timestamp tick are indistinguishable.
+        (machinery / "utils.py").write_text("x = 1  # changed\n", encoding="utf-8")
+        assert incremental_cache.current_stamp(branch_path, pack_dir) != stamp1
 
     def test_current_stamp_stable_when_nothing_changes(self, tmp_path):
         from aipass.seedgo.apps.handlers.audit import incremental_cache

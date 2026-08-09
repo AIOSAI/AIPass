@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2025-12-04
-# Modified: 2026-02-26
+# Modified: 2026-08-09
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -15,6 +15,15 @@ DPLAN-037 hardening (2026-02-26):
     - MAX_ERRORS_PER_SCAN: Stop scanning after this many new errors (prevents 100K+ event storms)
     - MAX_FILE_SIZE_BYTES: Skip log files larger than this threshold (prevents scanning 6MB files)
     - SCAN_TIME_BUDGET_SECONDS: Abort scan if it exceeds this duration
+
+Catch-up state lives in trigger_json/error_catchup.json. It used to live in
+trigger_json/trigger_data.json — a name json_handler's trio machinery owns for
+module "trigger", which validates such a file against a data template and
+overwrites it when the shape does not match. This file has never carried the
+template's created/last_updated keys, so a single trio call resolving to caller
+module "trigger" would have blanked the processed-hash set and re-dispatched
+every already-handled error. Same defect as the medic state move; see
+medic_state.py. _load_trigger_data() migrates on first read.
 """
 
 import json
@@ -23,16 +32,19 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    append_trail,
+    atomic_write_json,
+    migrate_json_file,
+    trail_logger,
+)
 from aipass.trigger.apps.handlers.json import json_handler
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
-TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_data.json"
+CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "error_catchup.json"
+LEGACY_CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "trigger_data.json"
 SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
 
 MAX_HASHES = 500
@@ -43,24 +55,18 @@ MAX_ERRORS_PER_SCAN = 50  # Stop after this many new errors found
 MAX_FILE_SIZE_BYTES = 512_000  # Skip files larger than 500KB
 SCAN_TIME_BUDGET_SECONDS = 5.0  # Abort entire scan after this many seconds
 
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "startup_handler.jsonl"
-
-
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "startup_handler.jsonl")
 
 
 def _load_trigger_data() -> Dict[str, Any]:
-    """Load trigger_data.json with error_catchup section."""
+    """Load error_catchup.json, migrating off the legacy path on first read."""
     try:
-        if TRIGGER_DATA_FILE.exists():
-            with open(TRIGGER_DATA_FILE, "r", encoding="utf-8") as f:
+        migrate_json_file(LEGACY_CATCHUP_STATE_FILE, CATCHUP_STATE_FILE)
+        if CATCHUP_STATE_FILE.exists():
+            with open(CATCHUP_STATE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if "error_catchup" not in data:
                 data["error_catchup"] = {
@@ -71,7 +77,7 @@ def _load_trigger_data() -> Dict[str, Any]:
                 }
             return data
     except Exception as exc:
-        _log_warning(f"load trigger data failed: {exc}")
+        logger.warning(f"load trigger data failed: {exc}")
         return {
             "error_catchup": {
                 "last_scan_timestamp": None,
@@ -91,22 +97,19 @@ def _load_trigger_data() -> Dict[str, Any]:
 
 
 def _save_trigger_data(data: Dict[str, Any]) -> None:
-    """Save trigger_data.json."""
+    """Save error_catchup.json."""
     try:
-        atomic_write_json(TRIGGER_DATA_FILE, data)
+        atomic_write_json(CATCHUP_STATE_FILE, data)
     except Exception as exc:
-        _log_warning(f"save trigger data failed: {exc}")
+        logger.warning(f"save trigger data failed: {exc}")
         return
 
 
 def _log_suppression(reason: str) -> None:
     """Log a catchup suppression event to medic_suppressed.jsonl."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(SUPPRESSED_LOG, {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason})
-    except Exception as exc:
-        _log_warning(f"log suppression write failed: {exc}")
+    entry = {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason}
+    if not append_trail(SUPPRESSED_LOG, entry):
+        logger.warning("log suppression write failed")
 
 
 def _generate_error_hash(source_module: str, message: str) -> str:
@@ -158,7 +161,7 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
 
         return None
     except Exception as exc:
-        _log_warning(f"parse log line failed: {exc}")
+        logger.warning(f"parse log line failed: {exc}")
         return None
 
 
@@ -192,7 +195,7 @@ def _detect_branch_from_log(log_file: str) -> str:
             return name.split("_")[0].upper()
         return name.upper()
     except Exception as exc:
-        _log_warning(f"detect branch from log failed: {exc}")
+        logger.warning(f"detect branch from log failed: {exc}")
         return "UNKNOWN"
 
 
@@ -296,7 +299,7 @@ def _scan_system_logs_for_errors(
                 files_skipped_size += 1
                 continue
         except Exception as exc:
-            _log_warning(f"stat log file {log_file}: {exc}")
+            logger.warning(f"stat log file {log_file}: {exc}")
             continue
 
         try:
@@ -304,7 +307,7 @@ def _scan_system_logs_for_errors(
             if not should_continue:
                 break
         except Exception as exc:
-            _log_warning(f"scan log file {log_file}: {exc}")
+            logger.warning(f"scan log file {log_file}: {exc}")
             continue
 
     if files_skipped_size > 0:
@@ -316,7 +319,7 @@ def _scan_system_logs_for_errors(
 def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None:
     """Catch-up on errors missed while Trigger wasn't running.
 
-    Loads last_scan_timestamp from trigger_data.json, scans system logs for
+    Loads last_scan_timestamp from error_catchup.json, scans system logs for
     ERROR entries since that time, fires error_logged events for new errors,
     and updates state with new timestamp and processed hashes.
 
@@ -335,7 +338,7 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
             try:
                 since_ts = datetime.fromisoformat(last_scan)
             except Exception as exc:
-                _log_warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
+                logger.warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
 
         processed_hashes = set(catchup.get("processed_hashes", []))
 
@@ -359,7 +362,7 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
         json_handler.log_operation("startup_catchup", {"errors_found": len(errors)})
 
     except Exception as exc:
-        _log_warning(f"error catchup scan failed: {exc}")
+        logger.warning(f"error catchup scan failed: {exc}")
         return
 
 

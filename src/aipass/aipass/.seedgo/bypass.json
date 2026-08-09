@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-04-16",
     "description": "Bypass config for @aipass citizen. Modules operational: concierge/init/doctor/handoff/profile/install built and tested. Bypasses cover: binary-invocation introspection pattern (bare aipass <cmd> runs, --info for introspection), thin entry-point router (aipass.py uses bare print, no CLI imports), pure-python bootstrap (bootstrap.py/scaffold_content.py run before AIPass services exist), test-isolation patterns (architecture/encapsulation for tests/ directory), and CLI flag name references (permission_flags in test assertions and handoff platform).",
-    "last_updated": "2026-07-05"
+    "last_updated": "2026-08-09"
   },
   "bypass": [
     {
@@ -425,7 +425,7 @@
       "file": "apps/handlers/provider_wire.py",
       "standard": "unused_function",
       "functions": ["refresh_provider_hooks"],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. Also the single source of truth for hook wiring, reachable in-process via auto_wire_provider (doctor --fix, interactive wire-prompt) and covered directly by tests/test_provider_wire.py."
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
     }
   ]
 }

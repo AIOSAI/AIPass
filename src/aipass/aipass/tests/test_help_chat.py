@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_help_chat.py
-# Description: Tests for help_chat module — Phase 2 of DPLAN-0136
-# Version: 1.0.0
+# Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
+# Version: 2.0.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-08-07
 # =============================================
 
 """Tests for aipass.aipass.apps.modules.help_chat"""
@@ -16,10 +16,13 @@ from unittest.mock import MagicMock, mock_open, patch
 
 from aipass.aipass.apps.modules.help_chat import (
     COMMAND,
+    _MAX_SECTION_LINES,
     _extract_keywords,
     _format_answer,
     _match_branches,
+    _score_section,
     _search_readme,
+    _split_sections,
     handle_command,
 )
 
@@ -239,33 +242,86 @@ class TestMatchBranches:
 # =============================================================================
 
 
+class TestSplitSections:
+    """Tests for _split_sections: heading-bounded splitting."""
+
+    def test_splits_on_headings(self):
+        """Each #/##/### heading starts a new section."""
+        sections = _split_sections(_SAMPLE_README.splitlines(keepends=True))
+        titles = [s["title"] for s in sections]
+        assert "Drone" in titles
+        assert "Usage" in titles
+
+    def test_preamble_becomes_intro_section(self):
+        """Content before the first heading is kept as an untitled section."""
+        sections = _split_sections(["intro line\n", "# Title\n", "body\n"])
+        assert sections[0]["title"] == ""
+        assert "intro line" in sections[0]["lines"]
+
+    def test_line_numbers_1_indexed_and_bounded(self):
+        """start = heading line, end = last line of the section."""
+        sections = _split_sections(_SAMPLE_README.splitlines(keepends=True))
+        drone_sec = next(s for s in sections if s["title"] == "Drone")
+        assert drone_sec["start"] == 1
+        assert drone_sec["end"] >= drone_sec["start"]
+
+    def test_heading_inside_code_fence_ignored(self):
+        """A # line inside ``` fences is body text, not a section break."""
+        sections = _split_sections(["# Real\n", "```\n", "# not a heading\n", "```\n", "tail\n"])
+        assert len(sections) == 1
+        assert "# not a heading" in sections[0]["lines"]
+
+    def test_empty_input_returns_empty(self):
+        """No lines → no sections."""
+        assert _split_sections([]) == []
+
+
+class TestScoreSection:
+    """Tests for _score_section: title weighting and body-hit capping."""
+
+    def _sec(self, title: str, body: list[str]) -> dict:
+        return {"title": title, "start": 1, "end": len(body) + 1, "lines": body}
+
+    def test_exact_title_match_beats_containment(self):
+        """Title == keyword scores higher than keyword-in-title."""
+        exact = _score_section(self._sec("Drone", []), ["drone"])
+        contains = _score_section(self._sec("Drone Commands", []), ["drone"])
+        assert exact > contains
+
+    def test_body_hit_lines_are_capped(self):
+        """30 hit lines score no more than the cap allows — tables can't drown intros."""
+        long_body = [f"drone line {i}" for i in range(30)]
+        short_body = ["drone here", "drone again", "drone third", "drone fourth", "drone fifth"]
+        assert _score_section(self._sec("x", long_body), ["drone"]) == _score_section(
+            self._sec("x", short_body), ["drone"]
+        )
+
+    def test_no_hits_scores_zero(self):
+        """Section without any keyword scores 0."""
+        assert _score_section(self._sec("Other", ["nothing here"]), ["drone"]) == 0
+
+
 class TestSearchReadme:
-    """Tests for _search_readme: live file reads via handler, scoring, and error handling."""
+    """Tests for _search_readme: live reads, section ranking, error handling."""
 
     def _mock_lines(self, content):
         """Return a patch that makes read_readme_lines return content as lines."""
         lines = content.splitlines(keepends=True)
         return patch("aipass.aipass.apps.modules.help_chat.read_readme_lines", return_value=lines)
 
-    def test_returns_matching_lines_with_line_numbers(self):
-        """Matching lines must be returned as (int, str) tuples."""
+    def test_returns_whole_sections(self):
+        """Results are section dicts with title/start/end/lines."""
         with self._mock_lines(_SAMPLE_README):
             results = _search_readme("drone", ["drone"])
         assert len(results) > 0
-        assert all(isinstance(ln, int) for ln, _ in results)
+        assert all({"title", "start", "end", "lines"} <= set(s.keys()) for s in results)
 
-    def test_line_numbers_are_1_indexed(self):
-        """Line numbers in results must start at 1, not 0."""
-        with self._mock_lines(_SAMPLE_README):
-            results = _search_readme("drone", ["drone"])
-        assert all(ln >= 1 for ln, _ in results)
-
-    def test_returns_at_most_5_matches(self):
-        """Result list must contain no more than 5 entries."""
-        content = "\n".join([f"drone line {i}" for i in range(10)])
+    def test_returns_at_most_two_sections(self):
+        """No more than _MAX_SECTIONS sections come back."""
+        content = "\n".join(f"# S{i}\ndrone body {i}\n" for i in range(6))
         with self._mock_lines(content):
             results = _search_readme("drone", ["drone"])
-        assert len(results) <= 5
+        assert len(results) <= 2
 
     def test_no_keyword_match_returns_empty(self):
         """Keyword with no hits in the README must return an empty list."""
@@ -282,17 +338,17 @@ class TestSearchReadme:
         mock_logger.warning.assert_called_once()
 
     def test_matching_is_case_insensitive(self):
-        """Uppercase keyword in README must still match a lowercase query keyword."""
-        with self._mock_lines("DRONE does routing\n"):
+        """Uppercase text in README must still match a lowercase query keyword."""
+        with self._mock_lines("# Intro\nDRONE does routing\n"):
             results = _search_readme("drone", ["drone"])
         assert len(results) == 1
 
-    def test_higher_scoring_lines_ranked_first(self):
-        """Lines matching more keywords must appear before lines matching fewer."""
-        with self._mock_lines("drone flow spawn\ndrone only\nflow only\n"):
-            results = _search_readme("drone", ["drone", "flow"])
-        first_text = results[0][1]
-        assert "drone" in first_text and "flow" in first_text
+    def test_exact_title_section_ranked_first(self):
+        """The '# Drone' intro outranks a longer commands section for 'drone'."""
+        content = "# Drone\nThe drone router.\n\n## Commands\n" + "\n".join(f"drone cmd {i}" for i in range(20))
+        with self._mock_lines(content):
+            results = _search_readme("drone", ["drone"])
+        assert results[0]["title"] == "Drone"
 
 
 # =============================================================================
@@ -301,39 +357,59 @@ class TestSearchReadme:
 
 
 class TestFormatAnswer:
-    """Tests for _format_answer: citation format and output structure."""
+    """Tests for _format_answer: section rendering, citations, truncation."""
 
     def _path(self, branch: str) -> Path:
         """Return a fake absolute README path for the given branch."""
         return Path(f"/home/user/Projects/AIPass/src/aipass/{branch}/README.md")
 
-    def test_citation_format_present(self):
-        """Citation must follow the (src/aipass/{branch}/README.md:{line}) format."""
-        path = self._path("drone")
-        result = _format_answer("drone", path, [(3, "Drone is the task-runner")])
-        assert "(src/aipass/drone/README.md:3)" in result
+    def _sec(self, title: str, start: int, end: int, body: list[str]) -> dict:
+        return {"title": title, "start": start, "end": end, "lines": body}
 
-    def test_branch_label_in_output(self):
-        """Output must include the branch name as a label."""
+    def test_citation_range_format_present(self):
+        """Citation must follow the (src/aipass/{branch}/README.md:{start}-{end}) format."""
         path = self._path("drone")
-        result = _format_answer("drone", path, [(1, "some line")])
-        assert "[drone]" in result
+        result = _format_answer("drone", path, [self._sec("Drone", 3, 8, ["task-runner"])])
+        assert "(src/aipass/drone/README.md:3-8)" in result
 
-    def test_multiple_matches_all_cited(self):
-        """Every matched line must have its own citation in the output."""
+    def test_branch_and_title_in_output(self):
+        """Output must include the branch name and section title."""
+        path = self._path("drone")
+        result = _format_answer("drone", path, [self._sec("Overview", 1, 4, ["some line"])])
+        assert "drone" in result
+        assert "Overview" in result
+
+    def test_multiple_sections_all_cited(self):
+        """Every section must carry its own line-range citation."""
         path = self._path("flow")
-        matches = [(1, "line one"), (5, "line five"), (10, "line ten")]
-        result = _format_answer("flow", path, matches)
-        assert "(src/aipass/flow/README.md:1)" in result
-        assert "(src/aipass/flow/README.md:5)" in result
-        assert "(src/aipass/flow/README.md:10)" in result
+        sections = [
+            self._sec("One", 1, 4, ["a"]),
+            self._sec("Two", 5, 9, ["b"]),
+        ]
+        result = _format_answer("flow", path, sections)
+        assert "(src/aipass/flow/README.md:1-4)" in result
+        assert "(src/aipass/flow/README.md:5-9)" in result
 
     def test_fallback_citation_when_src_not_in_path(self):
-        """When path lacks 'src', fallback citation must still include branch and line."""
+        """When path lacks 'src', fallback citation must still include branch and range."""
         path = Path("/unusual/path/drone/README.md")
         with patch("aipass.aipass.apps.modules.help_chat.logger"):
-            result = _format_answer("drone", path, [(7, "some content")])
-        assert "src/aipass/drone/README.md:7" in result
+            result = _format_answer("drone", path, [self._sec("X", 7, 9, ["some content"])])
+        assert "src/aipass/drone/README.md:7-9" in result
+
+    def test_long_section_truncated_with_read_hint(self):
+        """Bodies beyond _MAX_SECTION_LINES are cut and point at aipass read."""
+        path = self._path("drone")
+        body = [f"line {i}" for i in range(_MAX_SECTION_LINES + 10)]
+        result = _format_answer("drone", path, [self._sec("Big", 1, len(body) + 1, body)])
+        assert "aipass read drone" in result
+        assert f"line {_MAX_SECTION_LINES + 5}" not in result
+
+    def test_untitled_section_labeled_intro(self):
+        """A preamble section with no heading renders with an (intro) label."""
+        path = self._path("drone")
+        result = _format_answer("drone", path, [self._sec("", 1, 2, ["preamble text"])])
+        assert "(intro)" in result
 
 
 # =============================================================================

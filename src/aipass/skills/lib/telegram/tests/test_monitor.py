@@ -101,6 +101,7 @@ class TestSubscribePersists:
 
         result = bot._load_monitor_subscription()
 
+        assert result is not None
         assert result == {"chat_id": 42, "mode": "all"}
         assert result["chat_id"] == 42
         assert result["mode"] == "all"
@@ -289,6 +290,101 @@ class TestLevelFilter:
             "2026-06-24 | DEBUG | trace",
         ]
         assert streamer_all._filter_lines(lines) == lines
+
+
+# =============================================
+# 3b. SELF-EXCLUSION — THE SELF-FEEDING LOOP GUARD
+# =============================================
+
+
+class TestSelfExclusion:
+    """A system-wide streamer must be structurally incapable of streaming its own host's output.
+
+    Regression cover for the prax_monitor loop: the streamer logged one INFO per
+    cycle into the bot's own captured log, which sits inside its own watch scope,
+    so every cycle re-fed the next one forever.
+    """
+
+    @pytest.fixture
+    def streamer_all(self, tmp_path):
+        logs_dir = tmp_path / "system_logs"
+        logs_dir.mkdir()
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.SYSTEM_LOGS_DIR", logs_dir):
+            return LogStreamer("tok", 1, "x", system_wide=True, level_filter="all")
+
+    @pytest.fixture
+    def streamer_default(self, tmp_path):
+        logs_dir = tmp_path / "system_logs"
+        logs_dir.mkdir()
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.SYSTEM_LOGS_DIR", logs_dir):
+            return LogStreamer("tok", 1, "x", system_wide=True, level_filter="default")
+
+    def test_drops_the_exact_line_that_fed_the_loop(self, streamer_all):
+        lines = ["2026-08-09 09:42:02 | captured_bot_prax_monitor | INFO | Found 3 new log lines, sending to Telegram"]
+        assert streamer_all._filter_lines(lines) == []
+
+    def test_self_exclusion_survives_level_all(self, streamer_all):
+        """level_filter='all' must not reopen the loop — self-exclusion is unconditional."""
+        lines = ["2026-08-09 09:42:02 | captured_bot_base | INFO | anything at all"]
+        assert streamer_all._filter_lines(lines) == []
+
+    def test_drops_bot_warnings_too(self, streamer_default):
+        """A send failure logs WARNING; if that streamed, a failing send would loop hardest."""
+        lines = ["2026-08-09 09:42:02 | captured_bot_prax_monitor | WARNING | Telegram send failed: timeout"]
+        assert streamer_default._filter_lines(lines) == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "captured_bot_prax_monitor",
+            "captured_bot_scheduler",
+            "captured_bot_base",
+            "captured_bot_factory",
+            "captured_base_bot",
+            "captured_scheduler_bot",
+            "captured_botfather_client",
+            "captured_log_streamer",
+        ],
+    )
+    def test_every_bot_source_name_is_excluded(self, streamer_all, source):
+        """Prax names captures per-process or per-module — both forms must be covered."""
+        assert streamer_all._filter_lines([f"2026-08-09 09:42:02 | {source} | INFO | x"]) == []
+
+    def test_normal_forwarding_survives(self, streamer_all):
+        """The guard must not silence the logs Patrick actually subscribed to."""
+        lines = [
+            "2026-08-09 09:42:02 | captured_seedgo_audit | INFO | audit running",
+            "2026-08-09 09:42:03 | captured_prax_monitor_core | ERROR | real failure",
+        ]
+        assert streamer_all._filter_lines(lines) == lines
+
+    def test_mixed_batch_keeps_foreign_drops_self(self, streamer_all):
+        lines = [
+            "2026-08-09 09:42:02 | captured_bot_prax_monitor | INFO | Found 1 new log lines, sending to Telegram",
+            "2026-08-09 09:42:02 | captured_seedgo_audit | INFO | genuine line",
+        ]
+        assert streamer_all._filter_lines(lines) == [lines[1]]
+
+    def test_malformed_lines_are_not_dropped(self, streamer_all):
+        """Continuation/traceback lines have no source field — never silently swallow them."""
+        lines = ["Traceback (most recent call last):", "  File 'x.py', line 1"]
+        assert streamer_all._filter_lines(lines) == lines
+
+    def test_run_cycle_emits_no_log_of_its_own(self, streamer_all):
+        """Canary: the send path must stay silent — any INFO here re-enters the watch scope."""
+
+        def stop_after_one_send(_lines):
+            streamer_all._running = False  # _run loops on _running, not on the stop event
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.logger") as mock_logger:
+            with patch.object(streamer_all, "_read_new_lines", return_value=["2026-08-09 | captured_x | INFO | real"]):
+                with patch.object(streamer_all, "_send_batched", side_effect=stop_after_one_send) as mock_send:
+                    streamer_all._running = True
+                    streamer_all._stop_event.set()  # no real sleep between passes
+                    streamer_all._run()
+        mock_send.assert_called_once()
+        emitted = [str(c) for c in mock_logger.info.call_args_list]
+        assert not any("Found" in c for c in emitted), f"streamer announced forwarding: {emitted}"
 
 
 # =============================================

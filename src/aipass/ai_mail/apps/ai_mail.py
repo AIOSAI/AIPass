@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from typing import Any, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services for display
-from aipass.cli.apps.modules import console, error
+from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 
 # Handle broken pipe gracefully (e.g. output piped to head)
 # SIGPIPE does not exist on Windows
@@ -214,7 +214,16 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 def main():
-    """Main entry point - routes commands to modules"""
+    """Main entry point - routes commands to modules
+
+    Exit codes: 0 success, 1 unroutable command, 2 routed but failed.
+    A recognised command that failed (delivery refused, message not found,
+    invalid reply_path) still returns True from its handler — that means
+    "I handled this", not "it worked". Without the resolve_exit flip those
+    failures exited 0 and every script reading the exit code was told a
+    reply had been sent when it had not.
+    """
+    reset_command_state()
     try:
         # Parse arguments
         args = sys.argv[1:]
@@ -252,7 +261,7 @@ def main():
 
         # Route command
         if route_command(command, remaining_args, modules):
-            return 0
+            return resolve_exit(True)
         else:
             error(f"Unknown command: {command}")
             return 1

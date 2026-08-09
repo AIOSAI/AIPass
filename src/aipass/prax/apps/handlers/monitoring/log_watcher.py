@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Log File Monitor
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -517,7 +517,11 @@ class LogFileWatcher(FileSystemEventHandler):
         Only show NEW entries after watcher starts.
         """
         if not get_system_logs_dir().exists():
-            logger.warning(f"System logs directory not found: {get_system_logs_dir()}")
+            logger.warning(
+                f"[log_watcher] The live monitor's log watcher found no system logs folder, so no "
+                f"log lines will appear on screen. Nothing is lost — branches still write their own "
+                f"logs. Expected at: {get_system_logs_dir()}"
+            )
             return
 
         for log_file in get_system_logs_dir().glob("*.log"):
@@ -542,7 +546,10 @@ def start_log_watcher(event_queue: MonitoringQueue, use_polling: bool = False) -
 
     # Stop existing observer if running
     if _log_observer and _log_observer.is_alive():
-        logger.warning("Log watcher already running, stopping existing instance")
+        logger.warning(
+            "[log_watcher] The live monitor's log watcher was already running — stopping the old "
+            "one and starting fresh. On-disk logs are untouched; the screen may briefly skip lines."
+        )
         stop_log_watcher()
 
     # Create watcher instance

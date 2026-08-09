@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Trigger package path configuration
-# Version: 1.0.0
+# Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
+# Version: 1.3.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -11,6 +11,14 @@ Trigger package path configuration.
 
 Provides package-relative paths for trigger data directories.
 Works in both pip-installed and development environments.
+
+Also provides migrate_json_file() — the lossless move used to get
+hand-written live state OFF the trio-owned filename pattern in
+trigger_json/. json_handler owns every `<module>_<config|data|log>.json`
+in that directory: it validates such a file against a template and
+REGENERATES it when the shape does not match. Live state parked on one of
+those names is one caller-name resolution away from being overwritten with
+a blank template.
 """
 
 import json
@@ -18,7 +26,9 @@ import sys
 import os
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -31,18 +41,108 @@ TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
 
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
+def append_trail(path: Path, entry: dict) -> bool:
+    """Append one JSONL line to a sidecar file, reporting whether it landed.
+
+    The raw counterpart to TrailLogger, for the trails whose readers parse
+    named fields and so cannot carry a level/msg shape — medic_suppressed,
+    rate_limited, runaway_suppressed. Returns False rather than raising, so a
+    caller reports the miss through its own recursion-safe logger instead of
+    wrapping every call in an except block that has nothing to call.
+
+    It lives here because config.py is the one trigger module that cannot
+    import the prax logger at all (circular dependency), so the guarded import
+    and the one unloggable except block exist once, here, rather than repeated
+    in every handler that needs a sidecar.
+
+    Args:
+        path: Sidecar file to append to — use a `.jsonl` name so the branch log
+            watcher, which reads only `*.log`, cannot feed it back.
+        entry: JSON-serialisable line to append.
+
+    Returns:
+        True if the line was written, False if prax is absent or the write failed
+    """
     if _append_jsonl is None:
-        return
+        return False
     try:
-        _append_jsonl(_CONFIG_LOG, {"level": "WARNING", "msg": message})
+        _append_jsonl(path, entry)
+        return True
     except Exception:
-        pass
+        # You cannot log a failure to log. Reported by return value instead —
+        # callers surface it (TrailLogger.dropped, escalation.get_stats()).
+        return False
+
+
+class TrailLogger:
+    """A logger that writes JSONL to a sidecar file instead of through prax.
+
+    Trigger's log watchers read prax output. Code that runs ON that path —
+    the event handlers and the config readers they call — cannot log through
+    prax without being detected, fired back as an event, and re-entering
+    itself. So it logs here: `.jsonl`, which the watchers skip because they
+    only read `*.log`.
+
+    config.py is where this lives because config.py is the one trigger module
+    that CANNOT import the prax logger at all (circular dependency), so the
+    single except block that has no logger to call — the sidecar's own write
+    failure — is already accounted for here rather than repeated in every
+    caller. Failed writes are counted on `.dropped`, not discarded silently.
+
+    The method names are the fleet's logger API on purpose: call sites read
+    the same as everywhere else in AIPass.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.dropped = 0
+
+    def _emit(self, level: str, message: str, fields: dict) -> None:
+        """Append one line to the sidecar, counting the write if it is lost."""
+        entry: dict[str, Any] = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
+        entry.update(fields)
+        if not append_trail(self.path, entry):
+            # Counted rather than vanished — callers surface .dropped
+            # (see escalation.get_stats()).
+            self.dropped += 1
+
+    def info(self, message: str, **fields: Any) -> None:
+        """Record an INFO line on the trail."""
+        self._emit("INFO", message, fields)
+
+    def warning(self, message: str, **fields: Any) -> None:
+        """Record a WARNING line on the trail."""
+        self._emit("WARNING", message, fields)
+
+    def error(self, message: str, **fields: Any) -> None:
+        """Record an ERROR line on the trail."""
+        self._emit("ERROR", message, fields)
+
+
+def trail_logger(path: Path) -> TrailLogger:
+    """Build a recursion-safe logger writing to *path*.
+
+    Args:
+        path: Sidecar file to append to — use a `.jsonl` name so the branch
+            log watcher, which reads only `*.log`, cannot feed it back.
+
+    Returns:
+        A logger exposing .info/.warning/.error
+    """
+    return TrailLogger(path)
+
+
+logger = TrailLogger(_CONFIG_LOG)
 
 
 # AIPass package root: .../aipass/
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
+
+# Runtime state directory — also the directory json_handler's trio machinery owns.
+TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
+
+# Retired files land here rather than being deleted.
+ARCHIVE_DIR_NAME = ".archive"
 
 
 def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
@@ -99,6 +199,76 @@ def json_file_lock(path: Path):
                 fcntl.flock(lock_f, fcntl.LOCK_UN)
 
 
+def _archive_legacy_file(path: Path) -> bool:
+    """Move a retired state file into a sibling .archive/ directory.
+
+    Never deletes. A name collision keeps both copies by suffixing the
+    archived file with the source mtime.
+
+    Args:
+        path: The file to retire (must exist)
+
+    Returns:
+        True if the file was moved
+    """
+    archive_dir = path.parent / ARCHIVE_DIR_NAME
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    target = archive_dir / path.name
+    try:
+        if target.exists():
+            stamp = int(path.stat().st_mtime)
+            target = archive_dir / f"{path.stem}.{stamp}{path.suffix}"
+        os.replace(path, target)
+        return True
+    except OSError as exc:
+        logger.warning(f"archive of {path.name} failed: {exc}")
+        return False
+
+
+def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
+    """Move live JSON state from a legacy path to its new home, losslessly.
+
+    Idempotent and safe to call on every read — it stats the legacy path and
+    returns immediately when there is nothing to move. Behaviour:
+
+    - new present               -> no-op, whatever the legacy name holds. The
+                                   move already happened, so that name belongs
+                                   to json_handler's trio machinery again — a
+                                   blank template it regenerates there is its
+                                   file, not stale state of ours. Archiving it
+                                   on every read would fight the trio owner
+                                   forever and grow .archive/ without bound.
+    - new absent, legacy present-> copy contents to new, archive legacy
+    - legacy missing            -> no-op
+    - legacy unreadable         -> left in place untouched, warning logged.
+                                   Fail honest: a human decides, not a guess.
+
+    The lock is taken on the LEGACY path, not the new one: the legacy file is
+    the resource being claimed, and callers already hold the new file's lock
+    around their own read-modify-write cycles — flock on a second descriptor
+    for the same file would deadlock the process against itself.
+
+    Args:
+        legacy_path: Old file location
+        new_path: New file location
+
+    Returns:
+        True if the legacy file was migrated or archived on this call
+    """
+    if new_path.exists() or not legacy_path.exists():
+        return False
+    with json_file_lock(legacy_path):
+        if new_path.exists() or not legacy_path.exists():  # another process won the race
+            return False
+        try:
+            data = json.loads(legacy_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            logger.warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
+            return False
+        atomic_write_json(new_path, data)
+        return _archive_legacy_file(legacy_path)
+
+
 def read_text_file(path: Path, encoding: str = "utf-8") -> str:
     """Read a text file safely with encoding specification."""
     with open(path, "r", encoding=encoding) as f:
@@ -117,7 +287,7 @@ def print_introspection():
     try:
         from aipass.cli.apps.modules.display import console
     except ImportError:
-        _log_warning("CLI console not available, using rich fallback")
+        logger.warning("CLI console not available, using rich fallback")
         from rich.console import Console
 
         console = Console()

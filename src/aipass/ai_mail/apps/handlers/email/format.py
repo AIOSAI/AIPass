@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: format.py
 # Description: Email Formatting Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -11,12 +11,21 @@ Email Formatting Handler
 
 Handles email display formatting, preview generation, and text utilities.
 Independent handler - no module dependencies.
+
+Every string that comes from an email (subject, body preview, sender name,
+recipient address) is attacker-shaped input as far as the renderer is
+concerned: it is written by whoever sent the mail. These functions return
+Rich markup, so all of it is escaped here — an unescaped "[dim]" swallows
+text and an unescaped "[/rc]" raises MarkupError and takes the whole
+listing down with it. Escape at the boundary, once, for every surface.
 """
 
 import json
 import os
 import sys
 from typing import Dict, Optional
+
+from rich.markup import escape
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -71,8 +80,8 @@ def format_sender_display(from_name: str, from_addr: str) -> str:
     """
     alias = lookup_branch_alias(from_name)
     if alias:
-        return f"{alias} ({from_addr})"
-    return f"{from_name} ({from_addr})"
+        return f"{escape(alias)} ({escape(from_addr)})"
+    return f"{escape(from_name)} ({escape(from_addr)})"
 
 
 def format_email_preview(message: str, max_length: int = 100) -> str:
@@ -111,8 +120,8 @@ def format_email_header(email_data: Dict) -> str:
     lines = [
         "=" * 70,
         f"From: {sender}",
-        f"Date: {email_data.get('timestamp', 'Unknown')}",
-        f"Subject: {email_data.get('subject', 'No Subject')}",
+        f"Date: {escape(str(email_data.get('timestamp', 'Unknown')))}",
+        f"Subject: {escape(str(email_data.get('subject', 'No Subject')))}",
         "=" * 70,
     ]
     return "\n".join(lines)
@@ -133,27 +142,25 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
     lines = []
 
     # Unread marker + ID for copy-paste
-    msg_id = email_data.get("id", "????????")
+    msg_id = escape(str(email_data.get("id", "????????")))
+    timestamp = escape(str(email_data.get("timestamp", "Unknown")))
     if show_unread:
         # v2: check status first, fall back to read for backward compat
         status = email_data.get("status")
         is_new = status == "new" if status else not email_data.get("read", False)
         unread_marker = "📨" if is_new else "📬"
         sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
-        lines.append(
-            f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {email_data.get('timestamp', 'Unknown')}"
-        )
+        lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {timestamp}")
     else:
-        lines.append(
-            f"\n{index}. \\[{msg_id}] To: {email_data.get('to', 'Unknown')} @ {email_data.get('timestamp', 'Unknown')}"
-        )
+        recipient = escape(str(email_data.get("to", "Unknown")))
+        lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}")
 
-    lines.append(f"   Subject: {email_data.get('subject', 'No Subject')}")
+    lines.append(f"   Subject: {escape(str(email_data.get('subject', 'No Subject')))}")
 
     # Preview
     message = email_data.get("message", "")
     preview = format_email_preview(message, 100)
-    lines.append(f"   {preview}")
+    lines.append(f"   {escape(preview)}")
 
     return "\n".join(lines)
 

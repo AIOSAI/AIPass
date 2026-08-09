@@ -34,6 +34,10 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: the AIPass header block identifies a shipped
+# module. Tests do not carry it by convention -- 112 of 456 fleet test files failed
+# (25%, 14 branches) against a convention that was never asked of them.
+APPLIES_TO = "production"
 
 # Header/footer markers for library META
 # Accept both AIPass (canonical) and META (legacy) header markers

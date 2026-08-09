@@ -13,6 +13,47 @@ from pathlib import Path
 import pytest
 
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.modules.snapshot import _build_current_timestamps, _build_saved_timestamps
+
+
+class TestVanishedFileRace:
+    """Files deleted between scan and timestamp save (live-tree TOCTOU)."""
+
+    def test_saved_timestamps_skip_vanished_file(self, tmp_path: Path) -> None:
+        """A file gone since the scan is skipped, not raised on.
+
+        Regression: error 33f74c75 -- another branch's pytest fixture created
+        and deleted AIPASS_REGISTRY.json.test_backup at the repo root mid-run.
+        The unguarded comprehension raised FileNotFoundError, which escaped
+        run_snapshot and killed the whole 'all' cycle.
+        """
+        real = tmp_path / "here.txt"
+        real.write_text("x", encoding="utf-8")
+        filtered = [
+            (str(real), "here.txt"),
+            (str(tmp_path / "vanished.txt"), "vanished.txt"),
+        ]
+
+        timestamps = _build_saved_timestamps(filtered)
+
+        assert "here.txt" in timestamps
+        assert "vanished.txt" not in timestamps
+
+    def test_saved_timestamps_all_vanished(self, tmp_path: Path) -> None:
+        """Every file gone -- returns empty dict, still never raises."""
+        filtered = [(str(tmp_path / "gone.txt"), "gone.txt")]
+
+        assert _build_saved_timestamps(filtered) == {}
+
+    def test_quick_check_still_invalidates_on_missing(self, tmp_path: Path) -> None:
+        """The quick-check helper keeps its stricter contract: None, not a partial dict.
+
+        A partial dict would compare unequal to the stored one and silently
+        force a full re-copy; None is the explicit 'cannot compare' signal.
+        """
+        filtered = [(str(tmp_path / "gone.txt"), "gone.txt")]
+
+        assert _build_current_timestamps(filtered) is None
 
 
 class TestFileErrors:

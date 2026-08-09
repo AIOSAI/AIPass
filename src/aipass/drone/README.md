@@ -57,7 +57,7 @@ drone @git issue view 42         # Passthrough to gh issue view 42
 drone @git run list              # Passthrough to gh run list
 drone @git workflow list         # Passthrough to gh workflow list
 
-# Git workflow — owner tier (devpulse only)
+# Git workflow — owner tier (the project's registry-declared owner)
 drone @git commit "message"      # Commit whatever is already staged
 drone @git commit "msg" --all    # Stage ALL repo changes and commit
 drone @git commit "msg" f1 f2    # Stage only f1 f2, then commit
@@ -161,7 +161,7 @@ drone/
 │   ├── handlers/                  # Implementation details
 │   │   ├── executor.py            # Safe subprocess execution (timeout, no shell)
 │   │   ├── exceptions.py          # Exception hierarchy (10 exception types)
-│   │   ├── router_handler.py      # Routing implementation + caller detection
+│   │   ├── router_handler.py      # Routing implementation + caller identity resolution
 │   │   ├── registry_handler.py    # Registry file ops + dual registry lookup
 │   │   ├── discovery_handler.py   # Discovery implementation + help parsing
 │   │   ├── module_registry_handler.py  # Module loading (internal + external)
@@ -198,7 +198,7 @@ drone/
 │   │       └── tag_handler.py               # Release tagging (version + exists guards)
 │   └── plugins/
 │       ├── devpulse_ops/          # Privileged git operations (auth-gated)
-│       │   ├── auth.py            # Passport-based identity gate (ALLOWED_CALLERS)
+│       │   ├── auth.py            # Passport-based identity gate (owner tier earned per-repo)
 │       │   ├── pr_plugin.py       # System-wide PR (git add -A, system/ branches)
 │       │   ├── merge_plugin.py    # PR merge (--merge) + local sync
 │       │   ├── sync_plugin.py     # Smart sync (fetch, divergence detect, rebase)
@@ -208,7 +208,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 859 tests across 23 test files
+└── tests/                         # 986 tests across 25 test files
 ```
 
 ### Routing Flow
@@ -230,6 +230,30 @@ Drone routes to two kinds of modules:
 | External | `seedgo`, `cli`, `spawn` | `generic_adapter.capture_main()` via `routing_config.json` |
 
 External modules are declared in `apps/handlers/routing_config.json` with entry points, descriptions, and versions.
+
+### Caller Identity
+
+Every routed command is attributed to a caller, stamped into `AIPASS_CALLER_BRANCH` and the `[CALLER:X]` log tag. `resolve_caller_identity()` in `router_handler.py` weighs two signals:
+
+| Signal | Question it answers | Precedence |
+|--------|--------------------|------------|
+| `AIPASS_BRANCH_NAME` | Who this process **is** (assigned at spawn) | Wins |
+| cwd `.trinity/passport.json` | Who lives **where** the process stands (inferred) | Fallback |
+| cwd `*_REGISTRY.json` | Which **project** the process is in — never a citizen | Last resort |
+
+Assigned identity beats location: an agent that cds into another branch is still itself. Nothing here grants authority — git's owner tier reads passports directly.
+
+**Log severity is chosen by what the outcome means, not by how unusual it looks:**
+
+| Situation | Level | Why |
+|-----------|-------|-----|
+| Assigned identity vs a **passport** naming someone else | `WARNING` | Two citizens claim one process — genuinely abnormal, stays loud |
+| Assigned identity while standing in a **project** root | `INFO` | Not a conflict. A project name is location, not a rival claim of identity — the ordinary shape of every long-lived service |
+| No passport and no registry found | `INFO` | An anonymous caller is a correct outcome. Attribution reads `unknown`; whoever refuses work for want of an identity owns the page |
+
+Identity messages are logged **once per process per signature**. Neither signal can change under a running process, so a repeat restates the first. Suppression is per-process only, so a real conflict recurring across separate invocations still accumulates and still escalates. The per-call `[CALLER:X]` tag and stamp are never suppressed — every call stays individually attributable.
+
+There is no public reset for the dedupe set: production never needs to forget what it has already logged. The test suite clears `_LOGGED_IDENTITY_SIGNATURES` directly from an autouse fixture in `tests/conftest.py`.
 
 ### Git Access Tiers
 
@@ -253,7 +277,7 @@ All work happens on `dev`. Only devpulse has write access. Agents build and repo
 
 Enforcement layers:
 - Git gate (PreToolUse hook) blocks ALL raw git/gh commands
-- Drone tier system restricts write commands to devpulse only
+- Drone tier system restricts write commands to the project's registry-declared owner
 - Prompt instructions tell agents they have zero git access
 
 ---
@@ -297,7 +321,7 @@ Plugins live in `apps/plugins/{name}/` — outside the 3-layer structure by desi
 
 ### devpulse_ops
 
-Auth-gated operations for system administration. `auth.py` walks CWD for `.trinity/passport.json` and checks `branch_name` against `ALLOWED_CALLERS` (devpulse, seedgo, spawn).
+Auth-gated operations for system administration. `auth.py` walks CWD for `.trinity/passport.json`, then earns owner tier from four facts in the caller's own project registry: `citizen_class: manager`, registry tenancy, an `owner: true` entry, and path-binding of the passport to the recorded home. No hardcoded caller list — the owner is devpulse in AIPass and whoever owns elsewhere.
 
 | Plugin | Command | Purpose |
 |--------|---------|---------|
@@ -346,7 +370,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-807 tests across 22 test files, covering all layers:
+986 tests across 25 test files, covering all layers:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -370,7 +394,7 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ---
 
-**Seedgo:** 99% | **Tests:** 859 pass, 4 skip | **Last Updated:** 2026-07-02
+**Seedgo:** 99% | **Tests:** 981 pass, 5 skip | **Last Updated:** 2026-08-08
 
 ---
 [← Back to AIPass](../../../README.md)

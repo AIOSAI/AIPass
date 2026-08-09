@@ -901,3 +901,188 @@ class TestCallerRegistryFallback:
 
         assert result is not None
         assert result["email"] == "@vera"
+
+
+# ─── Identity resolution observability (@aipass misattribution, 2026-08-07) ───
+
+
+class TestIdentityResolutionLogging:
+    """Every resolution must record WHO it picked and WHICH strategy won.
+
+    A COMMONS-authored dispatch was filed under @aipass and the only log line read
+    `from_branch: null` — no resolved identity, no winning strategy. The message could
+    be traced to the wrong citizen but not to the code path that put it there.
+    """
+
+    def _resolve_identity_records(self, calls):
+        return [data for op, data in calls if op == "resolve_identity"]
+
+    def test_caller_cwd_hit_records_strategy_and_identity(self, clean_env, list_format_registry):
+        """A passport walk from AIPASS_CALLER_CWD is recorded as verified, with the resolved email."""
+        branch_dir, registry_path = list_format_registry
+        calls = []
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
+                side_effect=lambda op, data: calls.append((op, data)),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_CWD"] = str(branch_dir)
+            detect_branch_from_pwd()
+
+        records = self._resolve_identity_records(calls)
+        assert len(records) == 1
+        assert records[0]["strategy"] == "caller_cwd:passport_walk"
+        assert records[0]["confidence"] == "verified"
+        assert records[0]["resolved_email"] == "@test_cwd_branch"
+
+    def test_registry_hit_by_name_records_strategy(self, clean_env, list_format_registry):
+        """AIPASS_CALLER_BRANCH resolving through the registry names that strategy."""
+        _branch_dir, registry_path = list_format_registry
+        calls = []
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
+                side_effect=lambda op, data: calls.append((op, data)),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_BRANCH"] = "TEST_CWD_BRANCH"
+            detect_branch_from_pwd()
+
+        records = self._resolve_identity_records(calls)
+        assert records[0]["strategy"] == "caller_branch:registry"
+        assert records[0]["confidence"] == "verified"
+        assert records[0]["in_caller_branch"] == "TEST_CWD_BRANCH"
+
+    def test_synthesized_external_identity_is_unverified(self, clean_env, tmp_path, temp_registry):
+        """An identity invented from env vars alone must not be recorded as verified."""
+        registry_path, _ = temp_registry
+        calls = []
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
+                side_effect=lambda op, data: calls.append((op, data)),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_BRANCH"] = "NOBODY-KNOWS-ME"
+            os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
+            detect_branch_from_pwd()
+
+        records = self._resolve_identity_records(calls)
+        assert records[0]["strategy"] == "caller_branch:synthesized"
+        assert records[0]["confidence"] == "unverified"
+
+    def test_process_cwd_fallback_is_unverified(self, clean_env, monkeypatch, list_format_registry):
+        """With no caller env, identity comes from THIS process's cwd — correct only under dispatch."""
+        branch_dir, registry_path = list_format_registry
+        calls = []
+        monkeypatch.chdir(branch_dir)
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
+                side_effect=lambda op, data: calls.append((op, data)),
+            ),
+        ):
+            detect_branch_from_pwd()
+
+        records = self._resolve_identity_records(calls)
+        assert records[0]["strategy"] == "process_cwd:passport_walk"
+        assert records[0]["confidence"] == "unverified"
+        assert records[0]["resolved_email"] == "@test_cwd_branch"
+
+    def test_failed_resolution_is_recorded_not_silent(self, clean_env, tmp_path):
+        """An unresolved sender still records the strategy that failed."""
+        calls = []
+        with patch(
+            "aipass.ai_mail.apps.handlers.users.branch_detection.json_handler.log_operation",
+            side_effect=lambda op, data: calls.append((op, data)),
+        ):
+            os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
+            assert detect_branch_from_pwd() is None
+
+        records = self._resolve_identity_records(calls)
+        assert records[0]["strategy"] == "caller_cwd:passport_walk"
+        assert records[0]["resolved_email"] == ""
+
+    def test_conflicting_caller_signals_warn(self, clean_env, list_format_registry, tmp_path):
+        """CALLER_BRANCH and CALLER_CWD naming different branches is logged as AMBIGUOUS."""
+        branch_dir, registry_path = list_format_registry
+        warnings = []
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.logger.warning",
+                side_effect=lambda msg, *a: warnings.append(msg % a if a else msg),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_BRANCH"] = "TEST_CWD_BRANCH"
+            os.environ["AIPASS_CALLER_CWD"] = str(branch_dir.parent / "some_other_branch")
+            (branch_dir.parent / "some_other_branch" / ".trinity").mkdir(parents=True)
+            (branch_dir.parent / "some_other_branch" / ".trinity" / "passport.json").write_text("{}")
+            detect_branch_from_pwd()
+
+        assert any("AMBIGUOUS" in w for w in warnings), warnings
+
+    def test_agreeing_caller_signals_do_not_warn(self, clean_env, list_format_registry):
+        """The normal case must stay quiet — a warning that always fires is noise."""
+        branch_dir, registry_path = list_format_registry
+        warnings = []
+        with (
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
+            patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
+            patch(
+                "aipass.ai_mail.apps.handlers.users.branch_detection.logger.warning",
+                side_effect=lambda msg, *a: warnings.append(msg % a if a else msg),
+            ),
+        ):
+            os.environ["AIPASS_CALLER_BRANCH"] = "test_cwd_branch"
+            os.environ["AIPASS_CALLER_CWD"] = str(branch_dir)
+            detect_branch_from_pwd()
+
+        assert not any("AMBIGUOUS" in w for w in warnings), warnings
+
+
+class TestResolvedSenderLogging:
+    """resolve_sender_info() logged only its input; the sender it produced was never recorded."""
+
+    def test_detected_sender_logs_resolved_identity(self):
+        """The no-explicit-from path records who the sender became, not just `from_branch: null`."""
+        calls = []
+        user = {
+            "email_address": "@commons",
+            "display_name": "COMMONS",
+            "mailbox_path": "/x/commons/.ai_mail.local",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+        }
+        with patch(
+            "aipass.ai_mail.apps.handlers.email.send.json_handler.log_operation",
+            side_effect=lambda op, data: calls.append((op, data)),
+        ):
+            result = resolve_sender_info(None, Path("/x"), Path("/x/ai_mail"), lambda e: None, lambda: user)
+
+        assert result == user
+        resolved = [d for op, d in calls if op == "resolved_sender"]
+        assert len(resolved) == 1
+        assert resolved[0]["resolved_email"] == "@commons"
+        assert resolved[0]["strategy"] == "detected_from_caller_env"
+        assert resolved[0]["in_from_branch"] is None
+
+    def test_explicit_sender_logs_strategy(self):
+        """An explicit --from that misses the registry is recorded as an assumed path."""
+        calls = []
+        with patch(
+            "aipass.ai_mail.apps.handlers.email.send.json_handler.log_operation",
+            side_effect=lambda op, data: calls.append((op, data)),
+        ):
+            resolve_sender_info("@ghost", Path("/x"), Path("/x/ai_mail"), lambda e: None, lambda: {})
+
+        resolved = [d for op, d in calls if op == "resolved_sender"]
+        assert resolved[0]["strategy"] == "explicit_from:assumed_path"
+        assert resolved[0]["resolved_email"] == "@ghost"

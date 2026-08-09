@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.2.0
+# Version: 2.6.0
 # Created: 2026-02-10
-# Modified: 2026-08-02
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -27,10 +27,12 @@ Event data from log_watcher.py (Medic v2):
 Architecture (Medic v2):
     1. Trigger's log_watcher detects ERROR in branch logs
     2. log_watcher reports to error_registry, fires error_detected if new
-    3. This handler checks circuit_breaker_allows() (global gate)
-    4. This handler checks should_dispatch(fingerprint) (per-error backoff)
-    5. If allowed, delivers email to affected branch (auto_execute=True)
-    6. Records dispatch via record_dispatch() and circuit_breaker_record_error()
+    3. This handler records the occurrence in the escalation lane (BEFORE any
+       gate — a mute stops the dispatch, never the count)
+    4. This handler checks circuit_breaker_allows() (global gate)
+    5. This handler checks should_dispatch(fingerprint) (per-error backoff)
+    6. If allowed, delivers email to affected branch (auto_execute=True)
+    7. Records dispatch via record_dispatch() and circuit_breaker_record_error()
 """
 
 import json
@@ -38,25 +40,20 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    append_trail,
+    migrate_json_file,
+    trail_logger,
+)
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers import escalation
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl"
-
-
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 
 
 def _find_repo_root() -> Path:
@@ -71,7 +68,10 @@ def _find_repo_root() -> Path:
 _REPO_ROOT = _find_repo_root()
 
 BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
-TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
+
+# Live medic state — see medic_state.py for why it is not on the trio path.
+MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
+LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
 # Email send callback (set by module layer, avoids handler importing from modules)
 _send_email: Optional[Callable[..., bool]] = None
@@ -122,11 +122,24 @@ MAX_DISPATCHES_PER_WINDOW = 3
 RATE_LIMIT_WINDOW_SECONDS = 600  # 10 minutes
 
 
+def _read_medic_state() -> Dict[str, Any]:
+    """
+    Read medic_state.json, migrating off the legacy path on first read.
+
+    Returns:
+        Parsed state dict, or empty dict if missing or unreadable
+    """
+    migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
+    if not MEDIC_STATE_FILE.exists():
+        return {}
+    return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
+
+
 def _is_medic_enabled() -> bool:
     """
     Check if medic (auto-healing dispatch) is enabled.
 
-    Reads medic_enabled from trigger_config.json. If disabled with a TTL
+    Reads medic_enabled from medic_state.json. If disabled with a TTL
     (medic_disabled_until timestamp), treats an expired TTL as enabled.
     Defaults to True if config is missing or unreadable.
 
@@ -134,10 +147,7 @@ def _is_medic_enabled() -> bool:
         True if medic dispatch is enabled
     """
     try:
-        if not TRIGGER_CONFIG_FILE.exists():
-            return True
-        data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
-        config = data.get("config", {})
+        config = _read_medic_state().get("config", {})
         enabled = bool(config.get("medic_enabled", True))
         if enabled:
             return True
@@ -146,7 +156,7 @@ def _is_medic_enabled() -> bool:
             return True
         return False
     except Exception as exc:
-        _log_warning(f"_is_medic_enabled config read failed: {exc}")
+        logger.warning(f"_is_medic_enabled config read failed: {exc}")
         return True
 
 
@@ -168,7 +178,7 @@ def _is_branch_muted(branch_name: str) -> bool:
     """
     Check if a specific branch is muted for medic dispatch.
 
-    Reads muted_branches list from trigger_config.json. Supports both
+    Reads muted_branches list from medic_state.json. Supports both
     legacy plain-string entries (permanent) and new dict entries with
     optional expires_at timestamp. Expired TTL mutes are treated as
     unmuted.
@@ -180,15 +190,12 @@ def _is_branch_muted(branch_name: str) -> bool:
         True if branch is actively muted
     """
     try:
-        if not TRIGGER_CONFIG_FILE.exists():
-            return False
-        data = json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
-        muted = data.get("config", {}).get("muted_branches", [])
+        muted = _read_medic_state().get("config", {}).get("muted_branches", [])
         branch_lower = branch_name.lower()
         now = datetime.now()
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
     except Exception as exc:
-        _log_warning(f"_is_branch_muted config read failed: {exc}")
+        logger.warning(f"_is_branch_muted config read failed: {exc}")
         return False
 
 
@@ -218,7 +225,7 @@ def _get_registered_emails() -> set:
             data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
             return {b["email"] for b in data.get("branches", [])}
     except Exception as exc:
-        _log_warning(f"_get_registered_emails registry read failed: {exc}")
+        logger.warning(f"_get_registered_emails registry read failed: {exc}")
         return set()
     return set()
 
@@ -294,7 +301,7 @@ def _read_log_context(log_path: str, error_message: str, context_lines: int = 2)
         context = lines[start:end]
         return "\n".join(context)
     except Exception as exc:
-        _log_warning(f"_read_log_context failed for {log_path}: {exc}")
+        logger.warning(f"_read_log_context failed for {log_path}: {exc}")
         return ""
 
 
@@ -388,31 +395,22 @@ REPORT TO @devpulse:
 
 def _write_suppression_log(reason: str, branch: str, module: str, message: str) -> None:
     """Write a line to the medic suppression log."""
-    if _append_jsonl is None:
-        return
-    try:
-        suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
-        entry = {
-            "ts": datetime.now().isoformat(),
-            "reason": reason,
-            "branch": branch,
-            "module": module,
-            "msg": message[:100],
-        }
-        _append_jsonl(suppressed_log, entry)
-    except Exception as exc:
-        _log_warning(f"suppression log write failed ({reason}): {exc}")
+    entry = {
+        "ts": datetime.now().isoformat(),
+        "reason": reason,
+        "branch": branch,
+        "module": module,
+        "msg": message[:100],
+    }
+    if not append_trail(TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl", entry):
+        logger.warning(f"suppression log write failed ({reason})")
 
 
 def _write_rate_log(reason: str, detail: str) -> None:
     """Write a line to the rate-limited log."""
-    if _append_jsonl is None:
-        return
-    try:
-        rate_log = TRIGGER_ROOT / "logs" / "rate_limited.jsonl"
-        _append_jsonl(rate_log, {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail})
-    except Exception as exc:
-        _log_warning(f"rate log write failed ({reason}): {exc}")
+    entry = {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail}
+    if not append_trail(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry):
+        logger.warning(f"rate log write failed ({reason})")
 
 
 def handle_error_detected(
@@ -474,6 +472,19 @@ def handle_error_detected(
         # Validate required fields
         if not branch or not module or not message or not error_hash:
             return
+
+        # Escalation counting comes FIRST, before every dispatch gate below.
+        # A mute, a medic toggle or an open breaker stops the DISPATCH; none of
+        # them may stop the COUNT, or the repeat would go dark exactly when it
+        # matters most (DPLAN-0283). Sending is gated inside the lane, not here.
+        escalation.record_error(
+            branch=branch,
+            module=module,
+            message=message,
+            log_file=log_path or "",
+            fingerprint=fingerprint,
+            raw_line=kwargs.get("raw_line", "") or "",
+        )
 
         # Medic toggle - if disabled, log but do NOT dispatch
         if not _is_medic_enabled():
@@ -560,7 +571,7 @@ def handle_error_detected(
             message=message,
             timestamp=timestamp,
             log_path=effective_log_path,
-            occurrences=1,
+            occurrences=count,
             first_seen=first_seen or timestamp,
             last_seen=last_seen or timestamp,
             log_context=error_log_context,
@@ -579,7 +590,7 @@ def handle_error_detected(
         )
 
         if not sent:
-            _log_warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
+            logger.warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
             return
 
         # Wake the target branch so the email is processed immediately
@@ -587,8 +598,11 @@ def handle_error_detected(
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
-        except Exception:
-            pass  # Silent — email in inbox as fallback
+        except Exception as exc:
+            # Not fatal — the email is already delivered and waits in the inbox.
+            # But a wake that never lands means nobody reads it until they next
+            # wake anyway, so the miss is recorded rather than swallowed.
+            logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
 
         json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
@@ -602,5 +616,5 @@ def handle_error_detected(
             _record_dispatch(recipient)
 
     except Exception as exc:
-        _log_warning(f"handle_error_detected failed: {exc}")
+        logger.warning(f"handle_error_detected failed: {exc}")
         return  # Silent failure - handler must not raise

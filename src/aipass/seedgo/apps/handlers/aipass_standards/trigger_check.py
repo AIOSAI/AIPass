@@ -27,10 +27,18 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.bypass.utils import matching_rule
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+
+# Production only. All 19 test-file hits fleet-wide are a fixture unlinking its own
+# scratch file without firing an event -- 18 of them literally that, the 19th a test
+# that asserts on trigger.fire(). A test harness deleting its own temp file is not a
+# system state change, and a test that fired real events would pollute the bus for
+# everyone else. Spawn's one bypass rule here says the same thing in prose.
+APPLIES_TO = "production"
 
 # Valid bypass categories for trigger standard
 BYPASS_CATEGORIES = {
@@ -40,39 +48,6 @@ BYPASS_CATEGORIES = {
     "high_frequency": "Would create event spam",
     "utility": "Helper called by event-firing function",
 }
-
-
-def is_bypassed(
-    file_path: str, standard: str, line: int | None = None, bypass_rules: list | None = None
-) -> tuple[bool, str | None, str | None]:
-    """Check if a violation should be bypassed
-
-    Args:
-        file_path: Path to file being checked
-        standard: Standard name (e.g., 'trigger')
-        line: Optional specific line number
-        bypass_rules: List of bypass rules from .seedgo/bypass.json
-
-    Returns:
-        tuple: (is_bypassed: bool, category: str | None, reason: str | None)
-            - category is the bypass category if bypassed (handler_layer, initialization, etc.)
-            - reason is the human-readable bypass reason
-    """
-    if not bypass_rules:
-        return False, None, None
-    for rule in bypass_rules:
-        if rule.get("standard") and rule.get("standard") != standard:
-            continue
-        rule_file = rule.get("file", "")
-        if rule_file and rule_file not in file_path:
-            continue
-        rule_lines = rule.get("lines", [])
-        if rule_lines and line is not None and line not in rule_lines:
-            continue
-        category = rule.get("category")
-        reason = rule.get("reason")
-        return True, category, reason
-    return False, None, None
 
 
 def is_handler_layer(file_path: str) -> bool:
@@ -108,9 +83,16 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     checks = []
     path = Path(module_path)
 
-    # Check if entire standard is bypassed
-    bypassed, category, reason = is_bypassed(module_path, "trigger", bypass_rules=bypass_rules)
-    if bypassed:
+    # Check if entire standard is bypassed. The shared matcher decides; this
+    # standard reads category/reason off the rule it matched, which is the only
+    # reason this module used to carry a private copy of the matcher -- and that
+    # copy never received the FPLAN-0382 scope fix, so a 'lines' rule still
+    # fall-through-matched here and muted the whole file. No line is passed: this
+    # is a file-wide gate, and a forwarded line= would advertise scope support to
+    # the inert-rule map that no caller ever exercises.
+    rule = matching_rule(module_path, "trigger", bypass_rules=bypass_rules)
+    if rule is not None:
+        category, reason = rule.get("category"), rule.get("reason")
         bypass_msg = "Standard bypassed via .seedgo/bypass.json"
         if category:
             bypass_msg += f" [category: {category}]"

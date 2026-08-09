@@ -33,6 +33,10 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 AUDIT_SCOPE = "branch_level"
+# The one standard that is about tests. Branch-level, so check_branch() below owns
+# the corpus (tests/) and this constant documents it rather than enforcing it --
+# see applicability.py on why per-file lanes cannot filter a self-collecting checker.
+APPLIES_TO = "tests"
 
 # -- Directories to skip when scanning for module coverage --------------------
 SKIP_DIRS: set[str] = set(SOURCE_SKIP_DIRS)

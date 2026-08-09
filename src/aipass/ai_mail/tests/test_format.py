@@ -1,5 +1,6 @@
 """Tests for email formatting handler -- lookup, preview, header, list item."""
 
+import io
 import json
 
 import pytest
@@ -282,3 +283,110 @@ def test_format_email_list_item_truncates_long_message(monkeypatch):
     }
     result = mod.format_email_list_item(1, email_data)
     assert "..." in result
+
+
+# --- Rich markup safety ----------------------------------------------
+#
+# Sender-controlled text reaches a Rich console. Unescaped, "[dim]" is
+# swallowed silently and "[/rc]" raises MarkupError that takes the whole
+# listing down. These render the formatter's output through a real Console
+# and assert the text survives to the visible output — asserting on the
+# escaped string alone would pass even if Rich later ate it.
+
+
+def _render(markup_text: str) -> str:
+    """Render markup through a real Rich console and return visible text."""
+    from rich.console import Console
+
+    buffer = io.StringIO()
+    console = Console(file=buffer, width=200, no_color=True, highlight=False)
+    console.print(markup_text)
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "RE: Build TG bot verb /rc <target> - recover remote",
+        "RE: [/rc] closing tag subject",
+        "RE: [dim]lowercase style tag",
+        "RE: [skills] unknown lowercase tag",
+        "RE: [PLAN-42] uppercase bracket tag",
+    ],
+)
+def test_list_item_subject_survives_rich_render(monkeypatch, subject):
+    """Every bracket/angle shape renders visibly instead of vanishing or raising."""
+    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    email_data = {
+        "id": "brack01",
+        "from_name": "SKILLS",
+        "from": "@skills",
+        "timestamp": "2026-08-07 17:11:44",
+        "subject": subject,
+        "message": "body",
+        "status": "new",
+    }
+    out = _render(mod.format_email_list_item(1, email_data))
+    assert subject in out
+    assert "brack01" in out
+
+
+def test_list_item_preview_markup_survives_render(monkeypatch):
+    """A body preview containing markup renders literally, row intact."""
+    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    email_data = {
+        "id": "prev001",
+        "from_name": "SENDER",
+        "from": "@sender",
+        "timestamp": "2026-08-07",
+        "subject": "plain",
+        "message": "SHIPPED [dim]note and [/rc] tag",
+        "status": "new",
+    }
+    out = _render(mod.format_email_list_item(1, email_data))
+    assert "SHIPPED [dim]note and [/rc] tag" in out
+
+
+def test_list_item_sender_name_markup_survives_render(monkeypatch):
+    """A sender display name carrying markup cannot eat the row."""
+    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    email_data = {
+        "id": "send001",
+        "from_name": "[bold]EVIL",
+        "from": "@evil",
+        "timestamp": "2026-08-07",
+        "subject": "plain subject",
+        "message": "body",
+        "status": "new",
+    }
+    out = _render(mod.format_email_list_item(1, email_data))
+    assert "[bold]EVIL" in out
+    assert "plain subject" in out
+
+
+def test_list_item_recipient_markup_survives_render(monkeypatch):
+    """The sent-listing branch (show_unread=False) escapes the 'to' field too."""
+    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    email_data = {
+        "id": "sent001",
+        "to": "@team [dim]one",
+        "timestamp": "2026-08-07",
+        "subject": "sent subject <target>",
+        "message": "body",
+    }
+    out = _render(mod.format_email_list_item(1, email_data, show_unread=False))
+    assert "@team [dim]one" in out
+    assert "sent subject <target>" in out
+
+
+def test_email_header_subject_markup_survives_render(monkeypatch):
+    """The view header escapes subject and sender as well as the listing."""
+    monkeypatch.setattr(mod, "REGISTRY_PATH", Path("/nonexistent"))
+    email_data = {
+        "from_name": "SKILLS",
+        "from": "@skills",
+        "timestamp": "2026-08-07",
+        "subject": "RE: [/rc] recovered <target>",
+    }
+    out = _render(mod.format_email_header(email_data))
+    assert "RE: [/rc] recovered <target>" in out

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: instance_lock.py
 # Description: Single-instance lock for the prax monitor
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-10
-# Modified: 2026-08-02
+# Modified: 2026-08-08
 # =============================================
 
 """Relay-scoped lock for the prax monitor Telegram relay.
@@ -131,7 +131,11 @@ def try_acquire() -> bool:
                     current_boot[:8],
                 )
             elif existing_pid and _is_pid_alive(existing_pid):
-                logger.info("[instance_lock] Relay lock held by PID %d — skipping TG relay", existing_pid)
+                logger.info(
+                    "[instance_lock] Another monitor (PID %d) already owns the Telegram relay — "
+                    "this one shows events on screen only and sends nothing to the chat.",
+                    existing_pid,
+                )
                 return False
             else:
                 logger.info("[instance_lock] Reclaiming stale lock (PID %d is dead)", existing_pid)
@@ -156,6 +160,12 @@ def release() -> None:
             _held_lock.unlink()
             logger.info("[instance_lock] Released")
         except OSError as exc:
-            logger.warning("[instance_lock] Failed to remove lock file: %s", exc)
+            logger.warning(
+                "[instance_lock] The Telegram relay could not delete its single-instance lock file "
+                "on shutdown (%s) — the next monitor start reclaims a stale lock automatically, so "
+                "no action is needed. Lock file: %s",
+                type(exc).__name__,
+                _held_lock,
+            )
     _held_lock = None
     json_handler.log_operation("instance_lock_release", {"pid": os.getpid()})

@@ -520,6 +520,62 @@ class TestRenderTestMap:
         assert mock_con.print.call_count == 0
 
 
+class TestRenderInfoLines:
+    """Tests for _render_info_lines (non-scored signposts)."""
+
+    def test_no_info_lines(self):
+        """Missing info_lines key produces no output."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
+
+        mock_con = MagicMock()
+        _render_info_lines({}, mock_con)
+        assert mock_con.print.call_count == 0
+
+    def test_empty_message_skipped(self):
+        """An entry with an empty message prints nothing."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
+
+        mock_con = MagicMock()
+        _render_info_lines({"info_lines": [{"standard": "json_structure", "message": ""}]}, mock_con)
+        assert mock_con.print.call_count == 0
+
+    def test_info_lines_rendered(self):
+        """Each info line renders once, dimmed."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import _render_info_lines
+
+        mock_con = MagicMock()
+        _render_info_lines(
+            {
+                "info_lines": [
+                    {"standard": "json_structure", "message": "custom_config: cadence_config.json"},
+                    {"standard": "json_structure", "message": "second line"},
+                ]
+            },
+            mock_con,
+        )
+        calls = [str(c) for c in mock_con.print.call_args_list]
+        assert len(calls) == 2
+        assert any("cadence_config.json" in c for c in calls)
+        assert all("[dim]" in c for c in calls)
+
+    def test_rendered_at_full_score(self):
+        """A 100% branch still shows its info lines (context, not failure)."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        audit_result = {
+            "branch": {"name": "mybranch"},
+            "scores": {"naming": 100},
+            "average": 100,
+            "files_checked": 3,
+            "info_lines": [{"standard": "json_structure", "message": "operator file: memory.config.json"}],
+        }
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_branch_summary(audit_result)
+        calls = [str(c) for c in mock_con.print.call_args_list]
+        assert any("memory.config.json" in c for c in calls)
+
+
 class TestRenderDeprecatedPatterns:
     """Tests for _render_deprecated_patterns."""
 
@@ -1508,6 +1564,8 @@ def _make_checker(
     has_check_branch: bool = False,
     has_post: bool = False,
     post_result: tuple | None = None,
+    has_info: bool = False,
+    info_result: list | None = None,
 ) -> MagicMock:
     """Build a mock checker with configurable behavior."""
     checker = MagicMock()
@@ -1539,6 +1597,11 @@ def _make_checker(
         checker.check_branch_post = MagicMock(return_value=post_result or ([], []))
     else:
         del checker.check_branch_post
+
+    if has_info:
+        checker.check_branch_info = MagicMock(return_value=info_result if info_result is not None else [])
+    else:
+        del checker.check_branch_info
 
     return checker
 
@@ -1817,6 +1880,59 @@ class TestAuditBranch:
 
         result = branch_audit.audit_branch(branch, [])
         assert result["scores"]["naming"] == 100
+
+    def test_info_channel_collected_and_never_scored(self, tmp_path, monkeypatch):
+        """check_branch_info lines reach output without touching the score."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+        checker = _make_checker(has_info=True, info_result=["custom_config: cadence_config.json"])
+        monkeypatch.setattr(
+            branch_audit,
+            "discover_checkers",
+            lambda pack_path=None: {"naming": checker},
+        )
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, [])
+        assert result["info_lines"] == [{"standard": "naming", "message": "custom_config: cadence_config.json"}]
+        assert result["scores"]["naming"] == 100
+        assert result["average"] == 100
+
+    def test_info_check_raises_is_caught(self, tmp_path, monkeypatch):
+        """check_branch_info that raises leaves the audit intact."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+        checker = _make_checker(has_info=True)
+        checker.check_branch_info.side_effect = RuntimeError("fail")
+        monkeypatch.setattr(
+            branch_audit,
+            "discover_checkers",
+            lambda pack_path=None: {"naming": checker},
+        )
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        result = branch_audit.audit_branch(branch, [])
+        assert result["info_lines"] == []
+        assert result["scores"]["naming"] == 100
+
+    def test_checker_without_info_hook_skipped(self, tmp_path, monkeypatch):
+        """A checker with no check_branch_info contributes no info lines."""
+        from aipass.seedgo.apps.handlers.audit import branch_audit
+
+        branch, _ = _setup_branch(tmp_path)
+        monkeypatch.setattr(
+            branch_audit,
+            "discover_checkers",
+            lambda pack_path=None: {"naming": _make_checker()},
+        )
+        monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+        monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+
+        assert branch_audit.audit_branch(branch, [])["info_lines"] == []
 
     def test_diagnostics_checker_added(self, tmp_path, monkeypatch):
         """Diagnostics checker loaded and added."""

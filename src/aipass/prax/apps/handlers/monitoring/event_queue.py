@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: event_queue.py
 # Description: Thread-Safe Event Queue
-# Version: 0.1.1
+# Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """Thread-safe event coordination for monitoring system"""
 
-from queue import Empty, PriorityQueue
+from queue import Empty, Full, PriorityQueue
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -72,14 +72,11 @@ class MonitoringQueue:
                 # watches, so per-event logging turns a full queue into a
                 # self-feeding firehose — every warning spawns a new log event
                 # that also fails to enqueue (live-caught 2026-07-31, 20-80
-                # warnings/sec sustained). queue.Full has an empty str(), hence !r.
+                # warnings/sec sustained).
                 self._dropped += 1
                 now = time.monotonic()
                 if now - self._last_drop_warning >= 30.0:
-                    logger.warning(
-                        f"[event_queue] Dropping events ({self._dropped} since last report; "
-                        f"latest type={event.event_type}, branch={event.branch}): {e!r}"
-                    )
+                    self._report_drops(e, event)
                     self._dropped = 0
                     self._last_drop_warning = now
                 return False
@@ -88,6 +85,33 @@ class MonitoringQueue:
         # per *attempt* was another per-event write into a watched log.
         json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
         return True
+
+    def _report_drops(self, exc: Exception, latest: MonitoringEvent) -> None:
+        """Report skipped events to the operator in plain language.
+
+        This line shows up on the operator's Mission Control screen, so it names the
+        subsystem in plain words, says what happened, how many events it cost, and
+        whether anything is actually lost — never a bare exception repr (Patrick's
+        ruling, 2026-08-08). A full queue and an unexpected failure are reported
+        separately: calling the second one an overflow would be a comforting lie
+        about a real bug.
+        """
+        latest_desc = f"latest: {latest.event_type} from {latest.branch}"
+
+        if isinstance(exc, Full):
+            logger.warning(
+                f"[event_queue] The live monitor display queue is full — {self._dropped} events "
+                f"were skipped from the terminal monitor view since the last report ({latest_desc}). "
+                f"Nothing is lost: the on-disk logs are complete."
+            )
+            return
+
+        logger.error(
+            f"[event_queue] The live monitor display could not queue an event — unexpected "
+            f"{type(exc).__name__}, not a normal full queue ({latest_desc}); {self._dropped} events "
+            f"were skipped from the terminal monitor view since the last report. The on-disk logs "
+            f"are complete. This one is a bug."
+        )
 
     def dequeue(self, timeout: float = 0.1) -> Optional[MonitoringEvent]:
         """Get next event from queue (thread-safe)"""

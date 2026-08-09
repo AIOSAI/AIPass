@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -354,7 +354,11 @@ def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
                 if trinity_dir.exists():
                     dirs.append((trinity_dir, False))
         except (ValueError, OSError) as e:
-            logger.warning(f"[monitor] Failed to read registry: {e}")
+            logger.warning(
+                f"[monitor] Could not read the branch registry ({type(e).__name__}), so the live "
+                f"monitor will watch no branch folders for file changes — only the CLI session "
+                f"folders. The log feed is unaffected and the registry file was not modified."
+            )
 
     # Watch CLI session directories for agent activity tracking
     claude_projects = Path.home() / ".claude" / "projects"
@@ -417,7 +421,11 @@ def _start_observer_with_fallback(handler, watch_dirs):
         return observer
     except OSError as e:
         fix_msg = _inotify_fix_message(e)
-        logger.warning(f"[monitor] inotify unavailable: {e} — switching to polling")
+        logger.warning(
+            f"[monitor] The live monitor's file watcher cannot use the fast kernel notifications "
+            f"({e}) — switching to polling, which still sees every change but reacts more slowly. "
+            f"Nothing is lost."
+        )
         _emit_watcher_event("warning", f"File watcher: {fix_msg} Using polling fallback (slower).")
 
     try:
@@ -430,7 +438,11 @@ def _start_observer_with_fallback(handler, watch_dirs):
         logger.info("[monitor] File watcher: polling fallback active")
         return observer
     except Exception as e2:
-        logger.error(f"[monitor] Polling fallback also failed: {e2}")
+        logger.error(
+            f"[monitor] The live monitor's file watcher could not start at all — polling failed too "
+            f"({type(e2).__name__}). File changes will not appear on screen; the log feed and the "
+            f"on-disk logs are unaffected."
+        )
         _emit_watcher_event("error", "File watcher: completely unavailable — no file events")
         return None
 
@@ -457,7 +469,10 @@ def _file_watcher_worker():
     watch_dirs = _get_watch_directories(repo_root)
 
     if not watch_dirs:
-        logger.error("[monitor] No watch directories found — file watcher disabled")
+        logger.error(
+            "[monitor] The live monitor found no folders to watch, so file changes will not appear "
+            "on screen. The log feed and the on-disk logs are unaffected."
+        )
         _emit_watcher_event("warning", "File watcher: no watch directories found — file events disabled")
         return
 
@@ -486,14 +501,22 @@ def _start_log_watcher_with_fallback(event_queue) -> bool:
         return True
     except OSError as e:
         fix_msg = _inotify_fix_message(e)
-        logger.warning(f"[monitor] Log watcher inotify failed: {e} — switching to polling")
+        logger.warning(
+            f"[monitor] The live monitor's log watcher cannot use the fast kernel notifications "
+            f"({e}) — switching to polling, which still reads every log line but shows it a little "
+            f"later. Nothing is lost."
+        )
         _emit_watcher_event("warning", f"Log watcher: {fix_msg} Using polling fallback (slower).")
 
     try:
         start_log_watcher(event_queue, use_polling=True)
         return True
     except Exception as e2:
-        logger.error(f"[monitor] Log watcher polling fallback failed: {e2}")
+        logger.error(
+            f"[monitor] The live monitor's log watcher could not start at all — polling failed too "
+            f"({type(e2).__name__}). Log lines will not appear on screen; branches still write their "
+            f"logs to disk, so nothing is lost."
+        )
         _emit_watcher_event("error", "Log watcher: completely unavailable — no log events")
         return False
 
@@ -505,7 +528,11 @@ def _log_watcher_worker():
     from aipass.prax.apps.handlers.monitoring.log_watcher import stop_log_watcher
 
     if _event_queue is None:
-        logger.error("[monitor] Event queue not initialized for log watcher")
+        logger.error(
+            "[monitor] The live monitor's log watcher could not start — the display queue it feeds "
+            "was never created. Log lines will not appear on screen; branches still write their "
+            "logs to disk. This one is a bug."
+        )
         return
 
     if not _start_log_watcher_with_fallback(_event_queue):

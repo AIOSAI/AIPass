@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plan_file.py
 # Description: PLAN file event handlers for registry updates
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-01-20
-# Modified: 2026-01-20
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -26,13 +26,8 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json
+from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
-
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
 
 
 def _find_repo_root() -> Path:
@@ -55,14 +50,10 @@ HANDLER_LOG = TRIGGER_ROOT / "logs" / "plan_file_handler.jsonl"
 MODULE_NAME = "trigger.plan_file"
 
 
-def _log_error(message: str) -> None:
-    """Log error to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(HANDLER_LOG, {"level": "ERROR", "module": MODULE_NAME, "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(HANDLER_LOG)
 
 
 def _load_registry() -> dict:
@@ -140,7 +131,7 @@ def handle_plan_file_created(path: str, **kwargs):
         json_handler.log_operation("plan_event", {"success": True})
 
     except Exception as e:
-        _log_error(f"handle_plan_file_created failed for {path}: {e}")
+        logger.error(f"handle_plan_file_created failed for {path}: {e}", module=MODULE_NAME)
 
 
 def handle_plan_file_deleted(path: str, **kwargs):
@@ -176,7 +167,7 @@ def handle_plan_file_deleted(path: str, **kwargs):
                 _save_registry(registry)
 
     except Exception as e:
-        _log_error(f"handle_plan_file_deleted failed for {path}: {e}")
+        logger.error(f"handle_plan_file_deleted failed for {path}: {e}", module=MODULE_NAME)
 
 
 def handle_plan_file_moved(src_path: str, dest_path: str, **kwargs):
@@ -210,4 +201,4 @@ def handle_plan_file_moved(src_path: str, dest_path: str, **kwargs):
             _save_registry(registry)
 
     except Exception as e:
-        _log_error(f"handle_plan_file_moved failed for {src_path} -> {dest_path}: {e}")
+        logger.error(f"handle_plan_file_moved failed for {src_path} -> {dest_path}: {e}", module=MODULE_NAME)

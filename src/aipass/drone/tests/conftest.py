@@ -18,6 +18,26 @@ from unittest.mock import MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _clean_identity_dedupe() -> Generator[None, None, None]:
+    """Give every test a fresh caller-identity dedupe set.
+
+    router_handler suppresses repeated identity messages for the life of the
+    PROCESS, and pytest is one process. Without this, whether a test sees its
+    log line depends on which tests ran before it — the exact order-dependent
+    flake that only surfaces when someone runs a single test in isolation.
+
+    Reaches the module-private set on purpose. Production never needs to forget
+    what it has already logged, so exporting a reset() just to serve this
+    fixture would put a test-only function in the shipped API.
+    """
+    from aipass.drone.apps.handlers import router_handler
+
+    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
+    yield
+    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
+
+
 @pytest.fixture
 def temp_test_dir() -> Generator[Path, None, None]:
     """Creates temporary directory for testing, cleans up after."""

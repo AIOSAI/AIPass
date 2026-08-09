@@ -1,621 +1,173 @@
 {
   "metadata": {
-    "version": "1.0.0",
+    "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
-    "description": "Standards bypass configuration for this branch"
+    "updated": "2026-08-09",
+    "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
+    "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
+    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead."
   },
   "bypass": [
     {
-      "file": "apps/handlers/events/registry.py",
-      "standard": "trigger",
-      "pattern": "setup_handlers",
-      "reason": "setup_handlers() is a wiring function that registers event handlers, not an event handler itself. It does not handle any event \u2014 it calls trigger.on() to wire handle_{event} callbacks."
+      "file": "apps/config.py",
+      "standard": "silent_catch",
+      "pattern": "guarded prax import / sidecar write failure / tmp cleanup",
+      "reason": "Three sites, all structurally unloggable. L35: guarded `from aipass.prax import append_jsonl` — config.py is imported by everything and cannot hard-depend on prax (circular). L71: append_trail's own write failure — you cannot log a failure to log, so it is returned as False and COUNTED on TrailLogger.dropped, surfaced by callers (escalation get_stats). L170: atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
     },
     {
       "file": "apps/modules/core.py",
       "standard": "silent_catch",
-      "lines": [
-        160
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Intentional: handler callback runs inside event bus fire(). Logging here would cause infinite recursion (logger fires events via trigger)."
-    },
-    {
-      "file": "apps/handlers/events/error_detected.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/error_logged.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/.archive/bulletin_created.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/startup.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/memory_threshold_exceeded.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/plan_file.py",
-      "standard": "silent_catch",
-      "pattern": "_log_error except",
-      "reason": "Meta-logging helper: _log_error() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/registry.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
+      "pattern": "ImportError console fallback / _coerce_value cascade",
+      "reason": "L35: ImportError fallback that constructs a rich Console instead — the alternative IS the handling. L185/L189: _coerce_value() tries int, then float, then returns the string. try/except is the control flow for type coercion here, not error suppression."
     },
     {
       "file": "apps/handlers/log_watcher.py",
-      "standard": "handlers",
-      "lines": [
-        77
-      ],
-      "reason": "log_watcher imports error_registry.report() for Medic v2 dedup. This is a deliberate handler-to-handler dependency \u2014 the registry IS the dedup backend."
-    },
-    {
-      "file": "apps/handlers/error_reporter.py",
-      "standard": "handlers",
-      "lines": [
-        25,
-        45
-      ],
-      "reason": "error_reporter imports error_registry for tracking and ai_mail for email delivery. These are its core dependencies \u2014 it's the dispatch endpoint of the error pipeline."
-    },
-    {
-      "file": "apps/handlers/watchers/log_watcher.py",
-      "standard": "handlers",
-      "lines": [
-        242
-      ],
-      "reason": "Watcher imports trigger module to fire events. Handler\u2192module import needed because watcher operates as standalone watchdog callback."
+      "standard": "silent_catch",
+      "pattern": "timestamp format probe loop",
+      "reason": "L314: `except ValueError: continue` inside a loop that tries each known timestamp format. Failure of one format is not an error — exhausting ALL of them is, and that case logs a warning at L318 after the loop."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
-      "standard": "handlers",
-      "lines": [
-        76
-      ],
-      "reason": "error_detected handler imports error_registry to query error details during dispatch. Core integration point for the error pipeline."
+      "standard": "silent_catch",
+      "pattern": "guarded error_registry import",
+      "reason": "L91: `except ImportError` on the error_registry import. The handler is not silent about it — the except body sets _REGISTRY_DISPATCH_AVAILABLE = False and defines six named fallback functions so dispatch degrades to always-allow. FILE-WIDE, not line-scoped: silent_catch_check never passes a line to is_bypassed(), so a `lines` key here would match nothing. Cost accepted: a NEW silent catch anywhere in this file is also suppressed."
     },
     {
       "file": "apps/handlers/events/startup.py",
-      "standard": "handlers",
-      "lines": [
-        371
-      ],
-      "reason": "Startup handler imports memory rollover module to trigger memory checks on startup events. Cross-branch integration via modules layer public API."
+      "standard": "silent_catch",
+      "pattern": "timestamp format probe loop",
+      "reason": "L185: `except ValueError: continue` in _parse_timestamp's format loop — same probe idiom as log_watcher.py. When every format fails the function returns None and the caller decides. FILE-WIDE because silent_catch_check passes no line."
     },
     {
       "file": "apps/config.py",
       "standard": "error_handling",
-      "lines": [
-        36
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
+      "pattern": "atomic_write_json tmp cleanup",
+      "reason": "Reported as line 170, body at L170-171: unlinking the temp file after a failed atomic write. The real error is re-raised immediately after, so nothing is swallowed. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/modules/core.py",
       "standard": "error_handling",
-      "lines": [
-        61
-      ],
-      "pattern": "except ImportError",
-      "reason": "Handler import failure in _ensure_initialized \u2014 has logger.warning, not actually silent. Checker false positive on try block line."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "error_handling",
-      "lines": [
-        31
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/plan_file.py",
-      "standard": "error_handling",
-      "lines": [
-        59
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_error() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/memory_threshold_exceeded.py",
-      "standard": "error_handling",
-      "lines": [
-        47
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/error_logged.py",
-      "standard": "error_handling",
-      "lines": [
-        48
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/.archive/bulletin_created.py",
-      "standard": "error_handling",
-      "lines": [
-        55
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/error_detected.py",
-      "standard": "error_handling",
-      "lines": [
-        53
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/startup.py",
-      "standard": "error_handling",
-      "lines": [
-        51
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/registry.py",
-      "standard": "error_handling",
-      "lines": [
-        28
-      ],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/error_registry.py",
-      "standard": "architecture",
-      "pattern": "file_length",
-      "reason": "Error registry at 870 lines \u2014 core dedup engine with fingerprinting, circuit breaker, backoff, and CLI. Splitting would break cohesion of the error tracking lifecycle."
-    },
-    {
-      "file": "apps/handlers/log_watcher.py",
-      "standard": "architecture",
-      "pattern": "file_length",
-      "reason": "Log watcher at 782 lines \u2014 watchdog event handler with position tracking, dedup, and medic integration. Splitting would break the file monitoring pipeline."
+      "pattern": "_coerce_value int-then-float probe",
+      "reason": "L185-186: `except ValueError: pass` in _coerce_value, falling through from the int() attempt to the float() attempt. Nothing is swallowed — the last branch returns the raw string. Re-derived 2026-08-09: the old reason here described a checker misattribution at 'line 73' that no longer occurs. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/error_reporter.py",
-      "standard": "architecture",
-      "lines": [
-        153
-      ],
-      "pattern": "handler importing from parent module",
-      "reason": "error_reporter imports trigger bus to fire error_detected events after reporting. Handler must access event bus to complete the error pipeline."
+      "standard": "handlers",
+      "pattern": "handler imports modules (orchestration)",
+      "reason": "L45 imports ai_mail's email_send entry point to deliver the source-fix email; L148 imports the trigger bus to fire error_detected. Reporting an error IS an orchestration: detect, publish, notify. FILE-WIDE: handlers_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/watchers/log_watcher.py",
-      "standard": "architecture",
-      "lines": [
-        244
-      ],
-      "pattern": "handler importing from parent module",
-      "reason": "Log watcher imports trigger bus to fire error_logged/warning_logged events. Watchdog callback must access event bus to bridge file monitoring to event system."
+      "standard": "handlers",
+      "pattern": "module_name auto-detection + bus import",
+      "reason": "Two findings, one rule (the checker gives neither a line). module_name is supplied by the watcher's own parse of the log line, not inspect.stack() — the calling frame is watchdog's thread, which knows nothing about which branch wrote the line. L353 imports the trigger bus because a watchdog callback's whole job is to bridge the filesystem to the event bus."
+    },
+    {
+      "file": "apps/handlers/events/runaway_handler.py",
+      "standard": "handlers",
+      "pattern": "cross-branch wake_branch import",
+      "reason": "L344: inline `from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch` after email delivery. ai_mail exposes no modules/ entry point for wake — dispatch.wake IS the public surface. Cross-branch, so seedgo's same-branch handler-import allowance does not cover it. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
-      "standard": "architecture",
-      "lines": [
-        153,
-        243
-      ],
-      "pattern": "handler importing from parent module",
-      "reason": "error_detected imports error_registry (line 76) and medic_state \u2014 core pipeline dependencies for dispatch gating. Already bypassed under handlers standard."
-    },
-    {
-      "file": "apps/handlers/events/registry.py",
-      "standard": "architecture",
-      "lines": [
-        34
-      ],
-      "pattern": "handler importing from parent module",
-      "reason": "Registry handler imports trigger module to wire event handlers via trigger.on(). The wiring function must reference the event bus."
+      "standard": "handlers",
+      "pattern": "cross-branch wake_branch import",
+      "reason": "L598: the same inline wake_branch import as runaway_handler.py, for the same reason — the medic dispatch has to wake the branch it just mailed. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/events/warning_logged.py",
       "standard": "handlers",
       "pattern": "module_name auto-detection",
-      "reason": "module_name parameter is passed by the event bus caller, not auto-detected. Event handlers receive context from fire() data, not from inspect.stack()."
-    },
-    {
-      "file": "apps/handlers/events/error_logged.py",
-      "standard": "handlers",
-      "pattern": "module_name auto-detection",
-      "reason": "module_name parameter is passed by the event bus caller, not auto-detected. Event handlers receive context from fire() data, not from inspect.stack()."
+      "reason": "module_name arrives in the event payload from fire(), where the log watcher already resolved it. inspect.stack() at this point would report the event bus, not the module that logged the warning."
     },
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "handlers",
-      "lines": [
-        34
-      ],
-      "pattern": "handler imports modules",
-      "reason": "Registry wiring function imports trigger module to call trigger.on(). Must access the event bus to register handlers \u2014 this IS its purpose."
-    },
-    {
-      "file": "apps/handlers/error_registry.py",
-      "standard": "naming",
-      "pattern": "severity, entry, initial_status",
-      "reason": "Local variables inside functions, not module-level constants. Checker false positive on function-scoped assignments."
+      "pattern": "handler imports modules (orchestration)",
+      "reason": "L23 imports the trigger bus and L33 imports ai_mail's email_send. This file exists to wire handlers to the bus and inject the send callback — importing both is its entire purpose. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/error_reporter.py",
-      "standard": "naming",
-      "pattern": "email_data, error_type, message",
-      "reason": "Local variables inside report_error() function, not module-level constants. Checker false positive on function-scoped assignments."
+      "standard": "architecture",
+      "pattern": "handler importing from parent module",
+      "reason": "L148 imports apps/modules/core to fire error_detected — the same import architecture_check and handlers_check both flag. A reporter that cannot publish reports nothing. FILE-WIDE: architecture_check passes no line to is_bypassed()."
     },
     {
-      "file": "apps/handlers/events/memory_threshold_exceeded.py",
-      "standard": "naming",
-      "pattern": "threshold, subject, branch",
-      "reason": "Local variables inside handle_memory_threshold_exceeded(), not module-level constants. Checker false positive on function-scoped assignments."
+      "file": "apps/handlers/watchers/log_watcher.py",
+      "standard": "architecture",
+      "pattern": "handler importing from parent module",
+      "reason": "L353 imports the trigger bus so the watchdog callback can fire error_logged/warning_logged. FILE-WIDE: architecture_check passes no line."
     },
     {
-      "file": "apps/handlers/events/error_logged.py",
-      "standard": "naming",
-      "pattern": "effective_module, effective_log_file, email_subject",
-      "reason": "Local variables inside handle_error_logged(), not module-level constants. Checker false positive on function-scoped assignments."
+      "file": "apps/handlers/events/registry.py",
+      "standard": "architecture",
+      "pattern": "handler importing from parent module",
+      "reason": "L23 imports apps/modules/core because setup_handlers() calls trigger.on() for every handler. FILE-WIDE: architecture_check passes no line."
     },
     {
-      "file": "apps/handlers/events/error_detected.py",
-      "standard": "naming",
-      "pattern": "context_block, registry_block, display_fp",
-      "reason": "Local variables inside handle_error_detected(), not module-level constants. Checker false positive on function-scoped assignments."
-    },
-    {
-      "file": "apps/handlers/events/startup.py",
-      "standard": "naming",
-      "pattern": "local variable naming",
-      "reason": "Local variables inside startup handler functions, not module-level constants. Checker false positive on function-scoped assignments."
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "imports",
-      "pattern": "prax logger import",
-      "reason": "config.py cannot import prax logger \u2014 circular dependency. Uses _log_warning() file-based pattern instead. Comment on line 26 documents this."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "unused_function",
-      "pattern": "validate_json_structure, get_json_path, increment_counter, update_data_metrics",
-      "reason": "JSON handler framework utilities \u2014 part of the json_structure standard infrastructure. Available for future use by modules that need JSON validation and metrics."
-    },
-    {
-      "file": "apps/handlers/log_watcher.py",
-      "standard": "unused_function",
-      "pattern": "_save_seen_hashes, _save_log_positions",
-      "lines": [168, 208],
-      "reason": "Low-level single-key writers kept for direct unit testing (TestSaveSeenHashes, TestSaveLogPositions). Hot path uses coalesced _flush_trigger_data instead."
+      "file": "apps/handlers/events/runaway_handler.py",
+      "standard": "encapsulation",
+      "lines": [344],
+      "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it."
     },
     {
       "file": "apps/log_watcher_service.py",
       "standard": "cli",
-      "reason": "Systemd service \u2014 runs as persistent daemon process, no drone CLI interaction."
+      "pattern": "bare print() + no --help",
+      "reason": "Systemd unit, not a CLI module: started by trigger-log-watcher.service and never routed through drone. Its stdout is the journal, where rich markup would be noise. FILE-WIDE rather than line-scoped because the '--help not implemented' finding carries no line, so a `lines` key would cover the prints and silently drop the --help half."
     },
     {
       "file": "apps/log_watcher_service.py",
       "standard": "debug_print",
-      "reason": "Systemd service \u2014 print() output goes to journald, not debug output. This is the correct pattern for systemd services."
+      "lines": [66, 77, 85, 93],
+      "pattern": "journald status lines",
+      "reason": "LINE-SCOPED AND HONOURED: debug_print_check filters per line. These four are the daemon's lifecycle lines (signal received, both watchers failed, running, stopped) going to journald. The fifth print, in the __main__ block, the checker already exempts."
     },
     {
       "file": "apps/log_watcher_service.py",
       "standard": "help_text",
-      "reason": "Systemd service \u2014 runs as persistent daemon process, no CLI help text needed."
+      "lines": [17],
+      "pattern": "python -m in module docstring",
+      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form."
     },
     {
-      "file": "apps/log_watcher_service.py",
+      "file": "apps/config.py",
       "standard": "imports",
-      "pattern": "prax logger import",
-      "reason": "Systemd service \u2014 uses print() to journald, not prax logger. Importing prax adds unnecessary dependency for a standalone daemon."
+      "pattern": "no `from aipass.prax import logger`",
+      "reason": "config.py cannot import the prax logger — every trigger module imports config, and prax imports back. It uses TrailLogger instead: a real logger object writing JSONL to a sidecar, defined in this file so the one unloggable except block lives here once. FILE-WIDE: imports_check always passes line=None."
     },
     {
-      "file": "apps/handlers/events/memory_pool.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/memory_pool.py",
-      "standard": "error_handling",
-      "lines": [43],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/pr_status_sync.py",
-      "standard": "silent_catch",
-      "pattern": "_log_info except",
-      "reason": "Meta-logging helper: _log_info() writes directly to file. Its own except block cannot log \u2014 you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/pr_status_sync.py",
-      "standard": "error_handling",
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_info() \u2014 cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/pr_status_sync.py",
+      "file": "apps/handlers/events/registry.py",
       "standard": "trigger",
-      "pattern": "handle_pr",
-      "reason": "PR event handlers (handle_pr_created, handle_pr_merged) are event handlers registered in registry.py, not trigger-specific naming violations."
+      "category": "initialization",
+      "pattern": "setup_handlers",
+      "reason": "setup_handlers() is wiring, not an event handler — it handles no event, it calls trigger.on() to register the handle_{event} callbacks. Naming it handle_something would misdescribe it."
     },
     {
       "file": "apps/handlers/events/pr_status_sync.py",
       "standard": "unused_function",
-      "pattern": "handle_pr_created, handle_pr_merged",
-      "reason": "TDPLAN-0007: status-sync decommissioned. Handlers unregistered in registry.py but module + tests kept intact for future revival."
-    },
-    {
-      "file": "apps/handlers/log_watcher.py",
-      "standard": "silent_catch",
-      "lines": [
-        290
-      ],
-      "reason": "Timestamp parsing loop tries multiple formats. except ValueError: continue is intentional \u2014 on failure, tries next format. Logger.warning fires once after ALL formats fail (line 295)."
-    },
-    {
-      "file": "apps/modules/errors.py",
-      "standard": "silent_catch",
-      "lines": [
-        247
-      ],
-      "reason": "Exception is handled: calls error() to display user-facing message with suggestion. Not a silent catch \u2014 the user sees the error output."
-    },
-    {
-      "file": "apps/modules/core.py",
-      "standard": "silent_catch",
-      "lines": [
-        26,
-        171,
-        175
-      ],
-      "reason": "Line 26: ImportError fallback to rich Console. Lines 171/175: _coerce_value() type-testing try/except \u2014 intentional control flow for int/float/str coercion."
-    },
-    {
-      "file": "apps/config.py",
-      "standard": "silent_catch",
-      "lines": [
-        37,
-        66,
-        96
-      ],
-      "reason": "Line 37: meta-logging _log_warning() \u2014 cannot log a failure to log. Line 66: atomic_write_json cleanup of tmp file during error \u2014 can't fail on cleanup. Line 96: ImportError fallback with _log_warning + rich Console."
-    },
-    {
-      "file": "apps/handlers/log_watcher.py",
-      "standard": "silent_catch",
-      "lines": [
-        290
-      ],
-      "reason": "Timestamp format parsing loop \u2014 tries multiple datetime formats, ValueError is expected control flow on non-matching formats."
-    },
-    {
-      "file": "tests/test_log_watcher_service.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "encapsulation",
-      "lines": [
-        82
-      ],
-      "pattern": "handler imported directly",
-      "reason": "Test helper _import_log_watcher() must import the handler module directly to test it. All trigger test files follow this pattern."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "log_structure",
-      "lines": [
-        133,
-        310,
-        316
-      ],
-      "pattern": "hardcoded log paths",
-      "reason": "Test assertions use hardcoded log path strings as fixture data to verify path-detection logic. These are not production paths."
-    },
-    {
-      "file": "tests/test_trigger_entry.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_error_detected.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_error_detected.py",
-      "standard": "encapsulation",
-      "lines": [
-        72
-      ],
-      "pattern": "handler imported directly",
-      "reason": "Test helper _import_module() must import the handler module directly to test it. All trigger test files follow this pattern."
-    },
-    {
-      "file": "tests/test_event_handlers.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_event_handlers.py",
-      "standard": "encapsulation",
-      "lines": [
-        51
-      ],
-      "pattern": "handler imported directly",
-      "reason": "Test helper _import_cli() must import the handler module directly to test it. All trigger test files follow this pattern."
-    },
-    {
-      "file": "tests/test_core.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_core.py",
-      "standard": "documentation",
-      "pattern": "public functions missing docstrings",
-      "reason": "Test helper functions (capture_handler, etc.) are internal test utilities, not public API. Docstrings on test fixtures add noise without value."
-    },
-    {
-      "file": "tests/test_error_registry.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_error_registry.py",
-      "standard": "encapsulation",
-      "lines": [
-        63
-      ],
-      "pattern": "handler imported directly",
-      "reason": "Test helper _import_registry() must import the handler module directly to test it. All trigger test files follow this pattern."
-    },
-    {
-      "standard": "cli_flags",
-      "file": "apps/config.py",
-      "reason": "Config module \u2014 not a CLI entry point. --version is in apps/trigger.py."
-    },
-    {
-      "file": "apps/handlers/events/memory_pool.py",
-      "standard": "trigger",
-      "lines": [37],
-      "pattern": "prax logger docstring mention",
-      "reason": "Docstring mentions 'prax logger' to explain WHY this file uses file-based logging instead. Not an import — same pattern as bulletin_created.py, pr_status_sync.py, etc."
-    },
-    {
-      "file": "tests/test_memory_pool_handler.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file \u2014 tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_memory_pool_handler.py",
-      "standard": "encapsulation",
-      "lines": [40],
-      "pattern": "handler imported directly",
-      "reason": "Test helper _import_module() must import the handler module directly to test it. All trigger test files follow this pattern."
+      "functions": ["handle_pr_created", "handle_pr_merged"],
+      "reason": "NAME-SCOPED AND HONOURED: unused_function_check passes the function name to is_bypassed(). TDPLAN-0007 decommissioned status-sync — registry.py's trigger.on() calls are commented out, so both handlers are unreferenced by design while the module and its tests are kept for revival. Candidate for .archive/ if revival is off the table."
     },
     {
       "file": "apps/handlers/medic_state.py",
       "standard": "unused_function",
-      "pattern": "get_muted_branches",
-      "reason": "Public API returning List[str] of active muted branches. Used by 15+ existing tests and part of the medic_state interface. get_muted_branches_detail() supplements it for status display — this is the simple accessor."
-    },
-    {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "silent_catch",
-      "pattern": "_log_warning except",
-      "reason": "Meta-logging helper: _log_warning() writes directly to file. Its own except block cannot log — you cannot log a failure to log."
-    },
-    {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "error_handling",
-      "lines": [52],
-      "pattern": "except Exception: pass",
-      "reason": "Meta-logging helper _log_warning() — cannot log a failure to log. Same pattern as silent_catch bypass."
-    },
-    {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "handlers",
-      "lines": [272],
-      "pattern": "cross-handler import wake_branch",
-      "reason": "Inline import of wake_branch for dispatch — same pattern as error_detected.py line 572. Must wake target branch after email delivery."
-    },
-    {
-      "file": "apps/handlers/events/runaway_handler.py",
-      "standard": "encapsulation",
-      "lines": [272],
-      "pattern": "cross-handler import wake_branch",
-      "reason": "Inline import of wake_branch for dispatch — same pattern as error_detected.py. Handler must wake target branch after email delivery."
-    },
-    {
-      "file": "tests/test_runaway_handler.py",
-      "standard": "architecture",
-      "pattern": "3-layer structure",
-      "reason": "Test file — tests/ is the standard location for unit tests, not part of the apps/modules/handlers source tree."
-    },
-    {
-      "file": "tests/test_runaway_handler.py",
-      "standard": "encapsulation",
-      "pattern": "handler imported directly",
-      "reason": "Test must import the handler module directly to test it. All trigger test files follow this pattern."
+      "functions": ["get_volume_muted_branches"],
+      "reason": "NAME-SCOPED AND HONOURED. The plain-list accessor beside get_volume_muted_branches_detail(); medic.py renders the detail variant, so only the 5 assertions in test_medic_state.py call this one. Kept as the symmetric half of the public read API — delete it and the tests if that symmetry is not worth the rule."
     }
   ],
   "notes": {
-    "usage": "Add entries to 'bypass' list to exclude specific violations",
-    "example": {
-      "file": "apps/modules/logger.py",
-      "standard": "cli",
-      "reason": "Circular dependency - logger cannot import CLI",
-      "lines": [
-        146,
-        177
-      ],
-      "pattern": "if __name__ == '__main__'"
-    },
+    "usage": "Add entries to 'bypass' list to exclude specific violations. One rule per real violation — re-derive against the checkers, never guess line numbers.",
+    "line_scoping": "A `lines` key is ONLY honoured by checkers that pass a line to is_bypassed(): encapsulation, debug_print, help_text, cli (its print half), hardcoded_path, hardcoded_key, log_level, log_handler, log_visibility, output_routing, permission_flags, stderr_routing, windows_compat. silent_catch, error_handling, handlers, architecture, imports, trigger and readme call is_bypassed() with no line at all — on those standards a `lines` key is at best a comment and, once seedgo's wave-2 fix lands, will make the rule match nothing. Use `functions` for unused_function; it is name-scoped and honoured.",
     "fields": {
-      "file": "Relative path from branch root (required)",
+      "file": "Relative path from branch root (required) — matched as a substring of the checked path",
       "standard": "Standard name: cli, imports, naming, etc. (required)",
-      "lines": "Optional - specific line numbers to bypass",
-      "pattern": "Optional - pattern to match (e.g. 'if __name__')",
-      "reason": "Required - why this bypass exists"
+      "lines": "Optional — specific line numbers. Honoured only by the checkers listed in line_scoping",
+      "functions": "Optional — function names, honoured by unused_function",
+      "category": "Optional — read by trigger_check (e.g. handler_layer, initialization)",
+      "pattern": "Optional — records the construct being bypassed. Documentation only; no checker reads it",
+      "reason": "Required — why this bypass exists, and why it is file-wide if it is"
     }
   }
 }

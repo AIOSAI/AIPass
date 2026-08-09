@@ -45,6 +45,9 @@ from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
 # Throwaway / prototype detection
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_prototype_file, is_throwaway_path
 
+# Where each standard applies (production / tests / everywhere) — shared with the audit lane
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
+
 # .seedgoignore — gitignore-style per-directory + global default (tools/)
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
 
@@ -89,12 +92,22 @@ def _is_entry_point(file_path: str) -> bool:
 def _is_applicable(checker, file_path: str) -> bool:
     """Determine if a checker applies to the given file.
 
-    Rules based on AUDIT_SCOPE:
+    First gate is APPLIES_TO — whether the standard is meaningful for this
+    KIND of file (production / tests / everywhere), shared with the audit lane
+    via applicability.py so the two can never disagree about scope again.
+    Structural standards used to fail on nearly every test file in the fleet
+    here while the audit lane never even looked at tests/; that gap is what
+    branches were absorbing with bypass rules.
+
+    Then AUDIT_SCOPE — where a result is reported:
       - "entry_point" (default) -> only apps/{name}.py files
       - "all_files"             -> any .py file
       - "branch_level"          -> normally skipped, but eligible if checker
                                    also implements check_module() for per-file use
     """
+    if not applicability.applies_to_file(checker, file_path):
+        return False
+
     scope = getattr(checker, "AUDIT_SCOPE", "entry_point")
 
     # Branch-level checkers skip per-file runs UNLESS they also implement
@@ -139,6 +152,12 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
 
     if is_throwaway_path(resolved):
         return [{"standard": "(skip)", "passed": True, "detail": "Throwaway path (temp/scratchpad) — skipped"}]
+
+    # Retired code is not lintable. The audit lane has always skipped .archive/;
+    # this lane did not, so touching an archived file raised standards nobody
+    # can act on without un-retiring the code.
+    if applicability.is_retired_path(resolved):
+        return [{"standard": "(skip)", "passed": True, "detail": "Retired path (archived/deprecated) — skipped"}]
 
     if prototype or is_prototype_file(resolved):
         return [{"standard": "(skip)", "passed": True, "detail": "Prototype mode — standards skipped"}]

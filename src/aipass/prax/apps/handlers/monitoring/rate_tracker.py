@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rate_tracker.py
 # Description: Log file rate tracking for runaway detection
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-07-14
-# Modified: 2026-08-02
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -313,7 +313,9 @@ def _fire_event(
     """Fire runaway_log_detected on the trigger event bus."""
     branch = detect_branch_from_log(file_path)
     logger.warning(
-        "[rate_tracker] RUNAWAY %s: %s — %.0f lines/min sustained %.0fs (branch: %s)",
+        "[rate_tracker] Runaway log %s: %s is being written at %.0f lines/min, sustained %.0fs "
+        "(branch: %s) — at this rate the file rotates quickly, so older entries drop off sooner "
+        "than usual. Everything already on disk is intact.",
         severity.upper(),
         Path(file_path).name,
         rate_lines_per_min,

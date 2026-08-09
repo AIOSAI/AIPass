@@ -18,11 +18,15 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     """Mock heavy infrastructure imports."""
     import sys
 
-    from aipass.trigger.apps.config import atomic_write_json
+    from aipass.trigger.apps.config import atomic_write_json, trail_logger
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
+    # Real trail_logger, not the auto-mock: the handler's sidecar is what
+    # test_writes_handler_log_on_failure reads back, and TRIGGER_ROOT above
+    # already points it at tmp_path.
+    mock_config.trail_logger = trail_logger
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
     mock_json_handler = MagicMock()

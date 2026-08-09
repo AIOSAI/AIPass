@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_files.py
 # Description: Memory File Safe I/O Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-06-13
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -135,6 +135,47 @@ def _validate_entry_limits(
     return {"success": False, "error": f"Entry limit exceeded: {details}"}
 
 
+def _is_auto_compact(entry: Any) -> bool:
+    """True for auto-compact snapshot entries.
+
+    Must match rollover/extractor.py exactly — a guard that classified
+    entries differently from the extractor is how the false ENTRY COUNT
+    spam started in the first place.
+    """
+    return isinstance(entry, dict) and entry.get("status") == "auto-compact"
+
+
+def _warn_entry_count(branch: str, file_name: str, label: str, count: int, cap: int) -> None:
+    """Emit one soft-guard warning line for an over-cap section."""
+    logger.warning(
+        f"[memory_files] ENTRY COUNT: {branch} {file_name} "
+        f"{label} has {count}/{cap} entries "
+        f"(+{count - cap} over rollover limit)"
+    )
+
+
+def _check_session_counts(branch: str, file_name: str, entries: list, section_cfg: Dict[str, Any]) -> None:
+    """Warn on the sessions section, budgeting snapshots separately.
+
+    Auto-compact snapshots carry their own small cap in the extractor and
+    never count against the regular session budget.  Checking the combined
+    array against the regular cap made this guard permanently unsatisfiable:
+    rollover correctly archived nothing while the warning fired on every
+    .trinity write, fleet-wide.
+    """
+    auto_cap = section_cfg.get("auto_compact_cap")
+    if auto_cap is not None:
+        snapshots = [e for e in entries if _is_auto_compact(e)]
+        if len(snapshots) > auto_cap:
+            _warn_entry_count(branch, file_name, "sessions(auto-compact)", len(snapshots), auto_cap)
+
+    max_count = section_cfg.get("count")
+    if max_count is not None:
+        regular = [e for e in entries if not _is_auto_compact(e)]
+        if len(regular) > max_count:
+            _warn_entry_count(branch, file_name, "sessions", len(regular), max_count)
+
+
 def _check_entry_counts(file_path: Path, data: Dict[str, Any]) -> None:
     """Soft guard: warn when list entry counts exceed rollover limits.
 
@@ -164,16 +205,17 @@ def _check_entry_counts(file_path: Path, data: Dict[str, Any]) -> None:
             continue
         if not isinstance(section_cfg, dict):
             continue
-        max_count = section_cfg.get("count")
-        if max_count is None:
-            continue
         entries = data.get(section_name, [])
-        if isinstance(entries, list) and len(entries) > max_count:
-            logger.warning(
-                f"[memory_files] ENTRY COUNT: {branch} {file_path.name} "
-                f"{section_name} has {len(entries)}/{max_count} entries "
-                f"(+{len(entries) - max_count} over rollover limit)"
-            )
+        if not isinstance(entries, list):
+            continue
+
+        if section_name == "sessions":
+            _check_session_counts(branch, file_path.name, entries, section_cfg)
+            continue
+
+        max_count = section_cfg.get("count")
+        if max_count is not None and len(entries) > max_count:
+            _warn_entry_count(branch, file_path.name, section_name, len(entries), max_count)
 
 
 # =============================================================================

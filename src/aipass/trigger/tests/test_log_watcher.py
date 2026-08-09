@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for branch log watcher event producer
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-08-04
+# Modified: 2026-08-08
 # =============================================
 
 import json
@@ -1993,5 +1993,296 @@ class TestProcessLogLineDeeper:
             side_effect=TypeError("boom"),
         ):
             watcher._process_log_line("any line", "/any/path.log")
+
+        fire.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests -- WARNING capture for the escalation lane (DPLAN-0283 WS-A)
+# ---------------------------------------------------------------------------
+
+
+def _set_warning_capture(lw, enabled: bool) -> MagicMock:
+    """Answer the operator config the way a real config_loader would.
+
+    config_loader is imported lazily inside _warning_capture_enabled, so the
+    answer is configured on the mocked handlers.json package and the 60s TTL
+    cache is dropped.
+    """
+    json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
+    json_pkg.config_loader.section = MagicMock(return_value={"watch_branch_log_warnings": enabled})
+    lw._warning_capture_cache = (0.0, True)
+    return json_pkg.config_loader.section
+
+
+def _warning_line(message: str = "Queue depth at 91%", module: str = "watcher", level: str = "WARNING") -> str:
+    """Build a fresh prax-format WARNING line."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+    return f"{now} | {module} | {level} | {message}"
+
+
+class TestLevelConstants:
+    """The two level sets the parser is driven with."""
+
+    def test_error_levels(self):
+        """CRITICAL rides with ERROR — both mean something broke."""
+        lw = _import_log_watcher()
+        assert lw.ERROR_LEVELS == ("ERROR", "CRITICAL")
+
+    def test_warning_levels_include_the_short_alias(self):
+        """Loggers emit both WARNING and WARN; missing WARN would drop half the lines."""
+        lw = _import_log_watcher()
+        assert lw.WARNING_LEVELS == ("WARNING", "WARN")
+
+    def test_the_two_sets_do_not_overlap(self):
+        """A line can never be counted as both an error and a warning."""
+        lw = _import_log_watcher()
+        assert not set(lw.ERROR_LEVELS) & set(lw.WARNING_LEVELS)
+
+
+class TestParsePraxLogLineLevels:
+    """The parser takes the levels it should accept as an argument."""
+
+    def test_warning_parsed_with_warning_levels(self):
+        """A WARNING line parses when WARNING_LEVELS is passed."""
+        lw = _import_log_watcher()
+        parsed = lw._parse_prax_log_line(_warning_line(), levels=lw.WARNING_LEVELS)
+        assert parsed is not None
+        assert parsed["level"] == "WARNING"
+        assert parsed["module"] == "watcher"
+        assert parsed["message"] == "Queue depth at 91%"
+
+    def test_warn_alias_parsed(self):
+        """The WARN spelling parses the same way."""
+        lw = _import_log_watcher()
+        parsed = lw._parse_prax_log_line(_warning_line(level="WARN"), levels=lw.WARNING_LEVELS)
+        assert parsed is not None
+        assert parsed["level"] == "WARN"
+
+    def test_python_dash_format_warning_parsed(self):
+        """Python logging format is supported for warnings too."""
+        lw = _import_log_watcher()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")
+        parsed = lw._parse_prax_log_line(f"{now} - watcher - WARNING - Queue depth", levels=lw.WARNING_LEVELS)
+        assert parsed is not None
+        assert parsed["level"] == "WARNING"
+        assert parsed["message"] == "Queue depth"
+
+    def test_error_is_not_a_warning(self):
+        """An ERROR line is not collected by the warning lane."""
+        lw = _import_log_watcher()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        assert lw._parse_prax_log_line(f"{now} | mod | ERROR | boom", levels=lw.WARNING_LEVELS) is None
+
+    def test_default_levels_still_ignore_warnings(self):
+        """The default stays ERROR-only, so the error path is unchanged."""
+        lw = _import_log_watcher()
+        assert lw._parse_prax_log_line(_warning_line()) is None
+
+
+class TestProcessWarningLine:
+    """WARNING lines feed the escalation lane and nothing else.
+
+    They never enter the error registry and never dispatch anyone — before
+    this path existed, a branch warning was read by nothing at all.
+    """
+
+    def test_fires_warning_logged(self):
+        """A fresh WARNING line fires the event with the lane's fields."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        line = _warning_line()
+
+        watcher._process_warning_line(line, _BRANCH_LOG_PATH)
+
+        fire.assert_called_once()
+        assert fire.call_args[0][0] == "warning_logged"
+        kwargs = fire.call_args[1]
+        assert kwargs["branch"] == "FLOW"
+        assert kwargs["module_name"] == "watcher"
+        assert kwargs["level"] == "WARNING"
+        assert kwargs["message"] == "Queue depth at 91%"
+        assert kwargs["log_file"] == _BRANCH_LOG_PATH
+        assert kwargs["raw_line"] == line
+
+    def test_warn_alias_fires(self):
+        """WARN is the same signal as WARNING."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line(level="WARN"), _BRANCH_LOG_PATH)
+
+        assert fire.call_args[0][0] == "warning_logged"
+
+    def test_info_fires_nothing(self):
+        """INFO is not a failure signal — the lane must not count it."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        watcher._process_warning_line(f"{now} | mod | INFO | All good", _BRANCH_LOG_PATH)
+
+        fire.assert_not_called()
+
+    def test_stale_warning_fires_nothing(self):
+        """A replayed rotation must not re-count old warnings."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        old = (datetime.now() - timedelta(seconds=600)).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        watcher._process_warning_line(f"{old} | watcher | WARNING | Queue depth at 91%", _BRANCH_LOG_PATH)
+
+        fire.assert_not_called()
+
+    def test_semantic_exclusion_fires_nothing(self):
+        """A line ABOUT an error artifact is not new signal."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line("Retrying error_hash=abc123"), _BRANCH_LOG_PATH)
+
+        fire.assert_not_called()
+
+    def test_capture_disabled_by_config_fires_nothing(self):
+        """An operator can switch branch-log warning reading off entirely."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, False)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
+
+        fire.assert_not_called()
+
+    def test_capture_enabled_by_config_fires(self):
+        """Positive control for the switch: the identical line fires when it is on."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
+
+        fire.assert_called_once()
+
+    def test_missing_callback_does_not_raise(self):
+        """Warning lines can arrive before the module layer wires the bus."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        lw._fire_event = None
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
+
+    def test_unexpected_failure_is_contained(self):
+        """The watcher must survive a warning it cannot parse."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        with patch.object(lw, "_parse_prax_log_line", side_effect=TypeError("boom")):
+            watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
+
+        fire.assert_not_called()
+
+
+class TestWarningCaptureEnabled:
+    """Reading the switch runs per log line, so it is cached and fails open."""
+
+    def test_reads_the_operator_setting(self):
+        """False in the config means false here."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, False)
+        assert lw._warning_capture_enabled() is False
+
+    def test_answer_is_cached_between_lines(self):
+        """A config file read per log line would put file IO on the hot path."""
+        lw = _import_log_watcher()
+        section = _set_warning_capture(lw, True)
+
+        lw._warning_capture_enabled()
+        lw._warning_capture_enabled()
+        lw._warning_capture_enabled()
+
+        section.assert_called_once_with("escalation")
+
+    def test_unreadable_config_keeps_capture_on(self):
+        """Fails OPEN: losing the count silently is the failure the lane exists to stop."""
+        lw = _import_log_watcher()
+        json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
+        json_pkg.config_loader.section = MagicMock(side_effect=OSError("disk gone"))
+        lw._warning_capture_cache = (0.0, False)
+
+        assert lw._warning_capture_enabled() is True
+
+    def test_missing_key_defaults_to_on(self):
+        """A config predating this setting still watches warnings."""
+        lw = _import_log_watcher()
+        json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
+        json_pkg.config_loader.section = MagicMock(return_value={})
+        lw._warning_capture_cache = (0.0, False)
+
+        assert lw._warning_capture_enabled() is True
+
+
+class TestProcessLogLineRoutesWarnings:
+    """One entry point routes a line to the error path or the warning path."""
+
+    def test_warning_line_reaches_the_warning_path(self):
+        """A WARNING line falls through the ERROR parse into warning_logged."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+
+        watcher._process_log_line(_warning_line(), _BRANCH_LOG_PATH)
+
+        fire.assert_called_once()
+        assert fire.call_args[0][0] == "warning_logged"
+
+    def test_error_line_still_takes_the_error_path(self):
+        """The error path is unchanged: an ERROR line never becomes a warning."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        watcher._process_log_line(f"{now} | my_module | ERROR | Database connection failed", _BRANCH_LOG_PATH)
+
+        fire.assert_called_once()
+        assert fire.call_args[0][0] == "error_detected"
+
+    def test_info_line_reaches_neither_path(self):
+        """INFO is dropped by both parsers."""
+        lw = _import_log_watcher()
+        _set_warning_capture(lw, True)
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+
+        watcher._process_log_line(f"{now} | mod | INFO | All good", _BRANCH_LOG_PATH)
 
         fire.assert_not_called()

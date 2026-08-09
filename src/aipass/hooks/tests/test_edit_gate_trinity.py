@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.0.0
-# Description: Tests for edit_gate .trinity char-limit check (FPLAN-0270 Phase 4)
+# Version: 1.1.0
+# Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-06-13
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for edit_gate .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -93,6 +93,24 @@ _ROLLOVER_CONFIG_10 = {
                 "sessions": {"count": 20},
                 "key_learnings": {"count": 25},
                 "todos": {"count": 10},
+            },
+            "observations": {
+                "observations": {"count": 15},
+            },
+        },
+        "per_branch": {},
+    },
+}
+
+
+# The real fleet shape: regular sessions capped at 15, auto-compact snapshots
+# budgeted separately at 3. Mirrors memory.config.json defaults.
+_ROLLOVER_CONFIG_FLEET = {
+    "rollover": {
+        "defaults": {
+            "local": {
+                "sessions": {"count": 15, "auto_compact_cap": 3},
+                "key_learnings": {"count": 15},
             },
             "observations": {
                 "observations": {"count": 15},
@@ -1540,7 +1558,7 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "local.sessions count over limit (21/20)" in caplog.text
+        assert "@hooks .trinity/local.json — sessions has 21 entries, 1 over the rollover budget of 20" in caplog.text
 
     def test_key_learnings_over_count_warns(self, tmp_path, caplog):
         """26 key_learnings vs 25 cap -> warning logged."""
@@ -1554,7 +1572,7 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "local.key_learnings count over limit (26/25)" in caplog.text
+        assert "key_learnings has 26 entries, 1 over the rollover budget of 25" in caplog.text
 
     def test_observations_over_count_warns(self, tmp_path, caplog):
         """16 observations vs 15 cap -> warning logged."""
@@ -1568,7 +1586,10 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "observations.observations count over limit (16/15)" in caplog.text
+        assert (
+            "@hooks .trinity/observations.json — observations has 16 entries, 1 over the rollover budget of 15"
+            in caplog.text
+        )
 
     def test_under_count_no_warning(self, tmp_path, caplog):
         """10 sessions vs 20 cap -> no warning."""
@@ -1582,7 +1603,7 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "count over limit" not in caplog.text
+        assert "over the rollover budget" not in caplog.text
 
     def test_at_count_no_warning(self, tmp_path, caplog):
         """Exactly 20 sessions vs 20 cap -> no warning (only > triggers)."""
@@ -1596,7 +1617,7 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "count over limit" not in caplog.text
+        assert "over the rollover budget" not in caplog.text
 
     def test_count_guard_never_blocks(self, tmp_path):
         """Even with enforce=True char limits, count guard only warns — exit_code always 0."""
@@ -1630,7 +1651,7 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "local.sessions count over limit (6/5)" in caplog.text
+        assert "sessions has 6 entries, 1 over the rollover budget of 5" in caplog.text
 
     def test_config_loader_import_failure_silent(self, tmp_path, caplog):
         """config_loader import always fails -> no count warning, no crash, write allowed."""
@@ -1656,4 +1677,225 @@ class TestSectionCountGuard:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "count over limit" not in caplog.text
+        assert "over the rollover budget" not in caplog.text
+
+
+def _regular_sessions(n):
+    """n ordinary session entries."""
+    return [{"summary": f"s{i}"} for i in range(n)]
+
+
+def _snapshot_sessions(n):
+    """n auto-compact snapshot entries, as pre_compact_prep stamps them."""
+    return [{"summary": f"snap{i}", "status": "auto-compact"} for i in range(n)]
+
+
+class TestSessionSnapshotBudget:
+    """Auto-compact snapshots never count against the regular session budget.
+
+    The extractor has budgeted them separately for a while; this guard counted
+    the combined array, so a branch sitting legally at 14 regular + 2 snapshots
+    warned 16/15 on every .trinity write and rollover — correctly — archived
+    nothing. The warning could never be satisfied, and it promised a trim that
+    could never arrive. The two must agree on what counts.
+    """
+
+    def test_live_fleet_state_warns_nothing(self, tmp_path, caplog):
+        """14 regular + 2 snapshots = 16 total, both budgets under cap -> silence.
+
+        This is the exact state that emailed devpulse ten digests an hour.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(14) + _snapshot_sessions(2)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "over the rollover budget" not in caplog.text
+
+    def test_regular_sessions_over_budget_still_warns(self, tmp_path, caplog):
+        """17 regular + 2 snapshots -> one warning about the 17, snapshots untouched."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(17) + _snapshot_sessions(2)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "sessions has 17 entries, 2 over the rollover budget of 15" in caplog.text
+        assert "auto-compact" not in caplog.text
+
+    def test_snapshots_over_their_own_budget_warns(self, tmp_path, caplog):
+        """Snapshots have a budget too — 5 against a cap of 3 is genuinely over."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "sessions (auto-compact snapshots) has 5 entries, 2 over the rollover budget of 3" in caplog.text
+
+    def test_both_over_warn_separately(self, tmp_path, caplog):
+        """Two independent budgets means two distinct lines, not one blurred count."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(20) + _snapshot_sessions(6)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "sessions (auto-compact snapshots) has 6 entries, 3 over the rollover budget of 3" in caplog.text
+        assert "sessions has 20 entries, 5 over the rollover budget of 15" in caplog.text
+
+    def test_split_matches_extractor_on_junk_entries(self, tmp_path, caplog):
+        """Non-dict junk counts as regular here and in the extractor alike.
+
+        The extractor treats anything that is not a dict with
+        status == "auto-compact" as a regular entry. Splitting differently would
+        put the two back out of step in a subtler way.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        sessions = _regular_sessions(14) + _snapshot_sessions(2) + ["a bare string", None]
+        content = json.dumps({"sessions": sessions})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "sessions has 16 entries, 1 over the rollover budget of 15" in caplog.text
+
+    def test_split_applies_without_auto_compact_cap(self, tmp_path, caplog):
+        """No auto_compact_cap configured -> snapshots still excluded from the regular count.
+
+        The extractor's regular filter is unconditional. A config carrying only
+        `count` must not resurrect the combined-array count.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(14) + _snapshot_sessions(2)})
+
+        rollover_cfg = {
+            "rollover": {
+                "defaults": {"local": {"sessions": {"count": 15}}},
+                "per_branch": {},
+            },
+        }
+
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "over the rollover budget" not in caplog.text
+
+    def test_key_learnings_are_not_split(self, tmp_path, caplog):
+        """Only sessions carries a snapshot budget — key_learnings counts every entry.
+
+        The extractor does not split key_learnings, so neither may this guard.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        learnings = [{"value": f"v{i}"} for i in range(15)] + [{"value": "odd one", "status": "auto-compact"}]
+        content = json.dumps({"key_learnings": learnings})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "key_learnings has 16 entries, 1 over the rollover budget of 15" in caplog.text
+
+
+class TestSectionCountWording:
+    """The line an operator reads must name whose file it is and promise only what happens."""
+
+    def test_warning_names_the_branch_and_file(self, tmp_path, caplog):
+        """The module tag is always captured_edit_gate — the line itself must say whose memory it is."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "devpulse", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "devpulse")
+        content = json.dumps({"sessions": _regular_sessions(17)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "@devpulse .trinity/local.json" in caplog.text
+
+    def test_warning_promises_only_what_rollover_does(self, tmp_path, caplog):
+        """Names the actor, the count it archives, and where the entries go."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(18)})
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "The @memory rollover hook archives the 3 oldest at the next PreCompact" in caplog.text
+        assert "drone @memory search" in caplog.text
+
+    def test_todos_never_claim_a_rollover_trim(self, tmp_path, caplog):
+        """todos do not roll. Only the advisory speaks for them, and it says prune.
+
+        A `count` under local.todos used to reach the generic loop and promise a
+        trim at the next PreCompact — a trim that has never existed for todos.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"todos": [{"task": f"t{i}"} for i in range(11)]})
+
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        assert "todos do not auto-roll" in result["stdout"]
+        assert "over the rollover budget" not in caplog.text

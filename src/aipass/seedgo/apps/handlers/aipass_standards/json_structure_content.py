@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_content.py
 # Description: JSON Structure Standards Content Handler
-# Version: 2.0.0
+# Version: 3.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-17
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -48,6 +48,11 @@ def get_json_structure_standards() -> str:
         "  The sanctioned subdir for human-editable runtime settings.",
         "  Separates operator-tunable config from auto-generated logs/data.",
         "  [dim]Examples: cadence_config.json, memory.config.json[/dim]",
+        "",
+        "  [yellow]Operator-owned — seedgo never audits the CONTENT.[/yellow]",
+        "  The audit prints a non-scored info line naming the files it finds",
+        "  there, so an override is visible instead of invisible. That line",
+        "  can never change a score. The house pattern below is on you.",
         "",
         "─" * 70,
         "",
@@ -168,10 +173,48 @@ def get_json_structure_standards() -> str:
         "",
         "─" * 70,
         "",
+        "[bold cyan]custom_config/ HOUSE PATTERN:[/bold cyan]",
+        "",
+        "  seedgo lists what lives here and stops. These rules are how the",
+        "  code that READS an operator config must behave:",
+        "",
+        "  [green]1.[/green] [bold]Configs live in the JSON, not in code.[/bold] No tunable should",
+        "     require reading Python to find. The file is where a setting lives.",
+        "  [green]2.[/green] [bold]The file on disk is the runtime authority.[/bold] The operator",
+        "     edits it freely; its values win over code on every load.",
+        "  [green]3.[/green] [bold]Code holds DEFAULT_CONFIG as the regeneration seed[/bold] — carried",
+        "     for exactly one reason: so the file can come back when it is lost.",
+        "     Keep the seed at operating values: regenerate what we actually run.",
+        "  [green]4.[/green] [bold]Genuinely-missing file → regenerate it in FULL.[/bold] Every",
+        "     section, at operating values, written atomically (temp + replace),",
+        "     so the operator gets a real file to edit. A write that itself fails",
+        "     is logged and serves defaults — never swallowed.",
+        "  [green]5.[/green] [bold]Malformed JSON or wrong shape → fail loud, never clobber.[/bold]",
+        "     ERROR plus a logged operation, serve defaults IN MEMORY, and leave",
+        "     the operator file untouched. It may be one stray comma from correct",
+        "     and hold hand-tuned values no default can reconstruct.",
+        "     [dim]Unreadable for any OTHER reason (bad bytes, permissions) must take[/dim]",
+        "     [dim]this same path — never let it escape as a raw exception.[/dim]",
+        "  [green]6.[/green] [bold]Deep-merge at load.[/bold] File over seed, key by key, nested dicts",
+        "     included — so a file written before a key existed still gets it.",
+        "",
+        "  [yellow]Code never writes into custom_config/ outside that regeneration path.[/yellow]",
+        "  A write triggered by anything other than a genuinely-missing file (or an",
+        "  explicit operator set command) is a snapshot, and a snapshot overwrites",
+        "  operator intent with whatever the code happened to think.",
+        "  [dim]Live case: memory.config.json drifted 6 keys from the code it was[/dim]",
+        "  [dim]seeded from. The lesson is that the SEED must track operating values[/dim]",
+        "  [dim](a stale seed regenerates stale truth) — not that a file cannot hold[/dim]",
+        "  [dim]a full config. The file holding everything is the point.[/dim]",
+        "",
+        "─" * 70,
+        "",
         "[bold cyan]KEY WARNINGS:[/bold cyan]",
         "  [yellow]![/yellow]  The CODE PATTERN is the template -- no json_templates/ directory",
         "  [yellow]![/yellow]  JSON files auto-create on first log_operation() call",
-        "  [yellow]![/yellow]  Never create JSON files manually",
+        "  [yellow]![/yellow]  Never create the auto-generated trio manually",
+        "     [dim]custom_config/ is the exception — those are the operator's to write[/dim]",
+        "     [dim]and hand-edit. A trio file you hand-craft is a squatter and is flagged.[/dim]",
         "  [yellow]![/yellow]  Both import AND log_operation required for compliance",
         "",
         "[bold cyan]REFERENCE:[/bold cyan]",

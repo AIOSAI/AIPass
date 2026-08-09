@@ -9,6 +9,759 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-09] — v2.7.15: scope-aware standards, streamer loop kill, Windows tie data-loss fix, aipass read train
+
+**feat(aipass)** — `aipass read` + version truth + Telegram readiness at
+doctor time (by @aipass). New `read` command renders any branch README in
+the terminal straight from the live file (the depth step behind `aipass
+help`; list mode when no branch given, @-prefix tolerated). `--version` now
+resolves from the repo's own pyproject.toml with a tomli fallback on 3.10.
+doctor gains a telegram_readiness check that surfaces BotFather automation
+gaps only on machines that actually host bots — convenience warning, never
+an error, silent on plain installs. help_chat and readme_map sharpened;
+README updated. Test suite grows to 977 passing.
+
+**fix(ai_mail)** — sender identity resolution is now forensically loggable
+(by @ai_mail). A COMMONS-authored dispatch once filed under @aipass left
+only "from_branch: null" in the logs — no record of who the sender became
+or which resolution path decided, costing hours of cross-mailbox forensics.
+Every resolution now records strategy + input + resolved identity + mailbox
+path at the moment of decision, and branch_detection hardens the walk-up
+(env-var caller first, passport walk second, explicit precedence). New
+test_send_identity.py pins all resolution strategies; 881 passing.
+
+**docs(commons)** — branch prompt truthed to the standard layout (by
+@commons): src/aipass/commons/ paths corrected, registry lookup now
+documents the external-citizen fallback via the caller's own registry.
+
+**fix(trigger)** — Windows escalation flake was data loss, not display (by
+@trigger). datetime.now() ties on the 15.6ms Windows clock made the
+last_seen sort non-deterministic — and _prune sorts by the same key to pick
+evictions, so a tied clock dropped the signature just written and kept the
+stale one. Fix: the state document carries a write_seq counter and both call
+sites sort on one shared (last_seen, last_seen_seq) key — deliberately NOT
+time.monotonic(), whose per-process epoch is meaningless after a restart.
+No migration; missing keys default to 0. Three regression tests with a
+frozen clock reproduce the Windows tie on any platform, red-green probed
+(two initial tests passed for the wrong reason via insertion order and were
+rewritten to make creation and touch order diverge). Post-0384 settlement,
+measured NOW = OLD = NONE: the deleted tests/ bypass rules are formally
+moot — nothing left to restore. Bypass file 25 → 24 (one leave-one-out-dead
+rule dropped, two reasons re-derived to match present code); liveness sweep
+says all 24 earn their keep. Caveat for the audit info channel:
+functions-scoped rules read DEAD under record-field attribution because
+unused_function records bury names in issue strings — auto-pruning on that
+signal would delete working rules fleet-wide.
+source (by @skills). The streamer logged "Found N new log lines, sending to
+Telegram" every cycle; with system_wide=True that INFO landed in its own
+capture file inside its own watch glob, so each cycle manufactured the fuel
+for the next — 1,495 loop lines and a ping every ~6s on Patrick's phone. The
+announcement is deleted (forwarded lines are their own evidence) and a
+structural guard now drops the streamer's own log family first in
+_filter_lines, unconditionally — no level anyone adds later can reopen the
+loop, and a WARNING from a failing send would have looped hardest of all.
+Boot line now prints the real glob instead of claiming branch scope while
+watching everything. Trade-off, ruled delete-over-tune: bot-level errors no
+longer reach Telegram (still on disk + journalctl + medic scope); phone-side
+bot health needs its own de-duped heartbeat path if ever wanted. 9 new
+self-exclusion canaries (one behavioural: a _run cycle emits no "Found");
+telegram suite 1073 green. Deploy verified live: 5 bots restarted, 210s+
+quiet where it fired every 6s, forwarding canary still delivered.
+both lanes (by @seedgo). The audit lane walked apps/ regardless of what a
+checker declared and run_checklist filtered nothing, so the same standard was
+production-only in one lane and everywhere in the other — structural checks
+failed on 96% of the fleet's test files and branches papered over it with
+suppression. New aipass_standards/applicability.py declares APPLIES_TO
+(production / tests / everywhere, default everywhere so a new bug-finding
+checker is never silently muted) and BOTH collectors consult it. Deliberately
+NOT folded into AUDIT_SCOPE: that constant says where a result is REPORTED,
+and conflating the two axes is what created the disagreement. Retired code
+(.archive/, deprecated/) is now excluded from both lanes — the checklist lane
+used to flag archived files nobody can fix without un-retiring them — and the
+exclusion is part-based, closing a latent Windows bug where the audit's
+"/.archive/" substring pattern never matched and CI audited archived code the
+local run skipped. Measured, bypass disabled: fleet test files 1185 failing
+(standard, file) pairs → 205; architecture 439 → 0, encapsulation 247 → 0,
+documentation 163 → 0, meta 112 → 0, trigger 19 → 0, while every bug-finding
+standard is untouched (windows_compat 63, silent_catch 41, hardcoded_path 32
+— scoping, not muting). 0 production files misclassified; 42 archived files
+excluded fleet-wide. trigger_check's private copy of the bypass matcher —
+the third implementation in the tree, and the only one that never received the
+FPLAN-0382 scope fix — is gone; it still fall-through-matched, so a 'lines'
+rule muted the whole file for that standard. utils.matching_rule() now backs
+is_bypassed() and hands the rule back for the category/reason annotations that
+copy existed for. The audit cache now fingerprints the bypass/ and audit/
+packages, so a checker-semantics change busts it instead of serving green-stale
+results (that gap is why the wave-2 fleet verification read 17/17 from cache
+while CI was red). Branches keep their now-dead rules until their own next
+touch; each one is named on the audit's non-scored info channel with a count,
+not a wall of identical lines. **Correction to the entry below:** windows_compat
+is NOT line-blind. Canaried through all three paths — checker, audit lane
+_run_all_files, checklist lane — a lines rule suppresses in every one, and a
+non-matching line number suppresses in none. devpulse's registry.py rule said
+lines [138,149] while `import fcntl` sat on 139 and 150 in the same commit that
+introduced the rule (57285740): off by one from birth, harmless only because
+the pre-0382 fall-through was muting the whole file anyway. The honours map was
+right; the rule was wrong.
+
+**fix(devpulse)** — watchdog _FileLock fcntl imports restructured into
+checker-recognized platform guards; windows_compat bypass rule DELETED
+(FPLAN-0382 residue, own branch). CI's fresh seedgo-audit caught what
+the local fleet run could not: devpulse's own trued-up lines[139,150]
+rule went inert under wave 2 (windows_compat is line-blind — trigger's
+honours-map was wrong on this one standard, seedgo's AST scan right),
+and the local 17/17 verification was all "(cached)" because the audit
+cache doesn't fingerprint bypass/utils.py — the checker-semantics
+change never busted it. Fix at source instead of file-wide: the
+checker only sees imports INSIDE an if-sys.platform block (the
+early-return guard shape is invisible to it), so __enter__ moved to a
+positive platform guard and __exit__'s guard gained the explicit
+platform check. Rule deleted outright — the honest end-state a
+file-wide bypass would have papered over. 456 devpulse tests green;
+audit --full (uncached) Windows_Compat 100%, Overall 100%. Cache-gap
+finding queued for seedgo's board.
+
+**fix(seedgo)** — FPLAN-0382 wave 2: bypass scoping is real now (by
+@seedgo). is_bypassed rewritten around _scope_matches(): every scope
+the caller can evaluate must match AND at least one declared scope
+must be evaluable — a rule declaring scope nobody supplies is INERT,
+not file-wide (stricter than briefed; a pre-existing test proved the
+naive version wrong and the design was refined, not the test). The
+deeper truth, AST-derived: only 4 of 42 standards evaluate scope at
+all (cli/encapsulation/stderr_routing pass line, unused_function
+passes name) — so new machinery ships with the ruling: bypass/inert.py
+reports every inert rule on the audit's non-scored info channel, with
+the scope-support map derived from checker sources by AST so it
+cannot drift. pattern field documented ANNOTATION-ONLY (the notes
+example was teaching the fiction — removed). Trigger's in_except bug:
+THREE defects (never cleared inside class bodies; reported 0-based
+indexes as line numbers; reported only the first silent except) —
+rewritten on AST, trigger's repro files now score honestly. Drone's
+spurious 0%: root-caused — IndentationError is not a TokenError, a
+mid-save file escaped check_branch and scored the branch a flat mute
+0; fixed to degrade like _extract_functions, and crashed checkers now
+carry their error into checks[] so a 0 always arrives with its reason.
+Own rules: 52 → 34, zero lines rules left — after restoring ONE
+over-pruned rule (dead_code reports as prose, invisible to
+violation-key scans; caught in self-verification at 95%). Old-vs-new
+fleet measurement, cache off: 1 newly-red — exactly the pre-declared
+drone pr_handler rule (inert lines key on a line-blind standard);
+devpulse dropped the key per the rule's own documented intent. Two
+method blind spots flagged for the morning report: the checklist/hook
+lane audits tests/ WITH bypass rules (trigger deleted 18 tests/ rules
+on audit-only evidence — live for the hook lane, will trip on next
+test edit); branch-level standards report as prose. 1372 tests (+12,
+all canaried), fleet 17/17 at 100%, average 100%. WS-B doc moves ride
+along (legacy json_structure.md → .archive, handlers.md pointers
+fixed). Re-verified by devpulse: suite + fleet audit.
+
+**fix(fleet)** — FPLAN-0382 wave 1: all 77 line/function-scoped bypass
+rules trued up across 8 branches in parallel (by @skills @commons
+@aipass @memory @spawn @drone @prax @trigger, orchestrated by
+devpulse; Patrick night directive, max 2 waves). Context: @seedgo
+proved is_bypassed()'s line=None fall-through makes every scoped rule
+a silent WHOLE-FILE bypass — so before the 3-line fix can land (wave
+2), every rule had to face the raw checker. The fleet independently
+converged on the same honest method: pull the rule and re-audit;
+prose is not evidence. What the sweep found: nearly every line number
+had drifted (drone: all 9, in four separate edit-eras; devpulse's own
+was off by one); reasons had rotted into fiction (memory: a rule
+excusing a function called twice in-file; aipass: a documented caller
+that hasn't existed since their own refactor; spawn: two rationales
+SWAPPED between files); rules outlived their violations (prax: all 6
+lines now compliant console.print; commons: deleted by fixing the
+odd-one-out label instead). Trigger, the deepest cut: 84 rules → 25,
+4 violations fixed at source instead of excused (incl. two invisible
+wake_branch failures now logged WARNING), the CI readme red fixed and
+PROVEN on a self-built clean checkout (tree fence describes checkouts,
+prose describes runtime). Wave-2 rulings surfaced for @seedgo: 7
+standards never pass a line to is_bypassed (scoped rules on them can
+NEVER match post-fix — skills proved correct-line RED / file-wide
+GREEN by simulation; trigger mapped the full honours/ignores split);
+the pattern field is DECORATIVE (prax: is_bypassed never reads it);
+error_handling's in_except flag never clears inside class bodies
+(trigger); one spurious Unused_Function 0% (drone). Also: prax
+shipped the INVERTED-direction resync fixture (mocks raw-written INTO
+sys.modules — cascading eviction, xdist-proven at 3 worker counts),
+closing the Windows CI red. Every branch: audit 100%, suites green,
+re-verified by devpulse before commit.
+
+**fix(seedgo)** — handlers checker compared packages, not branches (by
+@seedgo, on @trigger's reproduction; the last CI seedgo-gate blocker).
+Ruling: the published text was the intent — the standard says twice
+that same-branch handler imports are ALLOWED across packages, and
+check_handler_independence() rejected its own shipped ALLOWED example;
+root-level handler files could never pass at all (own_package resolved
+to the filename, exempting an impossible string). Rewritten
+branch-level: cross-BRANCH handler imports forbidden, same-branch
+free; unrecognizable layout returns an explicit "rule not evaluated"
+pass instead of flagging everything. The old json_handler exemption
+removed as a real hole (any branch could import any other's
+json_handler past the DPLAN-0246 encapsulation ruling; fleet-grepped —
+all 4 occurrences comments/strings, AST-invisible). No-regression
+MEASURED, not asserted: all 623 handler files scored under old and new
+logic — 0 newly failing, 142 newly passing across 12 branches (trigger
+reported it but carried only 6; the false positive was quietly taxing
+the whole fleet). Bonus from trigger's third report: cli_check's
+duplicate-display scan was substring-based and read TrailLogger's
+.error() METHOD as a duplicate of cli.display — AST rewrite,
+module-level defs only, canaried 8 cases both directions; trigger can
+drop its cli_flags bypass. Held deliberately: the is_bypassed
+line=None fall-through fix (3 lines, written and MEASURED: 37 files
+across 6 branches would go red from 60 stale line-scoped rules that
+have been silently whole-file bypasses — every checker's top-of-file
+gate matches them, making all 21 per-line call sites dead code) — a
+correct fix with a wrong rollout is still red CI; staged options
+queued for Patrick. 1359 passed (+6), fleet 17/17 Handlers 100%,
+trigger confirmed 100%. Re-verified by devpulse: suite + trigger and
+seedgo audits both 100%.
+
+**fix(trigger)** — escalation-lane audit flags: four resolved at the
+root, the fifth raised as a checker bug instead of routed around (by
+@trigger). silent_catch + error_handling were one finding in two hats:
+seedgo only recognizes literal `logger.<level>()` calls, so the
+`_log_warning()` helper — which really wrote every exception to the
+JSONL sidecar — read as 16 silent catches. Rather than a 13th
+file-wide "cannot log a failure to log" bypass, TrailLogger moved into
+apps/config.py (the one module that can't import prax's logger —
+circular) and both files bind a module-level logger from it: all 16
+sites are now recognized log calls, ZERO bypasses on the two newest
+files, and nothing self-feeds (still never touches prax). The one
+genuinely unreportable site — the sidecar's own write failure — went
+from `pass` to a `.dropped` counter surfaced in `escalation status` as
+"Trail lines lost". unused_function: reset_config_cache() deleted (six
+test callers, zero production; a CLI call would be dead code — fresh
+process per invocation means the cache is always cold there).
+custom_config readme finding: already resolved by seedgo's FPLAN-0380
+work — verified, not claimed. Self-caught: moving the sink orphaned
+conftest's ESCALATION_LOG constant patch — 898 tests would have
+silently written the LIVE escalation.jsonl; all six sites now swap the
+logger object. +8 tests (build_digest was the branch's one untested
+public function), canary 3-red-then-green. Deliberately NOT fixed:
+cross-handler imports — trigger holds at 99% because
+check_handler_independence() rejects seedgo's own documented ALLOWED
+example and computes own_package as the FILENAME for root-level
+handler files (exemption tests "handlers.escalation.py", impossible in
+any import); reproduction mailed to @seedgo, restructure only on their
+ruling. Also reported: bypass rules carrying "lines" are actually
+file-wide (silent_catch never passes line to is_bypassed). 898 passed,
+ruff clean, coverage 100/100. Re-verified by devpulse: suite + audit
+(99%, sole flag is the checker bug).
+
+**fix(prax)** — Windows CI red root-caused to the assertion, not the
+isolation (test_telegram_relay.py 1.2.0, by @prax — correcting
+devpulse's brief). `assert Path.home() not in CONTROL_FILE.parents` is
+a POSIX-only proxy: on Windows pytest's tmp_path lives INSIDE the user
+profile, so the check is False whether isolation works or not — and
+the sibling exact-equality test passing on the same CI job proves
+isolation was holding. Assertions now state path IDENTITY (== isolated
+path, != operator path). The HOME+USERPROFILE redirect went in anyway
+as belt to the re-point's braces, scoped to the reload; platform
+honesty pinned by Linux-runnable tests calling posixpath/ntpath
+expanduser BY NAME (ntpath never reads HOME — drop USERPROFILE and the
+Linux runners go red, not Windows six weeks later). Canary: Windows-
+shaped layout on Linux (tmp nested under home) reproduced the verbatim
+CI error with the old assertion, 62/62 green with the new. Process
+honesty: their first simulation (swapping os.path.expanduser) was a
+no-op harness — caught, discarded, replaced. Fleet lesson: assert
+isolation by identity, never ancestry. 1098 passed / 1 skipped, audit
+100%. Re-verified by devpulse: suite + audit.
+
+**fix(drone)** — seedgo unused_function flag resolved by deletion, not
+bypass (by @drone). `reset_identity_log_dedupe()` was a public
+production function whose only callers were tests — exactly what the
+standard exists to catch. @drone verified a per-function bypass was
+genuinely available (unused_function honors named bypasses) and
+declined it: the standard wasn't wrong, the README's "long-lived host"
+justification was a hypothetical, and no natural production caller
+exists. Tests now clear the private dedupe set directly (documented
+autouse conftest fixture — the established shape, seedgo skips
+tests/). Honest extra: their canary showed the fixture is defensive,
+not load-bearing (per-test temp dirs mean signatures never collide),
+proven both ways with a throwaway shared-cwd pair. Audit 100%, 981
+passed / 5 skipped. Re-verified by devpulse: suite + audit.
+
+**fix(ci)** — two small CI reds cleared by devpulse on its own turf.
+Devpulse: watchdog transcript reader (agent.py 1.2.1) logged nothing
+when it skipped an unparseable transcript line — seedgo silent_catch
+flag, now an info log naming the file and the parse error, audit back
+at 100%. Flow tests: CodeQL read `assert "https://aipass.ai" in result`
+as hostname sanitization (py/incomplete-url-substring-sanitization);
+assertion now pins the full template sentence, which is also the
+stronger test. Both suites green (devpulse 456, flow 774).
+
+**fix(tests)** — CI-only xdist failures in backup and trigger rooted in
+one class: tests that evict a module from `sys.modules` and re-import it
+under mocks leave the parent package's *attribute* pointing at the
+throwaway twin after teardown (monkeypatch/patch.dict restore the dict,
+never the attribute). The next test on the same worker then resolves two
+different objects for one dotted name — patches land on one, code runs
+the other. Trigger: escalation's medic gates read an unpatched
+medic_state twin whenever test_medic_state ran first (deterministically
+reproduced: 4 red). Backup: mock.patch on 3.10/3.11 walks parent
+attributes and dies with `AttributeError: ...drive has no attribute
+'client'` (3.12+ resolves via pkgutil.resolve_name, which is why it
+never reproduced locally). Fix: autouse conftest fixture in both suites
+resyncs parent attributes with `sys.modules` after every test and drops
+attributes whose module was evicted. Trigger repro 4 red → 151 green;
++2 regression tests pinning the desync shape; both suites + full-repo
+xdist green. By devpulse (test-only, CI unblock).
+
+**fix(hooks)** — edit_gate's entry-count warning stopped making false
+promises (edit_gate 1.2.0, by @hooks; the @memory entry-count bug's
+twin, caught by three escalation digests). Same class: the guard
+counted the combined sessions array (regular + auto-compact snapshots)
+against the regular-only cap, so every healthy branch read "16/15 —
+rollover will trim at next PreCompact" on every gate pass — a trim that
+could never come, since rollover budgets snapshots separately and had
+nothing to archive. Guard now mirrors the extractor's predicate exactly
+(sessions split, key_learnings deliberately not — the extractor doesn't
+split it either, test-pinned). Second false promise found in the same
+function: todos "will trim" — todos never roll, they're hand-pruned;
+dormant today but one re-added config key from returning. Warning lines
+now name the branch (previously every branch's over-count was
+attributed to @hooks, and digest signatures blurred) and state what
+actually happens, every clause verified in code. Warn-only confirmed —
+nothing was ever blocked, "they were lied to ~10x/hr." +10 tests
+(1370), two canaries red with the false lines verbatim, live-verified
+against the real 14+2 file: zero warnings. Seedgo 100%. Suite + lint
+re-verified by devpulse.
+
+**fix(memory)** — the fleet-wide false ENTRY COUNT warning is gone:
+entry-count guard now budgets auto-compact snapshots separately, exactly
+as rollover always did (memory_files 1.2.0, built by @memory, parked by
+Patrick's ruling, applied as phase 2 of the digest live-test). The guard
+counted the combined sessions array against the regular-only cap, so
+every healthy branch (14 regular + 2 snapshots) read "16/15" on every
+.trinity write, forever — a warning rollover could never satisfy because
+there was nothing to trim. Deliberately left LIVE as the escalation
+digest's designated first prey; the digest caught it (signature
+d3aeeee9ae26, 10-in-60min, emailed @devpulse 21:41), and only then was
+the parked, canary-proven patch applied — completing the full lifecycle
+test: detection proven by the digest arriving, resolution proven by the
+signature going structurally quiet. Guard now shares the extractor's
+exact predicate (junk entries count as regular in both). +5 tests
+(1046), live-verified against the digest's named file: 0 warnings.
+Same-class twin found in @hooks' edit_gate by two more digests — fixed
+separately. Applied + re-verified by devpulse.
+
+**fix(drone)** — caller-identity warnings were a category error reported
+twice per call, fixed at source (router_handler 1.1.0, by @drone). The
+new escalation digest lane's first two catches named this module; the
+real bug was deeper than the digest saw. Identity resolution ran twice
+per route, doubling every log line — and the "identity conflict" warning
+cited a passport at the repo root that has never existed ('aipass' was
+the registry-fallback *project name* arriving indistinguishable from a
+passport identity; 103 of 105 logged conflicts were that shape).
+Detection now returns provenance (passport vs project), messages say
+what is actually true, and severity follows meaning: a real
+two-citizens conflict stays a loud WARNING, an assigned identity
+running at a project root is INFO, an anonymous caller is INFO (a
+correct outcome, not a fault). Repeated explanations dedupe once per
+process — per-process only, so real conflicts recurring across
+invocations still reach the digest, test-pinned. +10 tests (981),
+canary red on all three reverts, live-proven: the exact shapes that
+tripped both digests now produce zero warnings in 10 calls while the
+real-conflict case still warns. First full digest-lane loop closed:
+digest → owner fix → signature quiet. Suite + lint re-verified by
+devpulse.
+
+**fix(prax)** — every operator-facing monitor line rewritten in plain
+language that names its subsystem (40 sites across 10 monitoring files,
+by @prax; Patrick ruling). The line that triggered it — `Dropping
+events (102...): Full()` — now reads "The live monitor display queue is
+full — 102 events were skipped from the terminal monitor view since the
+last report. Nothing is lost: the on-disk logs are complete." Split in
+two on the way: the old line reported every enqueue failure as
+overflow, so an unexpected TypeError would have worn the comforting
+"queue is full" wording — expected pressure is now a WARNING saying
+nothing is lost, unexpected failure an ERROR saying "this one is a
+bug." Subsystem vocabulary standardized in the operator's words (live
+monitor display, file watcher, log watcher, Telegram relay, commons
+live feed, branch labelling) — including the instance_lock line that
+sat unremarked for 1h51m on 07-31 while the relay was stranded
+viewer-only. Every reassurance was verified in code before shipping
+("plain language can lie faster than a repr can"). Exception reprs
+gone except two network lines where the errno text IS the actionable
+content. +5 wording-pin tests (1093), canary red on old-line restore,
+live-proven overflow in system_logs. The 30s rate limiter untouched.
+Ruff + seedgo 100%. Suite + lint re-verified by devpulse.
+
+**fix(backup)** — user-supplied relative paths resolve where the user
+actually is, and a live tree changing mid-snapshot no longer aborts the
+cycle (by @backup). Two fixes riding together. CALLER_CWD: backup runs
+as an installed entry point, so `Path.cwd()` is backup's own branch dir
+— `backup share notes.txt` from another project resolved into the wrong
+tree and failed with a misleading not-found. New
+`handlers/path/caller.py` resolves relative paths against
+`AIPASS_CALLER_CWD` (drone exports it; falls back to `Path.cwd()` for
+direct invocation), absolute paths byte-identical to before. Sweep found
+the same class failing SILENTLY in register/status (registering the
+backup branch dir under another project's name and happily backing it
+up) — all four sites fixed, registry.py's registry-file path deliberately
+untouched (not user input). TOCTOU: the post-snapshot timestamp save
+indexed `os.path.getmtime` over files scanned moments earlier — an
+editor temp file vanishing mid-run threw FileNotFoundError, aborted the
+whole cycle, and surfaced as a bogus "Unknown command" through the
+route_command catch-all. Vanished files now skip with a log line
+(absent-from-both compares equal; a returning file mismatches and
+triggers the full snapshot it needs). +11 tests (263), canary red 6
+ways with the exact live failure shapes, absolute-path tests green
+under revert. Seedgo 100%. Suite + lint re-verified by devpulse.
+
+**fix(flow)** — template stamping hardened against partial placeholder
+values + VERA's weekly_update v2.1 landed (get_template 1.3.1). VERA's
+createIfEmpty KeyError report turned out already fixed 08-07 (her field
+report predated the fix — flow live-stamped to prove it before touching
+anything). The one real remaining hole: `_substitute_placeholders` used
+a raw dict index, safe today only because every known placeholder
+happens to be supplied — now `.get` with literal-token passthrough, so
+a template that loaded when registered always loads when stamped,
+structurally. v2.1 landed byte-identical from the dropbox (full
+clickable https://aipass.ai URLs per Patrick's directive, Bluesky step
+fires from the caller's own branch dir post-v2.7.14). +2 tests (774,
+one pinning the REAL shipped template through a live stamp), canary red
+with the exact KeyError shape VERA hit. README truth-up: PPLAN/
+playbook_plans was entirely undocumented. Live-stamped PPLAN-0032 as
+proof, both test artifacts closed through the pipeline. Seedgo 100%.
+By @flow; suite + lint re-verified by devpulse.
+
+**fix(prax)** — telegram relay tests no longer read the operator's live
+control file (test_telegram_relay.py 1.1.0, tests only). Five tests went
+red on the dev machine the moment Patrick paused the prax monitor bot
+from Telegram — `_flush_buffer` honors the real
+`~/.aipass/telegram_bots/` control file, and the tests inherited his
+`paused: true`, discarding every buffered line before assertion (green
+on CI where no control file exists). Fix: autouse fixture isolates
+CONTROL_FILE per test, applied AFTER the module reload — reload
+re-executes the module body and recomputes the path from Path.home(),
+so isolation applied before the reload silently lapses; a pin guards
+exactly that. Helper now refuses (RuntimeError) outside the fixture
+instead of quietly falling back to the operator file. Insight kept from
+the fix: module reload already resets literal globals — the only leak
+was the one global computed from the environment. +4 isolation pins
+(57), canary 8-red/57-green proven in BOTH environments (real paused
+file present, and HOME redirected). Patrick's pause untouched. By
+@prax; suite + lint re-verified by devpulse.
+
+**feat(trigger)** — the escalation digest lane: repeat warnings/errors
+now email the operator (DPLAN-0283 WS-A, the build the whole doctrine
+train served). Signature = level|branch|module|normalized-message,
+aligned with the error-registry fingerprints; rolling window per
+signature; threshold crossed → ONE email to @devpulse (email, never a
+wake), then per-signature cooldown. The ruling encoded structurally:
+`record_error()` is the FIRST statement above every gate — a mute stops
+the dispatch but cannot reach the counting; only SENDING is gated, so
+every signature stays auditable in escalation_state.json. Two tiers:
+warnings (which never had any escalation path) including branch-log
+WARNING parsing, and errors still recurring after a medic dispatch,
+under a mute, with medic off, or with no owner to dispatch to.
+Suppressed fingerprints stay silent (a human already said benign) unless
+`escalate_suppressed` is flipped. All knobs operator-owned in
+`trigger.config.json` under custom_config, loaded by trigger's own
+S193-doctrine config loader — first adopter of the standard shipped
+earlier tonight. Live-proven with 4 real digests through ai_mail
+end-to-end, including the muted-branch case: dispatch suppressed,
+counting continued, digest sent. State file deliberately off the trio
+naming path; audit trail in .jsonl so the lane cannot feed itself.
++167 tests (890), seedgo 99%, README truth-up. By @trigger; suite +
+lint + live CLI + audit re-verified by devpulse.
+
+**fix(memory)** — unreadable config can no longer crash past the
+fail-loud path (config_loader 1.3.0). Seedgo's WS-B rider find, fixed at
+both occurrences: `load()` had `read_text()` outside the try, so bad
+bytes (UnicodeDecodeError) or bad permissions (OSError) escaped raw
+instead of serving defaults — and `push_defaults_to_per_branch` had the
+identical hole, its try catching only JSONDecodeError. Now: read guarded
+with its own except → ERROR naming the exception type + distinct
+`config_load_unreadable` operation + defaults in memory, file never
+touched; push refuses on all three conditions. Corrupt handling NOT
+flipped — still fail-loud-never-clobber per the June ruling; the
+quarantine upgrade stays queued behind the escalation digest. +5 tests
+(1041), canary-verified red on both reverted halves, live-proven on a
+bad-bytes file (defaults served, push refused, bytes byte-identical).
+Operator's live config untouched throughout. By @memory; suite + lint +
+code read re-verified by devpulse.
+
+**fix(devpulse)** — watchdog stall detector no longer blind to sub-agent
+work (agent.py 1.2.0). Two compounding causes, both caught live when the
+watchdog cried STALLED on @trigger's healthy digest build: (1) JSONL
+scanning was top-level only, but sub-agent transcripts live under
+`<session>/subagents/` — a parent waiting on a synchronous sub-agent
+writes nothing itself while the nested file grows, so real work read as
+idle; now recursive, keyed by relative path so equal basenames across
+sessions can't collide. (2) The in-flight-tool check read the literal
+last JSONL line, which can be a bookkeeping entry (`last-prompt`)
+written after the assistant's `tool_use` — now walks backwards past
+roleless lines to the last real message entry. +4 tests (21),
+canary-verified red on the reverted glob, then live-proven against the
+very trigger session that false-fired: 11 nested files tracked,
+in-flight True, activity caught in 10s. By devpulse.
+
+**docs(seedgo)** — json_structure standard rewritten to the S193
+self-heal doctrine (v3.0.0, DPLAN-0283 WS-B). The house-pattern block is
+now 6 rules written from the verbatim ruling + memory's config_loader
+1.2.0 as reference implementation: configs live in the JSON; the file on
+disk is the runtime authority; DEFAULT_CONFIG is the regeneration seed
+kept at operating values; missing → full atomic regen; malformed or
+unreadable → fail loud, never clobber, defaults in memory only;
+deep-merge file-over-seed. Retired: never-snapshot, "config holds only
+overrides", "missing = defaults". The 6-key drift case reframed — a
+stale seed regenerates stale truth, not "files can't hold full configs".
+"Never create JSON files manually" warning scoped to the auto-generated
+trio (custom_config is the operator's to hand-edit). +8 tests (1347):
+six pin the doctrine, two pin what must never return — canary-verified
+red three ways, which itself caught a vacuous-pass defect in the test
+helper. Rider finding for @memory: config_loader read_text() outside
+the try — UnicodeDecodeError/PermissionError escape raw (queued). By
+@seedgo; suite + lint + live render re-verified by devpulse.
+
+**docs(spawn)** — custom_config README template rewritten to the S193
+self-heal doctrine + fleet re-render 17/17 (DPLAN-0283 WS-C). The guide
+now teaches: the file is the runtime authority (configs live in JSONs,
+not code); code holds `DEFAULT_CONFIG` only as the regeneration seed,
+kept aligned with operating values; missing file → regenerated in full;
+malformed file → fail loud, never clobbered; code writes to
+custom_config only on that self-heal path, partial files deep-merge from
+the seed. Thursday's never-snapshot wording retired everywhere —
+verified by grep across all 17 rendered READMEs. Tests were part of the
+defect (they asserted the reversed doctrine): rewritten + a new
+absence-canary test that goes red if the retired rule ever reappears,
+all three canary-verified red/green. Reference-loader pointer added
+(memory's config_loader 1.2.0). Registry hash updated; only README.md
+written per branch — operator files untouched. 381 tests, seedgo 100%.
+By @spawn; suite + lint + rendered README + fleet grep re-verified by
+devpulse.
+
+**fix(memory)** — the config file is the authority again: self-heal
+restored (config_loader 1.2.0, Patrick ruling S193 reversing the
+doctrine half of Thursday's ws4). The never-snapshot change had archived
+the operator's `memory.config.json` and made the loader write nothing on
+a missing file — inverting the June-shipped design (DPLAN-0206 /
+FPLAN-0271): configs live in JSONs; code's `DEFAULT_CONFIG` exists only
+as the regeneration seed. Restored to that spec: genuinely-missing file
+→ full config written to disk (atomic write); malformed or wrong-shape
+JSON → ERROR + defaults served in memory, the operator's file never
+touched; `push_defaults_to_per_branch` now refuses over an unreadable
+file instead of silently rebuilding it. `enforce: true` in the seed per
+ruling — regenerate what we operate. Kept from ws4 because correct
+regardless: the extractor defaults-fallback (the regen path is only safe
+because it stayed) and the aligned seed values. Live-proven twice:
+delete the file, run any memory command, watch the full config reborn —
+second run carries `enforce: true`. 1036 tests, seedgo 100%. Queued: the
+never-snapshot text in the seedgo standard + spawn README guide now
+contradicts the ruling; correction pass to follow. By @memory;
+suite + lint + live regen ×2 re-verified by devpulse.
+
+## [2026-08-07] — post-v2.7.14 train (in progress)
+
+**feat(seedgo)** — the audit can now SAY things without scoring them, and
+the trio standard closed its blind spot (FPLAN-0380 workstream 1 of 4,
+Patrick-ruled: seedgo never audits custom_config content — signpost only).
+A new non-scored info channel: checkers may expose `check_branch_info()`,
+collected into `info_lines` (structurally impossible to affect a score)
+and rendered dim ALWAYS — including at 100%, where the old
+violations-only display would have hidden an info line on exactly the
+healthy branches it describes. First consumer lists custom_config
+operator files + a guide pointer; audit cache now fingerprints
+custom_config names/mtimes so the line can't go stale on a cache hit.
+Standard text gains the house-pattern section (5 rules + the
+never-snapshot rule with memory's 6-key drift named). Trio completeness
+is now bidirectional — any `{stem}_{config|data|log}.json` implies the
+other two; live-proved both directions on @trigger in real time (19:45
+red 66% on the genuine gap, 19:50 green 100% after their parallel fix —
+neither branch touching the other). Plus, born from devpulse's typo'd
+pointer in the brief: `drone @seedgo standard <name>` now exists as a
+pack-resolving alias (refuses to guess on ambiguity), and a canary test
+parses the embedded pointer constant and resolves it for real — an
+embedded command string is untested code, which is how the typo could
+exist at all. Their attempt-1 process died after replying (exit 1);
+attempt 2 honestly flagged the tree-state mismatch before commit. 1339
+tests (+36 across both passes), fleet 16/17 at 100%. Found-not-fixed,
+queued: log_structure's branch post-check has been dead fleet-wide
+(bypass_rules TypeError swallowed by a bare except) — reviving it can
+move scores, held for a ruling. By @seedgo; suite + alias + live @hooks
+info line re-verified by devpulse.
+
+**fix(memory)** — archived entries recover by identity, not by guesswork
+(extractor 0.6.0, search display; @commons' finding fixed at the source).
+Archived vectors carried branch/type/source but never the entry's own
+number or date — a recovered entry matched on text alone, ambiguous the
+moment two entries share wording. extract_with_metadata now lifts
+entry_number + entry_date into vector metadata (scalars only; missing or
+mistyped values skipped, never written as None — a None fails the whole
+Chroma store). Chased to the surface: search had been printing a bare
+"Time:" for every archived .trinity entry since forever (rollover writes
+empty timestamp; entries carry `date`) — now renders "Entry: #14 | Dated:
+…". Canary-verified both ways; live unmocked run archived 3 entries
+printing numbered+dated. Honest caveats kept: ~8437 existing vectors have
+no backfill (only possible from versioned backups — on @memory's board),
+and their earlier "restore on request" offer is withdrawn as unactionable
+(the index-0-only write hook would misorder restored entries — correct
+guardrail, wrong offer). 1029 tests (+5). By @memory; suite + lint
+re-verified by devpulse.
+
+**fix(memory)** — the stale-snapshot trap closed at its source, and the
+reframe that came with it (FPLAN-0380 workstream 4 of 4). config_loader
+1.1.0 no longer writes anything on a missing file (the self_heal parameter
+removed entirely — a flag that never heals is a lie in the signature);
+code DEFAULT_CONFIG aligned to the operating values (enforce=True, todos
+150, observations 300, rollover keep 15/15/15). The reframe: that config
+file was NEVER in git — `**/*_json/` ignored — so the divergence was
+never disk-vs-code, it was THIS MACHINE vs EVERY FRESH INSTALL, which had
+been running the old lax defaults all along. The alignment is the entire
+shipped fix. And archiving the local file exposed a masked fleet bug:
+extractor _extract_items_v2 had no defaults fallback, so without
+per_branch entries (i.e., on every clone that ever ran rollover) it
+archived nothing while returning success — a silent no-op wearing a green
+badge. Fixed (extractor 0.5.0, canary-verified: revert reproduces the
+exact skipped:True dict). Live proof fileless: *_meta cap lines
+byte-identical across 21 branches before/after, end-to-end archive run
+kept 15 newest/archived 6 oldest (first attempt correctly refused —
+same-day entries hit the DPLAN-0278 safety valve, working as designed).
+1024 tests, seedgo 100%. By @memory; suite + fileless live rollover +
+rendered caps re-verified by devpulse.
+
+**fix(trigger)** — latent data-loss defused, and the defect had a twin
+(FPLAN-0380 workstream 3 of 4). Two hand-written live-state files squatted
+on json_handler's trio paths for module `trigger`: `trigger_config.json`
+(12 branch mutes + circuit breaker) and — found by @trigger, not in the
+brief — `trigger_data.json` (the error catch-up hash set, whose loss would
+re-dispatch every already-handled error). Neither carried the trio's
+required keys, so any `ensure_json_exists('trigger', ...)` call judged
+them corrupt and template-blanked them. Moved to `medic_state.json` /
+`error_catchup.json` (config.py 1.1.0, medic_state.py 1.2.0,
+error_detected.py 2.4.0, startup.py/runaway_handler.py 1.1.0/1.2.0);
+one-shot migration, legacy archived never deleted, unreadable legacy left
+in place with a warning. Proof by attempted destruction: fired
+`ensure_module_jsons('trigger')` live — it recreated blank templates while
+all 12 mutes, TTLs, breaker state, and 32/32 catch-up hashes survived
+(pre-fix, that single call destroys everything). Two self-caught traps:
+a nested-flock deadlock the mocked test lock could never expose (lock made
+real in the fixture), and the first-cut migration fighting @seedgo's new
+bidirectional trio check in an infinite create/archive loop (now one-shot,
+placeholders left to their owner — trigger audit 100%). A dead
+TRIGGER_CONFIG_FILE constant removed rather than repointed; one test that
+passed for the wrong reason fixed. 723 tests (+13). By @trigger; suite +
+live medic read-back re-verified by devpulse.
+
+**docs(spawn)** — custom_config/ README grows from 3-line stub to the
+operator-override guide (FPLAN-0380 workstream 2 of 4). Every branch's
+`{branch}_json/custom_config/` now explains the house pattern in-place:
+code holds defaults (shipped truth), a file here holds ONLY deliberately
+overridden keys deep-merged at load, missing file = defaults = safe, and
+never write defaults to disk (the snapshot anti-pattern that made
+@memory's config undiagnosable, named as the failure mode). Template +
+registry hash regenerated, plus a one-pass fleet refresh of all 17 live
+branches' copies — those are gitignored, so spawn's render pass is the
+only propagation path (two hand-written READMEs at @cli/@skills replaced,
+content preserved in the reply for their owners). 380 tests (+2, both
+canary-verified: stub-revert reds the rules test, placeholder-typo reds
+the render test). By @spawn; suite re-run + rendered copy + registry hash
+re-verified by devpulse.
+
+**feat(hooks)** — two grounding gaps closed, Patrick-ruled the same evening
+(email.py 1.2.0, cadence.py 2.1.0, grounding_content.py 1.1.0,
+post_compact_regrounding.py 1.1.0). (1) Mail banner on a 5-turn cadence
+loop: announces the turn mail arrives, repeats every 5th turn while it
+stays new, fully silent at zero — and zero CLEARS the loop state so the
+next arrival announces immediately instead of serving out the old period.
+Built as an elapsed-turns loop off the last fire, not a modulo slot (a
+banner four turns late is not a notification); state in its own per-session
+file because the turn-counter file's every-turn truncation is load-bearing
+for the post-compact regroup token. Fails OPEN — a broken counter can't
+hide someone's mail. Previously the banner stacked on every single turn
+(11 turns with mail = 11 banners). (2) Post-compact re-grounding is now
+ACTIVE, not just passive: the PostToolUse backstop prepends an explicit
+instruction — re-read .trinity, refresh + read the dashboard, and SAY SO
+if memory contradicts reality — because the startup protocol only ever ran
+off a greeting and a mid-task continuation never gets one. Live-proved
+twice: once on @hooks during the build itself, once on devpulse during
+this very verification (the backstop fired mid-turn and the instruction
+was followed). Known gap flagged, not fixed (their call was right): a
+compact followed by a real UserPromptSubmit gets passive grounding only —
+fix queued, touches DPLAN-0278 machinery. Plus a drive-by: srt_resolve
+node timeouts 15s→60s named constant (Windows runner cold-start flaked a
+docs-only commit; it's a hang backstop, not a latency budget). 1360 tests
+(+25, canary-verified: forced-fire + instruction-removal each break their
+own tests), seedgo 100%. By @hooks; suite re-verified by devpulse.
+
+**fix(ai_mail)** — mail can no longer be invisible or crash its reader: four
+live defects fixed (format.py 1.2.0, email.py, email_send.py, ai_mail.py).
+(1) The listing truncated the WRONG END — reverse-then-slice kept the oldest
+20, so any inbox over 20 silently hid every NEW arrival behind a benign
+"Showing 20 of 25" footer (found when @skills' reply vanished from devpulse's
+box, the busiest in the fleet). (2) `view latest` served the OLDEST mail.
+(3) Rich markup ate subjects — `[dim]` silently swallowed, `[/rc]` crashed
+the entire listing — and after the first fix the view BODY still crashed on
+`[/rc]` (caught live by devpulse viewing the fix report itself): bodies now
+render with markup=False (no parse step, can never raise), listings escape
+at the formatter, send-confirmation echo hardened (same class, found by
+sweeping the branch). (4) Sent listing skipped unreadable files silently —
+placeholder rows now. Fail-honest rule throughout: a row can render ugly,
+it can no longer be absent. Plus VERA's exit-code report folded in: failed
+replies exit 2 (nothing read the failure flag error() set). One complicit
+test fixture reordered (matched the bug, not delivery's write order — 4th
+logged instance of that class). 881 tests (+21 across both passes, canary-
+verified), seedgo 100%. By @ai_mail; suite + live read-back re-verified by
+devpulse.
+
+**feat(skills)** — TG `/rc <target>`: recover a dark Claude Code remote from
+the phone (remote_control.py, control-bot family). Born from the day Vera's
+rc died with Patrick phone-only and no path back: the bot resolves the target
+to its tmux session and types CC's built-in `/rc` (`/remote-control`) into
+it — the one injected string, module constant, TG-inbound and control-bot
+gated like `/context`. Safety learned the hard way and baked in: palette top
+match verified before Enter, never a bare Enter on an empty composer (ghost
+prompt-suggestions), busy sessions get a refusal not a queue, success read
+from the footer indicator only. Live-test discovery: the "second step" is
+state-dependent — an already-connected session pops a modal status panel
+that would wedge the target's composer, so the verb Escapes it and verifies
+dismissal. Deploy proven live via getMyCommands before/after fleet restart:
+`rc` present on exactly the two control bots, absent on all three branch
+bots (the gate holds in production). 48 new tests, 1058 telegram + 252
+skills green, seedgo 100%. By @skills; suites re-verified by devpulse.
+
+**fix(drone)** — caller identity: assigned beats inferred (router_handler
+1.1.0). `AIPASS_BRANCH_NAME` (who the process IS) now outranks the cwd
+passport (where it's standing); cwd stays as the human-shell fallback. The
+inverted precedence stamped any agent standing in another branch's directory
+with THAT branch's identity — S102 damage: a commons agent's mail landed as
+@aipass and corrupted a citizen's sent store. The bug lived in TWO places
+(the env builder at router_handler.py and a second copy feeding the
+`[CALLER:X]` routing-log tag in router.py) — a half-fix would have made the
+log exonerate the caller under investigation; both now share one resolver
+with a tag-matches-stamp test. Conflicts log a WARNING naming both signals
+(case-insensitive — passports carry display casing). Authority unaffected
+and now test-asserted: git owner-tier resolves from passports only. Also:
+ambient-env test pinned (outward-lean class), stale ALLOWED_CALLERS docs
+corrected to the earned owner tier. Found by @ai_mail/@aipass, ruled and
+built by @drone. 971 tests (+8), 5 canaries, seedgo 100%; live-proved under
+the original S102 conditions and independently re-verified by devpulse.
+
+**fix(flow)** — SOP templates stop exploding on braces (get_template loader):
+`str.format()` over the whole template body read every literal `{...}` in
+documented code snippets as a replacement field — weekly_update.md's
+`{createIfEmpty: true}` MCP example made the template 100% un-instantiable
+with a bare KeyError. Escaping the one brace would have left the trap armed
+for every future SOP, so the loader now substitutes ONLY the seven known
+placeholder names via regex; all other braces pass through verbatim.
+Template file untouched. Caught by @trigger's error watch, fixed by @flow.
+772 tests (+2), verified end-to-end (PPLAN-0030 created + closed through the
+full pipeline), seedgo 100%; suite re-verified by devpulse.
+
+**fix(trigger)** — dispatch notifications report the true occurrence count
+(error_detected 2.3.0, found by @drone): line 563 hardcoded `occurrences=1`
+while threading every other field through from the handler. Gate 3 refuses to
+dispatch below count ≥ 2, so no dispatched mail could ever truthfully read 1 —
+every notification understated recurrence and readers triaged recurring errors
+as one-offs (@drone read a count-9 error as a single). The registry's number
+(error_reporter.py) was always right, which is why the two disagreed and the
+bug survived. 710 trigger tests (+3, canary-verified: reverting the line fails
+all three), seedgo 100%. By @trigger; suite re-verified by devpulse.
+
+---
+
 ## [2026-08-07] — cross-project walls down: the Vera arc lands end to end
 
 *Release v2.7.14 (PR #727, 26 commits) rolls up this section plus

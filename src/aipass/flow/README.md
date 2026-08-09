@@ -4,9 +4,9 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.2.1
+**Version:** 2.2.2
 **Created:** 2025-11-15
-**Last Updated:** 2026-06-05
+**Last Updated:** 2026-08-08
 
 ---
 
@@ -108,9 +108,10 @@ flow/
 │   ├── dev_plans/               # DPLAN templates (default)
 │   ├── research_plans/          # RPLAN templates (default)
 │   ├── team_dev_plans/          # TDPLAN templates (default)
-│   └── audit_plans/             # APLAN templates (default)
+│   ├── audit_plans/             # APLAN templates (default)
+│   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 734 tests, 22 test files
+├── tests/                       # 774 tests, 22 test files
 └── .archive/                    # Archived legacy code
 ```
 
@@ -131,6 +132,7 @@ flow/
 | research_plans | RPLAN | rplan_registry.json | default |
 | team_dev_plans | TDPLAN | tdplan_registry.json | default |
 | audit_plans | APLAN | aplan_registry.json | default |
+| playbook_plans | PPLAN | pplan_registry.json | default, merge, prompt_change, weekly_update |
 
 Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` where NNNN auto-increments per type.
 
@@ -205,10 +207,10 @@ Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared ru
 
 ## Quality
 
-- **Seedgo:** 100% (35/35 standards)
-- **Tests:** 734 passed, 87/87 public functions tested (100%)
+- **Seedgo:** 100%
+- **Tests:** 774 passed, 88/88 public functions tested (100%)
 - **Source files:** 40 tracked by seedgo
-- **Last audit:** 2026-06-05
+- **Last audit:** 2026-08-08
 - **Battle test:** 16/16 commands pass via drone CLI (2026-04-22)
 
 ### Known Issues
@@ -220,7 +222,7 @@ Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared ru
 
 ---
 
-*Last Updated: 2026-06-05*
+*Last Updated: 2026-08-08*
 
 ---
 [← Back to AIPass](../../../README.md)

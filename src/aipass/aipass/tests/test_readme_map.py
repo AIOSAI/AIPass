@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_readme_map.py
 # Description: Tests for readme_map handler
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for readme_map — branch-name to README-path lookup."""
@@ -14,11 +14,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aipass.aipass.apps.handlers.readme_map import (
-    BRANCHES,
     _build_readme_map,
     _detect_aipass_root,
     get_readme_path,
     list_branches,
+    read_readme_at,
 )
 
 # Ensure encoding='utf-8' appears (PATTERN check)
@@ -215,22 +215,95 @@ class TestListBranches:
 
 
 # =============================================================================
-# TestBranchesConstant
+# TestLiveDiscovery
 # =============================================================================
 
 
-class TestBranchesConstant:
-    """Tests for the BRANCHES constant."""
+class TestLiveDiscovery:
+    """Branch roster is discovered from the tree, never hardcoded."""
 
-    def test_is_list(self) -> None:
-        """BRANCHES is a list."""
-        assert isinstance(BRANCHES, list)
+    def test_discovers_arbitrary_new_branch(self, tmp_path: Path) -> None:
+        """A branch dir that never existed before is found by the scan."""
+        import aipass.aipass.apps.handlers.readme_map as rm
 
-    def test_contains_known_branches(self) -> None:
-        """BRANCHES contains expected branch names."""
-        assert "drone" in BRANCHES
-        assert "aipass" in BRANCHES
+        src_aipass = tmp_path / "src" / "aipass"
+        for branch in ["drone", "zeta_brand_new"]:
+            d = src_aipass / branch
+            d.mkdir(parents=True)
+            (d / "README.md").write_text(f"# {branch}\n", encoding="utf-8")
 
-    def test_no_duplicates(self) -> None:
-        """BRANCHES has no duplicate entries."""
-        assert len(BRANCHES) == len(set(BRANCHES))
+        old_root = rm._AIPASS_ROOT
+        old_map = rm._README_MAP
+        try:
+            rm._AIPASS_ROOT = tmp_path
+            rm._README_MAP = None
+            result = _build_readme_map()
+        finally:
+            rm._AIPASS_ROOT = old_root
+            rm._README_MAP = old_map
+
+        assert "zeta_brand_new" in result
+        assert "drone" in result
+
+    def test_missing_src_aipass_returns_empty(self, tmp_path: Path) -> None:
+        """No src/aipass dir → empty map, no crash."""
+        import aipass.aipass.apps.handlers.readme_map as rm
+
+        old_root = rm._AIPASS_ROOT
+        old_map = rm._README_MAP
+        try:
+            rm._AIPASS_ROOT = tmp_path
+            rm._README_MAP = None
+            result = _build_readme_map()
+        finally:
+            rm._AIPASS_ROOT = old_root
+            rm._README_MAP = old_map
+
+        assert result == {}
+
+    def test_live_map_covers_real_tree(self) -> None:
+        """Against the real repo: every src/aipass dir with a README is mapped."""
+        branches = list_branches()
+        assert "drone" in branches
+        assert "hooks" in branches  # was missing from the old hardcoded roster
+
+
+# =============================================================================
+# TestReadReadmeAt — path-based live read
+# =============================================================================
+
+
+class TestReadReadmeAt:
+    """Tests for read_readme_at() — the handler that owns README file reads."""
+
+    def test_returns_whole_document(self, tmp_path: Path) -> None:
+        """The full file comes back verbatim, not a truncated or split view."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# Drone\n\nRoutes commands.\n", encoding=_ENCODING)
+
+        assert read_readme_at(readme) == "# Drone\n\nRoutes commands.\n"
+
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        """An unreadable path yields None rather than raising OSError."""
+        missing = tmp_path / "gone" / "README.md"
+
+        assert read_readme_at(missing) is None
+
+    def test_missing_file_logs_the_reason(self, tmp_path: Path) -> None:
+        """The OSError reason is logged, not swallowed — diagnosis needs it."""
+        missing = tmp_path / "gone" / "README.md"
+
+        with patch(f"{_MOD}.logger") as mock_logger:
+            read_readme_at(missing)
+
+        assert mock_logger.error.called
+
+    def test_content_is_never_cached(self, tmp_path: Path) -> None:
+        """A second call reflects an edit made after the first."""
+        readme = tmp_path / "README.md"
+        readme.write_text("# v1\n", encoding=_ENCODING)
+        first = read_readme_at(readme)
+        readme.write_text("# v2\n", encoding=_ENCODING)
+
+        assert first == "# v1\n"
+        assert read_readme_at(readme) == "# v2\n"

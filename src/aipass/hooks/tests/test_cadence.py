@@ -15,6 +15,7 @@ between calls (= new process) and aging the state file past the mtime
 debounce window (= a real prior turn, not a sibling in the same turn).
 """
 
+import contextlib
 import json
 import importlib
 import os
@@ -993,3 +994,156 @@ class TestPerLoaderPeriod:
             patch(f"{MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire("always") is True
+
+
+def _write_mail_state(tmp_path, last_fired, session="test-session"):
+    """Write the mail-loop state file (last turn the banner fired)."""
+    state_file = tmp_path / f"aipass-mailcadence-{session}.json"
+    state_file.write_text(json.dumps({"last_fired_turn": last_fired}))
+    return state_file
+
+
+@contextlib.contextmanager
+def _mail_env(tmp_path, config):
+    """Standard patch stack for mail cadence tests."""
+    with (
+        patch(f"{MODULE}._GUARD_DIR", tmp_path),
+        patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+        patch(f"{MODULE}._CONFIG_PATH", config),
+    ):
+        yield
+
+
+class TestShouldFireMail:
+    """Mail banner cadence: announce on arrival, repeat every Nth turn, silent at zero."""
+
+    def setup_method(self):
+        _reset_module_globals()
+
+    def _config(self, tmp_path, period=5, enabled=True):
+        config = tmp_path / "cadence.json"
+        config.write_text(json.dumps({"enabled": enabled, "period": 5, "loaders": {"email": {"period": period}}}))
+        return config
+
+    def test_zero_mail_is_silent(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(0, {}) is False
+
+    def test_first_sighting_fires(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        _write_state(tmp_path, turn=6)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True
+
+    def test_fires_at_plus_period_not_plus_one(self, tmp_path):
+        """The canary: over an 11-turn session with mail always present, the banner
+        fires on arrival and then only every 5th turn — never on consecutive turns."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path, period=5)
+        fired_on = []
+        for turn in range(11):
+            _reset_module_globals()
+            _write_state(tmp_path, turn=turn - 1)
+            with _mail_env(tmp_path, config):
+                if should_fire_mail(3, {}):
+                    fired_on.append(turn)
+
+        assert fired_on == [0, 5, 10]
+
+    def test_empty_inbox_clears_state_so_next_arrival_announces(self, tmp_path):
+        """Read your mail at turn 1, new mail lands at turn 2 -> announced at turn 2,
+        not held until turn 5. Clearing on zero is what makes that true."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+
+        _write_state(tmp_path, turn=-1)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(2, {}) is True  # turn 0, first sighting
+
+        _reset_module_globals()
+        _write_state(tmp_path, turn=0)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(0, {}) is False  # turn 1, inbox emptied
+
+        _reset_module_globals()
+        _write_state(tmp_path, turn=1)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True  # turn 2, fresh arrival announces
+
+    def test_without_clearing_the_next_arrival_would_be_muted(self, tmp_path):
+        """Control for the test above: same turn 2 arrival, but with stale state left
+        behind (as if zero had not cleared it) the banner is suppressed."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        _write_mail_state(tmp_path, last_fired=0)
+        _write_state(tmp_path, turn=1)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is False
+
+    def test_counter_reset_re_announces(self, tmp_path):
+        """After a compact the turn counter restarts at 0 while mail state says 7.
+        Negative elapsed must re-announce, not go permanently silent."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        _write_mail_state(tmp_path, last_fired=7)
+        _write_state(tmp_path, turn=-1)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True
+
+    def test_cadence_disabled_fires_every_turn(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path, enabled=False)
+        _write_mail_state(tmp_path, last_fired=3)
+        _write_state(tmp_path, turn=3)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True
+
+    def test_period_zero_fires_every_turn(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path, period=0)
+        _write_mail_state(tmp_path, last_fired=3)
+        _write_state(tmp_path, turn=3)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True
+
+    def test_disabled_still_silent_at_zero(self, tmp_path):
+        """Disabled restores fire-every-turn, but never invents a banner for no mail."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path, enabled=False)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(0, {}) is False
+
+    def test_no_session_id_fires(self, tmp_path):
+        """No session = no state to loop on; announce rather than swallow mail."""
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", env, clear=True),
+            patch(f"{MODULE}._CONFIG_PATH", config),
+        ):
+            assert should_fire_mail(1, {}) is True
+
+    def test_corrupt_mail_state_treated_as_never_fired(self, tmp_path):
+        from aipass.hooks.apps.modules.cadence import should_fire_mail
+
+        config = self._config(tmp_path)
+        (tmp_path / "aipass-mailcadence-test-session.json").write_text("{not json")
+        _write_state(tmp_path, turn=3)
+        with _mail_env(tmp_path, config):
+            assert should_fire_mail(1, {}) is True

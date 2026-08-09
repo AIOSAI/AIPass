@@ -117,14 +117,6 @@
     },
     {
       "file": "apps/commons.py",
-      "standard": "stderr_routing",
-      "lines": [
-        255
-      ],
-      "reason": "False positive \u2014 [yellow] section header in help text, not a warning message"
-    },
-    {
-      "file": "apps/commons.py",
       "standard": "deep_nesting",
       "reason": "main() depth 5 \u2014 app initialization flow: ensure_database, discover_modules, route_command. Legitimate entry point control flow."
     },

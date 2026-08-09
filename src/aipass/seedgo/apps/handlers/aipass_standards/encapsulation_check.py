@@ -27,6 +27,10 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: reaching into another module's internals is
+# what a unit test is FOR. 247 of 456 fleet test files failed this (54%, every
+# branch) for doing their job.
+APPLIES_TO = "production"
 
 # Cross-branch/cross-package handler imports are import-statement checks, so a
 # violation hiding in a package marker file must not be invisible to the audit

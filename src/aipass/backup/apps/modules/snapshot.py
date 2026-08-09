@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-04-17
-# Modified: 2026-06-12
+# Modified: 2026-08-08
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -74,6 +74,28 @@ def _build_current_timestamps(
         except OSError as e:
             logger.info(f"[backup] Quick-check mtime read failed for {rel_p}: {e}")
             return None
+    return timestamps
+
+
+def _build_saved_timestamps(
+    filtered: list[tuple[str, str]],
+) -> dict:
+    """Build the {rel_path: mtime} dict to persist after a snapshot run.
+
+    Deliberately more forgiving than _build_current_timestamps: a live tree
+    changes under us, so a file scanned a moment ago may already be gone
+    (another process's temp file, an editor swap). That file simply gets no
+    entry — never an abort. Omitting it is also correct for the next
+    quick-check: a file that stays deleted is absent from both sides and
+    compares equal, and one that comes back is absent from prev only, so the
+    mismatch triggers the full snapshot it needs.
+    """
+    timestamps: dict[str, float] = {}
+    for abs_p, rel_p in filtered:
+        try:
+            timestamps[rel_p] = os.path.getmtime(abs_p)
+        except OSError as e:
+            logger.info(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
     return timestamps
 
 
@@ -159,8 +181,7 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
 
     duration = time.time() - start
 
-    timestamps = {rel: os.path.getmtime(abs_p) for abs_p, rel in filtered}
-    save_timestamps(project_root, timestamps)
+    save_timestamps(project_root, _build_saved_timestamps(filtered))
 
     result.files_copied = copy_result.get("files_copied", 0)
     result.files_skipped = result.files_checked - result.files_copied

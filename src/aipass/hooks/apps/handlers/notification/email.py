@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: email.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Checks inbox for unread emails on UserPromptSubmit
 # Branch: hooks
 # Layer: apps/handlers/notification
 # Created: 2026-05-21
-# Modified: 2026-05-21
+# Modified: 2026-08-07
 # =============================================
 
 """Checks branch inbox for unread emails and returns notification text."""
@@ -77,6 +77,30 @@ def _count_new_emails(branch_root: Path) -> int:
         return 0
 
 
+def _cadence_allows(new_count: int, hook_data: dict) -> bool:
+    """Ask the shared cadence module whether the banner fires this turn.
+
+    Zero new mail is always silent. Otherwise the banner announces on the turn
+    mail arrives and repeats every Nth turn while it stays new, instead of
+    stacking on every single turn.
+
+    Fails OPEN: if cadence is unavailable the banner still shows whenever mail
+    exists. A broken counter must not be able to silently hide someone's mail.
+
+    Note the zero case is handed to cadence rather than short-circuited here —
+    an empty inbox is what CLEARS the loop state, so the next mail to arrive
+    announces on its own turn instead of serving out the previous period.
+    """
+    try:
+        import importlib
+
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        return cadence.should_fire_mail(new_count, hook_data)
+    except Exception as exc:
+        logger.info("[HOOKS] email: cadence check failed, announcing anyway: %s", exc)
+        return new_count > 0
+
+
 def handle(hook_data: dict) -> dict:
     """Check inbox and return email notification if unread messages exist.
 
@@ -92,7 +116,7 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     new_count = _count_new_emails(branch_root)
-    if new_count == 0:
+    if not _cadence_allows(new_count, hook_data):
         return {"stdout": "", "exit_code": 0}
 
     plural = "s" if new_count != 1 else ""

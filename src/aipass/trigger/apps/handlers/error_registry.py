@@ -49,7 +49,6 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 REGISTRY_FILE = TRIGGER_ROOT / "trigger_json" / "error_registry.json"
-TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
 CB_STATE_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_cb_state.json"
 
 VALID_STATUSES = ("new", "investigating", "suppressed", "resolved")
@@ -317,7 +316,7 @@ def circuit_breaker_trip(reason: str = "") -> None:
 
     Sets state to open with the current cooldown_seconds. Resets
     summary_sent flag so a new summary can be generated.
-    Persists state to trigger_config.json for restart survival.
+    Persists state to trigger_cb_state.json for restart survival.
 
     Args:
         reason: Optional reason string for logging/diagnostics
@@ -353,7 +352,7 @@ def circuit_breaker_reset() -> None:
 
     Restores all state to defaults: closed state, base cooldown,
     empty recent_errors list, and cleared flags.
-    Clears persisted state from trigger_config.json.
+    Clears persisted state from trigger_cb_state.json.
     """
     global _circuit_breaker
     _circuit_breaker.state = "closed"
@@ -419,6 +418,23 @@ def get_backoff_seconds(dispatch_count: int) -> int:
     if dispatch_count == 3:
         return 2700
     return 7200
+
+
+def get_dispatch_count(fingerprint: str) -> int:
+    """Return how many times this fingerprint has been dispatched.
+
+    Read-only view of the per-fingerprint tracking backoff already keeps (and
+    that survives restarts via the circuit breaker state file). The escalation
+    digest lane reads it to tell "medic told the owner and it is STILL
+    happening" apart from "the owner has not been told yet".
+
+    Args:
+        fingerprint: Error fingerprint to look up
+
+    Returns:
+        Dispatch count, 0 if this fingerprint has never been dispatched
+    """
+    return _fingerprint_dispatch_count.get(fingerprint, 0)
 
 
 def is_suppressed(fingerprint: str) -> bool:

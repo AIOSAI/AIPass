@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
@@ -25,6 +25,47 @@ from .executor import CommandResult, execute_command
 from aipass.drone.apps.handlers.json import json_handler
 
 logger = system_logger
+
+# Identity messages describe a process-wide, unchanging fact: who is calling and
+# from where. Neither the env var nor the cwd moves under a running process, so
+# the SECOND identical line carries no information the first did not — and there
+# is always a second, because resolve_caller_identity() is called twice per
+# route (modules/router.py for the CALLER: tag, then here for the stamp).
+# Long-lived callers turned that into a warning per drone call, forever.
+# Keyed per (kind, cwd, signals) so a genuinely NEW disagreement still speaks.
+#
+# Tests clear this directly (see tests/conftest.py). There is deliberately no
+# public reset(): nothing in production has a reason to forget what it has
+# already said, and a production function that only tests call is exactly what
+# seedgo's unused_function standard exists to catch.
+_LOGGED_IDENTITY_SIGNATURES: set[str] = set()
+
+
+def _log_identity_once(signature: str, level: str, message: str, *args: object) -> bool:
+    """Log an identity message once per process per signature.
+
+    Returns True if this call emitted, False if the signature was already seen.
+    Suppression is per-process only — a real conflict recurring across separate
+    invocations still accumulates and still escalates, which is the point.
+    """
+    if signature in _LOGGED_IDENTITY_SIGNATURES:
+        return False
+    _LOGGED_IDENTITY_SIGNATURES.add(signature)
+    getattr(logger, level)(message, *args)
+    return True
+
+
+class CallerSignal(NamedTuple):
+    """A caller-identity answer plus the evidence it came from.
+
+    ``source`` is the whole point: 'passport' is a competing claim about WHO a
+    caller is, 'project' is only a statement about WHERE they are standing. The
+    bare name cannot tell them apart, and treating them alike is what made a
+    process launched at a repo root look like an identity conflict.
+    """
+
+    name: str | None
+    source: str | None  # "passport" | "project" | None
 
 
 def find_entry_point(branch_path: str, branch_name: str) -> Path:
@@ -78,8 +119,13 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
     return derived
 
 
-def detect_caller_branch_name(cwd: Path) -> str | None:
-    """Walk up from cwd to find .trinity/passport.json and extract branch name.
+def detect_caller_signal(cwd: Path) -> CallerSignal:
+    """Walk up from cwd for a passport, then fall back to the registry project.
+
+    Returns the answer AND its provenance. Callers that only need the name use
+    :func:`detect_caller_branch_name`; callers weighing this against an assigned
+    identity need the source, because the two answers are not the same kind of
+    claim (see :class:`CallerSignal`).
 
     Falls back to the project name from the registry when no passport is found —
     a caller standing at a project root rather than in a branch. That resolves to
@@ -102,7 +148,7 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
                 if not name:
                     name = data.get("identity", {}).get("name")
                 if name:
-                    return name
+                    return CallerSignal(name, "passport")
                 logger.warning("Passport at %s names no branch — trying registry fallback", passport)
             except Exception as exc:
                 logger.warning("Failed to read passport at %s: %s — trying registry fallback", passport, exc)
@@ -124,19 +170,108 @@ def detect_caller_branch_name(cwd: Path) -> str | None:
         for reg_file in sorted(current.glob(f"*{_REGISTRY_SUFFIX}")):
             project_name = _project_name_from_registry(reg_file)
             if project_name:
-                return project_name
+                return CallerSignal(project_name, "project")
         parent = current.parent
         if parent == current:
             break
         current = parent
 
     # Single log site for a lost caller identity — every caller of this function
-    # gets the breadcrumb without any of them re-logging it. WARNING, not ERROR:
-    # the branch that actually refuses the work owns the page (see auth.py).
-    # Without the cwd this failure is invisible — the downstream error names the
-    # TARGET's directory, which sends investigation to the wrong branch entirely.
-    logger.warning("Caller branch detection failed — no passport or registry found from cwd %s", cwd)
-    return None
+    # gets the breadcrumb without any of them re-logging it.
+    #
+    # INFO, not WARNING: an anonymous caller is a correct OUTCOME, not a fault.
+    # A human running `drone @prax monitor` from their home directory has no
+    # identity to find, and saying so ten times an hour is not a diagnosis — it
+    # is the router complaining that a normal operator action is normal. The
+    # consequence is bounded and visible where it lands: AIPASS_CALLER_BRANCH
+    # goes unset and downstream attribution reads 'unknown'. Whoever REFUSES
+    # work for want of an identity owns the page (see auth.py) — the same rule
+    # that already keeps this site off ERROR.
+    #
+    # Once per process per cwd: the cwd cannot change under a running process,
+    # so a repeat is the same fact restated.
+    _log_identity_once(
+        f"undetected:{cwd}",
+        "info",
+        "Caller identity: anonymous — no passport or registry found from cwd %s. "
+        "Routing continues; work from here is attributed to no branch.",
+        cwd,
+    )
+    return CallerSignal(None, None)
+
+
+def resolve_caller_identity(cwd: Path) -> str | None:
+    """Resolve who is CALLING drone. Assigned identity beats location.
+
+    Two signals can answer "who is calling", and they are not the same kind of
+    claim:
+
+      - ``AIPASS_BRANCH_NAME`` — identity ASSIGNED to this process when it was
+        created. ai_mail's dispatch_monitor sets it from the dispatched address,
+        a branch entry point setdefaults its own name, and drone's own executor
+        sets it to the target below. All three mean the same thing: who this
+        process IS.
+      - the cwd passport — identity INFERRED from where the process happens to
+        be standing.
+
+    The env var wins. An agent that cds into another branch to read its code or
+    run its tests is still itself; the passport under its feet belongs to
+    whoever lives there. The inference is only ever as good as the assumption
+    "an agent works in its own home" — and agents legitimately leave home.
+    Trusting it stamped a commons-authored dispatch as @aipass, filed it in
+    aipass's sent store, and routed the reply to the wrong citizen (S102).
+
+    cwd still answers when nothing was assigned: a human in a terminal has no
+    AIPASS_BRANCH_NAME, and standing in a branch is the only signal they give.
+
+    Nothing here grants authority — git's owner-tier reads passports directly
+    (see plugins/devpulse_ops/auth.py) and never consults this. That is what
+    makes preferring an env var acceptable: it decides attribution, not access.
+
+    Only a PASSPORT can contradict an assigned identity. A registry-derived
+    project name answers a different question ("which project am I in"), so a
+    process launched at a repo root carrying its own branch name is not in
+    conflict with anything — it is the ordinary shape of every long-lived
+    service in this system.
+    """
+    assigned = os.environ.get("AIPASS_BRANCH_NAME") or None
+    standing, source = detect_caller_signal(cwd)
+
+    if assigned and standing and assigned.lower() != standing.lower():
+        if source == "passport":
+            # Two competing claims about WHO the caller is, and this process is
+            # the only place both coexist — unlogged, the disagreement is
+            # unrecoverable downstream (ai_mail sees only the winner). This is
+            # S102's shape; it stays loud. Deduped per process only, so the
+            # same conflict from a fresh invocation still counts and still
+            # escalates.
+            _log_identity_once(
+                f"conflict:{cwd}:{assigned}:{standing}",
+                "warning",
+                "Caller identity conflict: AIPASS_BRANCH_NAME=%r but the passport at cwd %s "
+                "claims %r — using %r (assigned identity wins). Two citizens claim this process.",
+                assigned,
+                cwd,
+                standing,
+                assigned,
+            )
+        else:
+            # Not a conflict: a project name is not a rival claim of identity.
+            # The old message called this one anyway AND named a passport that
+            # was never there — /home/patrick/Projects/AIPass holds no
+            # .trinity/passport.json, only AIPASS_REGISTRY.json — so it sent
+            # readers hunting for evidence that does not exist. INFO, once.
+            _log_identity_once(
+                f"in-project:{cwd}:{assigned}:{standing}",
+                "info",
+                "Caller identity: %r (assigned), running inside project %r from cwd %s. "
+                "No passport here — the project name is location, not identity.",
+                assigned,
+                standing,
+                cwd,
+            )
+
+    return assigned or standing
 
 
 def execute_branch_command(
@@ -170,11 +305,8 @@ def execute_branch_command(
         "AIPASS_BRANCH_NAME": branch_name,
     }
 
-    # Detect caller branch name from passport.json, fall back to env var
-    # (dispatched agents set AIPASS_BRANCH_NAME which survives cd)
-    caller_branch = detect_caller_branch_name(Path.cwd())
-    if not caller_branch:
-        caller_branch = os.environ.get("AIPASS_BRANCH_NAME")
+    # Who is calling: assigned identity first, cwd passport only as fallback.
+    caller_branch = resolve_caller_identity(Path.cwd())
     if caller_branch:
         caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
 

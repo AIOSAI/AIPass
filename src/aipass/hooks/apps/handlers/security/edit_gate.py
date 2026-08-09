@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-04
+# Modified: 2026-08-08
 # =============================================
 
 """Blocks unsafe edits: inbox writes, daemon confinement, cross-branch writes, diagnostics state."""
@@ -25,6 +25,9 @@ TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
+# todos never roll — they are operational and pruned by hand. _todos_count_advisory
+# says so in the right words; the rollover-budget warning must not also claim a trim.
+_NON_ROLLING_SECTIONS = frozenset({"todos"})
 
 
 def _entry_number(entry: dict) -> int | None:
@@ -134,6 +137,62 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         return ""
 
 
+def _is_auto_compact(entry: Any) -> bool:
+    """True for auto-compact snapshot entries.
+
+    Must match rollover/extractor.py exactly. This guard and the extractor
+    classifying the same entries differently is what made the warning
+    unsatisfiable, so anything that is not a dict carrying
+    status == "auto-compact" is a regular entry in both places.
+    """
+    return isinstance(entry, dict) and entry.get("status") == "auto-compact"
+
+
+def _warn_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
+    """Log one operator-facing line for a section over its rollover budget.
+
+    Every clause is a claim the code keeps: the count is the number rollover
+    itself counts, and @memory's detector marks the file ready at exactly this
+    threshold, so the archival named here really does happen.
+    """
+    logger.warning(
+        "[HOOKS] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
+        "The @memory rollover hook archives the %d oldest at the next PreCompact; "
+        "nothing is lost — recall them with drone @memory search.",
+        branch,
+        file_stem,
+        label,
+        count,
+        count - cap,
+        cap,
+        count - cap,
+    )
+
+
+def _check_session_counts(branch: str, file_stem: str, entries: list, section_cfg: dict) -> None:
+    """Warn on the sessions section, budgeting auto-compact snapshots separately.
+
+    Snapshots carry their own small cap in the extractor and never count against
+    the regular session budget. Checking the combined array against the regular
+    cap made this warning permanently unsatisfiable: a branch sitting legally at
+    14 regular + 2 snapshots read 16/15 on every .trinity write while rollover
+    correctly archived nothing, so the promised trim could never arrive.
+    """
+    auto_cap = section_cfg.get("auto_compact_cap")
+    if auto_cap is not None:
+        snapshots = [e for e in entries if _is_auto_compact(e)]
+        if len(snapshots) > auto_cap:
+            _warn_over_budget(branch, file_stem, "sessions (auto-compact snapshots)", len(snapshots), auto_cap)
+
+    cap = section_cfg.get("count")
+    if cap is not None:
+        # Unconditional split, matching the extractor: it excludes snapshots from
+        # the regular count whether or not auto_compact_cap is configured.
+        regular = [e for e in entries if not _is_auto_compact(e)]
+        if len(regular) > cap:
+            _warn_over_budget(branch, file_stem, "sessions", len(regular), cap)
+
+
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
     """Warn (never block) when rolling sections exceed their configured entry-count cap."""
     try:
@@ -144,21 +203,19 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
         for section_name, section_cfg in file_cfg.items():
             if not isinstance(section_cfg, dict):
                 continue
-            cap = section_cfg.get("count")
-            if cap is None:
+            if section_name in _NON_ROLLING_SECTIONS:
                 continue
             entries = after.get(section_name)
             if not isinstance(entries, list):
                 continue
-            count = len(entries)
-            if count > cap:
-                logger.warning(
-                    "[HOOKS] edit_gate: %s.%s count over limit (%d/%d) — rollover will trim at next PreCompact",
-                    file_stem,
-                    section_name,
-                    count,
-                    cap,
-                )
+
+            if section_name == "sessions":
+                _check_session_counts(branch, file_stem, entries, section_cfg)
+                continue
+
+            cap = section_cfg.get("count")
+            if cap is not None and len(entries) > cap:
+                _warn_over_budget(branch, file_stem, section_name, len(entries), cap)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
 

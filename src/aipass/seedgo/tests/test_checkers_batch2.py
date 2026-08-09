@@ -137,8 +137,10 @@ def do_work():
 
 class TestHandlers:
     def test_handlers_clean_passes(self, tmp_path: Path) -> None:
-        # The checker only runs checks for files whose path contains 'apps/handlers/'
-        handler_dir = tmp_path / "apps" / "handlers" / "mypack"
+        # The checker only runs checks for files whose path contains 'apps/handlers/'.
+        # The seedgo/ segment matters: handler independence is judged per BRANCH, so
+        # the fixture has to say which branch this file belongs to.
+        handler_dir = tmp_path / "seedgo" / "apps" / "handlers" / "mypack"
         handler_dir.mkdir(parents=True)
         code = """\
 from aipass.seedgo.apps.handlers.json import json_handler

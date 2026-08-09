@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Register module — adds a project to backup and creates .backup/
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-17
-# Modified: 2026-04-23
+# Modified: 2026-08-08
 # =============================================
 
 """Register Module — register a project for backup and scaffold its .backup/."""
@@ -23,6 +23,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.registry import lookup_project as _lookup_project
 from aipass.backup.apps.handlers.project.registry import register_project
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -41,7 +42,7 @@ def resolve_project(target: str) -> str | None:
         logger.warning(f"[BACKUP] Project '@{name}' not found in registry")
         return None
 
-    candidate = Path(target).resolve()
+    candidate = resolve_caller_path(target)
     if candidate.is_dir():
         return str(candidate)
 
@@ -82,7 +83,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    project_path = str(Path(args[0]).resolve())
+    project_path = str(resolve_caller_path(args[0]))
 
     name = Path(project_path).name
     if "--name" in args:

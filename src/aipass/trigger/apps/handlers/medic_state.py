@@ -1,16 +1,24 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-12
-# Modified: 2026-02-12
+# Modified: 2026-08-07
 # =============================================
 
 """
 Medic State Handler - Persistence and status for Medic toggle
 
-Reads/writes medic_enabled flag and the mute lists in trigger_config.json.
+Reads/writes medic_enabled flag and the mute lists in medic_state.json.
 Collects status data from suppression logs and rate limit logs.
+
+State lives in trigger_json/medic_state.json. It used to live in
+trigger_json/trigger_config.json, which is a name json_handler's trio
+machinery owns for module "trigger": any trio call under that caller name
+validates the file against a config template, finds this hand-written shape
+invalid, and overwrites it with a blank one — taking every live mute and the
+persisted breaker state with it. Nothing routed there yet; the file moved
+before something did. read_config() migrates on first read.
 
 Two independent mute classes share the same entry format and TTL machinery:
     muted_branches         - CONTENT mutes. Silence error_detected dispatch for
@@ -33,12 +41,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    atomic_write_json,
+    json_file_lock,
+    migrate_json_file,
+)
 from aipass.trigger.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
-TRIGGER_CONFIG_FILE = TRIGGER_ROOT / "trigger_json" / "trigger_config.json"
+MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
+LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 MEDIC_SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
 RATE_LIMITED_LOG = TRIGGER_ROOT / "logs" / "rate_limited.jsonl"
 
@@ -96,14 +111,15 @@ def _clean_expired_mutes(data: dict) -> None:
 
 def read_config() -> dict:
     """
-    Read trigger_config.json.
+    Read medic_state.json, migrating off the legacy path on first read.
 
     Returns:
         Parsed config dict, or empty dict on failure
     """
+    migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
     try:
-        if TRIGGER_CONFIG_FILE.exists():
-            return json.loads(TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        if MEDIC_STATE_FILE.exists():
+            return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("read_config failed: %s", exc)
         return {}
@@ -112,7 +128,7 @@ def read_config() -> dict:
 
 def write_config(data: dict) -> bool:
     """
-    Write trigger_config.json. Cleans expired mute entries before writing.
+    Write medic_state.json. Cleans expired mute entries before writing.
 
     Args:
         data: Config dict to persist
@@ -122,7 +138,7 @@ def write_config(data: dict) -> bool:
     """
     try:
         _clean_expired_mutes(data)
-        atomic_write_json(TRIGGER_CONFIG_FILE, data)
+        atomic_write_json(MEDIC_STATE_FILE, data)
         return True
     except Exception as exc:
         logger.warning("write_config failed: %s", exc)
@@ -174,7 +190,7 @@ def set_enabled(enabled: bool, duration_seconds: Optional[float] = None) -> bool
     Returns:
         True on success
     """
-    with json_file_lock(TRIGGER_CONFIG_FILE):
+    with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
         if "config" not in data:
             data["config"] = {}
@@ -306,7 +322,7 @@ def _mute_branch_in(key: str, branch_name: str, duration_seconds: Optional[float
         True on success
     """
     clean = _normalize_branch_name(branch_name)
-    with json_file_lock(TRIGGER_CONFIG_FILE):
+    with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
         if "config" not in data:
             data["config"] = {}
@@ -334,7 +350,7 @@ def _unmute_branch_in(key: str, branch_name: str) -> bool:
         True on success
     """
     clean = _normalize_branch_name(branch_name)
-    with json_file_lock(TRIGGER_CONFIG_FILE):
+    with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
         if "config" not in data:
             data["config"] = {}
@@ -350,7 +366,7 @@ def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> b
 
     Muted branches will have errors detected but NOT dispatched. Does NOT
     gate runaway (volume) alerts — use mute_branch_volume for those.
-    Persists in trigger_config.json.
+    Persists in medic_state.json.
 
     Args:
         branch_name: Branch name (with or without @)

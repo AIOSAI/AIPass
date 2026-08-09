@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: share.py
 # Description: Share module — single-file Drive upload with shareable link
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-01
-# Modified: 2026-07-01
+# Modified: 2026-08-08
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
@@ -22,6 +22,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
 from aipass.backup.apps.handlers.json import json_handler
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 
 MODULE_NAME = "share"
 PRIMARY_COMMAND = "share"
@@ -69,6 +70,10 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     from aipass.backup.apps.handlers.drive.client import DriveClient
     from aipass.backup.apps.handlers.drive.share import share_file
 
+    # Backup runs as an installed entry point, so a relative path would resolve
+    # against backup's own branch dir. Re-anchor it to where the user actually is.
+    resolved_path = str(resolve_caller_path(file_path))
+
     client = DriveClient()
     if not client.authenticate():
         err_msg = f"Drive authentication failed: {client.last_error}"
@@ -76,13 +81,13 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
         logger.warning(f"[backup] {err_msg}")
         return {"success": False, "link": None, "file_id": None, "error": err_msg}
 
-    console.print(f"[dim]Uploading {file_path}...[/dim]")
-    result = share_file(client, file_path, public=public)
+    console.print(f"[dim]Uploading {resolved_path}...[/dim]")
+    result = share_file(client, resolved_path, public=public)
 
     if result["success"]:
         mode = "public" if public else "restricted"
         console.print(f"[green]Shared ({mode}):[/green] {result['link']}")
-        logger.info(f"[backup] Shared {file_path} ({mode})")
+        logger.info(f"[backup] Shared {resolved_path} ({mode})")
     else:
         cli_error(f"Share failed: {result['error']}")
         logger.warning(f"[backup] Share failed: {result['error']}")
@@ -93,7 +98,7 @@ def run_share(file_path: str, *, public: bool = False) -> dict:
     json_handler.log_operation(
         "share_command",
         {
-            "file": file_path,
+            "file": resolved_path,
             "public": public,
             "success": result["success"],
         },

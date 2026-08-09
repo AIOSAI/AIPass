@@ -88,6 +88,7 @@ def _prepare_search_mocks(monkeypatch):
         "error": mock_error,
         "warning": mock_warning,
         "execute_search": mock_execute_search,
+        "panel": mock_panel,
     }
 
 
@@ -531,3 +532,72 @@ class TestShowSearchResults:
 
         assert result is False
         mocks["error"].assert_called_once()
+
+
+class TestResultMetadataDisplay:
+    """Verify archived-entry identity reaches the rendered panel."""
+
+    @staticmethod
+    def _panel_bodies(mocks):
+        """Return the body text of every result Panel that was rendered."""
+        return [call.args[0] for call in mocks["panel"].call_args_list if call.args]
+
+    @staticmethod
+    def _search_returning(metadata):
+        return {
+            "success": True,
+            "collections_searched": 1,
+            "total_results": 1,
+            "results": [
+                {
+                    "collection": "commons_local",
+                    "document": "Some archived session text",
+                    "metadata": metadata,
+                    "similarity": 0.66,
+                }
+            ],
+        }
+
+    def test_entry_number_and_date_are_rendered(self, monkeypatch):
+        """An archived entry's own number and date must be visible in the result.
+
+        Without them a citizen can only identify a recovered entry by matching
+        its text, which stops working as soon as two entries share wording.
+        """
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = self._search_returning(
+            {
+                "branch": "COMMONS",
+                "type": "local",
+                "entry_number": 14,
+                "entry_date": "2026-05-31",
+            }
+        )
+
+        assert search_mod.show_search_results("lost session") is True
+
+        body = "\n".join(self._panel_bodies(mocks))
+        assert "#14" in body
+        assert "2026-05-31" in body
+
+    def test_empty_timestamp_renders_no_time_label(self, monkeypatch):
+        """Rollover writes timestamp="" for .trinity entries -- don't print a bare label."""
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = self._search_returning(
+            {"branch": "COMMONS", "type": "local", "timestamp": "", "source": ""}
+        )
+
+        assert search_mod.show_search_results("lost session") is True
+
+        body = "\n".join(self._panel_bodies(mocks))
+        assert "Time:" not in body
+        assert "Source:" not in body
+
+    def test_entry_number_zero_is_still_rendered(self, monkeypatch):
+        """Entry #0 is falsy but real -- presence, not truthiness, decides."""
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = self._search_returning({"branch": "COMMONS", "entry_number": 0})
+
+        assert search_mod.show_search_results("first entry") is True
+
+        assert "#0" in "\n".join(self._panel_bodies(mocks))

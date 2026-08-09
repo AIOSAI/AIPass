@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler_content.py
 # Description: JSON Handler Integrity Standards Content
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-14
-# Modified: 2026-06-14
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -37,9 +37,13 @@ def get_json_handler_standards() -> str:
         "       [dim]def ensure_module_jsons(...)[/dim]",
         "       [dim]def ensure_json_exists(...)[/dim]",
         "",
-        "  [bold]2. Disk triplet completeness[/bold]:",
-        "    For each [dim]*_log.json[/dim] in [dim]{branch}_json/[/dim],",
-        "    matching [dim]*_config.json[/dim] and [dim]*_data.json[/dim] must exist.",
+        "  [bold]2. Disk triplet completeness[/bold] (bidirectional):",
+        "    Any [dim]{module}_config.json[/dim], [dim]{module}_data.json[/dim] or",
+        "    [dim]{module}_log.json[/dim] in [dim]{branch}_json/[/dim] implies the",
+        "    other two must exist. Checking log files only would let a",
+        "    hand-written config with no log sibling stay invisible.",
+        "    [dim]Bypass a deliberate gap with standard 'json_handler' and the[/dim]",
+        "    [dim]missing file path, e.g. {branch}_json/{module}_data.json.[/dim]",
         "",
         "─" * 70,
         "",

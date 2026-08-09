@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-11
-# Modified: 2026-07-11
+# Modified: 2026-08-09
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -110,9 +110,12 @@ def _strip_and_readd_hooks(
 def refresh_provider_hooks(manifest_path: Path) -> List[str]:
     """Strip-and-readd AIPass bridge hooks from manifest into ~/.claude/settings.json.
 
-    The single source of truth for hook wiring — setup.sh and `doctor --fix` both
-    end up calling this (the latter via auto_wire_provider) so upgrades never leave
-    a stale bridge entry from an old manifest version alongside the current one.
+    The install-time entry point: setup.sh's venv-python heredoc is its only caller.
+    The in-process path (`doctor --fix`, the interactive wire-prompt) goes through
+    auto_wire_provider instead — the two are siblings, not a chain. What they share
+    is _strip_and_readd_hooks, the single source of truth for the merge itself, so
+    upgrades never leave a stale bridge entry from an old manifest version alongside
+    the current one.
 
     Fails honestly: raises if the manifest can't be read/parsed rather than silently
     leaving stale wiring in place.

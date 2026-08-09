@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for trigger data files
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-13
-# Modified: 2025-11-21
+# Modified: 2026-08-09
 # =============================================
 
 """JSON auto-creating handler for trigger data files."""
@@ -16,12 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import inspect
 
-from aipass.trigger.apps.config import atomic_write_json
-
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
+from aipass.trigger.apps.config import atomic_write_json, trail_logger
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -37,15 +32,10 @@ if _test_log_dir:
 else:
     _LOG_FILE = Path(__file__).parent.parent.parent.parent / "logs" / "json_handler.jsonl"
 
-
-def _log_warning(msg: str) -> None:
-    """Recursion-safe warning logger via prax append_jsonl."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_LOG_FILE, {"level": "WARNING", "msg": msg})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: json_handler is called from the event handlers that run
+# on the path the log watchers read, so a line through prax would be detected and
+# fired back at them. The sidecar is `.jsonl` — the watchers read only `*.log`.
+logger = trail_logger(_LOG_FILE)
 
 
 # Constants
@@ -141,8 +131,7 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             # If corrupted, fall through to regenerate
         except Exception as exc:
             # If unreadable, fall through to regenerate
-            _log_warning(f"ensure_json_exists failed for {module_name}_{json_type}: {exc}")
-            pass
+            logger.warning(f"ensure_json_exists failed for {module_name}_{json_type}: {exc}")
 
     template = _get_default_template(json_type, module_name)
 
@@ -163,16 +152,19 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     try:
         content = json_path.read_text(encoding="utf-8").strip()
         if not content:
-            _log_warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
+            logger.warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
             ensure_json_exists(module_name, json_type)
             content = json_path.read_text(encoding="utf-8").strip()
         return json.loads(content)
     except (json.JSONDecodeError, OSError) as exc:
-        _log_warning(f"load_json failed for {module_name}_{json_type}: {exc}")
+        logger.warning(f"load_json failed for {module_name}_{json_type}: {exc}")
         ensure_json_exists(module_name, json_type)
         try:
             return json.loads(json_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as regen_exc:
+            # Regeneration itself came back unreadable — the caller still gets a
+            # usable shape, but the disk is in a state somebody should know about.
+            logger.error(f"load_json regeneration failed for {module_name}_{json_type}: {regen_exc}")
             return _get_default_template(json_type, module_name)
 
 

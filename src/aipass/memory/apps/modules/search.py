@@ -241,11 +241,21 @@ def show_search_results(
         branch_name = parts[0].upper() if parts else "UNKNOWN"
         mem_type = parts[1] if len(parts) > 1 else "unknown"
 
-        # Build metadata display
+        # Build metadata display. Entry identity first: it is what tells a
+        # citizen WHICH of its entries this was, so a recovered one can be
+        # named instead of matched on text that may not stay unique.
         meta_lines = []
-        if "timestamp" in metadata:
+        entry_number = metadata.get("entry_number")
+        if entry_number is not None:
+            meta_lines.append(f"[dim]Entry:[/dim] #{entry_number}")
+        if metadata.get("entry_date"):
+            meta_lines.append(f"[dim]Dated:[/dim] {metadata['entry_date']}")
+        # Truthiness, not key presence: rollover writes timestamp="" for every
+        # .trinity entry (they carry date, not timestamp), which rendered a
+        # bare "Time:" on every archived result.
+        if metadata.get("timestamp"):
             meta_lines.append(f"[dim]Time:[/dim] {metadata['timestamp']}")
-        if "source" in metadata:
+        if metadata.get("source"):
             meta_lines.append(f"[dim]Source:[/dim] {metadata['source']}")
 
         meta_text = " | ".join(meta_lines) if meta_lines else ""

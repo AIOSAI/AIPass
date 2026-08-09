@@ -12,7 +12,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.bypass import ignore_handler
+from aipass.seedgo.apps.handlers.bypass import ignore_handler, inert
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -60,6 +61,12 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     content-focused (dead code, naming, nesting) and __init__.py is typically
     boilerplate. Pass include_init=True for import-statement checkers, where a
     real cross-handler import hiding in a package marker must not go unseen.
+
+    This is the audit's CORPUS, not its applicability: every file here is
+    production source, and which checkers actually run against it is decided
+    per checker by applicability.applies_to_file(). is_retired_path() is
+    applied on top of the ignore patterns because those match on a substring
+    of the whole path ("/.archive/"), which never matches on Windows.
     """
     apps_dir = branch_path / "apps"
     if not apps_dir.exists():
@@ -73,6 +80,7 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
         if (include_init or f.name != "__init__.py")
         and not is_disabled_file(f.name)
         and not is_throwaway_path(str(f))
+        and not applicability.is_retired_path(str(f))
         and not any(p in str(f).lower() for p in ign)
         and not ignore_handler.is_seedgo_ignored(str(f), branch_path, ignore_entries)
     ]
@@ -89,6 +97,12 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     result gets served forever. .seedgo/bypass.json and .seedgoignore
     files are deliberately NOT included here — they're already covered
     by compute_bypass_stamp()'s separate whole-branch stamp-bust.
+
+    Also fingerprints {branch}_json/custom_config/ entries: the audit's
+    custom_config info line names those files, so an operator adding or
+    removing one must mark the branch dirty — otherwise a cache hit keeps
+    reporting the old list. Only the name/mtime/size is read; the content
+    of an operator config file is never audited.
     """
     root = branch_path.resolve()
     files = _collect_py_files(branch_path, include_init=True)
@@ -98,7 +112,41 @@ def _collect_watch_files(branch_path: Path) -> List[Dict[str, str]]:
     tests_dir = branch_path / "tests"
     if tests_dir.exists():
         files.extend({"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in tests_dir.rglob("*.py"))
+    custom_config = branch_path / f"{branch_path.name}_json" / "custom_config"
+    if custom_config.is_dir():
+        files.extend(
+            {"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in custom_config.iterdir() if f.is_file()
+        )
     return files
+
+
+def _collect_branch_info(checkers: Dict[str, Any], branch_path: Path, branch_name: str) -> List[Dict[str, str]]:
+    """Gather non-scored signpost lines from checkers exposing check_branch_info().
+
+    A separate channel from violations on purpose: info lines carry no score
+    and no pass/fail, so a checker can surface context (e.g. operator-owned
+    custom_config/ files it deliberately does NOT audit) with no way to move
+    a branch's number. Nothing here is ever merged into scores.
+
+    Bypass hygiene is reported here directly rather than through a checker: an
+    inert rule belongs to no single standard, and reporting it as a violation
+    would score a branch down for housekeeping.
+    """
+    info: List[Dict[str, str]] = []
+    try:
+        info.extend({"standard": "bypass", "message": line} for line in inert.check_branch_info(str(branch_path)))
+    except Exception as e:
+        logger.info("Inert bypass-rule info failed for branch %s: %s", branch_name, e)
+    for name, checker in sorted(checkers.items()):
+        if not hasattr(checker, "check_branch_info"):
+            continue
+        try:
+            lines = checker.check_branch_info(str(branch_path))
+        except Exception as e:
+            logger.info("Info check %s failed for branch %s: %s", name, branch_name, e)
+            continue
+        info.extend({"standard": name, "message": str(line)} for line in lines or [])
+    return info
 
 
 def _extract_branch_level_violations(result: dict) -> list:
@@ -269,8 +317,32 @@ def audit_branch(
                 results[name], scores[name] = r, r.get("score", 0)
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
+                # A crashed checker scores 0, which is indistinguishable from an honest
+                # 0 unless the result says so. Carry the error into checks[] so the
+                # number always arrives with its reason attached.
                 logger.info("Branch-level checker %s failed: %s", name, e)
-                results[name], scores[name] = {"passed": False, "score": 0, "error": str(e)}, 0
+                results[name] = {
+                    "passed": False,
+                    "score": 0,
+                    "error": str(e),
+                    "checks": [
+                        {
+                            "name": "Checker ran",
+                            "passed": False,
+                            "message": (
+                                f"{name} checker crashed ({type(e).__name__}: {e}) - "
+                                "score 0 is a failure to run, not a measured result"
+                            ),
+                        }
+                    ],
+                }
+                scores[name] = 0
+            continue
+        # Per-file lanes only check files the standard applies to. Branch-level
+        # checkers above are exempt because they walk the tree themselves —
+        # test_quality's whole corpus is tests/, and nothing here could filter
+        # it without also filtering it away.
+        if not applicability.applies_to_file(checker, entry_file):
             continue
         # Entry-point: always run on entry file. Genuine entry_point-scope
         # checkers (readme_check, cli_ux_check, ...) skip the cache here:
@@ -303,6 +375,7 @@ def audit_branch(
                 if files_with_init is None:
                     files_with_init = _collect_py_files(branch_path, include_init=True)
                 scan_files = files_with_init
+            scan_files = [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
             v, s = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, unchanged_files)
             all_violations[name] = v
             if s:
@@ -331,6 +404,8 @@ def audit_branch(
             except Exception:
                 logger.info("Post-check %s failed for branch %s", name, branch["name"])
 
+    info_lines = _collect_branch_info(checkers, branch_path, branch["name"])
+
     json_handler.log_operation("branch_audit_completed", {"branch": branch["name"], "checkers": len(checkers)})
     advisory_standards = [name for name, mod in checkers.items() if getattr(mod, "ADVISORY", False) is True]
     gating_scores = {k: v for k, v in scores.items() if k not in advisory_standards}
@@ -357,6 +432,7 @@ def audit_branch(
         "type_errors": diag_result.get("total_errors", 0),
         "type_error_files": diag_result.get("results", []),
         "test_map": test_map_result,
+        "info_lines": info_lines,
     }
     for name in checkers:
         output[f"{name}_violations"] = all_violations.get(name, [])

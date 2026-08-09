@@ -712,3 +712,106 @@ class TestCheckEntryCounts:
 
         assert result["success"] is True
         assert file_path.exists()
+
+
+# =============================================================================
+# _check_entry_counts — auto-compact snapshots carry their own budget
+# =============================================================================
+
+
+class TestSessionSnapshotBudget:
+    """Auto-compact snapshots never count against the regular session cap.
+
+    The extractor has budgeted them separately since fd091c25.  This guard
+    counted the combined array, so a branch sitting legally at 14 regular
+    + 2 snapshots warned 16/15 on every .trinity write, fleet-wide, and no
+    amount of rollover could ever satisfy it — rollover was right to archive
+    nothing.  The two must agree on what counts.
+    """
+
+    _LIMITS = {
+        "per_branch": {},
+        "defaults": {"local": {"sessions": {"count": 15, "auto_compact_cap": 3}}},
+    }
+
+    def _run(self, tmp_path: Path, monkeypatch, sessions: list) -> list:  # type: ignore[no-untyped-def]
+        """Run the guard over *sessions* and return ENTRY COUNT warning strings."""
+        from aipass.memory.apps.handlers.json import memory_files
+
+        monkeypatch.setattr(memory_files.config_loader, "section", lambda name: self._LIMITS)
+
+        trinity_dir = tmp_path / "testbranch" / ".trinity"
+        trinity_dir.mkdir(parents=True, exist_ok=True)
+        file_path = trinity_dir / "local.json"
+
+        warn_mock = getattr(memory_files.logger, "warning")
+        warn_mock.reset_mock()
+        memory_files._check_entry_counts(file_path, {"sessions": sessions})
+
+        return [str(c) for c in warn_mock.call_args_list if "ENTRY COUNT" in str(c)]
+
+    @staticmethod
+    def _regular(n: int) -> list:
+        return [{"number": i, "summary": f"s{i}"} for i in range(n)]
+
+    @staticmethod
+    def _snapshots(n: int) -> list:
+        return [{"number": 900 + i, "summary": f"snap{i}", "status": "auto-compact"} for i in range(n)]
+
+    def test_live_fleet_state_warns_nothing(self, tmp_path: Path, monkeypatch) -> None:
+        """14 regular + 2 snapshots = 16 total, both budgets under cap.
+
+        This is the exact state every warned branch was in tonight.
+        """
+        sessions = self._regular(14) + self._snapshots(2)
+
+        warnings = self._run(tmp_path, monkeypatch, sessions)
+
+        assert warnings == []
+
+    def test_regular_sessions_over_cap_still_warns(self, tmp_path: Path, monkeypatch) -> None:
+        """The guard must still do its job — 17 regular is genuinely over."""
+        sessions = self._regular(17) + self._snapshots(2)
+
+        warnings = self._run(tmp_path, monkeypatch, sessions)
+
+        assert len(warnings) == 1
+        assert "17/15" in warnings[0]
+        assert "auto-compact" not in warnings[0]
+
+    def test_snapshots_over_their_own_cap_warns(self, tmp_path: Path, monkeypatch) -> None:
+        """Snapshots have a budget too — 5 against a cap of 3 is over."""
+        sessions = self._regular(10) + self._snapshots(5)
+
+        warnings = self._run(tmp_path, monkeypatch, sessions)
+
+        assert len(warnings) == 1
+        assert "sessions(auto-compact)" in warnings[0]
+        assert "5/3" in warnings[0]
+
+    def test_both_over_warns_separately(self, tmp_path: Path, monkeypatch) -> None:
+        """Two independent budgets means two distinct warnings, not one blur."""
+        sessions = self._regular(20) + self._snapshots(6)
+
+        warnings = self._run(tmp_path, monkeypatch, sessions)
+
+        assert len(warnings) == 2
+        assert any("sessions(auto-compact)" in w and "6/3" in w for w in warnings)
+        assert any("20/15" in w and "auto-compact" not in w for w in warnings)
+
+    def test_snapshot_split_matches_the_extractor(self, tmp_path: Path, monkeypatch) -> None:
+        """Non-dict junk counts as regular in both places.
+
+        The extractor treats anything that is not a dict with
+        status == "auto-compact" as a regular entry.  If this guard split
+        differently, the two would disagree again in a subtler way.
+        """
+        from aipass.memory.apps.handlers.rollover import extractor  # noqa: F401
+
+        sessions = self._regular(14) + self._snapshots(2) + ["a bare string", None]
+
+        warnings = self._run(tmp_path, monkeypatch, sessions)
+
+        # 16 regular (14 + 2 junk) against a cap of 15 -> exactly one warning
+        assert len(warnings) == 1
+        assert "16/15" in warnings[0]

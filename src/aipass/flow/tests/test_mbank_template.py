@@ -778,6 +778,84 @@ class TestGetTemplate:
         assert len(date_part) == 10
         assert date_part[4] == "-" and date_part[7] == "-"
 
+    def test_literal_braces_in_prose_survive(self, tmp_path):
+        """ERROR d3de39ba: SOP templates document code with braces.
+
+        weekly_update.md carries a literal ``{createIfEmpty: true}`` MCP call,
+        which str.format() read as a replacement field and raised KeyError on --
+        making the whole template un-instantiable. Unknown braces must pass
+        through verbatim instead of blowing up template loading.
+        """
+        tpl = tmp_path / "sop.md"
+        tpl.write_text(
+            'Run `tabs_context_mcp {createIfEmpty: true}` for {subject}.\nJSON: {"a": 1}\nSet: {}',
+            encoding="utf-8",
+        )
+
+        from aipass.flow.apps.handlers.template.get_template import get_template
+
+        result = get_template(template_path=tpl, number=1, subject="Weekly")
+
+        # Known placeholder still substituted...
+        assert "for Weekly." in result
+        # ...while every non-placeholder brace form is preserved untouched.
+        assert "{createIfEmpty: true}" in result
+        assert 'JSON: {"a": 1}' in result
+        assert "Set: {}" in result
+
+    def test_unknown_placeholder_is_not_substituted(self, tmp_path):
+        """A brace token that is not a known placeholder is left alone, not blanked."""
+        tpl = tmp_path / "unknown.md"
+        tpl.write_text("{plan_number} {not_a_placeholder}", encoding="utf-8")
+
+        from aipass.flow.apps.handlers.template.get_template import get_template
+
+        result = get_template(template_path=tpl, number=2)
+
+        assert result == "FPLAN-0002 {not_a_placeholder}"
+
+    def test_missing_placeholder_value_passes_through(self):
+        """An optional placeholder with no supplied value must not raise.
+
+        VERA field report: stamping weekly_update died with
+        ``Failed to load template weekly_update: createIfEmpty``. A template
+        that loaded when it was registered must still load when it is stamped,
+        so a known placeholder name with no value degrades to the literal token
+        instead of raising KeyError and killing the whole template.
+        """
+        from aipass.flow.apps.handlers.template.get_template import _substitute_placeholders
+
+        result = _substitute_placeholders(
+            "{plan_number} {subject} {tag}",
+            {"subject": "Weekly"},  # every other known name deliberately absent
+        )
+
+        assert result == "{plan_number} Weekly {tag}"
+
+    def test_registered_weekly_update_template_stamps(self):
+        """The shipped weekly_update SOP loads end-to-end from its real path.
+
+        Guards the brace-in-prose class against the live file rather than a
+        synthetic one, and pins VERA's v2.1 content (full clickable URLs,
+        Bluesky posting from the caller's own branch dir).
+        """
+        from aipass.flow.apps.handlers.template.get_template import TEMPLATES_DIR, get_template
+
+        tpl = TEMPLATES_DIR / "playbook_plans" / "weekly_update.md"
+        assert tpl.is_file(), f"weekly_update template missing at {tpl}"
+
+        result = get_template(template_path=tpl, number=31, subject="Update 14", prefix="PPLAN")
+
+        assert "PPLAN-0031" in result
+        assert "Update 14" in result
+        # Literal MCP snippet survives the stamp
+        assert "{createIfEmpty: true}" in result
+        # v2.1 content landed — pin a full template sentence, not the bare
+        # domain: a URL-substring membership check reads to CodeQL like
+        # hostname sanitization (py/incomplete-url-substring-sanitization).
+        assert "Website: https://aipass.ai, changelog link" in result
+        assert "YOUR OWN branch dir" in result
+
 
 # ===================================================================
 # 8. template/plan_type_loader.py — discover_plan_types

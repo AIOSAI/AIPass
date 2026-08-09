@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filesystem_handler.py
 # Description: FileSystem Event Handler
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2026-03-08
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -205,7 +205,10 @@ class MonitoringFileHandler(FileSystemEventHandler):
             if result and result != "UNKNOWN":
                 return result
         except ValueError:
-            logger.info(f"[monitor] CWD not under ~/Projects/: {cwd}")
+            logger.info(
+                f"[monitor] Live monitor file watcher is ignoring a folder outside "
+                f"the watched area (~/Projects/): {cwd}"
+            )
         # Fallback: check src/{name} for branches outside aipass namespace
         if "src" in parts:
             idx = parts.index("src")
@@ -540,7 +543,11 @@ class MonitoringFileHandler(FileSystemEventHandler):
             if self._event_queue:
                 self._event_queue.enqueue(evt)
         except Exception as e:
-            logger.error(f"[monitor] Error handling {action} event for {path_str}: {e}")
+            logger.error(
+                f"[monitor] The live monitor file watcher could not show a file change — unexpected "
+                f"{type(e).__name__} on {action} of {path_str}. The file itself is fine; "
+                f"file watching continues."
+            )
 
     @staticmethod
     def _build_display_name(file_path: Path) -> str:

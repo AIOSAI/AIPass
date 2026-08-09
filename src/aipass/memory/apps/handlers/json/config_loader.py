@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.0.0
+# Version: 1.3.0
 # Created: 2026-06-13
-# Modified: 2026-06-13
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -14,7 +14,15 @@ ad-hoc readers that previously loaded the file independently, each
 with subtly different defaults and error handling.
 
 Provides a canonical DEFAULT_CONFIG, a non-mutating deep_merge, and a
-self-healing load() that guarantees callers always receive a usable dict.
+load() that guarantees callers always receive a usable dict.
+
+Doctrine (Patrick, S193): configs live inside JSONs, not inside code.
+memory.config.json on disk is the RUNTIME AUTHORITY the operator edits.
+DEFAULT_CONFIG exists so that file can be REGENERATED when it goes
+missing — it is the regeneration seed, not a rival source of truth.
+Keep the two in lockstep: what ships as default here is what an operator
+finds in the file after a regen.  A file that exists but will not parse
+is never written over (DPLAN-0206): defaults are served in memory only.
 
 Usage:
     from aipass.memory.apps.handlers.json.config_loader import load, section
@@ -25,6 +33,7 @@ Usage:
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +51,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "entry_limits": {
             "consumers": ["json/entry_limits.py", "modules/lint.py"],
-            "purpose": "Per-entry char caps on .trinity writes (warn-first baseline)",
+            "purpose": "Per-entry char caps on .trinity writes (enforced)",
         },
         "plans": {
             "consumers": ["intake/plans_processor.py", "monitor/memory_watcher.py"],
@@ -70,7 +79,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "entry_limits": {
         "enabled": True,
-        "enforce": False,
+        # true = regenerate what we actually operate (Patrick, S193). The June
+        # fail-safe lean (false) was written when enforcement was still rolling
+        # out; the fleet has run true for months, so a reborn file that came
+        # back warn-only would silently drop enforcement, not protect anyone.
+        "enforce": True,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",
@@ -91,14 +104,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "container": "todos",
                 "kind": "list",
                 "field": "task",
-                "max_chars": 200,
+                "max_chars": 150,
             },
             "observations": {
                 "file": "observations.json",
                 "container": "observations",
                 "kind": "list",
                 "field": "note",
-                "max_chars": 600,
+                "max_chars": 300,
             },
         },
         "per_branch": {},
@@ -112,11 +125,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "rollover": {
         "defaults": {
             "local": {
-                "sessions": {"count": 20, "auto_compact_cap": 3},
-                "key_learnings": {"count": 25},
+                "sessions": {"count": 15, "auto_compact_cap": 3},
+                "key_learnings": {"count": 15},
             },
             "observations": {
-                "observations": {"count": 25},
+                "observations": {"count": 15},
             },
             "_note": "DEFAULTS — edit then `drone @memory rollover push` to apply system-wide."
             " Char caps live in entry_limits.",
@@ -137,44 +150,113 @@ def deep_merge(base: dict, overrides: dict) -> dict:
     return result
 
 
-def load(self_heal: bool = True) -> dict[str, Any]:
-    """Load memory.config.json, deep-merged over DEFAULT_CONFIG.
+def _write_config_file(config: dict[str, Any]) -> bool:
+    """Write *config* to _CONFIG_PATH atomically.
+
+    Atomic because the watcher, rollover subprocesses and the CLI all read
+    this file concurrently — a half-written file would be read as corrupt,
+    turning a routine write into a fleet-wide fall back to defaults.
+
+    Returns:
+        True if the file was written, False if the write failed (logged).
+    """
+    tmp_path = _CONFIG_PATH.parent / f"{_CONFIG_PATH.name}.tmp-{os.getpid()}"
+    try:
+        _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp_path, _CONFIG_PATH)
+        return True
+    except OSError as exc:
+        logger.error(f"[config_loader] Failed to write {_CONFIG_PATH}: {exc}")
+        return False
+    finally:
+        # Never leave a half-written temp behind for the next reader to find
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(f"[config_loader] Could not clean up temp file {tmp_path}")
+
+
+def _regenerate(reason: str) -> dict[str, Any]:
+    """Rebuild the config file from DEFAULT_CONFIG and return the defaults.
+
+    Fires on a genuinely-missing file ONLY.  A file that exists but cannot be
+    read is never regenerated over — see load().
 
     Args:
-        self_heal: If True and the file is missing, create it from defaults.
+        reason: Why regeneration fired — logged.
+
+    Returns:
+        A fresh copy of DEFAULT_CONFIG, whether or not the write succeeded.
+        A failed write is logged as an error, never silently swallowed, and
+        the caller still gets a usable config.
+    """
+    written = _write_config_file(DEFAULT_CONFIG)
+    if written:
+        logger.info(f"[config_loader] Regenerated {_CONFIG_PATH} from defaults ({reason})")
+    json_handler.log_operation(
+        f"config_regenerate_{reason}",
+        {"path": str(_CONFIG_PATH), "written": written},
+        module_name="config_loader",
+    )
+    return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def load() -> dict[str, Any]:
+    """Load memory.config.json, deep-merged over DEFAULT_CONFIG.
+
+    The file on disk is the runtime authority.  A genuinely-MISSING file is
+    regenerated in full from DEFAULT_CONFIG, so the operator always has a
+    real file to edit — that is the whole reason code carries defaults.
+
+    A file that EXISTS but cannot be read is a different case and is never
+    written over (DPLAN-0206 red flag, seedgo-consulted): it may be one stray
+    comma away from correct and carry hand-tuned per_branch limits.  Log an
+    ERROR, serve defaults in memory, and leave the operator's file for the
+    operator to fix.
+
+    "Cannot be read" means for ANY reason (json_structure v3.0.0) — bad bytes
+    and bad permissions are as unreadable as bad syntax, and none of them may
+    escape as a raw exception into a caller that only wanted a config.
 
     Returns:
         The effective config dict (always safe to use).
     """
     if not _CONFIG_PATH.exists():
-        if self_heal:
-            _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2) + "\n", encoding="utf-8")
-            logger.info(f"[config_loader] Created default config at {_CONFIG_PATH}")
-            json_handler.log_operation(
-                "config_load_self_heal",
-                {"path": str(_CONFIG_PATH), "action": "created_default"},
-                module_name="config_loader",
-            )
-            return copy.deepcopy(DEFAULT_CONFIG)
+        logger.info(f"[config_loader] No config at {_CONFIG_PATH}, regenerating from defaults")
+        return _regenerate("missing")
 
-        logger.warning(f"[config_loader] Config not found at {_CONFIG_PATH}, using defaults")
+    try:
+        raw = _CONFIG_PATH.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Unopenable or undecodable — same no-clobber contract as malformed.
+        logger.error(f"[config_loader] Cannot read {_CONFIG_PATH}: {type(exc).__name__}: {exc}")
         json_handler.log_operation(
-            "config_load_missing",
-            {"path": str(_CONFIG_PATH)},
+            "config_load_unreadable",
+            {"path": str(_CONFIG_PATH), "error": f"{type(exc).__name__}: {exc}"},
             module_name="config_loader",
         )
         return copy.deepcopy(DEFAULT_CONFIG)
 
-    raw = _CONFIG_PATH.read_text(encoding="utf-8")
     try:
         file_config = json.loads(raw)
     except json.JSONDecodeError as exc:
-        # Malformed JSON is a red flag — log as error, don't overwrite
+        # Fail loud, do NOT overwrite — the operator must fix their file.
         logger.error(f"[config_loader] Malformed JSON in {_CONFIG_PATH}: {exc}")
         json_handler.log_operation(
             "config_load_malformed",
             {"path": str(_CONFIG_PATH), "error": str(exc)},
+            module_name="config_loader",
+        )
+        return copy.deepcopy(DEFAULT_CONFIG)
+
+    if not isinstance(file_config, dict):
+        # Valid JSON, wrong shape (a list, a bare string). deep_merge would
+        # raise on it, so it takes the same no-clobber path as malformed.
+        logger.error(f"[config_loader] Config at {_CONFIG_PATH} is {type(file_config).__name__}, expected object")
+        json_handler.log_operation(
+            "config_load_wrong_shape",
+            {"path": str(_CONFIG_PATH), "found_type": type(file_config).__name__},
             module_name="config_loader",
         )
         return copy.deepcopy(DEFAULT_CONFIG)
@@ -247,13 +329,27 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
 
     current: dict = {}
     if _CONFIG_PATH.exists():
+        loaded: Any = None
         try:
-            current = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            logger.warning("[config_loader] Malformed config on disk, starting fresh")
+            loaded = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            # Bad syntax, bad bytes and bad permissions all mean the same thing
+            # here: we cannot know what is in the file, so we must not write it.
+            logger.error(f"[config_loader] Cannot push onto unreadable config: {type(exc).__name__}: {exc}")
+        if isinstance(loaded, dict):
+            current = loaded
+        else:
+            # Same rule as load(): never write over a broken operator file.
+            # Refusing is the honest outcome — the old behaviour rebuilt from
+            # scratch and silently discarded everything they had.
+            logger.error(f"[config_loader] Refusing push onto unreadable {_CONFIG_PATH}")
+            return {
+                "success": False,
+                "error": f"Config at {_CONFIG_PATH} is unreadable — fix or move it aside, then push again",
+            }
 
     current.setdefault("rollover", {})["per_branch"] = per_branch
-    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _CONFIG_PATH.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    if not _write_config_file(current):
+        return {"success": False, "error": f"Failed to write {_CONFIG_PATH}"}
 
     return {"success": True, "branches": len(per_branch), "per_branch": per_branch}

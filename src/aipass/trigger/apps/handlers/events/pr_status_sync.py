@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pr_status_sync.py
 # Description: PR event handlers — sync STATUS.md on PR create/merge
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -22,25 +22,13 @@ Events:
 import subprocess
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "pr_status_sync_handler.jsonl"
-
-
-def _log_info(message: str) -> None:
-    """Log to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "INFO", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "pr_status_sync_handler.jsonl")
 
 
 def _run_status_sync(reason: str) -> None:
@@ -51,9 +39,9 @@ def _run_status_sync(reason: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        _log_info(f"status sync launched ({reason})")
+        logger.info(f"status sync launched ({reason})")
     except Exception as exc:
-        _log_info(f"status sync failed ({reason}): {exc}")
+        logger.info(f"status sync failed ({reason}): {exc}")
 
 
 def handle_pr_created(

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-23
-# Modified: 2026-04-23
+# Modified: 2026-08-08
 # =============================================
 
 """Status Module — display backup info and recent history for a project."""
@@ -24,6 +24,7 @@ from aipass.cli.apps.modules import console
 
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.path.builder import backup_root
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.state.changelog import load_changelog
 
@@ -57,7 +58,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    project_root = str(Path(args[0]).resolve())
+    project_root = str(resolve_caller_path(args[0]))
     bs_dir = backup_root(project_root)
 
     if not bs_dir.exists():

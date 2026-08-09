@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler_check.py
 # Description: JSON Handler Integrity Standards Checker
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-14
-# Modified: 2026-06-14
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -18,12 +18,15 @@ data files.
 Two checks:
 1. Handler capability — shared shim import OR triplet-creating surface
    (ensure_module_jsons / ensure_json_exists).
-2. Disk triplet completeness — each module with a _log.json also has
-   matching _config.json and _data.json on disk.
+2. Disk triplet completeness — bidirectional: any one of
+   {module}_config.json / _data.json / _log.json on disk implies the
+   other two must exist. A hand-written config with no log sibling is a
+   gap, not an invisible file.
 
 Score: percentage of passed checks. Pass threshold: 75%.
 """
 
+import re
 from pathlib import Path
 
 from aipass.prax import logger
@@ -31,6 +34,10 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "branch_level"
+
+_TRIPLET_KINDS = ("config", "data", "log")
+
+_TRIPLET_RE = re.compile(r"^(?P<stem>.+)_(?P<kind>config|data|log)\.json$")
 
 _SHARED_IMPORT_MARKERS = (
     "from aipass.aipass.shared.json_handler import",
@@ -77,7 +84,23 @@ def _has_triplet_surface(content: str) -> bool:
     return has_ensure_module or has_ensure_exists
 
 
-def _check_disk_triplets(branch_path: Path) -> dict:
+def _collect_triplet_members(json_dir: Path) -> dict[str, set[str]]:
+    """Map each module stem to the triplet members present on disk.
+
+    Any {stem}_config.json / {stem}_data.json / {stem}_log.json counts as
+    evidence the module exists, so a config with no log sibling is just as
+    visible as a log with no config.
+    """
+    members: dict[str, set[str]] = {}
+    for path in sorted(json_dir.glob("*.json")):
+        match = _TRIPLET_RE.match(path.name)
+        if match is None:
+            continue
+        members.setdefault(match.group("stem"), set()).add(match.group("kind"))
+    return members
+
+
+def _check_disk_triplets(branch_path: Path, bypass_rules: list | None = None) -> dict:
     branch_name = branch_path.name
     json_dir = branch_path / f"{branch_name}_json"
 
@@ -88,39 +111,37 @@ def _check_disk_triplets(branch_path: Path) -> dict:
             "message": f"No {branch_name}_json/ directory (no JSON activity)",
         }
 
-    log_files = sorted(json_dir.glob("*_log.json"))
-    if not log_files:
+    members = _collect_triplet_members(json_dir)
+    if not members:
         return {
             "name": "Disk triplet completeness",
             "passed": True,
-            "message": f"{branch_name}_json/ exists but has no log files",
+            "message": f"{branch_name}_json/ exists but has no triplet files",
         }
 
     missing = []
-    for log_file in log_files:
-        stem = log_file.name.removesuffix("_log.json")
-        config = json_dir / f"{stem}_config.json"
-        data = json_dir / f"{stem}_data.json"
-        if not config.exists() or not data.exists():
-            parts = []
-            if not config.exists():
-                parts.append("config")
-            if not data.exists():
-                parts.append("data")
-            missing.append(f"{stem} (missing {', '.join(parts)})")
+    for stem, present in sorted(members.items()):
+        absent = [
+            kind
+            for kind in _TRIPLET_KINDS
+            if kind not in present
+            and not is_bypassed(f"{branch_name}_json/{stem}_{kind}.json", "json_handler", bypass_rules=bypass_rules)
+        ]
+        if absent:
+            missing.append(f"{stem} (missing {', '.join(absent)})")
 
     if not missing:
         return {
             "name": "Disk triplet completeness",
             "passed": True,
-            "message": f"All {len(log_files)} modules have complete triplets",
+            "message": f"All {len(members)} modules have complete triplets",
         }
 
     return {
         "name": "Disk triplet completeness",
         "passed": False,
         "message": (
-            f"{len(missing)}/{len(log_files)} modules missing triplet files: "
+            f"{len(missing)}/{len(members)} modules missing triplet files: "
             + "; ".join(missing[:5])
             + ("..." if len(missing) > 5 else "")
         ),
@@ -210,7 +231,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 }
             )
 
-    checks.append(_check_disk_triplets(bp))
+    checks.append(_check_disk_triplets(bp, bypass_rules=bypass_rules))
 
     passed_count = sum(1 for c in checks if c["passed"])
     total = len(checks)

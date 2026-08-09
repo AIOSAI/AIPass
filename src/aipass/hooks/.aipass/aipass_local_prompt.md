@@ -78,7 +78,7 @@ apps/
     diagnostics.py         # JSONL diagnostics config
 logs/
   engine.jsonl             # JSONL diagnostics (every hook execution)
-tests/                     # 43 test files, 1249 tests
+tests/                     # 46 test files, 1370 tests
 ```
 
 ## Handler Categories

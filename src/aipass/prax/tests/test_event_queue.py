@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_event_queue.py
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for the thread-safe event queue used by the monitoring system."""
@@ -476,3 +476,85 @@ class TestMonitoringQueue:
         q.stop()  # Should not raise
         assert q._stopped.is_set()
         assert q.size() == 0
+
+
+# =============================================
+# OPERATOR-FACING DROP REPORT
+# =============================================
+
+
+class TestDropReportWording:
+    """The drop report is read by the operator on screen, not by a developer.
+
+    Patrick's ruling (2026-08-08): monitor lines name their subsystem in plain words
+    and say WHAT happened, the IMPACT, and whether data is safe — never a bare
+    exception repr. These pin the wording so it cannot regress to the old
+    'Dropping events (...): Full()' line.
+    """
+
+    def _fill_and_overflow(self, MonitoringQueue, MonitoringEvent):
+        """Return a size-1 queue that has just rejected an event, plus that event."""
+        q = MonitoringQueue(maxsize=1)
+        q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FIRST", message="in"))
+        overflow = MonitoringEvent(priority=2, event_type="log", branch="DAEMON", message="dropped")
+        assert q.enqueue(overflow) is False
+        return q, overflow
+
+    def test_overflow_report_is_plain_language(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """Full queue reports cause, count, data safety and latest branch — no repr."""
+        q, _ = self._fill_and_overflow(MonitoringQueue, MonitoringEvent)
+
+        reported = [str(c) for c in event_queue_module.logger.warning.call_args_list]
+        assert len(reported) == 1
+        line = reported[0]
+
+        assert "Full()" not in line, "raw exception repr must never reach the operator"
+        assert "queue is full" in line
+        assert "1 events" in line
+        assert "on-disk logs are complete" in line
+        assert "DAEMON" in line
+
+    def test_overflow_report_names_the_subsystem(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """The operator must know WHICH pipeline lost events, not just 'the queue'."""
+        self._fill_and_overflow(MonitoringQueue, MonitoringEvent)
+
+        line = str(event_queue_module.logger.warning.call_args_list[0])
+        assert "live monitor display" in line
+        assert "terminal monitor view" in line
+
+    def test_overflow_does_not_use_error_level(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """A normal overflow is a warning, not an error — it is expected under load."""
+        self._fill_and_overflow(MonitoringQueue, MonitoringEvent)
+        assert event_queue_module.logger.error.call_count == 0
+
+    def test_unexpected_failure_is_not_reported_as_overflow(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """A non-Full failure says it is a bug rather than claiming the queue filled up."""
+        q = MonitoringQueue(maxsize=10)
+
+        def boom(*_args, **_kwargs):
+            raise TypeError("unorderable event")
+
+        q.queue.put = boom
+        event = MonitoringEvent(priority=1, event_type="log", branch="DAEMON", message="x")
+        assert q.enqueue(event) is False
+
+        assert event_queue_module.logger.warning.call_count == 0
+        reported = [str(c) for c in event_queue_module.logger.error.call_args_list]
+        assert len(reported) == 1
+        line = reported[0]
+
+        assert "TypeError" in line
+        assert "not a normal full queue" in line
+        assert "live monitor display" in line
+        assert "on-disk logs are complete" in line
+        assert "queue is full" not in line, "an unrelated bug must not be dressed up as overflow"
+
+    def test_report_is_rate_limited_to_one_per_30s(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """Repeat overflows stay silent for 30s — this log is one prax itself watches."""
+        q = MonitoringQueue(maxsize=1)
+        q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FIRST", message="in"))
+        for i in range(10):
+            q.enqueue(MonitoringEvent(priority=2, event_type="log", branch="DAEMON", message=f"drop{i}"))
+
+        assert event_queue_module.logger.warning.call_count == 1
+        assert q._dropped == 9, "events after the report still counted for the next one"

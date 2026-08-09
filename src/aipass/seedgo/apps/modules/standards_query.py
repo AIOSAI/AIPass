@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_query.py
 # Description: Standards Query Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -11,6 +11,10 @@ Standards Query Module
 
 Auto-discovering content query module for standards packs.
 Replaces 15 dead _standard.py modules with one pack-aware module.
+
+Serves two command forms:
+  standards_query <pack> <standard>  - explicit, pack-addressed (canonical)
+  standard <standard>                - short alias, resolves the pack itself
 
 Run: seedgo standards_query
 """
@@ -35,6 +39,17 @@ from aipass.cli.apps.modules import error, warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
+
+# =============================================================================
+# COMMAND NAMES
+# =============================================================================
+
+QUERY_COMMAND = "standards_query"
+
+# Short alias: `standard <name>` resolves the owning pack itself. Exists because
+# the guide pointer embedded in audit output must be paste-and-go — the pack
+# argument is a detail the reader should not need to know to follow a signpost.
+ALIAS_COMMAND = "standard"
 
 
 # =============================================================================
@@ -87,6 +102,40 @@ def _discover_standards(pack_path: Path) -> dict:
         standard_name = f.stem.removesuffix("_content")
         standards[standard_name] = f
     return standards
+
+
+# =============================================================================
+# ALIAS RESOLUTION
+# =============================================================================
+
+
+def _resolve_standard(standard_name: str) -> list:
+    """Find every pack that defines a standard of this name.
+
+    Powers the short `standard <name>` alias, which carries no pack argument.
+
+    Args:
+        standard_name: Bare standard name, e.g. "json_structure"
+
+    Returns:
+        List of (pack_name, content_file) tuples. Empty if the name is unknown;
+        longer than one if two packs define the same name (ambiguous).
+    """
+    matches = []
+    for pack_name, pack_path in _discover_packs().items():
+        standards = _discover_standards(pack_path)
+        if standard_name in standards:
+            matches.append((pack_name, standards[standard_name]))
+    return matches
+
+
+def _all_standard_names() -> dict:
+    """Map every discovered standard name to the list of packs defining it."""
+    names: dict = {}
+    for pack_name, pack_path in _discover_packs().items():
+        for std_name in _discover_standards(pack_path):
+            names.setdefault(std_name, []).append(pack_name)
+    return names
 
 
 # =============================================================================
@@ -159,14 +208,103 @@ def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
     console.print()
 
 
+def _show_all_standards() -> None:
+    """List every standard across all packs — the `standard` alias landing page."""
+    names = _all_standard_names()
+
+    console.print()
+    header("STANDARDS")
+    console.print()
+
+    if not names:
+        warning("No content handlers found.")
+        console.print("[dim]Add *_content.py files to a handlers/*_standards/ pack[/dim]")
+        console.print()
+        return
+
+    ordered = sorted(names)
+    console.print(f"[yellow]Available Standards:[/yellow] ({len(ordered)})")
+    console.print()
+    for name in ordered:
+        console.print(f"  [cyan]{name}[/cyan]")
+    console.print()
+
+    console.print("[yellow]Next:[/yellow]  Pick a standard to see its content")
+    console.print(f"  [green]drone @seedgo standard {ordered[0]}[/green]")
+    console.print()
+
+
+def _display_content(pack_name: str, standard_name: str, content_file: Path) -> None:
+    """Load a standard's content, log the query, and print it."""
+    content = _load_content(content_file, standard_name)
+    json_handler.log_operation("standard_queried", {"pack": pack_name, "standard": standard_name})
+    if not content:
+        return
+
+    console.print()
+    # Handle both str and List[str] return types from content handlers
+    if isinstance(content, list):
+        for line in content:
+            console.print(line)
+    else:
+        console.print(content)
+    console.print()
+
+
 # =============================================================================
 # COMMAND HANDLER
 # =============================================================================
 
 
+def _handle_alias(args: List[str]) -> bool:
+    """Handle the short `standard [<name>]` form — pack resolved automatically.
+
+    Args:
+        args: Additional arguments
+            [] → list every standard across all packs
+            ["json_structure"] → show that standard's content
+            ["--help"] → alias help
+
+    Returns:
+        True — the alias always handles its own command.
+    """
+    if not args:
+        _show_all_standards()
+        return True
+
+    if args[0] in ["--help", "-h", "help"]:
+        print_alias_help()
+        return True
+
+    standard_name = args[0]
+    matches = _resolve_standard(standard_name)
+
+    if not matches:
+        error(f"Unknown standard: '{standard_name}'")
+        _show_all_standards()
+        return True
+
+    # Two packs claiming one name: refuse to guess, show the explicit form.
+    if len(matches) > 1:
+        error(f"Ambiguous standard: '{standard_name}' is defined in {len(matches)} packs")
+        console.print()
+        warning("Name the pack explicitly:")
+        for pack_name, _ in matches:
+            console.print(f"  [green]drone @seedgo {QUERY_COMMAND} {pack_name} {standard_name}[/green]")
+        console.print()
+        return True
+
+    pack_name, content_file = matches[0]
+    _display_content(pack_name, standard_name, content_file)
+    return True
+
+
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'standards_query' command with pack-aware drill-down.
+
+    Also handles the short 'standard <name>' alias, which resolves the owning
+    pack itself so an embedded pointer stays paste-and-go.
 
     Args:
         command: Command name
@@ -179,7 +317,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if handled, False if not this module's command
     """
-    if command != "standards_query":
+    if command == ALIAS_COMMAND:
+        return _handle_alias(args)
+
+    if command != QUERY_COMMAND:
         return False
 
     if not args:
@@ -220,17 +361,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     # Load and display content
-    content = _load_content(standards[standard_name], standard_name)
-    json_handler.log_operation("standard_queried", {"pack": pack_name, "standard": standard_name})
-    if content:
-        console.print()
-        # Handle both str and List[str] return types from content handlers
-        if isinstance(content, list):
-            for line in content:
-                console.print(line)
-        else:
-            console.print(content)
-        console.print()
+    _display_content(pack_name, standard_name, standards[standard_name])
     return True
 
 
@@ -272,6 +403,33 @@ def print_introspection() -> None:
         console.print()
 
 
+def print_alias_help() -> None:
+    """Print help for the short `standard` alias."""
+    console.print()
+    console.print("[bold cyan]Standard (short alias)[/bold cyan]")
+    console.print("Show a standard's content by name — the pack is resolved for you")
+    console.print()
+
+    console.print("[yellow]COMMANDS:[/yellow]")
+    console.print("  [green]drone @seedgo standard[/green]                   [dim]List every standard[/dim]")
+    console.print("  [green]drone @seedgo standard <standard>[/green]        [dim]Show standard content[/dim]")
+    console.print("  [green]drone @seedgo standard --help[/green]            [dim]This help message[/dim]")
+    console.print()
+
+    console.print("[yellow]EXAMPLES:[/yellow]")
+    console.print("  [dim]# Show the json_structure standard[/dim]")
+    console.print("  [green]drone @seedgo standard json_structure[/green]")
+    console.print()
+
+    console.print("[yellow]REFERENCE:[/yellow]")
+    console.print("  Short form of [green]standards_query <pack> <standard>[/green].")
+    console.print("  If two packs define the same name, the explicit form is required.")
+    console.print()
+
+    console.print("[dim]Commands: standard, --help[/dim]")
+    console.print()
+
+
 def print_help():
     """Print help information."""
     console.print()
@@ -290,6 +448,9 @@ def print_help():
         "  [green]drone @seedgo standards_query <pack> <standard>[/green]      [dim]Show standard content[/dim]"
     )
     console.print("  [green]drone @seedgo standards_query --help[/green]                 [dim]This help message[/dim]")
+    console.print(
+        "  [green]drone @seedgo standard <standard>[/green]                    [dim]Short alias, no pack needed[/dim]"
+    )
     console.print()
 
     console.print("[yellow]EXAMPLES:[/yellow]")
@@ -302,11 +463,14 @@ def print_help():
     console.print("  [dim]# Show architecture standard content[/dim]")
     console.print("  [green]drone @seedgo standards_query aipass_standards architecture[/green]")
     console.print()
+    console.print("  [dim]# Same thing, short form[/dim]")
+    console.print("  [green]drone @seedgo standard architecture[/green]")
+    console.print()
 
     console.print("[yellow]REFERENCE:[/yellow]")
     console.print("  Auto-discovers *_content.py handlers from pack directories.")
     console.print("  Each content handler provides get_<name>_standards() returning Rich-formatted text.")
     console.print()
 
-    console.print("[dim]Commands: standards_query, --help[/dim]")
+    console.print("[dim]Commands: standards_query, standard, --help[/dim]")
     console.print()

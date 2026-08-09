@@ -46,11 +46,17 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json
+    from aipass.trigger.apps.config import atomic_write_json, json_file_lock, migrate_json_file
 
     config_mod = MagicMock()
     config_mod.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
+    config_mod.TRIGGER_JSON_DIR = Path("/tmp/fake_trigger_root/trigger_json")
     config_mod.atomic_write_json = atomic_write_json
+    config_mod.migrate_json_file = migrate_json_file
+    # Real lock, not a mock: the write paths hold this lock while read_config
+    # runs the migration underneath, and only the real flock proves that
+    # nesting does not deadlock the process against itself.
+    config_mod.json_file_lock = json_file_lock
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", config_mod)
 
     # -- Force re-import so mocks take effect -------------------------------
@@ -62,11 +68,12 @@ def state_mod(tmp_path, monkeypatch):
     """Import medic_state and point all file path constants to tmp_path."""
     import aipass.trigger.apps.handlers.medic_state as mod
 
-    config_file = tmp_path / "trigger_json" / "trigger_config.json"
+    config_file = tmp_path / "trigger_json" / "medic_state.json"
     suppressed_log = tmp_path / "logs" / "medic_suppressed.jsonl"
     rate_limited_log = tmp_path / "logs" / "rate_limited.jsonl"
 
-    monkeypatch.setattr(mod, "TRIGGER_CONFIG_FILE", config_file)
+    monkeypatch.setattr(mod, "MEDIC_STATE_FILE", config_file)
+    monkeypatch.setattr(mod, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_json" / "trigger_config.json")
     monkeypatch.setattr(mod, "MEDIC_SUPPRESSED_LOG", suppressed_log)
     monkeypatch.setattr(mod, "RATE_LIMITED_LOG", rate_limited_log)
 
@@ -88,7 +95,7 @@ class TestReadConfig:
 
     def test_read_config_file_exists(self, state_mod):
         """read_config returns parsed dict when file exists."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         data = {"config": {"medic_enabled": True}, "version": "1.0"}
         config_file.write_text(json.dumps(data), encoding="utf-8")
@@ -106,7 +113,7 @@ class TestReadConfig:
 
     def test_read_config_corrupt_file_returns_empty(self, state_mod):
         """read_config returns empty dict when file contains invalid JSON."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text("not valid json {{{", encoding="utf-8")
 
@@ -130,14 +137,14 @@ class TestWriteConfig:
         result = state_mod.write_config(data)
 
         assert result is True
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         assert config_file.exists()
         written = json.loads(config_file.read_text(encoding="utf-8"))
         assert written == data
 
     def test_write_config_creates_parent_dirs(self, state_mod):
         """write_config creates parent directories when they do not exist."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         assert not config_file.parent.exists()
 
         result = state_mod.write_config({"test": True})
@@ -162,7 +169,7 @@ class TestIsEnabled:
 
     def test_is_enabled_true_when_set(self, state_mod):
         """is_enabled returns True when medic_enabled is True."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {"medic_enabled": True}}), encoding="utf-8")
 
@@ -172,7 +179,7 @@ class TestIsEnabled:
 
     def test_is_enabled_false_when_disabled(self, state_mod):
         """is_enabled returns False when medic_enabled is False."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {"medic_enabled": False}}), encoding="utf-8")
 
@@ -182,7 +189,7 @@ class TestIsEnabled:
 
     def test_is_enabled_true_when_config_empty(self, state_mod):
         """is_enabled returns True when config has no medic_enabled key."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({"config": {}}), encoding="utf-8")
 
@@ -204,7 +211,7 @@ class TestSetEnabled:
         result = state_mod.set_enabled(True)
 
         assert result is True
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert data["config"]["medic_enabled"] is True
 
@@ -213,7 +220,7 @@ class TestSetEnabled:
         result = state_mod.set_enabled(False)
 
         assert result is True
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert data["config"]["medic_enabled"] is False
 
@@ -234,7 +241,7 @@ class TestSetEnabled:
 
     def test_set_enabled_preserves_existing_config(self, state_mod):
         """set_enabled preserves other config keys when updating."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps({"config": {"medic_enabled": True, "other_key": "keep_me"}}),
@@ -294,7 +301,7 @@ class TestGetMutedBranches:
 
     def test_returns_populated_list(self, state_mod):
         """get_muted_branches returns the stored muted branch names."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps({"config": {"muted_branches": ["speakeasy", "api"]}}),
@@ -307,7 +314,7 @@ class TestGetMutedBranches:
 
     def test_normalizes_branch_names(self, state_mod):
         """get_muted_branches normalizes names (strips @, lowercases)."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps({"config": {"muted_branches": ["@SPEAKEASY", "@Api"]}}),
@@ -543,7 +550,7 @@ class TestMuteBranchTTL:
         """mute_branch with no duration stores dict with expires_at null."""
         state_mod.mute_branch("api")
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         muted = data["config"]["muted_branches"]
         assert len(muted) == 1
@@ -557,7 +564,7 @@ class TestMuteBranchTTL:
         state_mod.mute_branch("api", duration_seconds=3600)
         after = datetime.now()
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         muted = data["config"]["muted_branches"]
         assert len(muted) == 1
@@ -570,7 +577,7 @@ class TestMuteBranchTTL:
         """mute_branch with duration_seconds=None stores expires_at as null."""
         state_mod.mute_branch("api", duration_seconds=None)
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         muted = data["config"]["muted_branches"]
         assert len(muted) == 1
@@ -590,7 +597,7 @@ class TestGetMutedBranchesTTL:
         from datetime import datetime, timedelta
 
         expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -614,7 +621,7 @@ class TestGetMutedBranchesTTL:
         from datetime import datetime, timedelta
 
         future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -635,7 +642,7 @@ class TestGetMutedBranchesTTL:
 
     def test_get_muted_branches_plain_string_backcompat(self, state_mod):
         """get_muted_branches returns plain string entries as permanent mutes."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps({"config": {"muted_branches": ["speakeasy"]}}),
@@ -660,7 +667,7 @@ class TestGetMutedBranchesDetail:
         from datetime import datetime, timedelta
 
         future_ts = (datetime.now() + timedelta(hours=2)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -696,7 +703,7 @@ class TestIsEnabledTTL:
         from datetime import datetime, timedelta
 
         past_ts = (datetime.now() - timedelta(hours=1)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -719,7 +726,7 @@ class TestIsEnabledTTL:
         from datetime import datetime, timedelta
 
         future_ts = (datetime.now() + timedelta(hours=1)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -739,7 +746,7 @@ class TestIsEnabledTTL:
 
     def test_is_enabled_permanent_off(self, state_mod):
         """is_enabled returns False when permanently disabled (no medic_disabled_until)."""
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps({"config": {"medic_enabled": False}}),
@@ -767,7 +774,7 @@ class TestSetEnabledDuration:
         state_mod.set_enabled(False, duration_seconds=86400)
         after = datetime.now()
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert data["config"]["medic_enabled"] is False
         disabled_until = data["config"]["medic_disabled_until"]
@@ -779,7 +786,7 @@ class TestSetEnabledDuration:
         """set_enabled(True) clears any existing medic_disabled_until."""
         # First disable with TTL
         state_mod.set_enabled(False, duration_seconds=3600)
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert "medic_disabled_until" in data["config"]
 
@@ -842,7 +849,7 @@ class TestUnmuteBranchDict:
         from datetime import datetime, timedelta
 
         future_ts = (datetime.now() + timedelta(hours=2)).isoformat()
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -935,7 +942,7 @@ class TestWriteConfigCleansMutes:
 
         state_mod.write_config(data)
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         written = json.loads(config_file.read_text(encoding="utf-8"))
         muted = written["config"]["muted_branches"]
         assert len(muted) == 1
@@ -959,7 +966,7 @@ class TestWriteConfigCleansMutes:
 
         state_mod.write_config(data)
 
-        config_file = state_mod.TRIGGER_CONFIG_FILE
+        config_file = state_mod.MEDIC_STATE_FILE
         written = json.loads(config_file.read_text(encoding="utf-8"))
         muted = written["config"]["volume_muted_branches"]
         assert len(muted) == 1
@@ -978,7 +985,7 @@ class TestVolumeMutes:
         """mute_branch_volume stores under volume_muted_branches."""
         state_mod.mute_branch_volume("api")
 
-        data = json.loads(state_mod.TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         assert data["config"]["volume_muted_branches"] == [{"name": "api", "expires_at": None}]
         assert not data["config"].get("muted_branches")
 
@@ -1004,7 +1011,7 @@ class TestVolumeMutes:
         state_mod.mute_branch_volume("api", duration_seconds=3600)
         after = datetime.now()
 
-        data = json.loads(state_mod.TRIGGER_CONFIG_FILE.read_text(encoding="utf-8"))
+        data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
         entry = data["config"]["volume_muted_branches"][0]
         expires = datetime.fromisoformat(entry["expires_at"])
         assert expires >= before + timedelta(seconds=3600)
@@ -1042,10 +1049,61 @@ class TestVolumeMutes:
         from datetime import datetime, timedelta
 
         expired_ts = (datetime.now() - timedelta(hours=1)).isoformat()
-        state_mod.TRIGGER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        state_mod.TRIGGER_CONFIG_FILE.write_text(
+        state_mod.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state_mod.MEDIC_STATE_FILE.write_text(
             json.dumps({"config": {"volume_muted_branches": [{"name": "api", "expires_at": expired_ts}]}}),
             encoding="utf-8",
         )
 
         assert state_mod.get_volume_muted_branches() == []
+
+
+class TestLegacyPathMigration:
+    """Live state moves off the trio-owned trigger_config.json name."""
+
+    def test_read_config_migrates_legacy_file(self, state_mod, tmp_path) -> None:
+        """First read finds the legacy file, moves it, and returns its contents."""
+        legacy = state_mod.LEGACY_MEDIC_STATE_FILE
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(
+            json.dumps({"config": {"medic_enabled": True, "muted_branches": ["flow", "api"]}}),
+            encoding="utf-8",
+        )
+
+        data = state_mod.read_config()
+
+        assert data["config"]["muted_branches"] == ["flow", "api"]
+        assert state_mod.MEDIC_STATE_FILE.exists()
+        assert not legacy.exists()
+
+    def test_mutes_survive_migration(self, state_mod) -> None:
+        """get_muted_branches reads through the migration — no mute is lost."""
+        legacy = state_mod.LEGACY_MEDIC_STATE_FILE
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(
+            json.dumps(
+                {
+                    "config": {
+                        "muted_branches": [
+                            {"name": "flow", "expires_at": None},
+                            {"name": "api", "expires_at": None},
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert sorted(state_mod.get_muted_branches()) == ["api", "flow"]
+
+    def test_write_after_migration_targets_new_file(self, state_mod) -> None:
+        """A mute written post-migration lands in medic_state.json, not the legacy name."""
+        legacy = state_mod.LEGACY_MEDIC_STATE_FILE
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(json.dumps({"config": {"muted_branches": []}}), encoding="utf-8")
+
+        assert state_mod.mute_branch("@seedgo") is True
+
+        data = json.loads(state_mod.MEDIC_STATE_FILE.read_text(encoding="utf-8"))
+        assert [e["name"] for e in data["config"]["muted_branches"]] == ["seedgo"]
+        assert not legacy.exists()

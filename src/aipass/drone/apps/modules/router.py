@@ -13,7 +13,6 @@ Thin orchestrator that resolves targets and delegates execution
 to the handler layer.
 """
 
-import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -23,8 +22,8 @@ from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.executor import CommandResult, resolve_timeout
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
-    detect_caller_branch_name,
     execute_branch_command,
+    resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch
 
@@ -104,11 +103,12 @@ def route_command(
     branch_name = target.lstrip("@").lower()
     resolved_timeout = resolve_timeout(branch_name, command, timeout)
 
-    caller = detect_caller_branch_name(Path.cwd())
-    if not caller:
-        caller = os.environ.get("AIPASS_BRANCH_NAME")
+    # Same resolver execute_branch_command uses — logging its own precedence
+    # here would let the CALLER: tag name someone other than the branch actually
+    # stamped on the work.
+    caller = resolve_caller_identity(Path.cwd())
     # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
-    # hides the gap. detect_caller_branch_name already logged the cwd.
+    # hides the gap. detect_caller_signal already logged the cwd.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds)",

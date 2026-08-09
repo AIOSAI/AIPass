@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Multi-bot Telegram bridge — routes messages between Telegram and Claude tmux sessions
-version: 1.6.0
+version: 1.7.0
 tags: [communication, bridge, telegram, bot]
 requires:
   pip: [telethon]

@@ -25,6 +25,10 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: this checks the apps/handlers/modules layering
+# a branch is built from. A test file has no such layering, and enforcing it there
+# failed 439 of the fleet's 456 test files (96%, every branch) -- noise, not findings.
+APPLIES_TO = "production"
 
 PACK_ROOT = Path(__file__).resolve().parent.parent.parent  # aipass_standards/ -> handlers/ -> apps/ -> seedgo/
 

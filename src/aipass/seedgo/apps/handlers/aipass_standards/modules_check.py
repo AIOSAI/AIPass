@@ -23,6 +23,9 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: the module contract describes apps/modules/
+# orchestration code, which a test file is not.
+APPLIES_TO = "production"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:

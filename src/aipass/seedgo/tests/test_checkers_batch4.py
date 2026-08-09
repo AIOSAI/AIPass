@@ -494,3 +494,36 @@ class TestUnusedFunctionCheck:
         result = unused_function_check_branch(str(branch))
         assert result["score"] == 100
         assert result["passed"] is True
+
+
+# A file caught mid-save must not sink the branch (FPLAN-0382 ruling d)
+
+
+@patch("aipass.seedgo.apps.handlers.aipass_standards.unused_function_check.json_handler")
+def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_json, tmp_path):
+    """IndentationError is a SyntaxError, not a TokenError.
+
+    Uncaught it escaped check_branch(), and branch_audit scores an escaped exception
+    as a flat 0 for the whole branch -- the spurious 'Unused_Function 0%' seen on
+    uncached runs, unreproducible because the file is saved correctly by the retry.
+    """
+    branch = tmp_path / "victim"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "good.py").write_text(
+        "def alpha():\n    return beta()\n\n\ndef beta():\n    return 1\n", encoding="utf-8"
+    )
+    (branch / "apps" / "midsave.py").write_text("def helper():\n    return 1\n  stray = 2\n", encoding="utf-8")
+
+    result = unused_function_check_branch(str(branch))
+
+    assert result["score"] > 0
+    assert "error" not in result
+
+
+def test_unused_function_strip_non_code_degrades_on_syntax_error():
+    from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import _strip_non_code
+
+    source = "def helper():\n    return 1\n  stray = 2\n"
+
+    # Falls back to the raw corpus rather than raising -- the name must survive.
+    assert "helper" in _strip_non_code(source)
