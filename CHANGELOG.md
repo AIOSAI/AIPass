@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(hooks)** — edit_gate's entry-count warning stopped making false
+promises (edit_gate 1.2.0, by @hooks; the @memory entry-count bug's
+twin, caught by three escalation digests). Same class: the guard
+counted the combined sessions array (regular + auto-compact snapshots)
+against the regular-only cap, so every healthy branch read "16/15 —
+rollover will trim at next PreCompact" on every gate pass — a trim that
+could never come, since rollover budgets snapshots separately and had
+nothing to archive. Guard now mirrors the extractor's predicate exactly
+(sessions split, key_learnings deliberately not — the extractor doesn't
+split it either, test-pinned). Second false promise found in the same
+function: todos "will trim" — todos never roll, they're hand-pruned;
+dormant today but one re-added config key from returning. Warning lines
+now name the branch (previously every branch's over-count was
+attributed to @hooks, and digest signatures blurred) and state what
+actually happens, every clause verified in code. Warn-only confirmed —
+nothing was ever blocked, "they were lied to ~10x/hr." +10 tests
+(1370), two canaries red with the false lines verbatim, live-verified
+against the real 14+2 file: zero warnings. Seedgo 100%. Suite + lint
+re-verified by devpulse.
+
 **fix(memory)** — the fleet-wide false ENTRY COUNT warning is gone:
 entry-count guard now budgets auto-compact snapshots separately, exactly
 as rollover always did (memory_files 1.2.0, built by @memory, parked by
