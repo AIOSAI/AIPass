@@ -8,13 +8,24 @@
     {
       "file": "apps/drone.py",
       "standard": "cli",
-      "lines": [267, 269, 385, 387, 506, 508, 625, 627],
+      "lines": [
+        267,
+        269,
+        385,
+        387,
+        506,
+        508,
+        625,
+        627
+      ],
       "reason": "Raw passthrough of routed command stdout/stderr — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
     {
       "file": "apps/modules/router.py",
       "standard": "cli",
-      "lines": [61],
+      "lines": [
+        61
+      ],
       "reason": "Raw passthrough of routed command stdout — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
     {
@@ -45,8 +56,7 @@
     {
       "file": "apps/handlers/git/pr_handler.py",
       "standard": "handlers",
-      "lines": [298],
-      "reason": "Lazy CROSS-branch import of aipass.trigger's module for trigger.fire() — event notification after PR creation. Non-blocking, wrapped in try/except. Survives the same-branch relaxation (dc07cc01) precisely because the target is another branch's module, not drone's."
+      "reason": "Lazy CROSS-branch import of aipass.trigger's module for trigger.fire() - event notification after PR creation. Non-blocking, wrapped in try/except. Survives the same-branch relaxation (dc07cc01) precisely because the target is another branch's module, not drone's. FILE-WIDE BY NECESSITY: the handlers standard never passes a line to is_bypassed, so a lines key is inert post-FPLAN-0382-wave-2 (seedgo's inert-rule info channel flagged it; lines[298] dropped by devpulse 2026-08-09 per this rule's own documented intent, seedgo mail 932be941). Re-scope if handlers ever threads line=."
     },
     {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",
@@ -221,25 +231,34 @@
     {
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "unused_function",
-      "functions": ["update_command", "command_exists"],
+      "functions": [
+        "update_command",
+        "command_exists"
+      ],
       "reason": "Public CRUD API surface (update_command, command_exists) — tested, available for programmatic use. No CLI subcommand wired yet."
     },
     {
       "file": "apps/handlers/git/pr_handler.py",
       "standard": "unused_function",
-      "functions": ["create_pr"],
+      "functions": [
+        "create_pr"
+      ],
       "reason": "create_pr() is deprecated per FPLAN-0210 — pr command blocked at auth tier. Handler kept for backwards compatibility; still tested in test_git_module.py."
     },
     {
       "file": "apps/modules/git_module.py",
       "standard": "unused_function",
-      "functions": ["get_introspective"],
+      "functions": [
+        "get_introspective"
+      ],
       "reason": "get_introspective() called dynamically via getattr() by module_registry_handler.py:219 for internal module introspection. Also tested in test_git_module, test_system_pr, test_devpulse_plugins, test_git_access."
     },
     {
       "file": "apps/handlers/broker/daemon.py",
       "standard": "unused_function",
-      "functions": ["start_background"],
+      "functions": [
+        "start_background"
+      ],
       "reason": "Threaded broker entrypoint, exercised by tests/test_broker.py; production uses blocking start(); intentionally not called in shipped non-test code."
     }
   ],
