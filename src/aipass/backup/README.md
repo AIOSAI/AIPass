@@ -4,7 +4,7 @@
 **Module:** `aipass.backup`
 **Version:** 1.0.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-05-03
+**Last Updated:** 2026-08-08
 
 ---
 
@@ -39,6 +39,7 @@ apps/
 │   ├── register.py        # Project registration + @name resolution
 │   ├── restore.py         # Version discovery + file restoration
 │   ├── settings.py        # Settings UI (stub)
+│   ├── share.py           # Single-file Drive upload + share link
 │   ├── snapshot.py        # Full mirror backup
 │   ├── status.py          # Backup status display
 │   └── versioned.py       # Incremental timestamped backup
@@ -48,7 +49,7 @@ apps/
     ├── drive/             # Google Drive handlers (stubs)
     ├── ignore/            # .backupignore patterns + whitelist
     ├── json/              # JSON persistence, atomic writes, ops log
-    ├── path/              # Backup path building
+    ├── path/              # Backup path building + caller-CWD resolution
     ├── project/           # Config, registry, setup (.backup/)
     ├── report/            # Result formatting
     ├── scan/              # Directory walking + filtering
@@ -73,9 +74,16 @@ backup drive_sync <path|@name>           # Google Drive sync (stub — DPLAN-003
 backup drive_check <path|@name>          # Drive connectivity check (stub — DPLAN-003)
 backup drive_stats <path|@name>          # Drive storage stats (stub — DPLAN-003)
 backup drive_clear <path|@name>          # Clear Drive sync state (stub — DPLAN-003)
+backup share <file> [--public]           # Upload one file to Drive, return share link
 ```
 
-All 11 commands are auto-discovered by the entry point router.
+All 12 commands are auto-discovered by the entry point router.
+
+**Relative paths resolve where you are.** Backup runs as an installed entry
+point, so its process CWD is its own branch directory. Drone exports
+`AIPASS_CALLER_CWD`; `handlers/path/caller.py` re-anchors every user-supplied
+relative path to it, so `drone @backup share docs/notes.md` means the caller's
+`docs/notes.md`. Absolute paths are untouched.
 
 ---
 

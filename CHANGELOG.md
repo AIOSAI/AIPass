@@ -11,6 +11,28 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(backup)** — user-supplied relative paths resolve where the user
+actually is, and a live tree changing mid-snapshot no longer aborts the
+cycle (by @backup). Two fixes riding together. CALLER_CWD: backup runs
+as an installed entry point, so `Path.cwd()` is backup's own branch dir
+— `backup share notes.txt` from another project resolved into the wrong
+tree and failed with a misleading not-found. New
+`handlers/path/caller.py` resolves relative paths against
+`AIPASS_CALLER_CWD` (drone exports it; falls back to `Path.cwd()` for
+direct invocation), absolute paths byte-identical to before. Sweep found
+the same class failing SILENTLY in register/status (registering the
+backup branch dir under another project's name and happily backing it
+up) — all four sites fixed, registry.py's registry-file path deliberately
+untouched (not user input). TOCTOU: the post-snapshot timestamp save
+indexed `os.path.getmtime` over files scanned moments earlier — an
+editor temp file vanishing mid-run threw FileNotFoundError, aborted the
+whole cycle, and surfaced as a bogus "Unknown command" through the
+route_command catch-all. Vanished files now skip with a log line
+(absent-from-both compares equal; a returning file mismatches and
+triggers the full snapshot it needs). +11 tests (263), canary red 6
+ways with the exact live failure shapes, absolute-path tests green
+under revert. Seedgo 100%. Suite + lint re-verified by devpulse.
+
 **fix(flow)** — template stamping hardened against partial placeholder
 values + VERA's weekly_update v2.1 landed (get_template 1.3.1). VERA's
 createIfEmpty KeyError report turned out already fixed 08-07 (her field
