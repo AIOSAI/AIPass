@@ -11,7 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
-**fix(seedgo)** — FPLAN-0384: scope-aware standards, one source of truth for
+**fix(skills)** — FPLAN-0385: prax_monitor Telegram self-feed loop killed at
+source (by @skills). The streamer logged "Found N new log lines, sending to
+Telegram" every cycle; with system_wide=True that INFO landed in its own
+capture file inside its own watch glob, so each cycle manufactured the fuel
+for the next — 1,495 loop lines and a ping every ~6s on Patrick's phone. The
+announcement is deleted (forwarded lines are their own evidence) and a
+structural guard now drops the streamer's own log family first in
+_filter_lines, unconditionally — no level anyone adds later can reopen the
+loop, and a WARNING from a failing send would have looped hardest of all.
+Boot line now prints the real glob instead of claiming branch scope while
+watching everything. Trade-off, ruled delete-over-tune: bot-level errors no
+longer reach Telegram (still on disk + journalctl + medic scope); phone-side
+bot health needs its own de-duped heartbeat path if ever wanted. 9 new
+self-exclusion canaries (one behavioural: a _run cycle emits no "Found");
+telegram suite 1073 green. Deploy verified live: 5 bots restarted, 210s+
+quiet where it fired every 6s, forwarding canary still delivered.
 both lanes (by @seedgo). The audit lane walked apps/ regardless of what a
 checker declared and run_checklist filtered nothing, so the same standard was
 production-only in one lane and everywhere in the other — structural checks

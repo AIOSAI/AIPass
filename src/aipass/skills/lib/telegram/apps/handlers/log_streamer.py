@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_streamer.py
 # Description: Stream system log lines to Telegram via batched daemon thread
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-26
-# Modified: 2026-06-15
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -69,6 +69,30 @@ SYSTEM_LOGS_DIR = _get_system_logs_dir()
 
 _LEVEL_MARKERS = ("| WARNING |", "| ERROR |", "| CRITICAL |")
 
+# Prax log-source prefixes emitted by the telegram bot processes that host this
+# streamer. A system-wide streamer globs every *.log, so without this exclusion
+# its own output is inside its own watch scope: one INFO per cycle re-feeds the
+# next cycle forever. Prax SystemLogger has no debug() level, so there is no
+# "quiet" level to log at — the only safe rule is that bot-emitted lines never
+# stream. Covers both process-named captures (captured_bot_<bot_id>) and
+# module-named ones (captured_base_bot), since prax derives the name from
+# whichever context is live.
+_SELF_LOG_SOURCES = (
+    "captured_bot_",  # captured_bot_base, captured_bot_prax_monitor, captured_bot_factory, ...
+    "captured_base_bot",
+    "captured_scheduler_bot",
+    "captured_botfather_",
+    "captured_log_streamer",
+)
+
+
+def _is_self_log_line(line: str) -> bool:
+    """True if this line was emitted by a telegram bot process (this streamer's own host)."""
+    parts = line.split(" | ", 2)
+    if len(parts) < 3:
+        return False
+    return parts[1].strip().startswith(_SELF_LOG_SOURCES)
+
 
 class LogStreamer:
     """Stream system log lines for a branch to Telegram via batched sends."""
@@ -108,7 +132,13 @@ class LogStreamer:
         return sorted(SYSTEM_LOGS_DIR.glob(f"{self.branch_name}_*.log"))
 
     def _filter_lines(self, lines: List[str]) -> List[str]:
-        """Apply level filter: default keeps WARNING/ERROR/CRITICAL, all passes everything."""
+        """Drop the bots' own captured output, then apply the level filter.
+
+        Self-exclusion runs first and is unconditional — it holds even at
+        level_filter='all', so no INFO (or WARNING) added to this code path by
+        anyone can re-enter the stream and feed the loop.
+        """
+        lines = [ln for ln in lines if not _is_self_log_line(ln)]
         if self._level_filter == "all":
             return lines
         return [ln for ln in lines if any(m in ln for m in _LEVEL_MARKERS)]
@@ -231,19 +261,21 @@ class LogStreamer:
     def _run(self) -> None:
         """Main loop: read new lines, batch, send, sleep."""
         logger.info("Log streamer started for branch: %s", self.branch_name)
-        logger.info(
-            "Watching: %s/%s_*.log (chat_id=%s)",
-            SYSTEM_LOGS_DIR,
-            self.branch_name,
-            self.chat_id,
-        )
+        # Report the glob actually used, not the branch-scoped one — a system-wide
+        # streamer that claims to watch <branch>_*.log hides the very scope that
+        # let it watch itself.
+        scope = "*.log" if self._system_wide else f"{self.branch_name}_*.log"
+        logger.info("Watching: %s/%s (chat_id=%s)", SYSTEM_LOGS_DIR, scope, self.chat_id)
 
         while self._running:
             try:
                 new_lines = self._read_new_lines()
                 new_lines = self._filter_lines(new_lines)
                 if new_lines:
-                    logger.info("Found %d new log lines, sending to Telegram", len(new_lines))
+                    # No "forwarding N lines" announcement here, by Patrick's ruling:
+                    # the forwarded lines are their own evidence. Anything logged in
+                    # this loop lands in the bot's own captured log, which a
+                    # system-wide streamer watches — that is what fed the loop.
                     self._send_batched(new_lines)
             except Exception as e:
                 logger.warning("Streamer cycle error: %s", e)
