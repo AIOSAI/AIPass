@@ -8,13 +8,13 @@
     {
       "file": "apps/drone.py",
       "standard": "cli",
-      "lines": [244, 246, 360, 362, 479, 481, 585, 587],
+      "lines": [267, 269, 385, 387, 506, 508, 625, 627],
       "reason": "Raw passthrough of routed command stdout/stderr — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
     {
       "file": "apps/modules/router.py",
       "standard": "cli",
-      "lines": [62],
+      "lines": [61],
       "reason": "Raw passthrough of routed command stdout — console.print() wraps at 80 cols when piped, corrupting JSON and machine output"
     },
     {
@@ -33,31 +33,9 @@
       "reason": "handle_command returns dict (not bool) — module doubles as drone adapter for route_module_command() which requires dict return with stdout/stderr/exit_code"
     },
     {
-      "file": "apps/handlers/discovery_handler.py",
-      "standard": "handlers",
-      "lines": [
-        190
-      ],
-      "reason": "Discovery handler needs registry_handler.load_registry() to resolve branch paths for help lookups. Justified cross-handler dependency — discovery is the only consumer."
-    },
-    {
-      "file": "apps/handlers/scanning/scanner.py",
-      "standard": "handlers",
-      "lines": [
-        29
-      ],
-      "reason": "Scanner needs discovery_handler's get_entry_point() and parse_help_for_commands() to discover commands from branch help output. Justified — scanner's core function depends on discovery's parsing."
-    },
-    {
       "file": "apps/handlers/module_registry_handler.py",
       "standard": "naming",
       "reason": "_ExternalModuleConfig is PascalCase — leading underscore is Python private convention, not a naming violation"
-    },
-    {
-      "file": "apps/handlers/module_registry_handler.py",
-      "standard": "handlers",
-      "lines": [28],
-      "reason": "module_registry_handler routes through generic_adapter.capture_main() — this IS the routing mechanism. Cross-handler import is the core design."
     },
     {
       "file": "apps/plugins/devpulse_ops/auth.py",
@@ -67,8 +45,8 @@
     {
       "file": "apps/handlers/git/pr_handler.py",
       "standard": "handlers",
-      "lines": [210],
-      "reason": "Lazy import of trigger.fire() — event notification after PR creation. Non-blocking, wrapped in try/except."
+      "lines": [298],
+      "reason": "Lazy CROSS-branch import of aipass.trigger's module for trigger.fire() — event notification after PR creation. Non-blocking, wrapped in try/except. Survives the same-branch relaxation (dc07cc01) precisely because the target is another branch's module, not drone's."
     },
     {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",
@@ -134,12 +112,6 @@
       "file": "tests/test_git_module.py",
       "standard": "architecture",
       "reason": "Test file — intentionally outside 3-layer structure. tests/ is a peer of apps/, not part of it."
-    },
-    {
-      "file": "tests/test_git_module.py",
-      "standard": "encapsulation",
-      "lines": [20],
-      "reason": "Test file imports lock_handler directly to test its public interface. Unit tests require direct access to implementation components."
     },
     {
       "file": "tests/test_git_access.py",
@@ -237,12 +209,6 @@
       "reason": "Acceptance test exercises .unlink() to clean up test symlinks — not production file operations."
     },
     {
-      "file": "tests/test_broker.py",
-      "standard": "windows_compat",
-      "lines": [556],
-      "reason": "stat.S_IMODE() guarded by os.name != 'posix' skip at runtime. POSIX-only secret permission test."
-    },
-    {
       "file": "artifacts/broker_acceptance_test.py",
       "standard": "unused_function",
       "reason": "Standalone acceptance demo runner — helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
@@ -291,6 +257,7 @@
       "pattern": "Optional - pattern to match (e.g. 'if __name__')",
       "reason": "Required - why this bypass exists"
     },
+    "scoped_rules_trued_2026-08-09": "FPLAN-0382 wave 1: all 12 scope-qualified rules re-verified against the tree before seedgo's is_bypassed() scoping fix lands. Every line-scoped rule had DRIFTED — the 3 kept were refreshed, and 5 were DELETED as dead (3 handlers rules whose imports are same-branch aipass.drone, dead since dc07cc01; test_git_module encapsulation; test_broker windows_compat, already covered by an inline noqa). Deletion was proven, not assumed: removing each rule and re-auditing produced no violation. The 3 survivors were checked the other way — with the rule removed, the checker reports violations at exactly the bypassed lines and nowhere else, so line-scoped enforcement will not expose anything the current whole-file behaviour is hiding. All 4 function-scoped rules still name existing functions; reasons hold. Line numbers are a claim about the tree — re-verify whenever the file moves.",
     "removed_s61": "13 naming bypasses removed (9 __all__ + 4 local variable false positives). Seedgo dispatched to fix naming_check.py. If audit fails on naming after this, the checker fix didn't land."
   }
 }
