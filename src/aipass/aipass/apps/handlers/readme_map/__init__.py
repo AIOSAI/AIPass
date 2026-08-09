@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_map/__init__.py
-# Description: Branch-name to README-path lookup for help_chat live reads
-# Version: 1.0.0
+# Description: Branch-name to README-path lookup and live README reads
+# Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-08-08
 # =============================================
 
 """readme_map — branch-name → README-path lookup for help_chat live reads.
@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from aipass.prax import logger
 
 # =============================================================================
 # AIPASS ROOT DETECTION
@@ -51,23 +53,8 @@ def _detect_aipass_root() -> Path:
 
 
 # =============================================================================
-# BRANCH REGISTRY
+# BRANCH DISCOVERY
 # =============================================================================
-
-BRANCHES: list[str] = [
-    "drone",
-    "seedgo",
-    "prax",
-    "cli",
-    "flow",
-    "ai_mail",
-    "api",
-    "trigger",
-    "spawn",
-    "memory",
-    "devpulse",
-    "aipass",
-]
 
 # Module-level cache: branch_name → readme_path
 # This is the ONLY thing cached. Content is always live-read.
@@ -75,17 +62,21 @@ _README_MAP: dict[str, Path] | None = None
 
 
 def _build_readme_map() -> dict[str, Path]:
-    """Build the branch → README.md path map. Called once, result cached."""
+    """Build the branch → README.md path map. Called once, result cached.
+
+    Branches are discovered live — any src/aipass/<dir>/README.md counts.
+    No hardcoded roster: a branch spawned yesterday is findable today.
+    """
     global _AIPASS_ROOT
     if _AIPASS_ROOT is None:
         _AIPASS_ROOT = _detect_aipass_root()
 
     src_aipass = _AIPASS_ROOT / "src" / "aipass"
     result: dict[str, Path] = {}
-    for branch in BRANCHES:
-        readme = src_aipass / branch / "README.md"
-        if readme.exists():
-            result[branch] = readme
+    if not src_aipass.is_dir():
+        return result
+    for readme in sorted(src_aipass.glob("*/README.md")):
+        result[readme.parent.name] = readme
     return result
 
 
@@ -130,5 +121,22 @@ def read_readme_lines(branch: str) -> list[str] | None:
     try:
         with open(readme_path, encoding="utf-8") as fh:
             return fh.readlines()
-    except OSError:
+    except OSError as exc:
+        logger.error("[readme_map] Could not read %s: %s", readme_path, exc)
+        return None
+
+
+def read_readme_at(readme_path: Path) -> str | None:
+    """Live-read a README at a known path. Returns the whole document, or None on error.
+
+    The path-based counterpart to read_readme_lines: callers that already
+    resolved a path (and reported their own not-found message) read through
+    here rather than touching the filesystem themselves. Content is NEVER
+    cached — every call reads the current file.
+    """
+    try:
+        with open(readme_path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError as exc:
+        logger.error("[readme_map] Could not read %s: %s", readme_path, exc)
         return None

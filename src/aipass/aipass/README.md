@@ -8,6 +8,8 @@ The friendly front door for AIPass. Walks new users through setup, runs system d
 aipass                              # Show available commands
 aipass doctor                       # Check system health
 aipass help what does drone do      # Search branch documentation
+aipass what does drone do           # Same — free text falls through to help
+aipass read drone                   # Full branch README, rendered in the terminal
 aipass new myapp --template python  # Create a new project
 aipass adopt myapp --dry-run        # Preview adopting an existing projects/ dir
 aipass init                         # Guided setup (10 stages, resumable)
@@ -30,13 +32,14 @@ aipass/
 │   │   ├── doctor.py                      # System health aggregation + cross-OS pre-flight (--cross-os)
 │   │   ├── _doctor_fix.py                 # Remediation report (--fix, --json) [internal]
 │   │   ├── _doctor_wire.py                # Auto-wire provider settings + stale-deny re-export [internal]
-│   │   ├── handoff.py                     # CLI handoff (placeholder)
+│   │   ├── handoff.py                     # CLI handoff — tmux (Linux/Mac) / wt.exe (Windows) session launch
 │   │   ├── help_chat.py                   # README-backed Q&A (reads via readme_map handler)
 │   │   ├── init_flow.py                   # 10-stage guided setup
 │   │   ├── install.py                     # aipass install — one-command bootstrap (clone + setup + init)
 │   │   ├── new_project.py                 # aipass new — create projects inside the installation
 │   │   ├── adopt.py                       # aipass adopt — bring an existing projects/ dir into AIPass
 │   │   ├── profile.py                     # User profile read/write
+│   │   ├── read.py                        # aipass read — render a branch README, live-read
 │   │   ├── trust.py                       # Trust registry — aipass trust / aipass revoke
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
 │   ├── handlers/
@@ -51,9 +54,10 @@ aipass/
 │   │   ├── readme_map/                    # Live file reads + branch routing
 │   │   ├── structure_scan/                # Agent placement + pollution detection
 │   │   ├── system_detect/                 # OS, shell, Python, RAM, CPU
+│   │   ├── telegram_readiness.py          # Telegram bot-host readiness checks (doctor)
 │   │   └── ui/                            # Progress bars, menus, banners
 │   └── plugins/
-├── tests/                                 # 934 passing
+├── tests/                                 # 977 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -76,6 +80,10 @@ aipass/
 | `aipass init update --dry-run` | Preview the git-auth repairs only — writes nothing |
 | `aipass install` | One-command bootstrap — clone + setup.sh + hooks, then hand off to init |
 | `aipass profile` | Show/edit user profile |
+| `aipass read [branch]` | View a branch README rendered in the terminal (bare: module info + branch list) |
+| `aipass handoff` | Show CLI-handoff status |
+| `aipass handoff launch [--cli claude\|codex]` | Launch chosen CLI in a new session (tmux / wt.exe) |
+| `aipass <free text>` | Multi-word unknown input falls through to `aipass help` |
 | `aipass new <name>` | Create a project in projects/ — own git repo, AIPass scaffold, resident agent |
 | `aipass new <name> --template python` | Create with Python template (pyproject + src/) |
 | `aipass new <name> --no-agent` | Create without resident agent |
@@ -105,12 +113,12 @@ Humans only. Nothing in AIPass depends on this branch.
 
 ## Tests
 
-934 passing — `pytest src/aipass/aipass/tests/`
+977 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 
-- `aipass.py` line 23: `from aipass.prax import logger` fails outside package context (ModuleNotFoundError). Works via drone routing only.
+- Running the file directly (`python apps/aipass.py`) fails on package imports (ModuleNotFoundError) — use the installed `aipass` entry point, which works from any directory.
 
 ## Last Updated
 
-Last Updated: 2026-08-04
+Last Updated: 2026-08-08

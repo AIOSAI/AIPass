@@ -47,6 +47,7 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_srt_resolvable,
     is_linux,
 )
+from aipass.aipass.apps.handlers.telegram_readiness import check_telegram_readiness
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
     check_pyproject,
@@ -606,6 +607,10 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
 
     # stale rm deny rules — detect only (fix runs in run_doctor when --fix)
     for tup in reconcile_stale_deny(fix=False):
+        results.append(CheckResult(*tup))
+
+    # BotFather automation prerequisites — silent unless this machine hosts bots
+    for tup in check_telegram_readiness():
         results.append(CheckResult(*tup))
 
     return results

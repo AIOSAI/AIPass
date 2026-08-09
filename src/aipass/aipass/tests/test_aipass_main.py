@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-08-07
 # =============================================
 
 """Tests for aipass.py — main entry point and module discovery."""
@@ -15,7 +15,13 @@ import types
 from unittest.mock import MagicMock, patch
 
 
-from aipass.aipass.apps.aipass import discover_modules, main, route_command
+from aipass.aipass.apps.aipass import (
+    _pyproject_version,
+    _resolve_version,
+    discover_modules,
+    main,
+    route_command,
+)
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
@@ -142,6 +148,76 @@ class TestRouteCommand:
 
 
 # =============================================================================
+# TestResolveVersion
+# =============================================================================
+
+
+class TestResolveVersion:
+    """Tests for _pyproject_version / _resolve_version — live repo version."""
+
+    @staticmethod
+    def _write_pyproject(root, name: str, version: str) -> None:
+        (root / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "{version}"\n',
+            encoding="utf-8",
+        )
+
+    def test_pyproject_version_found(self, tmp_path) -> None:
+        """Walks up from a nested file path to the aipass pyproject.toml."""
+        self._write_pyproject(tmp_path, "aipass", "9.9.9")
+        start = tmp_path / "src" / "aipass" / "aipass" / "apps" / "aipass.py"
+        assert _pyproject_version(start) == "9.9.9"
+
+    def test_pyproject_skips_foreign_name(self, tmp_path) -> None:
+        """A nested project's own pyproject is skipped; walk continues upward."""
+        self._write_pyproject(tmp_path, "aipass", "9.9.9")
+        nested = tmp_path / "projects" / "myapp"
+        nested.mkdir(parents=True)
+        self._write_pyproject(nested, "myapp", "0.0.1")
+        start = nested / "src" / "deep" / "file.py"
+        assert _pyproject_version(start) == "9.9.9"
+
+    def test_pyproject_malformed_continues_upward(self, tmp_path) -> None:
+        """Unparseable pyproject logs a warning and the walk continues."""
+        self._write_pyproject(tmp_path, "aipass", "9.9.9")
+        nested = tmp_path / "projects" / "broken"
+        nested.mkdir(parents=True)
+        (nested / "pyproject.toml").write_text("not [ valid toml", encoding="utf-8")
+        start = nested / "src" / "file.py"
+        assert _pyproject_version(start) == "9.9.9"
+
+    def test_pyproject_missing_version_key(self, tmp_path) -> None:
+        """An aipass-named pyproject without a version yields None, not a crash."""
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "aipass"\n', encoding="utf-8")
+        assert _pyproject_version(tmp_path / "file.py") is None
+
+    def test_resolve_version_prefers_pyproject(self) -> None:
+        """Repo pyproject wins over installed metadata."""
+        with patch("aipass.aipass.apps.aipass._pyproject_version", return_value="1.2.3"):
+            with patch(
+                "aipass.aipass.apps.aipass.importlib.metadata.version",
+                return_value="9.9.9",
+            ) as mock_meta:
+                assert _resolve_version() == "1.2.3"
+        mock_meta.assert_not_called()
+
+    def test_resolve_version_falls_back_to_metadata(self) -> None:
+        """No repo pyproject → installed metadata is used."""
+        with patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None):
+            with patch(
+                "aipass.aipass.apps.aipass.importlib.metadata.version",
+                return_value="2.0.0",
+            ):
+                assert _resolve_version() == "2.0.0"
+
+    def test_resolve_version_live_is_current(self) -> None:
+        """Live resolve returns the repo's real version — never the stale 0.1.0/2.7.4."""
+        version = _resolve_version()
+        assert version not in ("unknown", "0.1.0")
+        assert version.count(".") == 2
+
+
+# =============================================================================
 # TestMain
 # =============================================================================
 
@@ -171,16 +247,17 @@ class TestMain:
         assert printed.startswith("aipass ")
 
     def test_version_flag_fallback(self) -> None:
-        """--version prints 'unknown' when package metadata unavailable."""
+        """--version prints 'unknown' when no repo pyproject AND no metadata."""
         _not_found = importlib.metadata.PackageNotFoundError
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch(
-                    "aipass.aipass.apps.aipass.importlib.metadata.version",
-                    side_effect=_not_found,
-                ):
-                    with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                        result = main()
+                with patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None):
+                    with patch(
+                        "aipass.aipass.apps.aipass.importlib.metadata.version",
+                        side_effect=_not_found,
+                    ):
+                        with patch("aipass.aipass.apps.aipass.console") as mock_con:
+                            result = main()
         assert result == 0
         mock_con.print.assert_called_once_with("aipass unknown")
 
@@ -345,6 +422,42 @@ class TestMain:
             if "Commands:" in printed
             else True
         )
+
+    def test_multiword_unknown_routes_to_help(self) -> None:
+        """`aipass what is drone` falls through to help with the full question."""
+        mod = MagicMock()
+        mod.handle_command.side_effect = lambda c, a: c == "help"
+        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "what", "is", "drone"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                with patch("aipass.aipass.apps.aipass.console"):
+                    result = main()
+        assert result == 0
+        mod.handle_command.assert_any_call("help", ["what", "is", "drone"])
+
+    def test_multiword_with_flag_stays_unknown(self) -> None:
+        """A mistyped command carrying flags must NOT become a help search."""
+        mod = MagicMock()
+        mod.handle_command.side_effect = lambda c, a: c == "help"
+        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "doctr", "--fix"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                with patch("aipass.aipass.apps.aipass.console") as mock_con:
+                    result = main()
+        assert result == 1
+        mock_con.print.assert_called_with("Unknown command: doctr")
+
+    def test_single_unknown_word_stays_unknown(self) -> None:
+        """One unknown token keeps the loud error — no silent help fallback."""
+        mod = MagicMock()
+        mod.handle_command.side_effect = lambda c, a: c == "help"
+        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "xyzzy"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                with patch("aipass.aipass.apps.aipass.console") as mock_con:
+                    result = main()
+        assert result == 1
+        mock_con.print.assert_called_with("Unknown command: xyzzy")
 
     def test_handler_crash_surfaces_error(self) -> None:
         """Handler crash prints real error, not 'Unknown command'."""

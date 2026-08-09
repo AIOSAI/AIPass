@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.1.0
+# Version: 0.4.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -38,6 +38,17 @@ if sys.platform == "win32":
 from aipass.cli.apps.modules import console, error
 from aipass.prax import logger
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover — Python 3.10
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+        logger.info("[AIPASS] tomllib unavailable (Python 3.10), using tomli")
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
+        logger.info("[AIPASS] tomllib/tomli unavailable, pyproject version read disabled")
+
 # =============================================================================
 # COMMANDS — public-facing labels and descriptions
 # =============================================================================
@@ -50,9 +61,56 @@ _PUBLIC_COMMANDS = {
     "install": "One-command bootstrap — clone + setup + init",
     "new": "Create a project inside AIPass",
     "profile": "Show/edit user profile",
+    "read": "View a branch README, rendered in the terminal",
     "trust": "Trust registry — enroll/revoke projects",
     "feedback": "Toggle the feedback reminder on/off",
 }
+
+# =============================================================================
+# VERSION RESOLUTION
+# =============================================================================
+
+
+def _pyproject_version(start: Path) -> str | None:
+    """Version from the repo's own pyproject.toml, walking up from `start`.
+
+    Editable installs freeze dist-info metadata at install time, so the
+    installed-metadata version goes stale the moment pyproject.toml bumps.
+    The repo tree is the live truth — read it directly. Returns None when
+    no `[project] name = "aipass"` pyproject exists above `start` (e.g. a
+    wheel install), so callers can fall back to metadata.
+    """
+    if tomllib is None:
+        logger.info("[AIPASS] tomllib/tomli unavailable, skipping pyproject version read")
+        return None
+
+    for parent in start.resolve().parents:
+        pyproject = parent / "pyproject.toml"
+        if not pyproject.exists():
+            continue
+        try:
+            data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            logger.warning(f"[AIPASS] Could not parse {pyproject}: {e}")
+            continue
+        project = data.get("project", {})
+        # Name guard: nested projects carry their own pyproject — keep walking
+        if project.get("name") == "aipass" and project.get("version"):
+            return str(project["version"])
+    return None
+
+
+def _resolve_version() -> str:
+    """Live version — repo pyproject.toml first, installed metadata as fallback."""
+    version = _pyproject_version(Path(__file__))
+    if version:
+        return version
+    try:
+        return importlib.metadata.version("aipass")
+    except importlib.metadata.PackageNotFoundError:
+        logger.info("[AIPASS] No repo pyproject.toml and no package metadata, version unknown")
+        return "unknown"
+
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -155,6 +213,9 @@ def print_help(modules: List[Any] | None = None) -> None:
     )
     console.print("  [green]profile[/green]                      [dim]Show/edit user profile[/dim]")
     console.print(
+        "  [green]read <branch>[/green]                [dim]View a branch README, rendered in the terminal[/dim]"
+    )
+    console.print(
         "  [green]trust[/green] [dim][path][/dim]                [dim]Trust registry — enroll/revoke projects[/dim]"
     )
     console.print("  [green]--version[/green]                    [dim]Show version[/dim]")
@@ -197,12 +258,7 @@ def main():
     args = sys.argv[1:]
 
     if len(args) > 0 and args[0] in ["--version", "-V"]:
-        try:
-            version = importlib.metadata.version("aipass")
-        except importlib.metadata.PackageNotFoundError:
-            logger.info("[AIPASS] Package metadata not found, version unknown")
-            version = "unknown"
-        console.print(f"aipass {version}")
+        console.print(f"aipass {_resolve_version()}")
         return 0
 
     if not args:
@@ -243,6 +299,21 @@ def main():
     for stem, err in _import_failures.items():
         if command in (stem, stem.replace("_", "")):
             error(f"'{command}' failed to load: {err}")
+            return 1
+
+    # Free-text catch-all: multi-word plain input reads as a question, so
+    # `aipass what is drone` just works. Single tokens and anything carrying
+    # flags stay loud "Unknown command" errors — a mistyped command with
+    # options must not silently become a documentation search.
+    if remaining and not command.startswith("-") and all(not a.startswith("-") for a in remaining):
+        question = [command, *remaining]
+        console.print(f"[dim]No command '{command}' — answering as: aipass help {' '.join(question)}[/dim]")
+        try:
+            if route_command("help", question, modules):
+                return 0
+        except Exception as e:
+            error(f"help crashed: {e}")
+            logger.error("[AIPASS] catch-all help traceback", exc_info=True)
             return 1
 
     console.print(f"Unknown command: {command}")

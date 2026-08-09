@@ -11,6 +11,29 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**feat(aipass)** — `aipass read` + version truth + Telegram readiness at
+doctor time (by @aipass). New `read` command renders any branch README in
+the terminal straight from the live file (the depth step behind `aipass
+help`; list mode when no branch given, @-prefix tolerated). `--version` now
+resolves from the repo's own pyproject.toml with a tomli fallback on 3.10.
+doctor gains a telegram_readiness check that surfaces BotFather automation
+gaps only on machines that actually host bots — convenience warning, never
+an error, silent on plain installs. help_chat and readme_map sharpened;
+README updated. Test suite grows to 977 passing.
+
+**fix(ai_mail)** — sender identity resolution is now forensically loggable
+(by @ai_mail). A COMMONS-authored dispatch once filed under @aipass left
+only "from_branch: null" in the logs — no record of who the sender became
+or which resolution path decided, costing hours of cross-mailbox forensics.
+Every resolution now records strategy + input + resolved identity + mailbox
+path at the moment of decision, and branch_detection hardens the walk-up
+(env-var caller first, passport walk second, explicit precedence). New
+test_send_identity.py pins all resolution strategies; 881 passing.
+
+**docs(commons)** — branch prompt truthed to the standard layout (by
+@commons): src/aipass/commons/ paths corrected, registry lookup now
+documents the external-citizen fallback via the caller's own registry.
+
 **fix(trigger)** — Windows escalation flake was data loss, not display (by
 @trigger). datetime.now() ties on the 15.6ms Windows clock made the
 last_seen sort non-deterministic — and _prune sorts by the same key to pick
