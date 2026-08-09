@@ -44,6 +44,12 @@ TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json"
 # Max age for log entries to be considered fresh (seconds)
 STALE_ENTRY_THRESHOLD_SECONDS = 300  # 5 minutes
 
+# Log levels this watcher acts on. Errors drive the medic dispatch pipeline;
+# warnings drive nothing but the escalation digest lane — they are counted by
+# signature and only surface when one keeps repeating (DPLAN-0283).
+ERROR_LEVELS = ("ERROR", "CRITICAL")
+WARNING_LEVELS = ("WARNING", "WARN")
+
 # How far down the rotation chain ('<name>.log.1' .. '.N') to look for a
 # rotated-out file. Matches prax RotatingFileHandler backup_count.
 MAX_BACKUP_CHAIN_DEPTH = 3
@@ -149,6 +155,37 @@ _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
 
 # Event fire callback (set by module, avoids handler importing from modules)
 _fire_event: Optional[Callable[..., None]] = None
+
+# Cached answer to "should I read WARNING lines at all?".  This runs per log
+# line, so it must not hit the config file every time; the TTL keeps an
+# operator's edit taking effect within a minute without a read per line.
+_WARNING_CAPTURE_TTL_SECONDS = 60.0
+_warning_capture_cache: tuple = (0.0, True)
+
+
+def _warning_capture_enabled() -> bool:
+    """Check whether branch-log WARNING lines feed the escalation lane.
+
+    Fails OPEN: if the config cannot be read, warnings keep being collected.
+    Losing the count silently is the failure this whole lane exists to stop.
+
+    Returns:
+        True when WARNING lines should be parsed and fired
+    """
+    global _warning_capture_cache
+    checked_at, cached = _warning_capture_cache
+    now = time.time()
+    if now - checked_at < _WARNING_CAPTURE_TTL_SECONDS:
+        return cached
+    value = True
+    try:
+        from aipass.trigger.apps.handlers.json import config_loader
+
+        value = bool(config_loader.section("escalation").get("watch_branch_log_warnings", True))
+    except Exception as exc:
+        logger.warning("Escalation config unreadable, keeping warning capture on: %s", exc)
+    _warning_capture_cache = (now, value)
+    return value
 
 
 def _load_seen_hashes() -> None:
@@ -344,7 +381,7 @@ def _detect_branch_from_path(log_path: str) -> str:
         return "UNKNOWN"
 
 
-def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
+def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optional[Dict[str, str]]:
     """
     Parse a log line in Prax format or Python logging format.
 
@@ -354,10 +391,12 @@ def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
 
     Args:
         log_line: Raw log line
+        levels: Levels to accept — defaults to ERROR/CRITICAL. The escalation
+            lane passes WARNING_LEVELS to collect repeat-warning signatures.
 
     Returns:
         Dict with keys: timestamp, module, level, message
-        None if parsing fails or line is not ERROR level
+        None if parsing fails or the line's level is not in *levels*
     """
     try:
         # Try Prax format first (pipe-separated)
@@ -365,7 +404,7 @@ def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
             parts = log_line.split(" | ", 3)
             if len(parts) >= 4:
                 level = parts[2].strip().upper()
-                if level in ("ERROR", "CRITICAL"):
+                if level in levels:
                     return {
                         "timestamp": parts[0].strip(),
                         "module": parts[1].strip(),
@@ -386,7 +425,7 @@ def _parse_prax_log_line(log_line: str) -> Optional[Dict[str, str]]:
                 level = parts[2].strip().upper()
                 # Strict check: level field must be EXACTLY a known level,
                 # not a longer string that happens to contain one.
-                if level in ("ERROR", "CRITICAL"):
+                if level in levels:
                     return {
                         "timestamp": parts[0].strip(),
                         "module": parts[1].strip(),
@@ -585,6 +624,56 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             logger.warning("Failed to read log file '%s': %s", file_path, exc)
             return  # Read failure on this event - skip without raising
 
+    def _process_warning_line(self, log_line: str, log_path: str) -> None:
+        """
+        Fire warning_logged for a WARNING line so repeats can escalate.
+
+        Warnings never enter the error registry and never dispatch anyone —
+        this path exists purely to feed the escalation digest lane, which
+        counts by signature and mails the operator only when one repeats past
+        its threshold. Before this, branch-log warnings were seen by nothing
+        at all: the parser dropped every non-ERROR line, so tier 1 of the
+        digest would have covered system_logs/ only.
+
+        Off by config (escalation.watch_branch_log_warnings) for operators who
+        want the extra lines left unread.
+
+        Args:
+            log_line: Raw log line
+            log_path: Path to log file
+        """
+        try:
+            if not _warning_capture_enabled():
+                return
+
+            parsed = _parse_prax_log_line(log_line, levels=WARNING_LEVELS)
+            if not parsed:
+                return
+
+            # Same guards the error path uses: lines ABOUT an error, and old
+            # lines replayed from a rotation, are not new signal.
+            if _SEMANTIC_EXCLUSION_PATTERNS.search(parsed["message"]):
+                return
+            if _is_stale_entry(parsed["timestamp"]):
+                return
+
+            if _fire_event is None:
+                return
+
+            _fire_event(
+                "warning_logged",
+                branch=_detect_branch_from_path(log_path),
+                message=parsed["message"],
+                error_hash=_generate_error_hash(parsed["module"], parsed["message"]),
+                timestamp=parsed["timestamp"],
+                log_file=log_path,
+                module_name=parsed["module"],
+                level=parsed["level"],
+                raw_line=log_line,
+            )
+        except Exception as exc:
+            logger.warning("Failed to process warning line from '%s': %s", log_path, exc)
+
     def _process_log_line(self, log_line: str, log_path: str) -> None:
         """
         Process a log line and fire error_detected if ERROR found.
@@ -604,6 +693,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         try:
             parsed = _parse_prax_log_line(log_line)
             if not parsed:
+                self._process_warning_line(log_line, log_path)
                 return
 
             # Skip lines that reference error artifacts (IDs, fingerprints,

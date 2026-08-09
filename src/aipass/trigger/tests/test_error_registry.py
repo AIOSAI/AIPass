@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for the error_registry handler -- dedup engine, circuit breaker, backoff."""
@@ -1305,3 +1305,69 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
     assert er._circuit_breaker.state == "closed"
     assert er._circuit_breaker.cooldown_seconds == base_cooldown
     assert er._circuit_breaker.opened_at == 0.0
+
+
+# ===========================================================================
+# 18. get_dispatch_count -- read-only view for the escalation lane
+# ===========================================================================
+
+
+def test_get_dispatch_count_unknown_fingerprint_is_zero(tmp_path: Path) -> None:
+    """A fingerprint nobody has dispatched reads as 0, never a KeyError.
+
+    The escalation lane calls this on every repeating error to tell "the owner
+    has been told and it is STILL happening" apart from "medic has not had its
+    turn yet" — a raise here would take the whole count down with it.
+    """
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    assert er.get_dispatch_count("never_seen_fingerprint") == 0
+
+
+def test_get_dispatch_count_increments_with_record_dispatch(tmp_path: Path) -> None:
+    """Each recorded dispatch is visible to the next reader."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = "escalation_view_fp"
+    assert er.get_dispatch_count(fp) == 0
+
+    er.record_dispatch(fp)
+    assert er.get_dispatch_count(fp) == 1
+
+    er.record_dispatch(fp)
+    assert er.get_dispatch_count(fp) == 2
+
+
+def test_get_dispatch_count_is_per_fingerprint(tmp_path: Path) -> None:
+    """One error's dispatches never make another error look answered."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    er.record_dispatch("fp_dispatched")
+
+    assert er.get_dispatch_count("fp_dispatched") == 1
+    assert er.get_dispatch_count("fp_untouched") == 0
+
+
+def test_get_dispatch_count_matches_the_backing_counter(tmp_path: Path) -> None:
+    """It is a read-only view: the same number backoff itself uses."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    fp = "backing_counter_fp"
+    er.record_dispatch(fp)
+    er.record_dispatch(fp)
+
+    assert er.get_dispatch_count(fp) == er._fingerprint_dispatch_count[fp]
+
+
+def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
+    """Reading the count must never create an entry for an unknown fingerprint."""
+    _seed_registry(tmp_path)
+    er = _import_registry()
+
+    er.get_dispatch_count("read_only_fp")
+
+    assert "read_only_fp" not in er._fingerprint_dispatch_count

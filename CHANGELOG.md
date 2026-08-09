@@ -11,6 +11,29 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**feat(trigger)** — the escalation digest lane: repeat warnings/errors
+now email the operator (DPLAN-0283 WS-A, the build the whole doctrine
+train served). Signature = level|branch|module|normalized-message,
+aligned with the error-registry fingerprints; rolling window per
+signature; threshold crossed → ONE email to @devpulse (email, never a
+wake), then per-signature cooldown. The ruling encoded structurally:
+`record_error()` is the FIRST statement above every gate — a mute stops
+the dispatch but cannot reach the counting; only SENDING is gated, so
+every signature stays auditable in escalation_state.json. Two tiers:
+warnings (which never had any escalation path) including branch-log
+WARNING parsing, and errors still recurring after a medic dispatch,
+under a mute, with medic off, or with no owner to dispatch to.
+Suppressed fingerprints stay silent (a human already said benign) unless
+`escalate_suppressed` is flipped. All knobs operator-owned in
+`trigger.config.json` under custom_config, loaded by trigger's own
+S193-doctrine config loader — first adopter of the standard shipped
+earlier tonight. Live-proven with 4 real digests through ai_mail
+end-to-end, including the muted-branch case: dispatch suppressed,
+counting continued, digest sent. State file deliberately off the trio
+naming path; audit trail in .jsonl so the lane cannot feed itself.
++167 tests (890), seedgo 99%, README truth-up. By @trigger; suite +
+lint + live CLI + audit re-verified by devpulse.
+
 **fix(memory)** — unreadable config can no longer crash past the
 fail-loud path (config_loader 1.3.0). Seedgo's WS-B rider find, fixed at
 both occurrences: `load()` had `read_text()` outside the try, so bad

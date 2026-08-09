@@ -37,6 +37,7 @@ def setup_handlers():
     from .plan_file import handle_plan_file_created, handle_plan_file_deleted, handle_plan_file_moved
     from .error_detected import handle_error_detected, set_send_email_callback
     from .runaway_handler import handle_runaway_log_detected, set_send_email_callback as set_runaway_email_callback
+    from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
 
     # Wire up email send callback for error_detected handler (avoids handler importing from modules)
     try:
@@ -62,6 +63,9 @@ def setup_handlers():
 
         set_send_email_callback(_send_email_adapter)
         set_runaway_email_callback(_send_email_adapter)
+        # Escalation digests go out through the same adapter with
+        # auto_execute=False — an email to a manager, never a wake.
+        set_escalation_email_callback(_send_email_adapter)
     except ImportError:
         _log_warning("ai_mail not available — error notifications won't send")
     from .warning_logged import handle_warning_logged

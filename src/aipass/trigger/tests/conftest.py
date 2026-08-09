@@ -2,10 +2,11 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2025-11-08
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-08-08): Suite-wide escalation lane isolation
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
 # CODE STANDARDS:
@@ -26,6 +27,46 @@ import pytest
 import shutil
 from pathlib import Path
 from typing import Generator
+
+# Imported here, while the REAL aipass.trigger.apps.config is still in place,
+# so the whole suite shares ONE escalation module. Handlers reach the lane with
+# `from aipass.trigger.apps.handlers import escalation`, which reuses whatever
+# is already imported — without this, the first test file to mock the config
+# module would leave a mock-configured copy (MagicMock file lock, stale tmp
+# paths) cached for every test that follows.
+from aipass.trigger.apps.handlers import escalation as _escalation
+from aipass.trigger.apps.handlers.json import config_loader as _config_loader
+
+
+@pytest.fixture(scope="session")
+def escalation_sandbox(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Session-wide stand-in for trigger_json/ and its custom_config/."""
+    return tmp_path_factory.mktemp("escalation_sandbox")
+
+
+@pytest.fixture(autouse=True)
+def isolate_escalation_state(monkeypatch: pytest.MonkeyPatch, escalation_sandbox: Path) -> Generator[None, None, None]:
+    """Keep the escalation lane off live state for every test in the suite.
+
+    handle_error_detected and handle_warning_logged record into the lane before
+    any dispatch gate, so any test that fires one of those events would
+    otherwise count into the real trigger_json/escalation_state.json and read —
+    or, when it is missing, regenerate — the operator's trigger.config.json.
+    setup_handlers() also wires a live email callback into the lane; it is
+    reset here so no test can send a digest.
+
+    Tests that need their own state file or config simply patch over these.
+    """
+    state_file = escalation_sandbox / "escalation_state.json"
+    state_file.unlink(missing_ok=True)
+    monkeypatch.setattr(_escalation, "STATE_FILE", state_file)
+    monkeypatch.setattr(_escalation, "ESCALATION_LOG", escalation_sandbox / "escalation.jsonl")
+    monkeypatch.setattr(_escalation, "_send_email", None)
+    monkeypatch.setattr(_config_loader, "CONFIG_PATH", escalation_sandbox / "custom_config" / "trigger.config.json")
+    monkeypatch.setattr(_config_loader, "_LOADER_LOG", escalation_sandbox / "config_loader.jsonl")
+    _escalation.reset_config_cache()
+    yield
+    _escalation.reset_config_cache()
 
 
 @pytest.fixture

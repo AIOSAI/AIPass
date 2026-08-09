@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-02-10
-# Modified: 2026-08-07
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -27,10 +27,12 @@ Event data from log_watcher.py (Medic v2):
 Architecture (Medic v2):
     1. Trigger's log_watcher detects ERROR in branch logs
     2. log_watcher reports to error_registry, fires error_detected if new
-    3. This handler checks circuit_breaker_allows() (global gate)
-    4. This handler checks should_dispatch(fingerprint) (per-error backoff)
-    5. If allowed, delivers email to affected branch (auto_execute=True)
-    6. Records dispatch via record_dispatch() and circuit_breaker_record_error()
+    3. This handler records the occurrence in the escalation lane (BEFORE any
+       gate — a mute stops the dispatch, never the count)
+    4. This handler checks circuit_breaker_allows() (global gate)
+    5. This handler checks should_dispatch(fingerprint) (per-error backoff)
+    6. If allowed, delivers email to affected branch (auto_execute=True)
+    7. Records dispatch via record_dispatch() and circuit_breaker_record_error()
 """
 
 import json
@@ -40,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers import escalation
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -484,6 +487,19 @@ def handle_error_detected(
         # Validate required fields
         if not branch or not module or not message or not error_hash:
             return
+
+        # Escalation counting comes FIRST, before every dispatch gate below.
+        # A mute, a medic toggle or an open breaker stops the DISPATCH; none of
+        # them may stop the COUNT, or the repeat would go dark exactly when it
+        # matters most (DPLAN-0283). Sending is gated inside the lane, not here.
+        escalation.record_error(
+            branch=branch,
+            module=module,
+            message=message,
+            log_file=log_path or "",
+            fingerprint=fingerprint,
+            raw_line=kwargs.get("raw_line", "") or "",
+        )
 
         # Medic toggle - if disabled, log but do NOT dispatch
         if not _is_medic_enabled():

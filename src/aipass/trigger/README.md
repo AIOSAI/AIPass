@@ -4,8 +4,8 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
-**Version:** 2.4.0
-**Last Updated:** 2026-08-07
+**Version:** 2.5.0
+**Last Updated:** 2026-08-08
 
 ## Quick Start
 
@@ -13,6 +13,7 @@
 drone @trigger status                        # Event bus + medic state
 drone @trigger errors list                   # View tracked errors
 drone @trigger medic status                  # Check dispatch gating
+drone @trigger escalation status             # Repeat-signature digest lane
 drone @trigger fire error_detected branch=api error_type=ImportError
 ```
 
@@ -46,6 +47,12 @@ drone @trigger medic unmute @branch         # Resume error dispatch to a branch
 drone @trigger medic volume-mute @branch    # Suppress runaway alerts for a branch
 drone @trigger medic volume-unmute @branch  # Resume runaway alerts for a branch
 drone @trigger medic --help                 # Medic subcommand help
+
+# Escalation digest (repeat signatures → operator email)
+drone @trigger escalation status            # Lane settings, tracked counts, digests sent
+drone @trigger escalation list [level]      # Tracked signatures (level: warning | error)
+drone @trigger escalation config            # Operator config path + effective values
+drone @trigger escalation --help            # Escalation subcommand help
 
 # Log watchers
 drone @trigger branch_log_events status     # Branch log watcher state
@@ -94,7 +101,7 @@ result = report_error(
 | `startup` | `startup.py` | Branch session starts | Error catch-up scan across log files, memory rollover check |
 | `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 8-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
 | `error_logged` | `error_logged.py` | System log error (fallback path) | Monitor-only: logs the event, no dispatch |
-| `warning_logged` | `warning_logged.py` | Warning in system logs | Logged for monitoring, no dispatch |
+| `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |
 | `plan_file_created` | `plan_file.py` | New PLAN file detected | Updates Flow's PLAN_REGISTRY.json |
 | `plan_file_deleted` | `plan_file.py` | PLAN file removed | Marks plan as deleted in registry |
 | `plan_file_moved` | `plan_file.py` | PLAN file relocated | Updates registry location |
@@ -152,6 +159,47 @@ systemctl --user status trigger-log-watcher    # Check watcher service
 systemctl --user restart trigger-log-watcher   # Restart watcher
 ```
 
+## Escalation Digest
+
+Medic answers an error **once**: it dispatches the owning branch, then goes quiet — backoff, a mute, or a suppression keeps it quiet. That is correct for agents and blind for humans. An error still firing after its owner was told, or while a branch is muted, was invisible to Patrick forever. Warnings were worse: they had **no escalation path at all**.
+
+The escalation lane counts repetition and mails the operator when repetition means nothing got fixed:
+
+> same signature, >= threshold occurrences inside the window → **one email** to the digest recipient → per-signature cooldown so the same noise cannot spam the mailbox
+
+**Two tiers:**
+
+| Tier | Covers | Escalates when |
+|---|---|---|
+| 1 — Warnings | Any repeating WARNING signature | Threshold crossed. Warnings have no dispatch path anywhere, so repetition alone is the signal |
+| 2 — Errors past medic | ERROR signatures still recurring after medic acted | Owner already dispatched, branch muted, medic off, or no registered owner to dispatch to |
+
+**Counting is unconditional; only sending is gated.** `record_error()` runs *before* every dispatch gate in `error_detected.py` — a mute stops re-dispatching, it must never stop the counting, or the repeat goes dark exactly when it matters most. A signature that never escalates is still fully auditable in the state file.
+
+A deliberately **suppressed** fingerprint stays silent here too (compass #219 — a human already judged it benign), unless `escalate_suppressed` is turned on.
+
+Digests are **email, never dispatch** (`auto_execute=False`). The default recipient `@devpulse` is a manager — wakes are blocked there, and the mail is meant to be read, not to spawn an agent.
+
+**Digest body carries the investigation:** signature, level, branch, module, occurrences in window, lifetime count, first/last seen, log file path, why it escalated, and the last N sample lines.
+
+**Config knobs** — operator-editable, live in `trigger_json/custom_config/trigger.config.json` under `escalation` (S193 doctrine: the file on disk is runtime authority; `config_loader.DEFAULT_CONFIG` is only the regeneration seed):
+
+| Knob | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Master switch — false records nothing, sends nothing |
+| `digest_recipient` | `@devpulse` | Where digests land (email only, never a wake) |
+| `warning_threshold` | `10` | WARNING occurrences in window before a digest |
+| `error_threshold` | `5` | ERROR occurrences in window before a digest |
+| `window_minutes` | `60` | Rolling window; older occurrences stop counting |
+| `cooldown_minutes` | `360` | Per-signature silence after a digest fires |
+| `sample_lines` | `3` | Sample log lines carried in the digest body |
+| `max_signatures` | `500` | Cap on tracked signatures (least-recently-seen pruned) |
+| `escalate_suppressed` | `false` | Escalate operator-suppressed fingerprints anyway |
+| `watch_branch_log_warnings` | `true` | Parse WARNING lines out of branch logs |
+| `ignore_branches` | `[]` | Branches never escalated (deliberate, like a volume mute) |
+
+State lives at `trigger_json/escalation_state.json` — deliberately **not** a trio name (see Architecture). The decision trail is `logs/escalation.jsonl` — `.jsonl`, not `.log`, so the branch watcher (which reads only `*.log`) cannot feed the lane its own output.
+
 ## Error Registry
 
 SHA1 fingerprinting for error deduplication. Tracks: fingerprint, branch, error type, message, count, first/last seen, dispatch history, source fix status.
@@ -172,15 +220,18 @@ trigger/
 │   │   ├── core.py                 # Event bus: Trigger.fire/on/off/status
 │   │   ├── errors.py               # Error registry CLI: list/suppress/unsuppress/stats
 │   │   ├── medic.py                # Medic toggle: on/off/status/mute/unmute
+│   │   ├── escalation.py           # Escalation digest CLI: status/list/config
 │   │   ├── branch_log_events.py    # Branch log watcher CLI: start/stop/status
 │   │   └── log_events.py           # System log watcher CLI: start/stop/status
 │   └── handlers/
 │       ├── error_registry.py       # SHA1 fingerprinting, circuit breaker, suppression gate, backoff
 │       ├── error_reporter.py       # report_error() API + source fix emails
+│       ├── escalation.py           # Repeat-signature counting + digest email
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
 │       ├── medic_state.py          # Medic state persistence (medic_state.json)
 │       ├── json/
-│       │   └── json_handler.py     # JSON structure logging
+│       │   ├── json_handler.py     # JSON structure logging
+│       │   └── config_loader.py    # Operator config loader (S193 self-heal doctrine)
 │       ├── events/
 │       │   ├── registry.py         # Auto-registers 14 active event handlers
 │       │   ├── startup.py          # Startup catch-up scan
@@ -198,13 +249,16 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 723 tests across 21 modules
+├── tests/                          # 890 tests across 23 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
 │   ├── error_registry.json         # All tracked errors
+│   ├── escalation_state.json       # Repeat-signature counts + digest cooldowns
 │   ├── trigger_cb_state.json       # Circuit breaker persistence
 │   ├── trigger_<config|data|log>.json  # Inert json_handler trio placeholders
+│   ├── custom_config/
+│   │   └── trigger.config.json     # Operator-editable settings (escalation knobs)
 │   └── .archive/                   # Retired state files, never deleted
 └── trigger_data.json               # Log watcher positions + dedup hashes
 ```
@@ -247,21 +301,21 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-723 tests across 21 test modules, all passing. Coverage: 87/87 public functions (100%).
+890 tests across 23 test modules, all passing. Coverage: 101/101 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`
+Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`
 
 ## Compliance
 
-Seedgo: 100% (41/41 standards). Zero type errors. All categories at 100%.
+Seedgo: 98% (43 standards). Zero type errors. Remaining deductions are the escalation lane's recursion-safe meta-logging catches (marked `seedgo:bypass` — a prax call on the error path would feed the lane its own output).
 
 ---
 
-*Last Updated: 2026-08-07*
+*Last Updated: 2026-08-08*
 
 ---
 [← Back to AIPass](../../../README.md)

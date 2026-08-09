@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-08-07
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for error_detected event handler: set_send_email_callback, handle_error_detected, and fallback stubs."""
@@ -12,6 +12,8 @@ import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
@@ -763,3 +765,221 @@ class TestOccurrencesReportsTrueCount:
         assert "Occurrences: 9" in body
         assert "First seen: 2026-07-06T08:13:26" in body
         assert "Last seen: 2026-08-04T18:27:38" in body
+
+
+# ---------------------------------------------------------------------------
+# Escalation lane recording (DPLAN-0283 WS-A)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    """The escalation lane on a tmp state file with known thresholds.
+
+    handle_error_detected records into the real lane module, so the state file,
+    the config and the digest callback are all pinned here — the operator's
+    config never decides a test outcome, and no digest can leave the process.
+    """
+    import aipass.trigger.apps.handlers as handlers_pkg
+    from aipass.trigger.apps.handlers import escalation
+
+    config: Dict[str, Any] = {
+        "enabled": True,
+        "digest_recipient": "@digest-inbox",
+        "warning_threshold": 2,
+        "error_threshold": 2,
+        "window_minutes": 60,
+        "cooldown_minutes": 60,
+        "sample_lines": 3,
+        "max_signatures": 500,
+        "escalate_suppressed": False,
+        "ignore_branches": [],
+    }
+    digests: List[Dict[str, Any]] = []
+
+    def _send(**kwargs: Any) -> bool:
+        digests.append(kwargs)
+        return True
+
+    monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
+    monkeypatch.setattr(escalation, "ESCALATION_LOG", tmp_path / "escalation.jsonl")
+    monkeypatch.setattr(escalation, "get_config", lambda: config)
+    monkeypatch.setattr(escalation, "_send_email", _send)
+
+    # medic_state is reached by a lazy `from ... import medic_state`, which
+    # resolves off the package attribute — stubbing it there keeps the real
+    # module (and the live medic_state.json behind it) out of this test.
+    medic = MagicMock()
+    medic.is_enabled.return_value = True
+    medic.get_muted_branches.return_value = []
+    monkeypatch.setattr(handlers_pkg, "medic_state", medic, raising=False)
+
+    registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
+    registry.is_suppressed.return_value = False
+    registry.get_dispatch_count.return_value = 0
+
+    escalation.reset_config_cache()
+    return SimpleNamespace(mod=escalation, config=config, digests=digests, medic=medic, registry=registry)
+
+
+class TestEscalationRecording:
+    """The occurrence is counted BEFORE every dispatch gate.
+
+    A mute, a medic toggle or a first occurrence stops the DISPATCH. None of
+    them may stop the COUNT, or a repeating failure goes dark for the human
+    exactly when medic has gone quiet about it (DPLAN-0283).
+    """
+
+    def test_dispatched_error_is_recorded(self, lane) -> None:
+        """Positive control: the ordinary dispatch path records too."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_called_once()
+        rows = lane.mod.get_signatures()
+        assert len(rows) == 1
+        assert rows[0]["total_count"] == 1
+
+    def test_medic_off_still_records(self, lane) -> None:
+        """Medic off suppresses the dispatch; the count carries on."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod._is_medic_enabled = MagicMock(return_value=False)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_muted_branch_still_records(self, lane) -> None:
+        """THE MUTE RULE: a mute is 'do not wake me', never 'stop counting'."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod._is_branch_muted = MagicMock(return_value=True)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=5)
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_muted_branch_repeat_escalates_without_any_dispatch(self, lane) -> None:
+        """The whole point: medic stays silent for a muted branch, the human does not."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod._is_branch_muted = MagicMock(return_value=True)
+        lane.medic.get_muted_branches.return_value = ["flow"]
+
+        for _ in range(2):
+            mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=5)
+
+        send.assert_not_called()
+        assert len(lane.digests) == 1
+        assert lane.digests[0]["to_branch"] == "@digest-inbox"
+        assert lane.digests[0]["auto_execute"] is False
+
+    def test_first_occurrence_still_records(self, lane) -> None:
+        """count=1 never dispatches, so without the lane a one-per-minute error is invisible."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=1)
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_open_circuit_breaker_still_records(self, lane) -> None:
+        """An error storm opens the breaker — the storm still has to be countable."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod.circuit_breaker_allows = MagicMock(return_value=False)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=3, fingerprint="fp1"
+        )
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_backoff_suppressed_dispatch_still_records(self, lane) -> None:
+        """Per-fingerprint backoff is exactly the silence this lane exists to cover."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod.registry_should_dispatch = MagicMock(return_value=False)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=3, fingerprint="fp1"
+        )
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_unknown_branch_still_records(self, lane) -> None:
+        """An error from a branch medic cannot mail is still counted."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        mod._get_registered_emails = MagicMock(return_value={"@spawn"})
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+        assert lane.mod.get_signatures()[0]["total_count"] == 1
+
+    def test_invalid_event_records_nothing(self, lane) -> None:
+        """Validation runs first — an event with no message counts as nothing."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="", error_hash="h1", count=2)
+
+        assert lane.mod.get_signatures() == []
+
+    def test_repeats_with_variable_paths_share_one_signature(self, lane) -> None:
+        """Two dispatches of the same failure against different paths are one signature."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="cannot open /home/a/x.json", error_hash="h1", count=2
+        )
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="cannot open /srv/b/y.json", error_hash="h2", count=3
+        )
+
+        rows = lane.mod.get_signatures()
+        assert len(rows) == 1
+        assert rows[0]["total_count"] == 2
+
+    def test_recorded_entry_carries_the_event_context(self, lane) -> None:
+        """Log path, fingerprint and raw line travel into the lane for the digest."""
+        mod = _import_module()
+        _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow",
+            module="cfg",
+            message="err",
+            error_hash="h1",
+            count=2,
+            fingerprint="fp-abc",
+            log_path="/logs/flow.log",
+            raw_line="2026-08-08 | cfg | ERROR | err",
+        )
+
+        row = lane.mod.get_signatures()[0]
+        assert row["level"] == "ERROR"
+        assert row["log_file"] == "/logs/flow.log"
+        assert row["fingerprint"] == "fp-abc"
+        assert row["samples"] == ["2026-08-08 | cfg | ERROR | err"]
+
+    def test_disabled_lane_records_nothing_but_dispatch_survives(self, lane) -> None:
+        """Switching the lane off must not take medic's dispatch down with it."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        lane.config["enabled"] = False
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_called_once()
+        assert lane.mod.get_signatures() == []

@@ -420,6 +420,23 @@ def get_backoff_seconds(dispatch_count: int) -> int:
     return 7200
 
 
+def get_dispatch_count(fingerprint: str) -> int:
+    """Return how many times this fingerprint has been dispatched.
+
+    Read-only view of the per-fingerprint tracking backoff already keeps (and
+    that survives restarts via the circuit breaker state file). The escalation
+    digest lane reads it to tell "medic told the owner and it is STILL
+    happening" apart from "the owner has not been told yet".
+
+    Args:
+        fingerprint: Error fingerprint to look up
+
+    Returns:
+        Dispatch count, 0 if this fingerprint has never been dispatched
+    """
+    return _fingerprint_dispatch_count.get(fingerprint, 0)
+
+
 def is_suppressed(fingerprint: str) -> bool:
     """Check whether a fingerprint is currently marked suppressed in the registry.
 
