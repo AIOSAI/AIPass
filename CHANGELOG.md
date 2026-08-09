@@ -11,6 +11,15 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(ci)** — two small CI reds cleared by devpulse on its own turf.
+Devpulse: watchdog transcript reader (agent.py 1.2.1) logged nothing
+when it skipped an unparseable transcript line — seedgo silent_catch
+flag, now an info log naming the file and the parse error, audit back
+at 100%. Flow tests: CodeQL read `assert "https://aipass.ai" in result`
+as hostname sanitization (py/incomplete-url-substring-sanitization);
+assertion now pins the full template sentence, which is also the
+stronger test. Both suites green (devpulse 456, flow 774).
+
 **fix(tests)** — CI-only xdist failures in backup and trigger rooted in
 one class: tests that evict a module from `sys.modules` and re-import it
 under mocks leave the parent package's *attribute* pointing at the

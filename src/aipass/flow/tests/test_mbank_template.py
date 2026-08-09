@@ -850,8 +850,10 @@ class TestGetTemplate:
         assert "Update 14" in result
         # Literal MCP snippet survives the stamp
         assert "{createIfEmpty: true}" in result
-        # v2.1 content landed
-        assert "https://aipass.ai" in result
+        # v2.1 content landed — pin a full template sentence, not the bare
+        # domain: a URL-substring membership check reads to CodeQL like
+        # hostname sanitization (py/incomplete-url-substring-sanitization).
+        assert "Website: https://aipass.ai, changelog link" in result
         assert "YOUR OWN branch dir" in result
 
 

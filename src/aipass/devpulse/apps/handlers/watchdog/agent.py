@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-14
 # Modified: 2026-08-08
 # =============================================
@@ -332,8 +332,10 @@ def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
     for line in reversed(lines[-_INFLIGHT_SCAN_LIMIT:]):
         try:
             entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue  # torn partial write or format drift — keep walking
+        except (json.JSONDecodeError, ValueError) as exc:
+            # torn partial write or format drift — keep walking
+            logger.info("[watchdog.agent] skipping unparseable transcript line in %s: %s", newest.name, exc)
+            continue
         if not isinstance(entry, dict):
             continue
         # Schemas vary: role/content may sit under "message" or at the top level.
