@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(memory)** — unreadable config can no longer crash past the
+fail-loud path (config_loader 1.3.0). Seedgo's WS-B rider find, fixed at
+both occurrences: `load()` had `read_text()` outside the try, so bad
+bytes (UnicodeDecodeError) or bad permissions (OSError) escaped raw
+instead of serving defaults — and `push_defaults_to_per_branch` had the
+identical hole, its try catching only JSONDecodeError. Now: read guarded
+with its own except → ERROR naming the exception type + distinct
+`config_load_unreadable` operation + defaults in memory, file never
+touched; push refuses on all three conditions. Corrupt handling NOT
+flipped — still fail-loud-never-clobber per the June ruling; the
+quarantine upgrade stays queued behind the escalation digest. +5 tests
+(1041), canary-verified red on both reverted halves, live-proven on a
+bad-bytes file (defaults served, push refused, bytes byte-identical).
+Operator's live config untouched throughout. By @memory; suite + lint +
+code read re-verified by devpulse.
+
 **fix(devpulse)** — watchdog stall detector no longer blind to sub-agent
 work (agent.py 1.2.0). Two compounding causes, both caught live when the
 watchdog cried STALLED on @trigger's healthy digest build: (1) JSONL

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-13
 # Modified: 2026-08-08
 # =============================================
@@ -215,6 +215,10 @@ def load() -> dict[str, Any]:
     ERROR, serve defaults in memory, and leave the operator's file for the
     operator to fix.
 
+    "Cannot be read" means for ANY reason (json_structure v3.0.0) — bad bytes
+    and bad permissions are as unreadable as bad syntax, and none of them may
+    escape as a raw exception into a caller that only wanted a config.
+
     Returns:
         The effective config dict (always safe to use).
     """
@@ -222,7 +226,18 @@ def load() -> dict[str, Any]:
         logger.info(f"[config_loader] No config at {_CONFIG_PATH}, regenerating from defaults")
         return _regenerate("missing")
 
-    raw = _CONFIG_PATH.read_text(encoding="utf-8")
+    try:
+        raw = _CONFIG_PATH.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        # Unopenable or undecodable — same no-clobber contract as malformed.
+        logger.error(f"[config_loader] Cannot read {_CONFIG_PATH}: {type(exc).__name__}: {exc}")
+        json_handler.log_operation(
+            "config_load_unreadable",
+            {"path": str(_CONFIG_PATH), "error": f"{type(exc).__name__}: {exc}"},
+            module_name="config_loader",
+        )
+        return copy.deepcopy(DEFAULT_CONFIG)
+
     try:
         file_config = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -317,8 +332,10 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
         loaded: Any = None
         try:
             loaded = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            logger.error(f"[config_loader] Cannot push onto unreadable config: {exc}")
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            # Bad syntax, bad bytes and bad permissions all mean the same thing
+            # here: we cannot know what is in the file, so we must not write it.
+            logger.error(f"[config_loader] Cannot push onto unreadable config: {type(exc).__name__}: {exc}")
         if isinstance(loaded, dict):
             current = loaded
         else:

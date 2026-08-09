@@ -317,6 +317,100 @@ class TestMalformedJson:
 
 
 # ===========================================================================
+# 3b. Unreadable for any OTHER reason -- bad bytes, bad permissions
+# ===========================================================================
+
+
+class TestUnreadableFile:
+    """json_structure v3.0.0: unreadable for ANY reason takes the malformed
+    path.  A file with bad bytes or the wrong permissions is exactly as
+    unreadable as one with a stray comma, and neither may reach the caller
+    as a raw exception -- callers asked for a config, not for a traceback.
+    """
+
+    def _bad_bytes_config(self, tmp_path: Path) -> Path:
+        """Write a file that is valid on disk but undecodable as UTF-8."""
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        bad_config = config_dir / "memory.config.json"
+        bad_config.write_bytes(b'{"entry_limits": \x80\x81\xfe}')
+        return bad_config
+
+    def test_bad_bytes_returns_defaults_instead_of_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bad_config = self._bad_bytes_config(tmp_path)
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        result = mod.load()
+
+        assert result == mod.DEFAULT_CONFIG
+
+    def test_bad_bytes_leaves_the_file_untouched(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        bad_config = self._bad_bytes_config(tmp_path)
+        original = bad_config.read_bytes()
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        mod.load()
+
+        assert bad_config.read_bytes() == original
+
+    def test_bad_bytes_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        bad_config = self._bad_bytes_config(tmp_path)
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+
+        mock_logger = mod.logger
+        mod.load()
+
+        mock_logger.error.assert_called()
+        assert "UnicodeDecodeError" in mock_logger.error.call_args[0][0]
+
+    def test_unopenable_file_returns_defaults_instead_of_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PermissionError and friends: simulated via read_text, because a
+        real chmod 000 is a no-op for root and unreliable on Windows.
+        """
+        config_dir = tmp_path / "custom_config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "memory.config.json"
+        config_path.write_text("{}", encoding="utf-8")
+
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
+
+        def _denied(*args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(type(config_path), "read_text", _denied)
+
+        result = mod.load()
+
+        assert result == mod.DEFAULT_CONFIG
+
+    def test_push_refuses_on_bad_bytes_rather_than_crashing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The push path reads the file too -- it had the same raw-escape hole,
+        and refusing is what keeps the operator's bytes theirs.
+        """
+        bad_config = self._bad_bytes_config(tmp_path)
+        original = bad_config.read_bytes()
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", bad_config)
+        monkeypatch.setattr(mod, "materialize_per_branch", lambda: {"memory": {"local": {}}})
+
+        result = mod.push_defaults_to_per_branch()
+
+        assert result["success"] is False
+        assert "unreadable" in result["error"]
+        assert bad_config.read_bytes() == original
+
+
+# ===========================================================================
 # 4. Partial config -- deep_merge fills missing defaults, preserves file values
 # ===========================================================================
 
