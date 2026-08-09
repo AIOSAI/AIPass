@@ -661,3 +661,96 @@ def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
     from aipass.seedgo.apps.handlers.bypass import inert
 
     assert inert.check_branch_info(str(tmp_path)) == []
+
+
+# The scope map must read POSITIONAL scope args, not just keywords (FPLAN-0384)
+
+
+def test_inert_scope_support_reads_positional_line_argument():
+    """is_bypassed(path, "debug_print", ln, rules) threads a line as much as line=ln does.
+
+    The first version of this map inspected keywords only and reported ten live
+    standards as line-blind, which nearly widened working rules to file-wide.
+    """
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    support = inert.scope_support()
+
+    for standard in ("debug_print", "help_text", "log_handler", "output_routing", "windows_compat"):
+        assert "lines" in support[standard], f"{standard} passes line positionally and must count as live"
+
+
+def test_inert_scope_support_ignores_a_literal_none_line():
+    """readme_quality passes None positionally -- supplying nothing, spelled out."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert "lines" not in inert.scope_support().get("readme_quality", set())
+
+
+def test_inert_scope_support_skips_modules_that_shadow_the_matcher():
+    """A module defining its own matcher is left out rather than read wrongly.
+
+    bypass_handler.is_bypassed takes (file_path, branch_path, standard, line) --
+    reading positional args against that signature while assuming the shared one
+    yields confident nonsense, so resolve the binding first.
+    """
+    import ast
+
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    local_copy = ast.parse("def is_bypassed(a, b, c):\n    return False\n")
+    assert inert._binds_shared_matcher(local_copy) is False
+
+    imported = ast.parse("from aipass.seedgo.apps.handlers.bypass.utils import matching_rule\n")
+    assert inert._binds_shared_matcher(imported) is True
+
+
+# The trigger standard's third matcher, folded back into the shared one (FPLAN-0384)
+
+
+def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
+    """trigger_check carried its own matcher, so the map could not see the standard at all."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    support = inert.scope_support()
+    assert "trigger" in support, "trigger now routes through the shared matcher"
+    assert "lines" not in support["trigger"], "its one call site gates the whole file"
+    assert inert.inert_scopes({"file": "a.py", "standard": "trigger", "lines": [1]}) == ("lines",)
+
+
+def _trigger_bypass_message(tmp_path, rules):
+    """check_module's bypass gate, exercised on a real file."""
+    from aipass.seedgo.apps.handlers.aipass_standards import trigger_check
+
+    target = tmp_path / "apps" / "foo.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('"""Doc."""\n\nx = 1\n', encoding="utf-8")
+    result = trigger_check.check_module(str(target), bypass_rules=rules)
+    return [c["message"] for c in result["checks"] if c["name"] == "Bypassed"]
+
+
+def test_trigger_lines_rule_no_longer_suppresses_the_whole_file(tmp_path):
+    """The local copy never got the FPLAN-0382 fix: a lines rule fall-through-matched here.
+
+    Spawn's tests/conftest.py [trigger] rule was not inert, it was over-wide --
+    it muted the standard for the whole file while reading as two lines.
+    """
+    scoped = [{"file": "apps/foo.py", "standard": "trigger", "lines": [10, 20], "reason": "x"}]
+    assert _trigger_bypass_message(tmp_path, scoped) == []
+
+
+def test_trigger_file_wide_rule_still_carries_its_category_and_reason(tmp_path):
+    rules = [{"file": "apps/foo.py", "standard": "trigger", "category": "handler_layer", "reason": "orchestrated"}]
+    messages = _trigger_bypass_message(tmp_path, rules)
+    assert len(messages) == 1
+    assert "handler_layer" in messages[0] and "orchestrated" in messages[0]
+
+
+def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees():
+    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed, matching_rule
+
+    rules = [{"file": "apps/foo.py", "standard": "cli", "reason": "entry point"}]
+    assert matching_rule("/b/apps/foo.py", "cli", None, rules) is rules[0]
+    assert is_bypassed("/b/apps/foo.py", "cli", None, rules) is True
+    assert matching_rule("/b/apps/bar.py", "cli", None, rules) is None
+    assert is_bypassed("/b/apps/bar.py", "cli", None, rules) is False

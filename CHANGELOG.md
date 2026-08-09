@@ -11,6 +11,44 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(seedgo)** — FPLAN-0384: scope-aware standards, one source of truth for
+both lanes (by @seedgo). The audit lane walked apps/ regardless of what a
+checker declared and run_checklist filtered nothing, so the same standard was
+production-only in one lane and everywhere in the other — structural checks
+failed on 96% of the fleet's test files and branches papered over it with
+suppression. New aipass_standards/applicability.py declares APPLIES_TO
+(production / tests / everywhere, default everywhere so a new bug-finding
+checker is never silently muted) and BOTH collectors consult it. Deliberately
+NOT folded into AUDIT_SCOPE: that constant says where a result is REPORTED,
+and conflating the two axes is what created the disagreement. Retired code
+(.archive/, deprecated/) is now excluded from both lanes — the checklist lane
+used to flag archived files nobody can fix without un-retiring them — and the
+exclusion is part-based, closing a latent Windows bug where the audit's
+"/.archive/" substring pattern never matched and CI audited archived code the
+local run skipped. Measured, bypass disabled: fleet test files 1185 failing
+(standard, file) pairs → 205; architecture 439 → 0, encapsulation 247 → 0,
+documentation 163 → 0, meta 112 → 0, trigger 19 → 0, while every bug-finding
+standard is untouched (windows_compat 63, silent_catch 41, hardcoded_path 32
+— scoping, not muting). 0 production files misclassified; 42 archived files
+excluded fleet-wide. trigger_check's private copy of the bypass matcher —
+the third implementation in the tree, and the only one that never received the
+FPLAN-0382 scope fix — is gone; it still fall-through-matched, so a 'lines'
+rule muted the whole file for that standard. utils.matching_rule() now backs
+is_bypassed() and hands the rule back for the category/reason annotations that
+copy existed for. The audit cache now fingerprints the bypass/ and audit/
+packages, so a checker-semantics change busts it instead of serving green-stale
+results (that gap is why the wave-2 fleet verification read 17/17 from cache
+while CI was red). Branches keep their now-dead rules until their own next
+touch; each one is named on the audit's non-scored info channel with a count,
+not a wall of identical lines. **Correction to the entry below:** windows_compat
+is NOT line-blind. Canaried through all three paths — checker, audit lane
+_run_all_files, checklist lane — a lines rule suppresses in every one, and a
+non-matching line number suppresses in none. devpulse's registry.py rule said
+lines [138,149] while `import fcntl` sat on 139 and 150 in the same commit that
+introduced the rule (57285740): off by one from birth, harmless only because
+the pre-0382 fall-through was muting the whole file anyway. The honours map was
+right; the rule was wrong.
+
 **fix(devpulse)** — watchdog _FileLock fcntl imports restructured into
 checker-recognized platform guards; windows_compat bypass rule DELETED
 (FPLAN-0382 residue, own branch). CI's fresh seedgo-audit caught what

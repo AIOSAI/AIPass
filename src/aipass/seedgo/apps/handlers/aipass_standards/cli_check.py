@@ -24,6 +24,10 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: this is about a branch's CLI surface, and a
+# test file is not one. Declared for correctness rather than for noise -- it fails
+# on no test file in the fleet today, but nothing made that a guarantee.
+APPLIES_TO = "production"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:

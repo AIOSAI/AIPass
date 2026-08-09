@@ -6,16 +6,6 @@
   },
   "bypass": [
     {
-      "file": "tests/test_checkers_batch5.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_checkers_batch5.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch4.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
       "file": "_content.py",
       "reason": "Content files contain Rich markup strings with code examples (print(), python3, imports, logger calls, etc.). These are documentation, not executable code. All code-quality checkers produce false positives on these files."
     },
@@ -119,34 +109,9 @@
       "reason": "Template files are reference implementations for other branches to copy. They contain function definitions that are not called within seedgo itself."
     },
     {
-      "file": "tests/test_hooks_track_e.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_hooks_track_e.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
       "file": "apps/modules/permissions.py",
       "standard": "unused_function",
       "reason": "is_trusted_caller() and identify_caller() are public API consumed by pre_edit_gate.py (hook layer) and drone auth.py. Checker cannot trace cross-file dynamic dispatch to the hook scripts."
-    },
-    {
-      "file": "tests/test_coverage_audit.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_coverage_audit.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
-    },
-    {
-      "file": "tests/test_hooks_snapshot.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_checkers_batch1.py",

@@ -47,14 +47,20 @@ def _scope_matches(rule: dict, line: int | None, name: str | None) -> bool:
     return evaluable
 
 
-def is_bypassed(
+def matching_rule(
     file_path: str,
     standard: str,
     line: int | None = None,
     bypass_rules: list | None = None,
     name: str | None = None,
-) -> bool:
-    """Check if a violation should be bypassed.
+) -> dict | None:
+    """The first bypass rule that covers this violation, or None.
+
+    Same decision as :func:`is_bypassed`, but hands back the rule so a caller
+    that needs the ``category``/``reason`` annotations can read them instead of
+    re-implementing the match. trigger_check used to carry its own copy for
+    exactly that reason, and the copy never received the FPLAN-0382 scope fix --
+    a second implementation of a rule matcher is a second set of semantics.
 
     Args:
         file_path: Path to the file being checked
@@ -64,10 +70,10 @@ def is_bypassed(
         name: Optional function/symbol name for name-scoped bypasses
 
     Returns:
-        True if this violation should be bypassed
+        The matching rule dict, or None when nothing covers this violation
     """
     if not bypass_rules:
-        return False
+        return None
     # Normalize to forward slashes for cross-platform matching
     file_path_posix = Path(file_path).as_posix()
     for rule in bypass_rules:
@@ -88,5 +94,27 @@ def is_bypassed(
                 "rule_file": rule_file,
             },
         )
-        return True
-    return False
+        return rule
+    return None
+
+
+def is_bypassed(
+    file_path: str,
+    standard: str,
+    line: int | None = None,
+    bypass_rules: list | None = None,
+    name: str | None = None,
+) -> bool:
+    """Check if a violation should be bypassed.
+
+    Args:
+        file_path: Path to the file being checked
+        standard: Standard name (e.g., 'cli', 'imports')
+        line: Optional specific line number of the violation
+        bypass_rules: List of bypass rules from .seedgo/bypass.json
+        name: Optional function/symbol name for name-scoped bypasses
+
+    Returns:
+        True if this violation should be bypassed
+    """
+    return matching_rule(file_path, standard, line, bypass_rules, name) is not None

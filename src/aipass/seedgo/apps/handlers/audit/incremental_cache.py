@@ -55,6 +55,18 @@ CACHE_VERSION = "1"
 SCHEMA_VERSION = 1
 CACHE_FILE = json_handler.JSON_DIR / "audit_cache.json"
 
+# Packages that decide audit OUTPUT without living in the checker pack: bypass/
+# decides whether a violation counts, audit/ decides which files a checker ever
+# sees. Both are inputs exactly as much as a checker is, and neither was
+# fingerprinted — so when FPLAN-0382 changed is_bypassed's matching semantics,
+# every branch kept serving results computed under the old rules. The fleet read
+# 17/17 cached green while CI, which has no cache, showed the real 99%. A stale
+# green is worse than a slow audit.
+MACHINERY_DIRS: Tuple[Path, ...] = (
+    Path(__file__).resolve().parent,
+    Path(__file__).resolve().parent.parent / "bypass",
+)
+
 
 def fingerprint_file(path: Path) -> List[int]:
     """Return [mtime_ns, size] for a file. [-1, -1] if it can't be stat'd."""
@@ -121,9 +133,31 @@ def compute_bypass_stamp(branch_path: Path) -> str:
     return hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest()
 
 
+def compute_machinery_stamp() -> str:
+    """Fingerprint the bypass/ and audit/ packages — the code that decides results.
+
+    compute_pack_stamp() covers the checkers; this covers everything the
+    checkers' answers are filtered through afterwards. Machine-local paths, so
+    the stamp is per-install, which is what the cache is too.
+    """
+    entries = []
+    for directory in MACHINERY_DIRS:
+        if not directory.exists():
+            continue
+        for f in sorted(directory.rglob("*.py")):
+            if "__pycache__" in f.parts:
+                continue
+            fp = fingerprint_file(f)
+            entries.append([f"{directory.name}/{f.relative_to(directory).as_posix()}", fp[0], fp[1]])
+    return hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest()
+
+
 def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = None) -> str:
-    """Combined invalidation stamp: cache version + checker pack + bypass/ignore rules."""
-    combined = f"{CACHE_VERSION}:{compute_pack_stamp(pack_path, diag_path)}:{compute_bypass_stamp(branch_path)}"
+    """Combined invalidation stamp: cache version + checker pack + audit machinery + bypass/ignore rules."""
+    combined = (
+        f"{CACHE_VERSION}:{compute_pack_stamp(pack_path, diag_path)}"
+        f":{compute_machinery_stamp()}:{compute_bypass_stamp(branch_path)}"
+    )
     return hashlib.sha1(combined.encode("utf-8")).hexdigest()
 
 

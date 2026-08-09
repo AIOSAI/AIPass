@@ -189,6 +189,15 @@ def is_bypassed(file_path: str, branch_path: str, standard: str, line: Optional[
     """
     Check if a specific violation should be bypassed.
 
+    NOT the checkers' matcher. That is
+    ``bypass.utils.is_bypassed(file_path, standard, line, bypass_rules, name)``
+    -- note the different parameter ORDER: this one takes ``branch_path``
+    second, and it matches a rule's ``file`` against the branch-relative path
+    exactly rather than as a substring. No production code calls this; it is
+    kept for the .seedgo config surface it sits beside. Call the shared matcher
+    from a checker, never this, and never read one's call site against the
+    other's signature.
+
     Args:
         file_path: Absolute path to file
         branch_path: Path to branch root

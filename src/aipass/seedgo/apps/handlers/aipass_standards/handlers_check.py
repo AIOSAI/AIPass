@@ -24,6 +24,9 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: the handler contract (no CLI, no orchestration)
+# describes apps/handlers/ code. A test is neither a handler nor a caller of one.
+APPLIES_TO = "production"
 
 # Cross-handler/orchestration imports are purely import-statement checks, so a
 # violation hiding in a package marker file must not be invisible to the audit

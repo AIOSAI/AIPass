@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass import ignore_handler, inert
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -60,6 +61,12 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     content-focused (dead code, naming, nesting) and __init__.py is typically
     boilerplate. Pass include_init=True for import-statement checkers, where a
     real cross-handler import hiding in a package marker must not go unseen.
+
+    This is the audit's CORPUS, not its applicability: every file here is
+    production source, and which checkers actually run against it is decided
+    per checker by applicability.applies_to_file(). is_retired_path() is
+    applied on top of the ignore patterns because those match on a substring
+    of the whole path ("/.archive/"), which never matches on Windows.
     """
     apps_dir = branch_path / "apps"
     if not apps_dir.exists():
@@ -73,6 +80,7 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
         if (include_init or f.name != "__init__.py")
         and not is_disabled_file(f.name)
         and not is_throwaway_path(str(f))
+        and not applicability.is_retired_path(str(f))
         and not any(p in str(f).lower() for p in ign)
         and not ignore_handler.is_seedgo_ignored(str(f), branch_path, ignore_entries)
     ]
@@ -330,6 +338,12 @@ def audit_branch(
                 }
                 scores[name] = 0
             continue
+        # Per-file lanes only check files the standard applies to. Branch-level
+        # checkers above are exempt because they walk the tree themselves —
+        # test_quality's whole corpus is tests/, and nothing here could filter
+        # it without also filtering it away.
+        if not applicability.applies_to_file(checker, entry_file):
+            continue
         # Entry-point: always run on entry file. Genuine entry_point-scope
         # checkers (readme_check, cli_ux_check, ...) skip the cache here:
         # AUDIT_SCOPE says where a result is REPORTED, not what a checker
@@ -361,6 +375,7 @@ def audit_branch(
                 if files_with_init is None:
                     files_with_init = _collect_py_files(branch_path, include_init=True)
                 scan_files = files_with_init
+            scan_files = [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
             v, s = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, unchanged_files)
             all_violations[name] = v
             if s:

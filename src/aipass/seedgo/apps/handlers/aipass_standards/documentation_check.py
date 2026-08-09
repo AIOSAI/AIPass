@@ -23,6 +23,9 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
+# Applies to production source only: a test documents itself by its name and its
+# assertions. 163 of 456 fleet test files failed docstring coverage (36%, 15 branches).
+APPLIES_TO = "production"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:

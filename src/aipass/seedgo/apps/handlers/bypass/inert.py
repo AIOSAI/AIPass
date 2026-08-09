@@ -24,40 +24,79 @@ that starts threading ``line=`` stops being reported the moment it does.
 
 import ast
 import json
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Set, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Every checker in the pack lives under this package's parent.
 HANDLERS_ROOT = Path(__file__).resolve().parents[1]
+PACK_ROOT = HANDLERS_ROOT / "aipass_standards"
 
 
-def _standard_of(call: ast.Call) -> str | None:
-    """The standard a single is_bypassed() call gates, if it is a plain literal."""
-    node: ast.expr | None = None
+# is_bypassed(file_path, standard, line=None, bypass_rules=None, name=None) -- the
+# scope arguments are as passable positionally as by keyword, and most call sites use
+# the positional form. Reading only keywords is how the first version of this map
+# reported ten live standards as line-blind.
+_SHARED_SIGNATURE = ("file_path", "standard", "line", "bypass_rules", "name")
+_SHARED_IMPORT = "aipass.seedgo.apps.handlers.bypass.utils"
+# Both entry points of the shared matcher, same signature: is_bypassed() answers
+# yes/no, matching_rule() hands back the rule for its category/reason annotations.
+_SHARED_NAMES = ("is_bypassed", "matching_rule")
+_SCOPE_ARG = {"line": "lines", "name": "functions"}
+
+
+def _argument(call: ast.Call, param: str) -> ast.expr | None:
+    """The expression passed for one parameter, by keyword or by position."""
     for kw in call.keywords:
-        if kw.arg == "standard":
-            node = kw.value
-    if node is None and len(call.args) >= 2:
-        node = call.args[1]
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
+        if kw.arg == param:
+            return kw.value
+    index = _SHARED_SIGNATURE.index(param)
+    return call.args[index] if len(call.args) > index else None
+
+
+def _is_supplied(node: ast.expr | None) -> bool:
+    """A literal None is the same as passing nothing; anything else may be a real value."""
+    if node is None:
+        return False
+    return not (isinstance(node, ast.Constant) and node.value is None)
+
+
+def _binds_shared_matcher(tree: ast.AST) -> bool:
+    """Whether the matcher names in this module mean the shared utility.
+
+    ``bypass_handler.is_bypassed`` shares the name with a different parameter
+    ORDER (file_path, branch_path, standard, line), so reading positional
+    arguments against the wrong signature yields confident nonsense. Resolve the
+    binding before trusting it: a module that defines its own is disqualified,
+    and one that imports from the shared package is not.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _SHARED_NAMES:
+            return False
+        if isinstance(node, ast.ImportFrom) and node.module == _SHARED_IMPORT:
+            if any(alias.name in _SHARED_NAMES and alias.asname is None for alias in node.names):
+                return True
+    return False
 
 
 @lru_cache(maxsize=1)
 def scope_support() -> Dict[str, Set[str]]:
     """Map each standard to the scope kinds its checker can actually evaluate.
 
-    Returns e.g. ``{"cli": {"lines"}, "encapsulation": {"lines"}, "handlers": set()}``
-    — an empty set meaning that standard gates file-wide only, so no ``lines`` or
-    ``functions`` rule written against it can ever match.
+    Returns e.g. ``{"cli": {"lines"}, "handlers": set()}`` — an empty set meaning that
+    standard only ever gates file-wide, so no ``lines``/``functions`` rule written
+    against it can match.
 
-    Read from the checker sources by AST rather than from a maintained list: a
-    list would drift the same way the bypass rules themselves did.
+    Read from the checker sources by AST rather than from a maintained list: a list
+    would drift the same way the bypass rules themselves did. A standard counts as
+    supporting a scope if ANY of its call sites supplies it — a checker that gates
+    file-wide at the top of check_module and then re-checks per line still lets a
+    ``lines`` rule narrow those per-line findings.
     """
     support: Dict[str, Set[str]] = {}
     for source in sorted(HANDLERS_ROOT.rglob("*.py")):
@@ -66,22 +105,18 @@ def scope_support() -> Dict[str, Set[str]]:
         except (OSError, SyntaxError) as e:
             logger.info("Skipping %s while mapping bypass scope support: %s", source, e)
             continue
+        if not _binds_shared_matcher(tree):
+            continue
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+            if not isinstance(node, ast.Call) or getattr(node.func, "id", None) not in _SHARED_NAMES:
                 continue
-            func = node.func
-            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-            if called != "is_bypassed":
+            standard = _argument(node, "standard")
+            if not (isinstance(standard, ast.Constant) and isinstance(standard.value, str)):
                 continue
-            standard = _standard_of(node)
-            if standard is None:
-                continue
-            supplied = {kw.arg for kw in node.keywords}
-            kinds = support.setdefault(standard, set())
-            if "line" in supplied:
-                kinds.add("lines")
-            if "name" in supplied:
-                kinds.add("functions")
+            kinds = support.setdefault(standard.value, set())
+            for param, scope in _SCOPE_ARG.items():
+                if _is_supplied(_argument(node, param)):
+                    kinds.add(scope)
     return support
 
 
@@ -110,6 +145,69 @@ def inert_scopes(rule: dict) -> Tuple[str, ...]:
     return tuple(key for key in declared if key not in evaluable)
 
 
+@lru_cache(maxsize=1)
+def standard_constants() -> Dict[str, Dict[str, str]]:
+    """Each standard's module-level string constants, read from the checker sources.
+
+    Read by AST rather than by importing the pack: branch_audit imports this
+    module, so importing branch_audit's discover_checkers() back would be a
+    cycle. These are module-level string constants, exactly as readable from
+    the source as from the loaded module.
+    """
+    declared: Dict[str, Dict[str, str]] = {}
+    for source in sorted(PACK_ROOT.glob("*_check.py")):
+        try:
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError) as e:
+            logger.info("Skipping %s while reading checker constants: %s", source, e)
+            continue
+        constants = declared.setdefault(source.stem.removesuffix("_check"), {})
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+                continue
+            if not isinstance(node.value.value, str):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in ("APPLIES_TO", "AUDIT_SCOPE"):
+                    constants[target.id] = node.value.value
+    return declared
+
+
+def out_of_scope_reason(rule: dict) -> str | None:
+    """Why this rule can no longer match, when its file is outside its standard's scope.
+
+    A bypass rule suppresses a violation. If the standard is never evaluated on
+    that kind of file, there is no violation to suppress and the rule is dead
+    weight — not wrong, just no longer doing anything.
+
+    Says nothing about two cases it genuinely cannot see. A wildcard file
+    pattern covers both kinds of file at once. And a branch-level checker walks
+    the tree itself: test_quality's module-coverage category names PRODUCTION
+    modules while the standard is about tests, so reading its rules against the
+    per-file lanes' scope would confidently report live rules as dead — the
+    same mistake this module already made once by reading half a call site.
+    """
+    path = rule.get("file")
+    if not path or any(ch in path for ch in "*?["):
+        return None
+    if applicability.is_retired_path(path):
+        return "retired code is not checked by either lane, so this rule suppresses nothing"
+
+    standard = rule.get("standard")
+    if not standard:
+        return None
+    constants = standard_constants().get(standard, {})
+    if constants.get("AUDIT_SCOPE") == "branch_level":
+        return None
+    declared = constants.get("APPLIES_TO", applicability.DEFAULT_APPLIES_TO)
+    if declared == applicability.EVERYWHERE:
+        return None
+    if applicability.is_test_path(path) == (declared == applicability.TESTS):
+        return None
+    kind = "a test file" if applicability.is_test_path(path) else "production code"
+    return f"{standard} applies to {declared} only and this is {kind}, so this rule suppresses nothing"
+
+
 def check_branch_info(branch_path: str) -> list[str]:
     """Non-scored signpost lines naming every inert bypass rule in a branch.
 
@@ -128,18 +226,35 @@ def check_branch_info(branch_path: str) -> list[str]:
         return []
 
     lines = []
+    out_of_scope: Counter = Counter()
     for rule in rules:
         if not isinstance(rule, dict):
             continue
+        standard = rule.get("standard") or "all standards"
+
+        if out_of_scope_reason(rule):
+            out_of_scope[standard] += 1
+            continue
+
         inert = inert_scopes(rule)
         if not inert:
             continue
-        standard = rule.get("standard") or "all standards"
         scopes = " and ".join(f"'{key}'" for key in inert)
         verb = "never match" if len(inert) > 1 else "never matches"
         lines.append(
             f"{rule.get('file', '?')} [{standard}]: {scopes} {verb} — that checker gates file-wide "
             f"and passes no line/name, so this rule is inert. Scope it file-wide or drop it."
+        )
+
+    # Out-of-scope rules are counted, not listed: a branch that was absorbing a
+    # mis-scoped standard has dozens of them, and 118 identical lines is a wall,
+    # not a signpost. One line names the standards and the size of the cleanup.
+    if out_of_scope:
+        breakdown = ", ".join(f"{std} {count}" for std, count in out_of_scope.most_common())
+        lines.append(
+            f"{sum(out_of_scope.values())} bypass rules now suppress nothing ({breakdown}) — those "
+            f"standards no longer apply to that kind of file. Safe to delete at your next touch; "
+            f"no score depends on them."
         )
 
     if lines:
