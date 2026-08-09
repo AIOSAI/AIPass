@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-08-07
+# Modified: 2026-08-08
 # =============================================
 
 """Integration tests for the citizen class template system.
@@ -107,22 +107,29 @@ class TestClassRegistry:
 
 
 class TestCustomConfigReadmeGuide:
-    """The custom_config/ README ships the operator-override house pattern (FPLAN-0380)."""
+    """The custom_config/ README ships the S193 self-heal doctrine (DPLAN-0283 WS-C)."""
 
     def _readme(self):
         from aipass.spawn.apps.handlers.class_registry import get_template_dir
 
         return get_template_dir("aipass_framework") / "{{BRANCH}}_json" / "custom_config" / "README.md"
 
-    def test_readme_carries_override_pattern(self):
-        """Guide states the four load-bearing rules and names its source of truth."""
+    def test_readme_carries_self_heal_doctrine(self):
+        """Guide states the five load-bearing rules and names its source of truth."""
         text = self._readme().read_text(encoding="utf-8").lower()
 
-        assert "defaults" in text
-        assert "only overrides" in text
+        assert "runtime authority" in text
+        assert "default_config" in text
+        assert "regenerat" in text
         assert "deep-merged" in text
-        assert "never write defaults to disk" in text
         assert "json_structure" in text
+
+    def test_readme_does_not_carry_reversed_never_snapshot_rule(self):
+        """S193 reversed never-snapshot — the retired wording must not creep back in."""
+        text = self._readme().read_text(encoding="utf-8").lower()
+
+        assert "never write defaults to disk" not in text
+        assert "missing file = defaults = safe" not in text
 
     def test_readme_placeholders_resolve(self):
         """Every placeholder in the guide is one the scaffolder actually substitutes."""

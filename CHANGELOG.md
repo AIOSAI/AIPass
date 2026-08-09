@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**docs(spawn)** — custom_config README template rewritten to the S193
+self-heal doctrine + fleet re-render 17/17 (DPLAN-0283 WS-C). The guide
+now teaches: the file is the runtime authority (configs live in JSONs,
+not code); code holds `DEFAULT_CONFIG` only as the regeneration seed,
+kept aligned with operating values; missing file → regenerated in full;
+malformed file → fail loud, never clobbered; code writes to
+custom_config only on that self-heal path, partial files deep-merge from
+the seed. Thursday's never-snapshot wording retired everywhere —
+verified by grep across all 17 rendered READMEs. Tests were part of the
+defect (they asserted the reversed doctrine): rewritten + a new
+absence-canary test that goes red if the retired rule ever reappears,
+all three canary-verified red/green. Reference-loader pointer added
+(memory's config_loader 1.2.0). Registry hash updated; only README.md
+written per branch — operator files untouched. 381 tests, seedgo 100%.
+By @spawn; suite + lint + rendered README + fleet grep re-verified by
+devpulse.
+
 **fix(memory)** — the config file is the authority again: self-heal
 restored (config_loader 1.2.0, Patrick ruling S193 reversing the
 doctrine half of Thursday's ws4). The never-snapshot change had archived
