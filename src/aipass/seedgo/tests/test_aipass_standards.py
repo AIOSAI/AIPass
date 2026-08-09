@@ -274,6 +274,113 @@ def test_naming_is_bypassed_wrong_standard():
 
 
 # ---------------------------------------------------------------------------
+# Tests -- json_structure_content custom_config doctrine (Patrick ruling S193)
+# ---------------------------------------------------------------------------
+
+
+def _custom_config_doctrine_text():
+    """Just the custom_config house-pattern section, lowercased.
+
+    Sliced deliberately: asserting against the whole 200-line standard would
+    let a generic word like "untouched" pass from some unrelated paragraph
+    after the doctrine block itself was deleted.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_content import (
+        get_json_structure_standards,
+    )
+
+    full = get_json_structure_standards()
+    start = full.index("custom_config/ HOUSE PATTERN:")
+    end = full.index("KEY WARNINGS:", start)
+    return full[start:end].lower()
+
+
+def test_doctrine_file_is_the_runtime_authority():
+    """S193: the JSON on disk wins over code, and configs live in JSONs."""
+    text = _custom_config_doctrine_text()
+
+    assert "runtime authority" in text
+    assert "configs live in the json" in text
+    # The operator edits the file; code does not out-rank it.
+    assert "win over code" in text
+    # The reason a config belongs in the file at all — reading Python to find
+    # a tunable is the failure this rule exists to prevent.
+    assert "require reading python" in text
+
+
+def test_doctrine_missing_file_regenerates_in_full():
+    """S193: a genuinely-missing file is regenerated from the seed, in full."""
+    text = _custom_config_doctrine_text()
+
+    assert "regeneration seed" in text
+    assert "regenerate it in full" in text
+
+
+def test_doctrine_malformed_file_is_never_clobbered():
+    """S193: malformed/wrong-shape fails loud and leaves the operator file alone."""
+    text = _custom_config_doctrine_text()
+
+    assert "never clobber" in text
+    assert "untouched" in text
+    assert "in memory" in text
+
+
+def test_doctrine_pins_the_write_boundary():
+    """The one sentence that decides whether a snapshot writer is legal.
+
+    Everything else in the block describes a load; this is the only line that
+    bounds a WRITE. Without it pinned, the whole yellow paragraph could be
+    deleted and every other doctrine test would still pass.
+    """
+    text = _custom_config_doctrine_text()
+
+    assert "code never writes into custom_config/ outside that regeneration path" in text
+    assert "snapshot overwrites" in text
+
+
+def test_doctrine_states_merge_direction():
+    """Deep-merge is only correct in one direction: file over seed."""
+    text = _custom_config_doctrine_text()
+
+    assert "deep-merge" in text
+    assert "file over seed" in text
+    # Seed-over-file would silently undo every operator edit on a key the
+    # seed also carries — the exact inversion S193 reversed.
+    assert "seed over file" not in text
+
+
+def test_doctrine_does_not_carry_the_reversed_never_snapshot_rule():
+    """The pre-S193 doctrine said the opposite; it must not creep back.
+
+    This text has now inverted twice (FPLAN-0380 ws1 -> ruling S193). A checker
+    cannot catch a standard that contradicts the fleet's operating truth, so
+    the wording itself is pinned here.
+    """
+    text = _custom_config_doctrine_text()
+
+    assert "never self-heal-write" not in text
+    assert "holds only overrides" not in text
+    # "Missing file = defaults" was the reversed rule — missing now regenerates.
+    assert "missing file = defaults" not in text
+
+
+def test_doctrine_keeps_six_key_drift_as_seed_lesson():
+    """The @memory drift story stays, reframed as why the SEED must stay aligned."""
+    text = _custom_config_doctrine_text()
+
+    assert "6 keys" in text
+    # Reframed: stale seed regenerates stale truth, not "files can't hold config".
+    assert "stale seed regenerates stale truth" in text
+
+
+def test_doctrine_omits_queued_quarantine_upgrade():
+    """Quarantine-then-regenerate is queued behind the medic digest, not current."""
+    text = _custom_config_doctrine_text()
+
+    assert "quarantine" not in text
+
+
+# ---------------------------------------------------------------------------
 # Tests -- json_structure_check.check_branch_info (custom_config signpost)
 # ---------------------------------------------------------------------------
 

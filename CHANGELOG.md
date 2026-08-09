@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**docs(seedgo)** — json_structure standard rewritten to the S193
+self-heal doctrine (v3.0.0, DPLAN-0283 WS-B). The house-pattern block is
+now 6 rules written from the verbatim ruling + memory's config_loader
+1.2.0 as reference implementation: configs live in the JSON; the file on
+disk is the runtime authority; DEFAULT_CONFIG is the regeneration seed
+kept at operating values; missing → full atomic regen; malformed or
+unreadable → fail loud, never clobber, defaults in memory only;
+deep-merge file-over-seed. Retired: never-snapshot, "config holds only
+overrides", "missing = defaults". The 6-key drift case reframed — a
+stale seed regenerates stale truth, not "files can't hold full configs".
+"Never create JSON files manually" warning scoped to the auto-generated
+trio (custom_config is the operator's to hand-edit). +8 tests (1347):
+six pin the doctrine, two pin what must never return — canary-verified
+red three ways, which itself caught a vacuous-pass defect in the test
+helper. Rider finding for @memory: config_loader read_text() outside
+the try — UnicodeDecodeError/PermissionError escape raw (queued). By
+@seedgo; suite + lint + live render re-verified by devpulse.
+
 **docs(spawn)** — custom_config README template rewritten to the S193
 self-heal doctrine + fleet re-render 17/17 (DPLAN-0283 WS-C). The guide
 now teaches: the file is the runtime authority (configs live in JSONs,
