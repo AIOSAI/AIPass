@@ -34,16 +34,13 @@ import json
 import os
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT
-
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
+from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, trail_logger
 
 CONFIG_PATH = TRIGGER_JSON_DIR / "custom_config" / "trigger.config.json"
 
-_LOADER_LOG = TRIGGER_ROOT / "logs" / "config_loader.jsonl"
+# Recursion-safe: this loader is read from the event path the log watchers
+# read, so it logs to a .jsonl sidecar rather than through prax.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "config_loader.jsonl")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "_meta": {
@@ -86,16 +83,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def _log(level: str, message: str) -> None:
-    """Log to a jsonl sidecar (recursion-safe: never through a watched .log)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_LOADER_LOG, {"level": level, "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
-
-
 def deep_merge(base: dict, overrides: dict) -> dict:
     """Recursively merge *overrides* into *base* without mutating either.
 
@@ -135,13 +122,13 @@ def _write_config_file(config: dict[str, Any]) -> bool:
         os.replace(tmp_path, CONFIG_PATH)
         return True
     except OSError as exc:
-        _log("ERROR", f"failed to write {CONFIG_PATH}: {exc}")
+        logger.error(f"failed to write {CONFIG_PATH}: {exc}")
         return False
     finally:
         try:
             tmp_path.unlink(missing_ok=True)
         except OSError:
-            _log("WARNING", f"could not clean up temp file {tmp_path}")
+            logger.warning(f"could not clean up temp file {tmp_path}")
 
 
 def load() -> dict[str, Any]:
@@ -157,20 +144,20 @@ def load() -> dict[str, Any]:
     """
     if not CONFIG_PATH.exists():
         written = _write_config_file(DEFAULT_CONFIG)
-        _log("INFO", f"regenerated {CONFIG_PATH} from defaults (missing), written={written}")
+        logger.info(f"regenerated {CONFIG_PATH} from defaults (missing), written={written}")
         return copy.deepcopy(DEFAULT_CONFIG)
 
     try:
         file_config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         # Fail loud, do NOT overwrite — the operator must fix their file.
-        _log("ERROR", f"unreadable config at {CONFIG_PATH}, serving defaults in memory: {exc}")
+        logger.error(f"unreadable config at {CONFIG_PATH}, serving defaults in memory: {exc}")
         return copy.deepcopy(DEFAULT_CONFIG)
 
     if not isinstance(file_config, dict):
         # Valid JSON, wrong shape (a list, a bare string). deep_merge would
         # raise on it, so it takes the same no-clobber path as malformed.
-        _log("ERROR", f"config at {CONFIG_PATH} is {type(file_config).__name__}, expected object")
+        logger.error(f"config at {CONFIG_PATH} is {type(file_config).__name__}, expected object")
         return copy.deepcopy(DEFAULT_CONFIG)
 
     return deep_merge(DEFAULT_CONFIG, file_config)

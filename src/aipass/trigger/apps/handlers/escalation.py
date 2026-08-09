@@ -46,14 +46,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    atomic_write_json,
+    json_file_lock,
+    trail_logger,
+)
 from aipass.trigger.apps.handlers.json import config_loader
 from aipass.trigger.apps.handlers.json import json_handler
-
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
 
 # Live state — off the trio path (see module docstring).
 STATE_FILE = TRIGGER_JSON_DIR / "escalation_state.json"
@@ -70,30 +71,16 @@ MAX_SAMPLE_CHARS = 500
 _send_email: Optional[Callable[..., bool]] = None
 
 # Config cache — see get_config(). (checked_at, config or None)
+# No production reset hook: nothing in the running system needs one (each CLI
+# invocation is a fresh process). Tests reset this global directly.
 CONFIG_TTL_SECONDS = 30.0
 _config_cache: tuple = (0.0, None)
 
 
-def _log(level: str, message: str, **fields: Any) -> None:
-    """Append a line to the escalation trail (recursion-safe path).
-
-    Deliberately NOT prax: this runs on the error path the log watchers read.
-    A prax line here would be detected, fired back as an error_detected event,
-    and land in record() again — the lane feeding itself forever.
-    """
-    if _append_jsonl is None:
-        return
-    try:
-        entry = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
-        entry.update(fields)
-        _append_jsonl(ESCALATION_LOG, entry)
-    except Exception:
-        pass  # seedgo:bypass meta-logging
-
-
-def _log_warning(message: str, **fields: Any) -> None:
-    """Record a warning on the escalation trail."""
-    _log("WARNING", message, **fields)
+# Deliberately NOT prax: this code runs on the error path the log watchers
+# read. A prax line here would be detected, fired back as an error_detected
+# event, and land in record() again — the lane feeding itself forever.
+logger = trail_logger(ESCALATION_LOG)
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
@@ -126,12 +113,6 @@ def get_config() -> Dict[str, Any]:
     return cfg
 
 
-def reset_config_cache() -> None:
-    """Drop the cached config so the next read hits the file."""
-    global _config_cache
-    _config_cache = (0.0, None)
-
-
 def _normalize(message: str) -> str:
     """Strip variable data from a message so repeats share one signature.
 
@@ -150,7 +131,7 @@ def _normalize(message: str) -> str:
 
         return normalize_message(message)
     except Exception as exc:
-        _log_warning(f"normalizer unavailable, signing on raw text: {exc}")
+        logger.warning(f"normalizer unavailable, signing on raw text: {exc}")
         return message
 
 
@@ -194,10 +175,10 @@ def _load_state() -> Dict[str, Any]:
 
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
-        _log_warning(f"unreadable escalation state, starting empty: {exc}")
+        logger.warning(f"unreadable escalation state, starting empty: {exc}")
         return _empty_state()
     if not isinstance(data, dict) or not isinstance(data.get("signatures"), dict):
-        _log_warning("escalation state has wrong shape, starting empty")
+        logger.warning("escalation state has wrong shape, starting empty")
         return _empty_state()
     return data
 
@@ -243,7 +224,7 @@ def _is_error_eligible(branch: str, fingerprint: str, cfg: Dict[str, Any]) -> tu
             if get_dispatch_count(fingerprint) >= 1:
                 return True, "owner already dispatched, still recurring"
         except Exception as exc:
-            _log_warning(f"registry state unavailable for {fingerprint[:12]}: {exc}")
+            logger.warning(f"registry state unavailable for {fingerprint[:12]}: {exc}")
 
     try:
         from aipass.trigger.apps.handlers import medic_state
@@ -253,7 +234,7 @@ def _is_error_eligible(branch: str, fingerprint: str, cfg: Dict[str, Any]) -> tu
         if branch.lower() in [b.lower() for b in medic_state.get_muted_branches()]:
             return True, "branch muted — dispatch suppressed, counting continues"
     except Exception as exc:
-        _log_warning(f"medic state unavailable for {branch}: {exc}")
+        logger.warning(f"medic state unavailable for {branch}: {exc}")
 
     if not _has_registered_owner(branch):
         return True, "no registered owner — medic cannot dispatch this anywhere"
@@ -276,7 +257,7 @@ def _has_registered_owner(branch: str) -> bool:
 
         return f"@{branch.lower()}" in _get_registered_emails()
     except Exception as exc:
-        _log_warning(f"registry lookup failed for {branch}: {exc}")
+        logger.warning(f"registry lookup failed for {branch}: {exc}")
         return True
 
 
@@ -414,7 +395,7 @@ def _record(
         return {"signature": signature, "count": window_count, "outcome": outcome}
 
     except Exception as exc:
-        _log_warning(f"escalation record failed for {branch}/{module}: {exc}")
+        logger.warning(f"escalation record failed for {branch}/{module}: {exc}")
         return None
 
 
@@ -448,8 +429,7 @@ def _evaluate_digest(
         try:
             elapsed = now - datetime.fromisoformat(last_digest).timestamp()
             if elapsed < cooldown_seconds:
-                _log(
-                    "INFO",
+                logger.info(
                     "digest held by cooldown",
                     signature=signature,
                     branch=branch,
@@ -459,7 +439,7 @@ def _evaluate_digest(
                 return "cooldown"
         except ValueError:
             # Unparseable stamp — treat as no cooldown rather than going silent.
-            _log_warning(f"bad last_digest stamp on {signature}: {last_digest!r}")
+            logger.warning(f"bad last_digest stamp on {signature}: {last_digest!r}")
 
     if level == "ERROR":
         eligible, reason = _is_error_eligible(branch, entry.get("fingerprint", ""), cfg)
@@ -467,8 +447,7 @@ def _evaluate_digest(
         eligible, reason = True, "warnings have no dispatch path — repetition is the only signal"
 
     if not eligible:
-        _log(
-            "INFO",
+        logger.info(
             "digest withheld",
             signature=signature,
             branch=branch,
@@ -482,7 +461,7 @@ def _evaluate_digest(
     subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient)
 
     if _send_email is None:
-        _log_warning(
+        logger.warning(
             "digest not sent — no email callback wired",
             signature=signature,
             branch=branch,
@@ -503,12 +482,12 @@ def _evaluate_digest(
             from_branch="@trigger",
         )
     except Exception as exc:
-        _log_warning(f"digest send raised for {signature}: {exc}", outcome="send_failed")
+        logger.warning(f"digest send raised for {signature}: {exc}", outcome="send_failed")
         return "send_failed"
 
     if not sent:
         # Cooldown is NOT set on a failed send — the next occurrence retries.
-        _log_warning(
+        logger.warning(
             "digest delivery failed",
             signature=signature,
             branch=branch,
@@ -521,8 +500,7 @@ def _evaluate_digest(
     entry["digests_sent"] = int(entry.get("digests_sent", 0)) + 1
     # Reset the window so the next digest reports occurrences since this one.
     entry["occurrences"] = []
-    _log(
-        "INFO",
+    logger.info(
         "digest sent",
         signature=signature,
         branch=branch,
@@ -669,6 +647,10 @@ def get_stats() -> Dict[str, Any]:
         "state_file": str(STATE_FILE),
         "config_file": str(config_loader.CONFIG_PATH),
         "email_wired": _send_email is not None,
+        # Trail lines lost because the sidecar itself could not be written.
+        # The one place in this lane that cannot report its own failure, so
+        # it is counted here instead of vanishing.
+        "trail_writes_dropped": logger.dropped,
     }
 
 
@@ -688,5 +670,5 @@ def clear_state() -> bool:
         with json_file_lock(STATE_FILE):
             return _archive_legacy_file(Path(STATE_FILE))
     except Exception as exc:
-        _log_warning(f"clear_state failed: {exc}")
+        logger.warning(f"clear_state failed: {exc}")
         return False

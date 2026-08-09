@@ -39,6 +39,7 @@ from typing import Generator
 # paths) cached for every test that follows.
 from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
+from aipass.trigger.apps.config import trail_logger
 
 
 @pytest.fixture(scope="session")
@@ -63,13 +64,13 @@ def isolate_escalation_state(monkeypatch: pytest.MonkeyPatch, escalation_sandbox
     state_file = escalation_sandbox / "escalation_state.json"
     state_file.unlink(missing_ok=True)
     monkeypatch.setattr(_escalation, "STATE_FILE", state_file)
-    monkeypatch.setattr(_escalation, "ESCALATION_LOG", escalation_sandbox / "escalation.jsonl")
+    monkeypatch.setattr(_escalation, "logger", trail_logger(escalation_sandbox / "escalation.jsonl"))
     monkeypatch.setattr(_escalation, "_send_email", None)
     monkeypatch.setattr(_config_loader, "CONFIG_PATH", escalation_sandbox / "custom_config" / "trigger.config.json")
-    monkeypatch.setattr(_config_loader, "_LOADER_LOG", escalation_sandbox / "config_loader.jsonl")
-    _escalation.reset_config_cache()
+    monkeypatch.setattr(_config_loader, "logger", trail_logger(escalation_sandbox / "config_loader.jsonl"))
+    _escalation._config_cache = (0.0, None)
     yield
-    _escalation.reset_config_cache()
+    _escalation._config_cache = (0.0, None)
 
 
 @pytest.fixture(autouse=True)

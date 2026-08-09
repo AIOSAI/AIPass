@@ -11,6 +11,38 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(trigger)** — escalation-lane audit flags: four resolved at the
+root, the fifth raised as a checker bug instead of routed around (by
+@trigger). silent_catch + error_handling were one finding in two hats:
+seedgo only recognizes literal `logger.<level>()` calls, so the
+`_log_warning()` helper — which really wrote every exception to the
+JSONL sidecar — read as 16 silent catches. Rather than a 13th
+file-wide "cannot log a failure to log" bypass, TrailLogger moved into
+apps/config.py (the one module that can't import prax's logger —
+circular) and both files bind a module-level logger from it: all 16
+sites are now recognized log calls, ZERO bypasses on the two newest
+files, and nothing self-feeds (still never touches prax). The one
+genuinely unreportable site — the sidecar's own write failure — went
+from `pass` to a `.dropped` counter surfaced in `escalation status` as
+"Trail lines lost". unused_function: reset_config_cache() deleted (six
+test callers, zero production; a CLI call would be dead code — fresh
+process per invocation means the cache is always cold there).
+custom_config readme finding: already resolved by seedgo's FPLAN-0380
+work — verified, not claimed. Self-caught: moving the sink orphaned
+conftest's ESCALATION_LOG constant patch — 898 tests would have
+silently written the LIVE escalation.jsonl; all six sites now swap the
+logger object. +8 tests (build_digest was the branch's one untested
+public function), canary 3-red-then-green. Deliberately NOT fixed:
+cross-handler imports — trigger holds at 99% because
+check_handler_independence() rejects seedgo's own documented ALLOWED
+example and computes own_package as the FILENAME for root-level
+handler files (exemption tests "handlers.escalation.py", impossible in
+any import); reproduction mailed to @seedgo, restructure only on their
+ruling. Also reported: bypass rules carrying "lines" are actually
+file-wide (silent_catch never passes line to is_bypassed). 898 passed,
+ruff clean, coverage 100/100. Re-verified by devpulse: suite + audit
+(99%, sole flag is the checker bug).
+
 **fix(prax)** — Windows CI red root-caused to the assertion, not the
 isolation (test_telegram_relay.py 1.2.0, by @prax — correcting
 devpulse's brief). `assert Path.home() not in CONTROL_FILE.parents` is

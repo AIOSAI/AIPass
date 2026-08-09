@@ -4,7 +4,7 @@
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
-**Version:** 2.5.0
+**Version:** 2.6.0
 **Last Updated:** 2026-08-08
 
 ## Quick Start
@@ -198,7 +198,7 @@ Digests are **email, never dispatch** (`auto_execute=False`). The default recipi
 | `watch_branch_log_warnings` | `true` | Parse WARNING lines out of branch logs |
 | `ignore_branches` | `[]` | Branches never escalated (deliberate, like a volume mute) |
 
-State lives at `trigger_json/escalation_state.json` — deliberately **not** a trio name (see Architecture). The decision trail is `logs/escalation.jsonl` — `.jsonl`, not `.log`, so the branch watcher (which reads only `*.log`) cannot feed the lane its own output.
+State lives at `trigger_json/escalation_state.json` — deliberately **not** a trio name (see Architecture). The decision trail is `logs/escalation.jsonl` — `.jsonl`, not `.log`, so the branch watcher (which reads only `*.log`) cannot feed the lane its own output. It is written through `TrailLogger` (`apps/config.py`), the shared recursion-safe sink every trigger handler on the error path logs through; a write it cannot complete is counted on `.dropped` and surfaced as `Trail lines lost` in `escalation status` rather than discarded.
 
 ## Error Registry
 
@@ -214,7 +214,7 @@ SHA1 fingerprinting for error deduplication. Tracks: fingerprint, branch, error 
 trigger/
 ├── apps/
 │   ├── trigger.py                  # Entry point (auto-discovers modules/)
-│   ├── config.py                   # Constants, atomic_write_json, json_file_lock
+│   ├── config.py                   # Constants, atomic_write_json, json_file_lock, TrailLogger
 │   ├── log_watcher_service.py      # Persistent watcher daemon (systemd)
 │   ├── modules/
 │   │   ├── core.py                 # Event bus: Trigger.fire/on/off/status
@@ -249,7 +249,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 890 tests across 23 modules
+├── tests/                          # 898 tests across 23 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -301,7 +301,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-890 tests across 23 test modules, all passing. Coverage: 101/101 public functions (100%).
+898 tests across 23 test modules, all passing. Coverage: 100/100 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -311,7 +311,7 @@ Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `te
 
 ## Compliance
 
-Seedgo: 98% (43 standards). Zero type errors. Remaining deductions are the escalation lane's recursion-safe meta-logging catches (marked `seedgo:bypass` — a prax call on the error path would feed the lane its own output).
+Seedgo: 99% (43 standards). Zero type errors. The single remaining deduction is `handlers` on `handlers/escalation.py`: its five same-branch imports are all ALLOWED by the published handlers standard ("same-branch handler imports: ALLOWED, even across packages"), but `handlers_check` computes a handler's own package as the path part after `handlers/` — for a file sitting at the handlers root that is the *filename*, so the exemption can never match. Raised with @seedgo as a standards question rather than restructured around; the same check rejects the standard's own documented ALLOWED example.
 
 ---
 

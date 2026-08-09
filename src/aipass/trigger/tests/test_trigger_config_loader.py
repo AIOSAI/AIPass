@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
+from aipass.trigger.apps.config import trail_logger
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ def loader(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from aipass.trigger.apps.handlers.json import config_loader
 
     monkeypatch.setattr(config_loader, "CONFIG_PATH", tmp_path / "custom_config" / "trigger.config.json")
-    monkeypatch.setattr(config_loader, "_LOADER_LOG", tmp_path / "config_loader.jsonl")
+    monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
     return config_loader
 
 

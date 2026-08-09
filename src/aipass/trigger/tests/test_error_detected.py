@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
+from aipass.trigger.apps.config import trail_logger
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +803,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
         return True
 
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "ESCALATION_LOG", tmp_path / "escalation.jsonl")
+    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: config)
     monkeypatch.setattr(escalation, "_send_email", _send)
 
@@ -818,7 +819,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     registry.is_suppressed.return_value = False
     registry.get_dispatch_count.return_value = 0
 
-    escalation.reset_config_cache()
+    escalation._config_cache = (0.0, None)
     return SimpleNamespace(mod=escalation, config=config, digests=digests, medic=medic, registry=registry)
 
 

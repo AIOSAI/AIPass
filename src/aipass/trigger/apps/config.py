@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Trigger package path configuration
-# Version: 1.1.0
+# Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
+# Version: 1.2.0
 # Created: 2026-03-09
-# Modified: 2026-08-07
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -26,7 +26,9 @@ import sys
 import os
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -39,14 +41,70 @@ TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
 
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_CONFIG_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass
+class TrailLogger:
+    """A logger that writes JSONL to a sidecar file instead of through prax.
+
+    Trigger's log watchers read prax output. Code that runs ON that path —
+    the event handlers and the config readers they call — cannot log through
+    prax without being detected, fired back as an event, and re-entering
+    itself. So it logs here: `.jsonl`, which the watchers skip because they
+    only read `*.log`.
+
+    config.py is where this lives because config.py is the one trigger module
+    that CANNOT import the prax logger at all (circular dependency), so the
+    single except block that has no logger to call — the sidecar's own write
+    failure — is already accounted for here rather than repeated in every
+    caller. Failed writes are counted on `.dropped`, not discarded silently.
+
+    The method names are the fleet's logger API on purpose: call sites read
+    the same as everywhere else in AIPass.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.dropped = 0
+
+    def _emit(self, level: str, message: str, fields: dict) -> None:
+        """Append one line to the sidecar, counting the write if it is lost."""
+        if _append_jsonl is None:
+            self.dropped += 1
+            return
+        entry: dict[str, Any] = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
+        entry.update(fields)
+        try:
+            _append_jsonl(self.path, entry)
+        except Exception:
+            # You cannot log a failure to log. Counted rather than vanished —
+            # callers surface .dropped (see escalation.get_stats()).
+            self.dropped += 1
+
+    def info(self, message: str, **fields: Any) -> None:
+        """Record an INFO line on the trail."""
+        self._emit("INFO", message, fields)
+
+    def warning(self, message: str, **fields: Any) -> None:
+        """Record a WARNING line on the trail."""
+        self._emit("WARNING", message, fields)
+
+    def error(self, message: str, **fields: Any) -> None:
+        """Record an ERROR line on the trail."""
+        self._emit("ERROR", message, fields)
+
+
+def trail_logger(path: Path) -> TrailLogger:
+    """Build a recursion-safe logger writing to *path*.
+
+    Args:
+        path: Sidecar file to append to — use a `.jsonl` name so the branch
+            log watcher, which reads only `*.log`, cannot feed it back.
+
+    Returns:
+        A logger exposing .info/.warning/.error
+    """
+    return TrailLogger(path)
+
+
+logger = TrailLogger(_CONFIG_LOG)
 
 
 # AIPass package root: .../aipass/
@@ -135,7 +193,7 @@ def _archive_legacy_file(path: Path) -> bool:
         os.replace(path, target)
         return True
     except OSError as exc:
-        _log_warning(f"archive of {path.name} failed: {exc}")
+        logger.warning(f"archive of {path.name} failed: {exc}")
         return False
 
 
@@ -177,7 +235,7 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
         try:
             data = json.loads(legacy_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, ValueError) as exc:
-            _log_warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
+            logger.warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
             return False
         atomic_write_json(new_path, data)
         return _archive_legacy_file(legacy_path)
@@ -201,7 +259,7 @@ def print_introspection():
     try:
         from aipass.cli.apps.modules.display import console
     except ImportError:
-        _log_warning("CLI console not available, using rich fallback")
+        logger.warning("CLI console not available, using rich fallback")
         from rich.console import Console
 
         console = Console()

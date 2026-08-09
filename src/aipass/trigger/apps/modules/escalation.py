@@ -112,6 +112,11 @@ def _handle_status(console) -> None:
     console.print(f"  Digests sent     : {stats['digests_sent']} [dim]across {stats['signatures_digested']}[/dim]")
     if not stats["email_wired"]:
         console.print("  [dim]Email callback not wired in this process (wired when events fire).[/dim]")
+    if stats.get("trail_writes_dropped"):
+        console.print(
+            f"  [yellow]Trail lines lost  : {stats['trail_writes_dropped']}[/yellow] "
+            f"[dim](the escalation.jsonl sidecar could not be written — counting is unaffected)[/dim]"
+        )
     console.print()
     console.print(f"  [dim]state : {stats['state_file']}[/dim]")
     console.print(f"  [dim]config: {stats['config_file']}[/dim]")

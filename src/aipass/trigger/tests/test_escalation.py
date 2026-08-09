@@ -18,6 +18,7 @@ from typing import Any, Dict, Generator, List
 from unittest.mock import MagicMock
 
 import pytest
+from aipass.trigger.apps.config import trail_logger
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +54,12 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     from aipass.trigger.apps.handlers import escalation
 
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-    monkeypatch.setattr(escalation, "ESCALATION_LOG", tmp_path / "escalation.jsonl")
+    monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
-    escalation.reset_config_cache()
+    escalation._config_cache = (0.0, None)
     yield escalation
-    escalation.reset_config_cache()
+    escalation._config_cache = (0.0, None)
 
 
 @pytest.fixture
@@ -919,11 +920,11 @@ class TestConfigReadThrough:
 
         path = tmp_path / "custom_config" / "trigger.config.json"
         monkeypatch.setattr(config_loader, "CONFIG_PATH", path)
-        monkeypatch.setattr(config_loader, "_LOADER_LOG", tmp_path / "config_loader.jsonl")
+        monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
         monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
-        escalation.reset_config_cache()
+        escalation._config_cache = (0.0, None)
         yield path
-        escalation.reset_config_cache()
+        escalation._config_cache = (0.0, None)
 
     def test_operator_values_win_over_defaults(self, operator_config: Path) -> None:
         """A threshold set in the file is the threshold the lane uses."""
@@ -947,7 +948,7 @@ class TestConfigReadThrough:
         assert operator_config.exists()
 
     def test_value_is_cached_until_reset(self, operator_config: Path) -> None:
-        """The hot path does not re-read the file per log line; reset_config_cache does."""
+        """The hot path does not re-read the file per log line; clearing the cache does."""
         from aipass.trigger.apps.handlers import escalation
 
         operator_config.parent.mkdir(parents=True, exist_ok=True)
@@ -957,7 +958,7 @@ class TestConfigReadThrough:
         operator_config.write_text(json.dumps({"escalation": {"warning_threshold": 7}}), encoding="utf-8")
         assert escalation.get_config()["warning_threshold"] == 99
 
-        escalation.reset_config_cache()
+        escalation._config_cache = (0.0, None)
         assert escalation.get_config()["warning_threshold"] == 7
 
 
@@ -1037,3 +1038,110 @@ class TestCliCommand:
         cli.module.handle_command("escalation", ["status"])
 
         cli.log_operation.assert_called_once_with("escalation_command", {"command": "status"})
+
+
+class TestDigestBody:
+    """The digest mail is the whole product — investigation starts from it alone."""
+
+    @staticmethod
+    def _entry() -> dict:
+        return {
+            "level": "ERROR",
+            "branch": "BACKUP",
+            "module": "drive",
+            "message": "module 'drive' has no attribute 'client'",
+            "first_seen": "2026-08-08T21:00:00",
+            "last_seen": "2026-08-08T21:40:00",
+            "log_file": "/logs/backup/backup.log",
+            "total_count": 47,
+            "digests_sent": 2,
+            "samples": ["21:39 ERROR drive failed", "21:40 ERROR drive failed"],
+        }
+
+    def test_body_carries_everything_an_investigation_needs(self, lane) -> None:
+        """Signature, counts, window, branch, module, log path and samples all travel."""
+        subject, body = lane.build_digest(
+            "abc123def456", self._entry(), 9, 3600, "owner already dispatched", "@devpulse"
+        )
+
+        assert subject == "[REPEAT] ERROR x9 @backup / drive"
+        for expected in (
+            "abc123def456",
+            "@backup",
+            "drive",
+            "9 in the last 60 min",
+            "lifetime 47",
+            "/logs/backup/backup.log",
+            "owner already dispatched",
+            "21:40 ERROR drive failed",
+        ):
+            assert expected in body, f"digest body lost {expected!r}"
+
+    def test_body_says_it_is_mail_not_a_dispatch(self, lane) -> None:
+        """The recipient must not read a digest as a task waiting on them."""
+        _subject, body = lane.build_digest("sig", self._entry(), 5, 3600, "branch muted", "@devpulse")
+
+        assert "EMAIL, not a dispatch" in body
+        assert "nothing was woken" in body
+
+    def test_body_names_the_config_file_to_tune_it(self, lane) -> None:
+        """An operator who wants less of this must not have to go hunting."""
+        _subject, body = lane.build_digest("sig", self._entry(), 5, 3600, "medic off", "@devpulse")
+
+        assert "trigger_json/custom_config/trigger.config.json" in body
+
+    def test_missing_samples_say_so_rather_than_render_blank(self, lane) -> None:
+        """A digest with no captured lines must not look like a digest with empty lines."""
+        entry = self._entry()
+        entry["samples"] = []
+
+        _subject, body = lane.build_digest("sig", entry, 5, 3600, "no registered owner", "@devpulse")
+
+        assert "(no samples captured)" in body
+
+
+class TestTrailLogger:
+    """The recursion-safe sidecar every trigger handler logs through."""
+
+    def test_writes_level_message_and_fields(self, tmp_path) -> None:
+        """A trail line carries the structured fields the caller passed."""
+        path = tmp_path / "trail.jsonl"
+
+        trail_logger(path).warning("state unreadable", signature="abc123", branch="BACKUP")
+
+        line = json.loads(path.read_text(encoding="utf-8").strip())
+        assert line["level"] == "WARNING"
+        assert line["msg"] == "state unreadable"
+        assert line["signature"] == "abc123"
+        assert line["branch"] == "BACKUP"
+
+    def test_a_broken_sink_is_counted_never_raised(self, tmp_path, monkeypatch) -> None:
+        """A dead trail must not take the error path down with it — it is counted."""
+        trail = trail_logger(tmp_path / "trail.jsonl")
+        monkeypatch.setattr(
+            "aipass.trigger.apps.config._append_jsonl",
+            MagicMock(side_effect=OSError("read-only filesystem")),
+        )
+
+        trail.error("digest send raised")
+
+        assert trail.dropped == 1
+
+    def test_absent_prax_is_counted_too(self, tmp_path, monkeypatch) -> None:
+        """No prax means no sidecar — the loss is still visible as a count."""
+        trail = trail_logger(tmp_path / "trail.jsonl")
+        monkeypatch.setattr("aipass.trigger.apps.config._append_jsonl", None)
+
+        trail.info("digest sent")
+
+        assert trail.dropped == 1
+
+    def test_dropped_trail_lines_reach_the_operator_in_stats(self, lane, monkeypatch) -> None:
+        """A silent sink would be invisible; get_stats() is where it surfaces."""
+        monkeypatch.setattr(
+            "aipass.trigger.apps.config._append_jsonl",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        lane.logger.warning("something the trail could not keep")
+
+        assert lane.get_stats()["trail_writes_dropped"] >= 1
