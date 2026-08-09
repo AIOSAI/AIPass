@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(memory)** — the fleet-wide false ENTRY COUNT warning is gone:
+entry-count guard now budgets auto-compact snapshots separately, exactly
+as rollover always did (memory_files 1.2.0, built by @memory, parked by
+Patrick's ruling, applied as phase 2 of the digest live-test). The guard
+counted the combined sessions array against the regular-only cap, so
+every healthy branch (14 regular + 2 snapshots) read "16/15" on every
+.trinity write, forever — a warning rollover could never satisfy because
+there was nothing to trim. Deliberately left LIVE as the escalation
+digest's designated first prey; the digest caught it (signature
+d3aeeee9ae26, 10-in-60min, emailed @devpulse 21:41), and only then was
+the parked, canary-proven patch applied — completing the full lifecycle
+test: detection proven by the digest arriving, resolution proven by the
+signature going structurally quiet. Guard now shares the extractor's
+exact predicate (junk entries count as regular in both). +5 tests
+(1046), live-verified against the digest's named file: 0 warnings.
+Same-class twin found in @hooks' edit_gate by two more digests — fixed
+separately. Applied + re-verified by devpulse.
+
 **fix(drone)** — caller-identity warnings were a category error reported
 twice per call, fixed at source (router_handler 1.1.0, by @drone). The
 new escalation digest lane's first two catches named this module; the
