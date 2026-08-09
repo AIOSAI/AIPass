@@ -68,8 +68,8 @@
     {
       "file": "lib/telegram/tests/test_multi_bot.py",
       "standard": "trigger",
-      "lines": [409],
-      "reason": "Test-only teardown — base_bot.pending_file.unlink() simulates file absence to verify heartbeat backward-compat behavior. No trigger event is appropriate for test fixture manipulation."
+      "pattern": "base_bot.pending_file.unlink()",
+      "reason": "Test-only teardown — base_bot.pending_file.unlink() (line 397 as of 2026-08-09) simulates file absence to verify heartbeat backward-compat behavior. No trigger event is appropriate for test fixture manipulation. FILE-WIDE BY NECESSITY, not scope drift: trigger_check.py:112 is the standard's only bypass gate and passes line=None, so a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09 — the old lines:[409] had also drifted from the real line 397). Re-scope to lines:[397] the moment that gate threads a line number through."
     },
     {
       "file": "lib/telegram/tests/test_attach_only.py",
@@ -182,25 +182,10 @@
       "reason": "TDPLAN-0009 — launch_mirror_session() intentionally uses --dangerously-skip-permissions. Detached tmux mirror sessions have no operator to approve prompts; without it the session hangs forever. Patrick's explicit ask."
     },
     {
-      "file": "apps/handlers/loader_handler.py",
-      "standard": "handlers",
-      "lines": [25],
-      "pattern": "from aipass.skills.apps.handlers.discovery_handler import parse_frontmatter",
-      "reason": "Same-branch handler utility import — parse_frontmatter is a shared parsing function needed by both discovery and loader handlers"
-    },
-    {
-      "file": "apps/handlers/creator_handler.py",
-      "standard": "handlers",
-      "lines": [23],
-      "pattern": "from aipass.skills.apps.handlers.template import copy_template, get_template",
-      "reason": "Same-branch handler utility import — template.py provides copy/get functions used only by creator_handler"
-    },
-    {
       "file": "apps/handlers/discovery_handler.py",
       "standard": "naming",
-      "lines": [26],
       "pattern": "yaml = None",
-      "reason": "Conditional import holder — yaml is assigned via 'import yaml' on success or stays None. Not a constant, just a module reference variable"
+      "reason": "Conditional import holder — 'yaml = None' (line 26 as of 2026-08-09) is reassigned by 'import yaml' on success or stays None. Not a constant, just a module reference variable. FILE-WIDE BY NECESSITY, not scope drift: the constant check emits one file-level verdict listing every offender (here only 'yaml') and naming_check.py:56 is the standard's only bypass gate, passing line=None — a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09). Re-scope to lines:[26] the moment that gate threads a line number through."
     },
     {
       "file": "apps/handlers/registry.py",
