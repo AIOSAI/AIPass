@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_pool.py
 # Description: Memory pool auto-process event handler — observability for pool processing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-06-06
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -26,25 +26,13 @@ Event data expected:
 
 from typing import Any
 
-from aipass.trigger.apps.config import TRIGGER_ROOT
+from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "memory_pool_handler.jsonl"
-
-
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "memory_pool_handler.jsonl")
 
 
 def handle_memory_pool_auto_processed(
@@ -87,7 +75,7 @@ def handle_memory_pool_auto_processed(
         return
 
     error_msg = error or "memory pool auto-process failed (no detail)"
-    _log_warning(f"auto-process failure: {error_msg}")
+    logger.warning(f"auto-process failure: {error_msg}")
 
     json_handler.log_operation(
         "memory_pool_auto_processed",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths, atomic JSON writes, recursion-safe trail logger
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-09
-# Modified: 2026-08-08
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -41,6 +41,39 @@ TRIGGER_ROOT = Path(__file__).resolve().parents[1]
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
 
+def append_trail(path: Path, entry: dict) -> bool:
+    """Append one JSONL line to a sidecar file, reporting whether it landed.
+
+    The raw counterpart to TrailLogger, for the trails whose readers parse
+    named fields and so cannot carry a level/msg shape — medic_suppressed,
+    rate_limited, runaway_suppressed. Returns False rather than raising, so a
+    caller reports the miss through its own recursion-safe logger instead of
+    wrapping every call in an except block that has nothing to call.
+
+    It lives here because config.py is the one trigger module that cannot
+    import the prax logger at all (circular dependency), so the guarded import
+    and the one unloggable except block exist once, here, rather than repeated
+    in every handler that needs a sidecar.
+
+    Args:
+        path: Sidecar file to append to — use a `.jsonl` name so the branch log
+            watcher, which reads only `*.log`, cannot feed it back.
+        entry: JSON-serialisable line to append.
+
+    Returns:
+        True if the line was written, False if prax is absent or the write failed
+    """
+    if _append_jsonl is None:
+        return False
+    try:
+        _append_jsonl(path, entry)
+        return True
+    except Exception:
+        # You cannot log a failure to log. Reported by return value instead —
+        # callers surface it (TrailLogger.dropped, escalation.get_stats()).
+        return False
+
+
 class TrailLogger:
     """A logger that writes JSONL to a sidecar file instead of through prax.
 
@@ -66,16 +99,11 @@ class TrailLogger:
 
     def _emit(self, level: str, message: str, fields: dict) -> None:
         """Append one line to the sidecar, counting the write if it is lost."""
-        if _append_jsonl is None:
-            self.dropped += 1
-            return
         entry: dict[str, Any] = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
         entry.update(fields)
-        try:
-            _append_jsonl(self.path, entry)
-        except Exception:
-            # You cannot log a failure to log. Counted rather than vanished —
-            # callers surface .dropped (see escalation.get_stats()).
+        if not append_trail(self.path, entry):
+            # Counted rather than vanished — callers surface .dropped
+            # (see escalation.get_stats()).
             self.dropped += 1
 
     def info(self, message: str, **fields: Any) -> None:

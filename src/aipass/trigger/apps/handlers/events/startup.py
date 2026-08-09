@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-12-04
-# Modified: 2026-08-07
+# Modified: 2026-08-09
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -32,13 +32,15 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, atomic_write_json, migrate_json_file
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    append_trail,
+    atomic_write_json,
+    migrate_json_file,
+    trail_logger,
+)
 from aipass.trigger.apps.handlers.json import json_handler
-
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
 
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 CATCHUP_STATE_FILE = TRIGGER_JSON_DIR / "error_catchup.json"
@@ -53,17 +55,10 @@ MAX_ERRORS_PER_SCAN = 50  # Stop after this many new errors found
 MAX_FILE_SIZE_BYTES = 512_000  # Skip files larger than 500KB
 SCAN_TIME_BUDGET_SECONDS = 5.0  # Abort entire scan after this many seconds
 
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "startup_handler.jsonl"
-
-
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "startup_handler.jsonl")
 
 
 def _load_trigger_data() -> Dict[str, Any]:
@@ -82,7 +77,7 @@ def _load_trigger_data() -> Dict[str, Any]:
                 }
             return data
     except Exception as exc:
-        _log_warning(f"load trigger data failed: {exc}")
+        logger.warning(f"load trigger data failed: {exc}")
         return {
             "error_catchup": {
                 "last_scan_timestamp": None,
@@ -106,18 +101,15 @@ def _save_trigger_data(data: Dict[str, Any]) -> None:
     try:
         atomic_write_json(CATCHUP_STATE_FILE, data)
     except Exception as exc:
-        _log_warning(f"save trigger data failed: {exc}")
+        logger.warning(f"save trigger data failed: {exc}")
         return
 
 
 def _log_suppression(reason: str) -> None:
     """Log a catchup suppression event to medic_suppressed.jsonl."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(SUPPRESSED_LOG, {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason})
-    except Exception as exc:
-        _log_warning(f"log suppression write failed: {exc}")
+    entry = {"ts": datetime.now().isoformat(), "source": "error_catchup", "reason": reason}
+    if not append_trail(SUPPRESSED_LOG, entry):
+        logger.warning("log suppression write failed")
 
 
 def _generate_error_hash(source_module: str, message: str) -> str:
@@ -169,7 +161,7 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
 
         return None
     except Exception as exc:
-        _log_warning(f"parse log line failed: {exc}")
+        logger.warning(f"parse log line failed: {exc}")
         return None
 
 
@@ -203,7 +195,7 @@ def _detect_branch_from_log(log_file: str) -> str:
             return name.split("_")[0].upper()
         return name.upper()
     except Exception as exc:
-        _log_warning(f"detect branch from log failed: {exc}")
+        logger.warning(f"detect branch from log failed: {exc}")
         return "UNKNOWN"
 
 
@@ -307,7 +299,7 @@ def _scan_system_logs_for_errors(
                 files_skipped_size += 1
                 continue
         except Exception as exc:
-            _log_warning(f"stat log file {log_file}: {exc}")
+            logger.warning(f"stat log file {log_file}: {exc}")
             continue
 
         try:
@@ -315,7 +307,7 @@ def _scan_system_logs_for_errors(
             if not should_continue:
                 break
         except Exception as exc:
-            _log_warning(f"scan log file {log_file}: {exc}")
+            logger.warning(f"scan log file {log_file}: {exc}")
             continue
 
     if files_skipped_size > 0:
@@ -346,7 +338,7 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
             try:
                 since_ts = datetime.fromisoformat(last_scan)
             except Exception as exc:
-                _log_warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
+                logger.warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
 
         processed_hashes = set(catchup.get("processed_hashes", []))
 
@@ -370,7 +362,7 @@ def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None
         json_handler.log_operation("startup_catchup", {"errors_found": len(errors)})
 
     except Exception as exc:
-        _log_warning(f"error catchup scan failed: {exc}")
+        logger.warning(f"error catchup scan failed: {exc}")
         return
 
 

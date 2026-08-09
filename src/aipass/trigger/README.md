@@ -233,16 +233,13 @@ trigger/
 │       │   ├── json_handler.py     # JSON structure logging
 │       │   └── config_loader.py    # Operator config loader (S193 self-heal doctrine)
 │       ├── events/
-│       │   ├── registry.py         # Auto-registers 14 active event handlers
+│       │   ├── registry.py         # Auto-registers the 10 active event handlers
 │       │   ├── startup.py          # Startup catch-up scan
 │       │   ├── error_detected.py   # 8-gate Medic dispatch
-│       │   ├── error_logged.py     # Monitor-only (no dispatch)
-│       │   ├── warning_logged.py   # Warning monitor
+│       │   ├── warning_logged.py   # Warning monitor + escalation counting
 │       │   ├── plan_file.py        # Plan lifecycle events
 │       │   ├── .archive/bulletin_created.py  # Retired
-│       │   ├── memory_threshold_exceeded.py
 │       │   ├── memory_template_updated.py
-│       │   ├── memory.py           # memory_saved placeholder
 │       │   ├── cli.py              # cli_header_displayed hook
 │       │   ├── runaway_handler.py  # Runaway log dispatch (per-file cooldown, independent of Medic)
 │       │   ├── pr_status_sync.py   # PR → prax status sync (decommissioned TDPLAN-0007)
@@ -257,11 +254,16 @@ trigger/
 │   ├── escalation_state.json       # Repeat-signature counts + digest cooldowns
 │   ├── trigger_cb_state.json       # Circuit breaker persistence
 │   ├── trigger_<config|data|log>.json  # Inert json_handler trio placeholders
-│   ├── custom_config/
-│   │   └── trigger.config.json     # Operator-editable settings (escalation knobs)
 │   └── .archive/                   # Retired state files, never deleted
 └── trigger_data.json               # Log watcher positions + dedup hashes
 ```
+
+Nothing under `trigger_json/` is in git — it is runtime state, written by the
+running system. The operator config lives at
+`trigger_json/custom_config/trigger.config.json` and is created by
+`config_loader.load()` on the first read, so on a fresh clone that directory
+does not exist yet. It is named here in prose rather than drawn into the tree
+above for exactly that reason: the tree describes what a checkout contains.
 
 **Live state never sits on a trio filename.** `json_handler` owns every
 `<module>_<config|data|log>.json` name in `trigger_json/`: it validates such a

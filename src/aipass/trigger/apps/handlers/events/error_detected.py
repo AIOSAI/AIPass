@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-02-10
-# Modified: 2026-08-08
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -40,26 +40,20 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from aipass.trigger.apps.config import TRIGGER_JSON_DIR, TRIGGER_ROOT, migrate_json_file
+from aipass.trigger.apps.config import (
+    TRIGGER_JSON_DIR,
+    TRIGGER_ROOT,
+    append_trail,
+    migrate_json_file,
+    trail_logger,
+)
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl"
-
-
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 
 
 def _find_repo_root() -> Path:
@@ -162,7 +156,7 @@ def _is_medic_enabled() -> bool:
             return True
         return False
     except Exception as exc:
-        _log_warning(f"_is_medic_enabled config read failed: {exc}")
+        logger.warning(f"_is_medic_enabled config read failed: {exc}")
         return True
 
 
@@ -201,7 +195,7 @@ def _is_branch_muted(branch_name: str) -> bool:
         now = datetime.now()
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
     except Exception as exc:
-        _log_warning(f"_is_branch_muted config read failed: {exc}")
+        logger.warning(f"_is_branch_muted config read failed: {exc}")
         return False
 
 
@@ -231,7 +225,7 @@ def _get_registered_emails() -> set:
             data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
             return {b["email"] for b in data.get("branches", [])}
     except Exception as exc:
-        _log_warning(f"_get_registered_emails registry read failed: {exc}")
+        logger.warning(f"_get_registered_emails registry read failed: {exc}")
         return set()
     return set()
 
@@ -307,7 +301,7 @@ def _read_log_context(log_path: str, error_message: str, context_lines: int = 2)
         context = lines[start:end]
         return "\n".join(context)
     except Exception as exc:
-        _log_warning(f"_read_log_context failed for {log_path}: {exc}")
+        logger.warning(f"_read_log_context failed for {log_path}: {exc}")
         return ""
 
 
@@ -401,31 +395,22 @@ REPORT TO @devpulse:
 
 def _write_suppression_log(reason: str, branch: str, module: str, message: str) -> None:
     """Write a line to the medic suppression log."""
-    if _append_jsonl is None:
-        return
-    try:
-        suppressed_log = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
-        entry = {
-            "ts": datetime.now().isoformat(),
-            "reason": reason,
-            "branch": branch,
-            "module": module,
-            "msg": message[:100],
-        }
-        _append_jsonl(suppressed_log, entry)
-    except Exception as exc:
-        _log_warning(f"suppression log write failed ({reason}): {exc}")
+    entry = {
+        "ts": datetime.now().isoformat(),
+        "reason": reason,
+        "branch": branch,
+        "module": module,
+        "msg": message[:100],
+    }
+    if not append_trail(TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl", entry):
+        logger.warning(f"suppression log write failed ({reason})")
 
 
 def _write_rate_log(reason: str, detail: str) -> None:
     """Write a line to the rate-limited log."""
-    if _append_jsonl is None:
-        return
-    try:
-        rate_log = TRIGGER_ROOT / "logs" / "rate_limited.jsonl"
-        _append_jsonl(rate_log, {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail})
-    except Exception as exc:
-        _log_warning(f"rate log write failed ({reason}): {exc}")
+    entry = {"ts": datetime.now().isoformat(), "reason": reason, "detail": detail}
+    if not append_trail(TRIGGER_ROOT / "logs" / "rate_limited.jsonl", entry):
+        logger.warning(f"rate log write failed ({reason})")
 
 
 def handle_error_detected(
@@ -605,7 +590,7 @@ def handle_error_detected(
         )
 
         if not sent:
-            _log_warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
+            logger.warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
             return
 
         # Wake the target branch so the email is processed immediately
@@ -613,8 +598,11 @@ def handle_error_detected(
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
-        except Exception:
-            pass  # Silent — email in inbox as fallback
+        except Exception as exc:
+            # Not fatal — the email is already delivered and waits in the inbox.
+            # But a wake that never lands means nobody reads it until they next
+            # wake anyway, so the miss is recorded rather than swallowed.
+            logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
 
         json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
@@ -628,5 +616,5 @@ def handle_error_detected(
             _record_dispatch(recipient)
 
     except Exception as exc:
-        _log_warning(f"handle_error_detected failed: {exc}")
+        logger.warning(f"handle_error_detected failed: {exc}")
         return  # Silent failure - handler must not raise

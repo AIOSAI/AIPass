@@ -8,13 +8,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.trigger.apps import config as trigger_config
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture: redirect file paths to tmp_path, mock _append_jsonl and
-# wake_branch, clear cooldown state between tests.
+# Shared fixture: redirect file paths to tmp_path, capture the sidecar trail,
+# mock wake_branch, clear cooldown state between tests.
 # ---------------------------------------------------------------------------
+
+# The handler writes two kinds of sidecar line — logger.warning() and the
+# decision log via append_trail() — and BOTH funnel through config's one prax
+# hook. Patching that single seam captures the whole trail in call order and
+# keeps the suite out of the live logs/ directory.
+_trail = MagicMock()
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +33,8 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     monkeypatch.setattr(mod, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
     monkeypatch.setattr(mod, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
     monkeypatch.setattr(mod, "ALERTS_FILE", tmp_path / "alerts.json")
-    monkeypatch.setattr(mod, "_append_jsonl", MagicMock())
+    _trail.reset_mock()
+    monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
 
     # Mock wake_branch import chain so the in-function import succeeds
     mock_wake_mod = MagicMock()
@@ -316,7 +324,7 @@ class TestNoEmailCallback:
     """
 
     def test_logs_warning_no_dispatch(self) -> None:
-        """Logs warning via _append_jsonl when no callback set."""
+        """Logs a WARNING to the sidecar trail when no callback set."""
         # _send_email stays None (no set_send_email_callback call)
         mod.handle_runaway_log_detected(
             file_path="/var/log/test.log",
@@ -326,7 +334,7 @@ class TestNoEmailCallback:
             severity="critical",
         )
 
-        calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
+        calls = _trail.call_args_list
         warning_calls = [c for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
         assert len(warning_calls) >= 1
         assert "No email callback" in warning_calls[0][0][1]["msg"]
@@ -523,7 +531,7 @@ class TestEmailSendFails:
 
 def _decision_entries(reason: str) -> list:
     """Collect decision-log entries written with the given reason."""
-    calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
+    calls = _trail.call_args_list
     return [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == reason]
 
 
@@ -531,7 +539,7 @@ class TestSuppressionLog:
     """Cooldown and mute suppressions write to the decision log."""
 
     def test_cooldown_writes_suppression_log(self) -> None:
-        """Cooldown suppression writes reason='cooldown' via _append_jsonl."""
+        """Cooldown suppression writes reason='cooldown' to the decision log."""
         _setup_happy_path()
         file_path = "/var/log/test.log"
 
@@ -544,7 +552,7 @@ class TestSuppressionLog:
         )
 
         # Reset mock to isolate suppression log call
-        mod._append_jsonl.reset_mock()  # type: ignore[union-attr]
+        _trail.reset_mock()
 
         # Second call is on cooldown — should write suppression log
         mod.handle_runaway_log_detected(
@@ -856,7 +864,7 @@ class TestCriticalUnchanged:
         assert file_path not in mod._file_cooldowns
         assert not _decision_entries("observe_only")
 
-        calls = mod._append_jsonl.call_args_list  # type: ignore[union-attr]
+        calls = _trail.call_args_list
         warnings = [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("level") == "WARNING"]
         assert any("Email delivery failed" in w["msg"] for w in warnings)
 

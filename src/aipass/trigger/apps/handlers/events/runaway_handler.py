@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-14
-# Modified: 2026-08-07
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -70,32 +70,24 @@ from typing import Any, Callable, Optional
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
     TRIGGER_ROOT,
+    append_trail,
     atomic_write_json,
     json_file_lock,
     migrate_json_file,
+    trail_logger,
 )
 from aipass.trigger.apps.handlers.json import json_handler
 
-try:
-    from aipass.prax import append_jsonl as _append_jsonl
-except Exception:
-    _append_jsonl = None
-
-_HANDLER_LOG = TRIGGER_ROOT / "logs" / "runaway_handler.jsonl"
 DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
 
 # Volume mutes are a separate class from medic's content mutes (muted_branches).
 VOLUME_MUTE_KEY = "volume_muted_branches"
 
 
-def _log_warning(message: str) -> None:
-    """Log warning to file (recursion-safe prax path)."""
-    if _append_jsonl is None:
-        return
-    try:
-        _append_jsonl(_HANDLER_LOG, {"level": "WARNING", "msg": message})
-    except Exception:
-        pass  # seedgo:bypass meta-logging
+# Deliberately NOT prax: this handler runs on the event path the log watchers
+# read, so a line through prax would be detected and fired straight back at it.
+# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
 
 
 def _find_repo_root() -> Path:
@@ -191,7 +183,7 @@ def _is_branch_volume_muted(branch_name: str) -> bool:
         now = datetime.now()
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
     except Exception as exc:
-        _log_warning(f"_is_branch_volume_muted config read failed: {exc}")
+        logger.warning(f"_is_branch_volume_muted config read failed: {exc}")
         return False
 
 
@@ -205,19 +197,15 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
         file_path: Path to the runaway log file
         branch: Responsible branch name
     """
-    if _append_jsonl is None:
-        return
-    try:
-        entry = {
-            "ts": datetime.now().isoformat(),
-            "outcome": outcome,
-            "reason": reason,
-            "file": file_path,
-            "branch": branch,
-        }
-        _append_jsonl(DECISION_LOG, entry)
-    except Exception as exc:
-        _log_warning(f"decision log write failed ({outcome}/{reason}): {exc}")
+    entry = {
+        "ts": datetime.now().isoformat(),
+        "outcome": outcome,
+        "reason": reason,
+        "file": file_path,
+        "branch": branch,
+    }
+    if not append_trail(DECISION_LOG, entry):
+        logger.warning(f"decision log write failed ({outcome}/{reason})")
 
 
 def _write_alert(
@@ -256,7 +244,7 @@ def _write_alert(
             existing.setdefault("alerts", []).append(alert)
             atomic_write_json(ALERTS_FILE, existing)
     except Exception as exc:
-        _log_warning(f"_write_alert failed: {exc}")
+        logger.warning(f"_write_alert failed: {exc}")
 
 
 def handle_runaway_log_detected(
@@ -318,7 +306,7 @@ def handle_runaway_log_detected(
             return
 
         if _send_email is None:
-            _log_warning("No email callback — cannot dispatch runaway alert")
+            logger.warning("No email callback — cannot dispatch runaway alert")
             return
 
         recipient = "@prax" if is_unknown else f"@{target_branch.lower()}"
@@ -349,19 +337,22 @@ def handle_runaway_log_detected(
         )
 
         if not sent:
-            _log_warning(f"Email delivery failed for {recipient} ({file_path})")
+            logger.warning(f"Email delivery failed for {recipient} ({file_path})")
             return
 
         try:
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
-        except Exception:
-            pass  # Email in inbox as fallback
+        except Exception as exc:
+            # Not fatal — the email is already delivered and waits in the inbox.
+            # But a wake that never lands means nobody reads it until they next
+            # wake anyway, so the miss is recorded rather than swallowed.
+            logger.warning(f"wake failed for {recipient} ({file_path}): {exc}")
 
         _write_alert(file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever)
         _record_file_dispatch(file_path)
         json_handler.log_operation("runaway_dispatch_sent", {"recipient": recipient, "file": file_path})
 
     except Exception as exc:
-        _log_warning(f"handle_runaway_log_detected failed: {exc}")
+        logger.warning(f"handle_runaway_log_detected failed: {exc}")

@@ -11,6 +11,37 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(fleet)** — FPLAN-0382 wave 1: all 77 line/function-scoped bypass
+rules trued up across 8 branches in parallel (by @skills @commons
+@aipass @memory @spawn @drone @prax @trigger, orchestrated by
+devpulse; Patrick night directive, max 2 waves). Context: @seedgo
+proved is_bypassed()'s line=None fall-through makes every scoped rule
+a silent WHOLE-FILE bypass — so before the 3-line fix can land (wave
+2), every rule had to face the raw checker. The fleet independently
+converged on the same honest method: pull the rule and re-audit;
+prose is not evidence. What the sweep found: nearly every line number
+had drifted (drone: all 9, in four separate edit-eras; devpulse's own
+was off by one); reasons had rotted into fiction (memory: a rule
+excusing a function called twice in-file; aipass: a documented caller
+that hasn't existed since their own refactor; spawn: two rationales
+SWAPPED between files); rules outlived their violations (prax: all 6
+lines now compliant console.print; commons: deleted by fixing the
+odd-one-out label instead). Trigger, the deepest cut: 84 rules → 25,
+4 violations fixed at source instead of excused (incl. two invisible
+wake_branch failures now logged WARNING), the CI readme red fixed and
+PROVEN on a self-built clean checkout (tree fence describes checkouts,
+prose describes runtime). Wave-2 rulings surfaced for @seedgo: 7
+standards never pass a line to is_bypassed (scoped rules on them can
+NEVER match post-fix — skills proved correct-line RED / file-wide
+GREEN by simulation; trigger mapped the full honours/ignores split);
+the pattern field is DECORATIVE (prax: is_bypassed never reads it);
+error_handling's in_except flag never clears inside class bodies
+(trigger); one spurious Unused_Function 0% (drone). Also: prax
+shipped the INVERTED-direction resync fixture (mocks raw-written INTO
+sys.modules — cascading eviction, xdist-proven at 3 worker counts),
+closing the Windows CI red. Every branch: audit 100%, suites green,
+re-verified by devpulse before commit.
+
 **fix(seedgo)** — handlers checker compared packages, not branches (by
 @seedgo, on @trigger's reproduction; the last CI seedgo-gate blocker).
 Ruling: the published text was the intent — the standard says twice
