@@ -746,6 +746,37 @@ def test_trigger_file_wide_rule_still_carries_its_category_and_reason(tmp_path):
     assert "handler_layer" in messages[0] and "orchestrated" in messages[0]
 
 
+def test_functions_scoped_unused_function_rules_are_never_reported_dead():
+    """Attribution is source-derived, not record-derived.
+
+    unused_function's audit records carry no line and no name field -- the
+    function names live inside the issues strings ("handle_pr_created() line
+    47"). A liveness sweep that matches rules against record FIELDS therefore
+    reads every functions-scoped rule as dead, and an owner pruning in good
+    faith deletes a working rule. This map reads the checker's call sites
+    instead: unused_function passes name=, so the scope is evaluable.
+    """
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert "functions" in inert.scope_support()["unused_function"]
+
+    live = {
+        "file": "apps/handlers/events/pr_status_sync.py",
+        "standard": "unused_function",
+        "functions": ["handle_pr_created", "handle_pr_merged"],
+    }
+    assert inert.inert_scopes(live) == ()
+    assert inert.out_of_scope_reason(live) is None
+
+
+def test_a_functions_rule_on_a_name_blind_standard_is_still_reported():
+    """The other direction: the map must not go quiet on every functions rule."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    name_blind = next(s for s, kinds in inert.scope_support().items() if "functions" not in kinds)
+    assert inert.inert_scopes({"file": "a.py", "standard": name_blind, "functions": ["f"]}) == ("functions",)
+
+
 def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees():
     from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed, matching_rule
 
