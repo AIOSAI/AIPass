@@ -8,12 +8,12 @@
     {
       "file": "tests/test_checkers_batch5.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design."
+      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_checkers_batch5.py",
       "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch4.py."
+      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch4.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "_content.py",
@@ -45,75 +45,13 @@
       "reason": "Checker file references TODO/FIXME/HACK/XXX in its own comments and regex pattern as documentation of what it detects. False positive from self-referential detection logic."
     },
     {
-      "file": "apps/handlers/__init__.py",
-      "standard": "handlers",
-      "lines": [
-        101
-      ],
-      "reason": "Line 101 is inside an f-string error message showing the correct import pattern to users. Not an actual module import. False positive from text-matching checker."
-    },
-    {
-      "file": "apps/handlers/audit/branch_audit.py",
-      "standard": "handlers",
-      "lines": [
-        14
-      ],
-      "reason": "Same-branch cross-handler import (allowed per architecture standard). Audit handler imports bypass/ignore_handler for file filtering during audits."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/architecture_check.py",
-      "standard": "handlers",
-      "lines": [
-        22
-      ],
-      "reason": "Same-branch cross-handler import (allowed per architecture standard). Architecture checker imports bypass/ignore_handler for template ignore patterns."
-    },
-    {
-      "file": "apps/handlers/diagnostics/diagnostics_check.py",
-      "standard": "handlers",
-      "lines": [
-        32
-      ],
-      "reason": "Same-branch cross-handler import (allowed per architecture standard). Diagnostics handler imports bypass/ignore_handler for audit ignore patterns."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/",
-      "standard": "handlers",
-      "reason": "All 33 checkers import is_bypassed from bypass/utils.py — shared utility extracted from 33 duplicate copies (DPLAN-0159 A2). Same-branch cross-handler import, intentional."
-    },
-    {
-      "file": "apps/handlers/aipass_standards/cli_check.py",
-      "standard": "debug_print",
-      "reason": "print() appears in string patterns/regex, not as executable code"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/stderr_routing_check.py",
-      "standard": "debug_print",
-      "reason": "print() appears in string patterns/regex, not as executable code"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/trigger_check.py",
-      "standard": "debug_print",
-      "reason": "print() appears in string patterns/regex, not as executable code"
-    },
-    {
-      "file": "test_quality_check.py",
-      "standard": "error_handling",
-      "reason": "Checker file for the test_quality standard — not a test file despite 'test' in name"
-    },
-    {
       "file": "tests/test_json_handler.py",
-      "reason": "Universal JSON handler test template (DPLAN-0059). Canonical source at seedgo/templates/. Test files contain string patterns that trigger code-quality checkers."
+      "reason": "Universal JSON handler test template (DPLAN-0059). Canonical source at seedgo/templates/. Test files contain string patterns that trigger code-quality checkers. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "cli",
       "reason": "Display handler is an exception to the handler-no-console rule — its entire purpose is Rich console formatting. Known debt tracked in DPLAN-0047."
-    },
-    {
-      "file": "__init__.py",
-      "standard": "naming",
-      "reason": "Python package init file — __init__.py naming is required by Python convention"
     },
     {
       "file": "apps/handlers/diagnostics/diagnostics_check.py",
@@ -124,16 +62,6 @@
       "file": "apps/modules/diagnostics_audit.py",
       "standard": "unused_function",
       "reason": "print_branch_diagnostics() is a public API consumed by tests (test_diagnostics_audit.py). Not called in production code path."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "unused_function",
-      "reason": "increment_counter() and update_data_metrics() are public API functions used in self-test block. Not called in production code path."
-    },
-    {
-      "file": "drone_adapter.py",
-      "standard": "unused_function",
-      "reason": "get_help() and get_introspective() are called by drone via getattr() dynamic discovery. Checker can't trace cross-branch getattr calls."
     },
     {
       "file": "apps/handlers/bypass/ignore_handler.py",
@@ -166,31 +94,6 @@
       "reason": "Redundant prefix is a known naming issue — rename deferred to avoid breaking imports across codebase"
     },
     {
-      "file": "apps/handlers/aipass_proof/plugin_integrity.py",
-      "standard": "naming",
-      "reason": "Checker false positive — these are local function variables, not module-level constants"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/__init__.py",
-      "standard": "naming",
-      "reason": "Checker false positive — __version__ is a Python dunder convention, not a user-defined constant"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/dead_code_check.py",
-      "standard": "naming",
-      "reason": "Checker false positive — these are local function variables, not module-level constants"
-    },
-    {
-      "file": "apps/handlers/aipass_standards/test_quality_check.py",
-      "standard": "naming",
-      "reason": "Checker false positive — 'points' is a local variable inside _calculate_score(), not a module-level constant"
-    },
-    {
-      "file": "handlers/aipass_proof/",
-      "standard": "dead_code",
-      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns"
-    },
-    {
       "file": "apps/handlers/aipass_proof/triplet.py",
       "standard": "deep_nesting",
       "reason": "scan() depth 6 — state machine tracking file types across standards with nested conditionals, inherent to triplet completeness detection"
@@ -218,12 +121,12 @@
     {
       "file": "tests/test_hooks_track_e.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design."
+      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_hooks_track_e.py",
       "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py."
+      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "apps/modules/permissions.py",
@@ -233,29 +136,29 @@
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design."
+      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_coverage_audit.py",
       "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py."
+      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_checkers_batch5.py. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_hooks_snapshot.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design."
+      "reason": "Test file lives in tests/ by convention — outside the 3-layer apps/ structure by design. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_checkers_batch1.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data."
+      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_checkers_batch3.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data."
+      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional bad-pattern strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "tests/test_coverage_arch_checklist.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and test functions omit docstrings by pytest convention."
+      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and test functions omit docstrings by pytest convention. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
       "file": "apps/handlers/aipass_standards/skip_dirs.py",
@@ -263,13 +166,13 @@
       "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
-      "file": "apps/handlers/aipass_proof/",
-      "standard": "handlers",
-      "reason": "Proof handlers import SOURCE_SKIP_DIRS from aipass_standards/skip_dirs.py — shared constant, same-branch cross-handler import, intentional (FPLAN-0261)."
+      "file": "tests/test_checkers_batch10.py",
+      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional hardcoded-path strings as test input data. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
     },
     {
-      "file": "tests/test_checkers_batch10.py",
-      "reason": "Test file: outside 3-layer structure by convention, imports handlers directly for unit testing, and contains intentional hardcoded-path strings as test input data."
+      "file": "handlers/aipass_proof/",
+      "standard": "dead_code",
+      "reason": "Proof handlers are discovered via iterdir() + importlib in seedgo_proof.py — dead_code checker only recognizes glob() patterns. [branch-level standard: dead_code reports through checks[].message prose, not a *_violations list, so a raw re-audit that scans violation keys shows this rule as dead — it is not. Canary branch-level standards with check_branch(), not with the audit's violation lists.]"
     }
   ],
   "notes": {
@@ -281,15 +184,17 @@
       "lines": [
         146,
         177
-      ],
-      "pattern": "if __name__ == '__main__'"
+      ]
     },
     "fields": {
       "file": "Relative path from branch root (required)",
       "standard": "Standard name: cli, imports, naming, etc. (required)",
-      "lines": "Optional - specific line numbers to bypass",
-      "pattern": "Optional - pattern to match (e.g. 'if __name__')",
+      "lines": "Optional - specific line numbers. Only honoured by standards whose checker passes line= (see line_scoping).",
+      "pattern": "Optional - ANNOTATION ONLY, never matched. Documents intent; does not narrow the bypass.",
       "reason": "Required - why this bypass exists"
-    }
+    },
+    "line_scoping": "'lines' is only honoured by standards whose checker passes line= to is_bypassed. As of the FPLAN-0382 strict-matching fix a lines rule on a standard that never passes a line can NEVER match -- it is inert, not narrow. Inert rules are reported by the audit's info channel. Standards that do NOT pass a line: silent_catch, error_handling, handlers, architecture, imports, trigger, readme. Scope those file-wide and say so in the reason.",
+    "pattern_field": "'pattern' is ANNOTATION-ONLY -- is_bypassed never reads it. It documents intent for humans; it does not narrow the rule. A rule carrying pattern is as wide as its file/standard/lines keys make it.",
+    "branch_level_standards": "dead_code and unused_function are BRANCH-LEVEL: they run once per branch via check_branch(), not per file. Their findings land in checks[].message, not in a *_violations list, and the per-file checklist lane never calls them at all. A true-up that re-audits and scans violation keys is blind to both -- call check_branch() directly to prove a rule on one of these dead."
   }
 }

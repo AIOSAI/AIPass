@@ -12,7 +12,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.bypass import ignore_handler
+from aipass.seedgo.apps.handlers.bypass import ignore_handler, inert
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -119,8 +119,16 @@ def _collect_branch_info(checkers: Dict[str, Any], branch_path: Path, branch_nam
     and no pass/fail, so a checker can surface context (e.g. operator-owned
     custom_config/ files it deliberately does NOT audit) with no way to move
     a branch's number. Nothing here is ever merged into scores.
+
+    Bypass hygiene is reported here directly rather than through a checker: an
+    inert rule belongs to no single standard, and reporting it as a violation
+    would score a branch down for housekeeping.
     """
     info: List[Dict[str, str]] = []
+    try:
+        info.extend({"standard": "bypass", "message": line} for line in inert.check_branch_info(str(branch_path)))
+    except Exception as e:
+        logger.info("Inert bypass-rule info failed for branch %s: %s", branch_name, e)
     for name, checker in sorted(checkers.items()):
         if not hasattr(checker, "check_branch_info"):
             continue
@@ -301,8 +309,26 @@ def audit_branch(
                 results[name], scores[name] = r, r.get("score", 0)
                 all_violations[name] = _extract_branch_level_violations(r)
             except Exception as e:
+                # A crashed checker scores 0, which is indistinguishable from an honest
+                # 0 unless the result says so. Carry the error into checks[] so the
+                # number always arrives with its reason attached.
                 logger.info("Branch-level checker %s failed: %s", name, e)
-                results[name], scores[name] = {"passed": False, "score": 0, "error": str(e)}, 0
+                results[name] = {
+                    "passed": False,
+                    "score": 0,
+                    "error": str(e),
+                    "checks": [
+                        {
+                            "name": "Checker ran",
+                            "passed": False,
+                            "message": (
+                                f"{name} checker crashed ({type(e).__name__}: {e}) - "
+                                "score 0 is a failure to run, not a measured result"
+                            ),
+                        }
+                    ],
+                }
+                scores[name] = 0
             continue
         # Entry-point: always run on entry file. Genuine entry_point-scope
         # checkers (readme_check, cli_ux_check, ...) skip the cache here:

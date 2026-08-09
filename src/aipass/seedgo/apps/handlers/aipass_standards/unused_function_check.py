@@ -97,7 +97,12 @@ def _strip_non_code(source: str) -> str:
     """
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
-    except tokenize.TokenError as exc:
+    except (tokenize.TokenError, SyntaxError) as exc:
+        # SyntaxError matters as much as TokenError: IndentationError is a SyntaxError
+        # subclass, NOT a TokenError, and a file caught mid-save raises it. Uncaught it
+        # escaped check_branch(), which the audit scores as a flat 0 for the whole
+        # branch -- a CI false-red that vanishes on the next run once the file is saved.
+        # _extract_functions already skips such files; this path must degrade the same way.
         logger.info("Tokenizer failed, falling back to raw corpus: %s", exc)
         return _MAIN_BLOCK_RE.sub("", source)
 

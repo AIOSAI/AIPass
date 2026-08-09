@@ -13,6 +13,7 @@ Validates error handling compliance — detects silent failures
 (bare except: pass) in production code.
 """
 
+import ast
 from pathlib import Path
 from typing import Dict, List, Optional
 from aipass.prax import logger
@@ -84,16 +85,32 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "ERROR_HANDLING"}
 
 
-def _is_silent_except(lines: List[str], pass_index: int, pass_line: str) -> bool:
-    pass_indent = len(pass_line) - len(pass_line.lstrip())
-    for j in range(pass_index, min(pass_index + 3, len(lines))):
-        next_line = lines[j].strip()
-        is_pass_line = next_line == "pass" or next_line.startswith("pass ") or next_line.startswith("pass#")
-        if next_line and not is_pass_line:
-            if lines[j].startswith(" ") and len(lines[j]) - len(lines[j].lstrip()) > pass_indent:
-                return False
-            break
-    return True
+def _silent_except_lines(content: str) -> Optional[List[int]]:
+    """Return the 1-indexed lines of every `except ...:` whose body is only `pass`.
+
+    Returns None when the file cannot be parsed, so the caller can skip rather
+    than guess.
+
+    This replaced a line scanner that tracked an `in_except` flag and only cleared
+    it on a line starting at column 0. Nothing inside a class body starts at column
+    0, so once the flag was set it stayed set across method boundaries and the next
+    bare `pass` anywhere downstream -- in a different method, inside no except at
+    all -- was reported as a silent failure, against the earlier except's line.
+    The AST knows where a handler actually ends, and handler.lineno is already
+    1-indexed (the scanner reported a 0-based enumerate index, so every finding
+    came back one line low).
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as e:
+        logger.info("Skipping error-handling scan: SyntaxError during parse: %s", e)
+        return None
+
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ExceptHandler) and node.body and all(isinstance(s, ast.Pass) for s in node.body)
+    ]
 
 
 def check_error_handling(content: str, lines: List[str], module_path: str = "") -> Optional[Dict]:
@@ -103,37 +120,17 @@ def check_error_handling(content: str, lines: List[str], module_path: str = "") 
     if try_count == 0:
         return None
 
-    silent_failures = []
-    in_docstring = False
-    in_except = False
-    except_line = 0
+    silent_lines = _silent_except_lines(content)
+    if silent_lines is None:
+        return None
 
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            quote = '"""' if stripped.startswith('"""') else "'''"
-            if stripped.count(quote) == 2 and len(stripped) > len(quote) * 2:
-                pass
-            else:
-                in_docstring = not in_docstring
-        if in_docstring:
-            continue
-        if "except" in stripped and ":" in stripped:
-            in_except = True
-            except_line = i
-            continue
-        if in_except:
-            if stripped == "pass" or stripped.startswith("pass ") or stripped.startswith("pass#"):
-                if _is_silent_except(lines, i, line):
-                    silent_failures.append(f"line {except_line}")
-            if line.strip() and not line.startswith(" ") and not line.startswith("\t"):
-                in_except = False
-
-    if silent_failures:
+    if silent_lines:
+        where = ", ".join(f"line {n}" for n in silent_lines)
+        name = Path(module_path).name if module_path else "file"
         return {
             "name": "Error handling",
             "passed": False,
-            "message": f"Silent failure detected (except: pass) in {Path(module_path).name if module_path else 'file'} at {silent_failures[0]} - errors should log/return",
+            "message": f"Silent failure detected (except: pass) in {name} at {where} - errors should log/return",
         }
 
     return {

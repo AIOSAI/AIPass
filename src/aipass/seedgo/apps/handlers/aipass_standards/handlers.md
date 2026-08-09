@@ -76,7 +76,7 @@ json_handler.log_operation("my_module", "operation", data)  # Typo-prone, boiler
 - Handler is pure utility (no caller-specific behavior)
 - Explicit parameter makes more semantic sense
 
-**Reference:** See `json_structure.md` for complete implementation example.
+**Reference:** `drone @seedgo standard json_structure` for the complete implementation example.
 
 ---
 
@@ -100,7 +100,7 @@ json_handler.log_operation("my_module", "operation", data)  # Typo-prone, boiler
 
 **Key Features:**
 - Auto-creates missing JSON files from templates
-- Self-heals corrupted files
+- Malformed files fail loud - never silently overwritten (ruling S193)
 - Auto-detects calling module (no module_name needed)
 - Log rotation (prevents unbounded growth)
 - Structure validation
@@ -117,7 +117,7 @@ json_handler.log_operation("validation_run", {"files": 42})
 
 **3-Tier Compliance:** Default handlers follow the same 3-tier error handling rules as custom handlers. Location (`handlers/`) determines rules, not conceptual role. json_handler.py raises exceptions; calling modules handle logging. See `error_handling.md` for 3-tier architecture details.
 
-**Reference:** See `json_structure.md` for complete three-JSON pattern details.
+**Reference:** `drone @seedgo standard json_structure` for the complete three-JSON pattern details.
 
 ---
 

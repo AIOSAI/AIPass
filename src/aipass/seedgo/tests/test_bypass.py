@@ -535,3 +535,129 @@ def test_utils_multiple_functions_in_one_rule():
         )
         is False
     )
+
+
+# ---------------------------------------------------------------------------
+# utils.is_bypassed -- scope must be SUPPLIED, not just declared (FPLAN-0382)
+# ---------------------------------------------------------------------------
+
+
+def test_utils_lines_rule_does_not_match_when_no_line_supplied():
+    """A lines rule is inert for a caller that passes no line -- never file-wide.
+
+    This is the whole defect: every checker's top-of-check_module gate calls
+    is_bypassed(path, standard) with no line, so a rule reading "lines": [37, 66]
+    used to suppress the entire file for that standard.
+    """
+    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+
+    rules = [{"file": "apps/ops.py", "standard": "silent_catch", "lines": [37, 66], "reason": "test"}]
+
+    assert is_bypassed("/branch/apps/ops.py", "silent_catch", bypass_rules=rules) is False
+    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=37, bypass_rules=rules) is True
+    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=99, bypass_rules=rules) is False
+
+
+def test_utils_functions_rule_does_not_match_when_no_name_supplied():
+    """Same contract for name-scoped rules: no name supplied means no match."""
+    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+
+    rules = [{"file": "apps/ops.py", "standard": "unused_function", "functions": ["foo"], "reason": "test"}]
+
+    assert is_bypassed("/branch/apps/ops.py", "unused_function", bypass_rules=rules) is False
+    assert is_bypassed("/branch/apps/ops.py", "unused_function", name="foo", bypass_rules=rules) is True
+    assert is_bypassed("/branch/apps/ops.py", "unused_function", name="bar", bypass_rules=rules) is False
+
+
+def test_utils_declared_scope_that_is_supplied_must_match():
+    """With both keys declared, a supplied scope that disagrees blocks the match.
+
+    A rule for update_command does not cover some other symbol that happens to
+    sit on the same line.
+    """
+    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+
+    rules = [
+        {
+            "file": "apps/ops.py",
+            "standard": "unused_function",
+            "functions": ["update_command"],
+            "lines": [10],
+            "reason": "test",
+        }
+    ]
+
+    assert is_bypassed("/branch/apps/ops.py", "unused_function", line=10, name="other", bypass_rules=rules) is False
+    assert is_bypassed("/branch/apps/ops.py", "unused_function", line=10, name="update_command", bypass_rules=rules)
+
+
+def test_utils_unscoped_rule_is_still_file_wide():
+    """A rule with neither lines nor functions keeps matching everything in its file."""
+    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+
+    rules = [{"file": "apps/ops.py", "standard": "silent_catch", "reason": "test"}]
+
+    assert is_bypassed("/branch/apps/ops.py", "silent_catch", bypass_rules=rules) is True
+    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=12345, bypass_rules=rules) is True
+
+
+# inert.py -- a rule whose scope the checker can never evaluate must ANNOUNCE itself (FPLAN-0382 ruling a)
+
+
+def test_inert_scope_support_is_derived_not_hardcoded():
+    """The map comes from the checker sources, so it cannot drift from them."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    support = inert.scope_support()
+
+    # cli threads line= into is_bypassed; handlers gates once at the top of check_module.
+    assert "lines" in support["cli"]
+    assert support["handlers"] == set()
+
+
+def test_inert_lines_rule_on_line_blind_standard_is_reported():
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert inert.inert_scopes({"file": "a.py", "standard": "handlers", "lines": [10]}) == ("lines",)
+
+
+def test_inert_lines_rule_on_line_passing_standard_is_not_reported():
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert inert.inert_scopes({"file": "a.py", "standard": "cli", "lines": [10]}) == ()
+
+
+def test_inert_unscoped_rule_is_never_reported():
+    """File-wide rules are the recommended form -- they must not be nagged about."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert inert.inert_scopes({"file": "a.py", "standard": "handlers"}) == ()
+
+
+def test_inert_unknown_standard_is_left_alone():
+    """A rule naming no known standard is a different defect; this channel reports scope only."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert inert.inert_scopes({"file": "a.py", "standard": "nope", "lines": [1]}) == ()
+
+
+def test_inert_branch_info_names_the_file_and_standard(tmp_path):
+    import json
+
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    (tmp_path / ".seedgo").mkdir()
+    (tmp_path / ".seedgo" / "bypass.json").write_text(
+        json.dumps({"bypass": [{"file": "apps/x.py", "standard": "handlers", "lines": [7]}]}), encoding="utf-8"
+    )
+
+    lines = inert.check_branch_info(str(tmp_path))
+
+    assert len(lines) == 1
+    assert "apps/x.py" in lines[0] and "handlers" in lines[0] and "inert" in lines[0]
+
+
+def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    assert inert.check_branch_info(str(tmp_path)) == []

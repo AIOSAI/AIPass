@@ -11,6 +11,40 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(seedgo)** — FPLAN-0382 wave 2: bypass scoping is real now (by
+@seedgo). is_bypassed rewritten around _scope_matches(): every scope
+the caller can evaluate must match AND at least one declared scope
+must be evaluable — a rule declaring scope nobody supplies is INERT,
+not file-wide (stricter than briefed; a pre-existing test proved the
+naive version wrong and the design was refined, not the test). The
+deeper truth, AST-derived: only 4 of 42 standards evaluate scope at
+all (cli/encapsulation/stderr_routing pass line, unused_function
+passes name) — so new machinery ships with the ruling: bypass/inert.py
+reports every inert rule on the audit's non-scored info channel, with
+the scope-support map derived from checker sources by AST so it
+cannot drift. pattern field documented ANNOTATION-ONLY (the notes
+example was teaching the fiction — removed). Trigger's in_except bug:
+THREE defects (never cleared inside class bodies; reported 0-based
+indexes as line numbers; reported only the first silent except) —
+rewritten on AST, trigger's repro files now score honestly. Drone's
+spurious 0%: root-caused — IndentationError is not a TokenError, a
+mid-save file escaped check_branch and scored the branch a flat mute
+0; fixed to degrade like _extract_functions, and crashed checkers now
+carry their error into checks[] so a 0 always arrives with its reason.
+Own rules: 52 → 34, zero lines rules left — after restoring ONE
+over-pruned rule (dead_code reports as prose, invisible to
+violation-key scans; caught in self-verification at 95%). Old-vs-new
+fleet measurement, cache off: 1 newly-red — exactly the pre-declared
+drone pr_handler rule (inert lines key on a line-blind standard);
+devpulse dropped the key per the rule's own documented intent. Two
+method blind spots flagged for the morning report: the checklist/hook
+lane audits tests/ WITH bypass rules (trigger deleted 18 tests/ rules
+on audit-only evidence — live for the hook lane, will trip on next
+test edit); branch-level standards report as prose. 1372 tests (+12,
+all canaried), fleet 17/17 at 100%, average 100%. WS-B doc moves ride
+along (legacy json_structure.md → .archive, handlers.md pointers
+fixed). Re-verified by devpulse: suite + fleet audit.
+
 **fix(fleet)** — FPLAN-0382 wave 1: all 77 line/function-scoped bypass
 rules trued up across 8 branches in parallel (by @skills @commons
 @aipass @memory @spawn @drone @prax @trigger, orchestrated by

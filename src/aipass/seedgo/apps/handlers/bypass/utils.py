@@ -13,6 +13,40 @@ from pathlib import Path
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
+def _scope_matches(rule: dict, line: int | None, name: str | None) -> bool:
+    """Decide whether a rule's declared scope is satisfied by what the caller supplied.
+
+    A rule may narrow itself with ``lines`` and/or ``functions``. The contract:
+
+    - every declared scope the caller CAN evaluate must match -- a rule for
+      ``update_command`` does not cover a different symbol on the same line;
+    - at least one declared scope must actually be evaluable. A rule that declares
+      scope the caller supplied nothing for is INERT, not file-wide.
+
+    That last clause is the fix. It used to fall through to a match, and every
+    checker's top-of-check_module gate passes neither line nor name -- so a rule
+    reading ``"lines": [37, 66]`` silently suppressed the whole file for that
+    standard, and the per-line call sites that did pass a line were dead code.
+
+    A rule with no ``lines``/``functions`` keys is file-wide by design and always
+    matches here.
+    """
+    functions, rule_lines = rule.get("functions"), rule.get("lines")
+    if not functions and not rule_lines:
+        return True
+
+    evaluable = False
+    if functions and name is not None:
+        if name not in functions:
+            return False
+        evaluable = True
+    if rule_lines and line is not None:
+        if line not in rule_lines:
+            return False
+        evaluable = True
+    return evaluable
+
+
 def is_bypassed(
     file_path: str,
     standard: str,
@@ -42,13 +76,8 @@ def is_bypassed(
         rule_file = rule.get("file", "")
         if rule_file and Path(rule_file).as_posix() not in file_path_posix:
             continue
-        functions = rule.get("functions")
-        if functions and name is not None:
-            if name not in functions:
-                continue
-        elif rule.get("lines") and line is not None:
-            if line not in rule["lines"]:
-                continue
+        if not _scope_matches(rule, line, name):
+            continue
         json_handler.log_operation(
             "bypass_matched",
             {
