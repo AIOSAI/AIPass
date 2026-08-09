@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(tests)** — CI-only xdist failures in backup and trigger rooted in
+one class: tests that evict a module from `sys.modules` and re-import it
+under mocks leave the parent package's *attribute* pointing at the
+throwaway twin after teardown (monkeypatch/patch.dict restore the dict,
+never the attribute). The next test on the same worker then resolves two
+different objects for one dotted name — patches land on one, code runs
+the other. Trigger: escalation's medic gates read an unpatched
+medic_state twin whenever test_medic_state ran first (deterministically
+reproduced: 4 red). Backup: mock.patch on 3.10/3.11 walks parent
+attributes and dies with `AttributeError: ...drive has no attribute
+'client'` (3.12+ resolves via pkgutil.resolve_name, which is why it
+never reproduced locally). Fix: autouse conftest fixture in both suites
+resyncs parent attributes with `sys.modules` after every test and drops
+attributes whose module was evicted. Trigger repro 4 red → 151 green;
++2 regression tests pinning the desync shape; both suites + full-repo
+xdist green. By devpulse (test-only, CI unblock).
+
 **fix(hooks)** — edit_gate's entry-count warning stopped making false
 promises (edit_gate 1.2.0, by @hooks; the @memory entry-count bug's
 twin, caught by three escalation digests). Same class: the guard
