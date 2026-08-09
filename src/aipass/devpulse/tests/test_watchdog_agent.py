@@ -448,6 +448,108 @@ def test_watch_agent_live_dispatch_completes():
 
 
 @pytest.mark.integration
+# ─────────────────────────────────────────────────────────────────────────────
+# Sub-agent visibility + bookkeeping-line masking (false STALLED, 2026-08-08)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_jsonl_activity_sees_subagent_transcripts(tmp_path):
+    """A sub-agent transcript under <session>/subagents/ counts as activity.
+
+    A parent waiting on a synchronous sub-agent writes no top-level JSONL while
+    the sub-agent's nested file grows — top-level-only scanning false-fired
+    STALLED on exactly this (live, @trigger digest build)."""
+    proj = tmp_path / "proj"
+    _write_jsonl(proj, {"type": "user", "message": {"role": "user", "content": []}})
+    sub = proj / "session-abc" / "subagents"
+    sub.mkdir(parents=True)
+
+    baseline = agent_handler._snapshot_jsonl_sizes(proj)
+    assert agent_handler._has_jsonl_activity(proj, baseline) is False
+
+    # New nested file appears → activity.
+    (sub / "agent-x.jsonl").write_text('{"type": "assistant"}\n', encoding="utf-8")
+    assert agent_handler._has_jsonl_activity(proj, baseline) is True
+
+    # Known nested file grows → activity.
+    baseline = agent_handler._snapshot_jsonl_sizes(proj)
+    assert agent_handler._has_jsonl_activity(proj, baseline) is False
+    with (sub / "agent-x.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write('{"type": "assistant"}\n')
+    assert agent_handler._has_jsonl_activity(proj, baseline) is True
+
+
+def test_jsonl_snapshot_keys_relative_no_basename_collision(tmp_path):
+    """Equal basenames in different session dirs are tracked independently."""
+    proj = tmp_path / "proj"
+    a = proj / "session-a" / "subagents"
+    b = proj / "session-b" / "subagents"
+    a.mkdir(parents=True)
+    b.mkdir(parents=True)
+    (a / "agent-1.jsonl").write_text("x\n", encoding="utf-8")
+    (b / "agent-1.jsonl").write_text("longer content\n", encoding="utf-8")
+
+    sizes = agent_handler._snapshot_jsonl_sizes(proj)
+    assert len(sizes) == 2
+    # Growth in only one of the twins is seen.
+    with (a / "agent-1.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write("more\n")
+    assert agent_handler._has_jsonl_activity(proj, sizes) is True
+
+
+def test_inflight_tool_seen_past_bookkeeping_lines(tmp_path):
+    """Bookkeeping lines (type: last-prompt) after the assistant tool_use must not
+    mask the in-flight signal — the live false-STALLED had exactly this shape."""
+    proj = tmp_path / "proj"
+    _write_jsonl(
+        proj,
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
+        },
+        {"type": "last-prompt", "prompt": "..."},
+    )
+    assert agent_handler._last_entry_is_inflight_tool(proj) is True
+
+    # But a returned tool_result behind the same bookkeeping → NOT in-flight.
+    _write_jsonl(
+        proj,
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
+        },
+        {
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
+        },
+        {"type": "last-prompt", "prompt": "..."},
+    )
+    assert agent_handler._last_entry_is_inflight_tool(proj) is False
+
+
+def test_inflight_tool_newest_file_may_be_subagent(tmp_path):
+    """The newest transcript can be a nested sub-agent file — its in-flight
+    tool_use counts (the sub-agent working IS the parent working)."""
+    proj = tmp_path / "proj"
+    parent = _write_jsonl(
+        proj,
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}},
+    )
+    sub = proj / "session-abc" / "subagents"
+    sub.mkdir(parents=True)
+    subfile = sub / "agent-x.jsonl"
+    subfile.write_text(
+        json.dumps(
+            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.utime(parent, (1, 1))
+    os.utime(subfile, (2, 2))
+    assert agent_handler._last_entry_is_inflight_tool(proj) is True
+
+
 @pytest.mark.skipif(
     os.environ.get("WATCHDOG_INTEGRATION") != "1",
     reason="Set WATCHDOG_INTEGRATION=1 to run live dispatch tests",

@@ -11,6 +11,21 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(devpulse)** — watchdog stall detector no longer blind to sub-agent
+work (agent.py 1.2.0). Two compounding causes, both caught live when the
+watchdog cried STALLED on @trigger's healthy digest build: (1) JSONL
+scanning was top-level only, but sub-agent transcripts live under
+`<session>/subagents/` — a parent waiting on a synchronous sub-agent
+writes nothing itself while the nested file grows, so real work read as
+idle; now recursive, keyed by relative path so equal basenames across
+sessions can't collide. (2) The in-flight-tool check read the literal
+last JSONL line, which can be a bookkeeping entry (`last-prompt`)
+written after the assistant's `tool_use` — now walks backwards past
+roleless lines to the last real message entry. +4 tests (21),
+canary-verified red on the reverted glob, then live-proven against the
+very trigger session that false-fired: 11 nested files tracked,
+in-flight True, activity caught in 10s. By devpulse.
+
 **docs(seedgo)** — json_structure standard rewritten to the S193
 self-heal doctrine (v3.0.0, DPLAN-0283 WS-B). The house-pattern block is
 now 6 rules written from the verbatim ruling + memory's config_loader

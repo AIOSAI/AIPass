@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-07-10
+# Modified: 2026-08-08
 # =============================================
 
 # Signal choice: ai_mail dispatch lock file polling.
@@ -207,14 +207,22 @@ def _get_jsonl_projects_dir(branch_path: Path) -> Path:
 
 
 def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
-    """Snapshot current sizes of all JSONL files."""
+    """Snapshot current sizes of all JSONL files, recursively.
+
+    Recursive because sub-agent transcripts live under ``<session>/subagents/``,
+    not at the top level: a parent waiting on a synchronous sub-agent writes no
+    JSONL of its own while the sub-agent's file grows, so a top-level-only scan
+    misreads that whole span as idle and false-fires STALLED (seen live
+    2026-08-08 on @trigger's digest build). Keys are paths relative to
+    ``projects_dir`` so equal basenames in different session dirs can't collide.
+    """
     sizes = {}
     if not projects_dir.exists():
         return sizes
     try:
-        for f in projects_dir.glob("*.jsonl"):
+        for f in projects_dir.rglob("*.jsonl"):
             try:
-                sizes[f.name] = f.stat().st_size
+                sizes[str(f.relative_to(projects_dir))] = f.stat().st_size
             except OSError as exc:
                 logger.info("[watchdog.agent] jsonl snapshot stat failed for %s: %s", f.name, exc)
     except OSError as exc:
@@ -223,11 +231,14 @@ def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
 
 
 def _has_jsonl_activity(projects_dir: Path, baseline: dict) -> bool:
-    """Return True if any JSONL file grew or a new file appeared since baseline."""
+    """Return True if any JSONL file grew or a new file appeared since baseline.
+
+    Recursive, keyed by relative path — see ``_snapshot_jsonl_sizes``.
+    """
     if not projects_dir.exists():
         return False
     try:
-        files = list(projects_dir.glob("*.jsonl"))
+        files = list(projects_dir.rglob("*.jsonl"))
     except OSError as exc:
         logger.info("[watchdog.agent] jsonl activity glob failed: %s", exc)
         return False
@@ -237,19 +248,20 @@ def _has_jsonl_activity(projects_dir: Path, baseline: dict) -> bool:
         except OSError as exc:
             logger.info("[watchdog.agent] jsonl activity stat failed for %s: %s", f.name, exc)
             continue
-        if f.name not in baseline:
+        key = str(f.relative_to(projects_dir))
+        if key not in baseline:
             return current_size > 0
-        if current_size > baseline[f.name]:
+        if current_size > baseline[key]:
             return True
     return False
 
 
 def _newest_jsonl(projects_dir: Path) -> Path | None:
-    """Return the most-recently-modified .jsonl in projects_dir, or None."""
+    """Return the most-recently-modified .jsonl under projects_dir (recursive), or None."""
     if not projects_dir.exists():
         return None
     try:
-        files = list(projects_dir.glob("*.jsonl"))
+        files = list(projects_dir.rglob("*.jsonl"))
     except OSError as exc:
         logger.info("[watchdog.agent] newest jsonl glob failed: %s", exc)
         return None
@@ -267,11 +279,11 @@ def _newest_jsonl(projects_dir: Path) -> Path | None:
     return newest
 
 
-def _tail_last_line(path: Path, max_bytes: int = 1_000_000) -> str | None:
-    """Read the last non-blank newline-delimited line of a file via a bounded tail
-    read. Reads at most ``max_bytes`` from the end so a multi-MB transcript stays
-    cheap; a single line longer than that decodes partially and simply fails to
-    parse downstream (→ treated as no in-flight tool)."""
+def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
+    """Non-blank newline-delimited lines from a bounded tail read of ``path``.
+    Reads at most ``max_bytes`` from the end so a multi-MB transcript stays
+    cheap; a line truncated by the bound decodes partially and simply fails to
+    parse downstream (→ skipped)."""
     try:
         size = path.stat().st_size
         with path.open("rb") as fh:
@@ -280,49 +292,63 @@ def _tail_last_line(path: Path, max_bytes: int = 1_000_000) -> str | None:
             chunk = fh.read()
     except OSError as exc:
         logger.info("[watchdog.agent] tail read failed for %s: %s", path.name, exc)
-        return None
+        return []
     if not chunk:
-        return None
+        return []
     text = chunk.decode("utf-8", errors="replace")
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    return lines[-1] if lines else None
+    return [ln for ln in text.splitlines() if ln.strip()]
+
+
+# Backwards-walk bound for the in-flight scan: bookkeeping lines between the
+# real message entries are few, so the last message entry sits well inside this.
+_INFLIGHT_SCAN_LIMIT = 25
 
 
 def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
-    """True if the newest JSONL's last event is an assistant message dispatching a
-    tool call — an in-flight ``tool_use`` awaiting its result.
+    """True if the newest JSONL's last MESSAGE event is an assistant message
+    dispatching a tool call — an in-flight ``tool_use`` awaiting its result.
 
-    While a tool runs (a big Read, a long Bash, heavy compute) the agent writes NO
-    new JSONL lines, so size-growth alone misreads that span as idle and false-fires
-    STALLED (#634 part 1). The last line being an assistant ``tool_use`` is the
-    precise signal that the agent is actively working, not stuck.
+    While a tool runs (a big Read, a long Bash, a synchronous sub-agent) the
+    agent writes NO new JSONL lines, so size-growth alone misreads that span as
+    idle and false-fires STALLED (#634 part 1). The last message entry being an
+    assistant ``tool_use`` is the precise signal that the agent is actively
+    working, not stuck.
 
-    Best-effort: any read/parse/shape surprise returns False, degrading to the
-    size-based liveness check so the stall detector never crashes on a format drift.
+    Transcripts interleave bookkeeping lines (``type: last-prompt``, summaries)
+    with message entries, and bookkeeping can land AFTER the assistant's
+    ``tool_use`` line — seen live 2026-08-08: a parent mid-Task-call had
+    ``last-prompt`` as its literal last line, masking the in-flight signal. So
+    walk backwards past roleless lines to the last entry carrying a role:
+    assistant + ``tool_use`` → in-flight; any other message (text-only turn, a
+    returned ``tool_result``) → not.
+
+    Best-effort: any read/parse/shape surprise degrades to False so the stall
+    detector never crashes on a format drift.
     """
     newest = _newest_jsonl(projects_dir)
     if newest is None:
         return False
-    last_line = _tail_last_line(newest)
-    if not last_line:
-        return False
-    try:
-        entry = json.loads(last_line)
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.info("[watchdog.agent] last jsonl entry unparseable in %s: %s", newest.name, exc)
-        return False
-    if not isinstance(entry, dict):
-        return False
-    # Schemas vary: role/content may sit under "message" or at the top level.
-    message = entry.get("message")
-    if not isinstance(message, dict):
-        message = entry
-    if message.get("role") != "assistant":
-        return False
-    content = message.get("content")
-    if not isinstance(content, list):
-        return False
-    return any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
+    lines = _tail_lines(newest)
+    for line in reversed(lines[-_INFLIGHT_SCAN_LIMIT:]):
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue  # torn partial write or format drift — keep walking
+        if not isinstance(entry, dict):
+            continue
+        # Schemas vary: role/content may sit under "message" or at the top level.
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            message = entry
+        role = message.get("role")
+        if role == "assistant":
+            content = message.get("content")
+            if not isinstance(content, list):
+                return False
+            return any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
+        if role == "user":
+            return False
+    return False
 
 
 def _read_lock(lock_file: Path) -> dict | None:
