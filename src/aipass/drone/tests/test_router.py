@@ -12,12 +12,12 @@ from aipass.drone.apps.handlers.exceptions import (
     BranchNotFoundError,
     CommandExecutionError,
 )
+from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.executor import CommandResult
 from aipass.drone.apps.handlers.router_handler import (
     detect_caller_signal,
     execute_branch_command,
     find_entry_point,
-    reset_identity_log_dedupe,
     resolve_caller_identity,
 )
 from aipass.drone.apps.modules.router import handle_command, route_command, route_all
@@ -803,7 +803,7 @@ class TestIdentityMessageSeverity:
 
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             resolve_caller_identity(home)
-            reset_identity_log_dedupe()  # a fresh process starts empty
+            router_handler._LOGGED_IDENTITY_SIGNATURES.clear()  # a fresh process starts empty
             resolve_caller_identity(home)
 
         assert len(mock_logger.warning.call_args_list) == 2

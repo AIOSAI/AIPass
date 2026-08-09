@@ -26,12 +26,16 @@ def _clean_identity_dedupe() -> Generator[None, None, None]:
     PROCESS, and pytest is one process. Without this, whether a test sees its
     log line depends on which tests ran before it — the exact order-dependent
     flake that only surfaces when someone runs a single test in isolation.
+
+    Reaches the module-private set on purpose. Production never needs to forget
+    what it has already logged, so exporting a reset() just to serve this
+    fixture would put a test-only function in the shipped API.
     """
     from aipass.drone.apps.handlers import router_handler
 
-    router_handler.reset_identity_log_dedupe()
+    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
     yield
-    router_handler.reset_identity_log_dedupe()
+    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
 
 
 @pytest.fixture

@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(drone)** — seedgo unused_function flag resolved by deletion, not
+bypass (by @drone). `reset_identity_log_dedupe()` was a public
+production function whose only callers were tests — exactly what the
+standard exists to catch. @drone verified a per-function bypass was
+genuinely available (unused_function honors named bypasses) and
+declined it: the standard wasn't wrong, the README's "long-lived host"
+justification was a hypothetical, and no natural production caller
+exists. Tests now clear the private dedupe set directly (documented
+autouse conftest fixture — the established shape, seedgo skips
+tests/). Honest extra: their canary showed the fixture is defensive,
+not load-bearing (per-test temp dirs mean signatures never collide),
+proven both ways with a throwaway shared-cwd pair. Audit 100%, 981
+passed / 5 skipped. Re-verified by devpulse: suite + audit.
+
 **fix(ci)** — two small CI reds cleared by devpulse on its own turf.
 Devpulse: watchdog transcript reader (agent.py 1.2.1) logged nothing
 when it skipped an unparseable transcript line — seedgo silent_catch

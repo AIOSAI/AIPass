@@ -33,6 +33,11 @@ logger = system_logger
 # route (modules/router.py for the CALLER: tag, then here for the stamp).
 # Long-lived callers turned that into a warning per drone call, forever.
 # Keyed per (kind, cwd, signals) so a genuinely NEW disagreement still speaks.
+#
+# Tests clear this directly (see tests/conftest.py). There is deliberately no
+# public reset(): nothing in production has a reason to forget what it has
+# already said, and a production function that only tests call is exactly what
+# seedgo's unused_function standard exists to catch.
 _LOGGED_IDENTITY_SIGNATURES: set[str] = set()
 
 
@@ -48,11 +53,6 @@ def _log_identity_once(signature: str, level: str, message: str, *args: object) 
     _LOGGED_IDENTITY_SIGNATURES.add(signature)
     getattr(logger, level)(message, *args)
     return True
-
-
-def reset_identity_log_dedupe() -> None:
-    """Clear the per-process identity dedupe. For tests and long-lived hosts."""
-    _LOGGED_IDENTITY_SIGNATURES.clear()
 
 
 class CallerSignal(NamedTuple):

@@ -253,6 +253,8 @@ Assigned identity beats location: an agent that cds into another branch is still
 
 Identity messages are logged **once per process per signature**. Neither signal can change under a running process, so a repeat restates the first. Suppression is per-process only, so a real conflict recurring across separate invocations still accumulates and still escalates. The per-call `[CALLER:X]` tag and stamp are never suppressed — every call stays individually attributable.
 
+There is no public reset for the dedupe set: production never needs to forget what it has already logged. The test suite clears `_LOGGED_IDENTITY_SIGNATURES` directly from an autouse fixture in `tests/conftest.py`.
+
 ### Git Access Tiers
 
 Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py`. Two tiers:
@@ -387,7 +389,6 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 ## Known Issues
 
 - `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
-- `reset_identity_log_dedupe()` in `router_handler.py` has no production caller by design — it clears process-lifetime state for the test suite (an autouse conftest fixture) and for long-lived hosts embedding drone as a library. Not bypassed in seedgo: a file-level bypass would blind the detector to real findings in the same file
 - Pyright warns about `json` package name shadowing stdlib — works at runtime
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
