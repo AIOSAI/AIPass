@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_telegram_relay.py
 # Description: Tests for the Telegram relay handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-24
-# Modified: 2026-06-24
+# Modified: 2026-08-08
 # =============================================
 
 """Tests for apps/handlers/monitoring/telegram_relay.py
@@ -19,6 +19,7 @@ Covers:
 - _render_event calls relay_event in monitor.py
 - is_relay_enabled_by_env for env var detection
 - Offline backoff: doubles+caps, resets on success, log-once, never blocks
+- Control-file isolation: no test ever reads the operator's live pause state
 """
 
 import importlib
@@ -26,8 +27,11 @@ import json
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @dataclass
@@ -45,8 +49,39 @@ class FakeEvent:
     pid: Optional[int] = None
 
 
+# ---------------------------------------------------------------------------
+# Control-file isolation
+# ---------------------------------------------------------------------------
+#
+# The module default CONTROL_FILE is ~/.aipass/telegram_bots/prax_monitor_control.json
+# — LIVE operator state, written by the Telegram bot when the operator pauses or
+# filters the feed. _flush_buffer discards the whole buffer when paused=true, so a
+# test that flushes without re-pointing CONTROL_FILE inherits the operator's pause:
+# red on a machine where the bot is paused, green on CI where no control file exists.
+# Tests assert on relay behavior, never on operator state, so every import is aimed
+# at a per-test tmp path and _import_relay refuses to return a module still aimed
+# at HOME.
+
+_ISOLATED_CONTROL_FILE: Optional[Path] = None
+
+
+@pytest.fixture(autouse=True)
+def isolate_control_file(tmp_path):
+    """Point every relay import at a throwaway control file, never the operator's."""
+    global _ISOLATED_CONTROL_FILE
+    _ISOLATED_CONTROL_FILE = tmp_path / "relay_control.json"
+    yield
+    _ISOLATED_CONTROL_FILE = None
+
+
 def _import_relay():
     """Import (or reload) telegram_relay with mocked dependencies."""
+    if _ISOLATED_CONTROL_FILE is None:
+        raise RuntimeError(
+            "_import_relay() called outside the isolate_control_file fixture — "
+            "the relay would read the operator's live control file"
+        )
+
     fresh_mocks = {
         "aipass.prax.apps.modules.logger": MagicMock(),
         "aipass.prax.apps.handlers.json": MagicMock(),
@@ -57,6 +92,8 @@ def _import_relay():
             mod = importlib.reload(sys.modules["aipass.prax.apps.handlers.monitoring.telegram_relay"])
         else:
             mod = importlib.import_module("aipass.prax.apps.handlers.monitoring.telegram_relay")
+
+    setattr(mod, "CONTROL_FILE", _ISOLATED_CONTROL_FILE)
 
     lock_mock = MagicMock()
     lock_mock.try_acquire = MagicMock(return_value=True)
@@ -737,3 +774,49 @@ class TestOfflineBackoff:
         recovery_calls = [c for c in info_calls if "recovered" in str(c).lower()]
         assert len(recovery_calls) == 1
         assert "42" in str(recovery_calls[0])
+
+
+# ---------------------------------------------------------------------------
+# Control-file isolation
+# ---------------------------------------------------------------------------
+
+
+class TestControlFileIsolation:
+    """Tests must never inherit the operator's live pause state from HOME."""
+
+    def test_import_never_points_at_operator_file(self, tmp_path):
+        """A freshly imported relay reads a tmp control file, not the one in HOME."""
+        relay = _import_relay()
+        operator_file = Path.home() / ".aipass" / "telegram_bots" / "prax_monitor_control.json"
+        assert relay.CONTROL_FILE != operator_file
+        assert relay.CONTROL_FILE == tmp_path / "relay_control.json"
+
+    def test_reimport_re_isolates(self):
+        """Reload restores the HOME default, so every import must re-point after it."""
+        _import_relay()
+        relay = _import_relay()
+        assert Path.home() not in relay.CONTROL_FILE.parents
+
+    def test_flush_ignores_a_paused_operator_file(self, tmp_path):
+        """paused=true in the isolated file suppresses; the real file is never consulted."""
+        relay = _import_relay()
+        setattr(relay, "_bot_token", "t")
+        setattr(relay, "_chat_id", 1)
+        setattr(relay, "_RELAY_ACTIVE", True)
+        sent = []
+        setattr(relay, "_send_batched", lambda lines: sent.extend(lines))
+
+        relay._buffer.extend(["line 1", "line 2"])
+        relay._flush_buffer()
+        assert len(sent) == 2, "no control file must mean 'not paused', whatever HOME says"
+
+        relay.CONTROL_FILE.write_text(json.dumps({"paused": True}))
+        relay._buffer.extend(["line 3"])
+        relay._flush_buffer()
+        assert len(sent) == 2
+
+    def test_helper_refuses_without_isolation(self, monkeypatch):
+        """The helper fails loud rather than silently reading operator state."""
+        monkeypatch.setattr(sys.modules[__name__], "_ISOLATED_CONTROL_FILE", None)
+        with pytest.raises(RuntimeError, match="operator's live control file"):
+            _import_relay()

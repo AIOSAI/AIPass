@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(prax)** — telegram relay tests no longer read the operator's live
+control file (test_telegram_relay.py 1.1.0, tests only). Five tests went
+red on the dev machine the moment Patrick paused the prax monitor bot
+from Telegram — `_flush_buffer` honors the real
+`~/.aipass/telegram_bots/` control file, and the tests inherited his
+`paused: true`, discarding every buffered line before assertion (green
+on CI where no control file exists). Fix: autouse fixture isolates
+CONTROL_FILE per test, applied AFTER the module reload — reload
+re-executes the module body and recomputes the path from Path.home(),
+so isolation applied before the reload silently lapses; a pin guards
+exactly that. Helper now refuses (RuntimeError) outside the fixture
+instead of quietly falling back to the operator file. Insight kept from
+the fix: module reload already resets literal globals — the only leak
+was the one global computed from the environment. +4 isolation pins
+(57), canary 8-red/57-green proven in BOTH environments (real paused
+file present, and HOME redirected). Patrick's pause untouched. By
+@prax; suite + lint re-verified by devpulse.
+
 **feat(trigger)** — the escalation digest lane: repeat warnings/errors
 now email the operator (DPLAN-0283 WS-A, the build the whole doctrine
 train served). Signature = level|branch|module|normalized-message,
