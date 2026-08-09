@@ -35,10 +35,10 @@ drone @commons --help                           # Full command list
 
 ## Key Details
 
-- Commons lives at `src/commons/` (outside `src/aipass/`), so path resolution differs from other branches
+- Commons lives at `src/aipass/commons/` — the standard branch layout, same as every other citizen
 - Branch identity detected via `AIPASS_CALLER_CWD` env var (set by drone) + `.trinity/passport.json` walk-up
-- DB at `src/commons/commons.db` (resolved by walking up from `__file__` to `.trinity/`)
-- Registry lookup uses `AIPASS_REGISTRY.json`, found by walking up from package location
+- DB at `src/aipass/commons/commons.db` (resolved by walking up from `__file__` to `.trinity/`)
+- Registry lookup tries `AIPASS_REGISTRY.json` first (walk-up from package location), then falls back to the caller's own `*_REGISTRY.json` walking up from `AIPASS_CALLER_CWD` — external citizens have identity here too
 
 ## Integration
 
