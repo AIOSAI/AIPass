@@ -247,10 +247,10 @@
       "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
     },
     {
-      "file": "apps/handlers/registry.py",
+      "file": "apps/handlers/repair_ops.py",
       "standard": "windows_compat",
-      "lines": [249],
-      "reason": "fcntl import at L249 inside 'if lock_fd is not None:' — lock_fd is None on Windows (set at L206), so this line never executes on Windows."
+      "lines": [92],
+      "reason": "Lock release in update_registry_path(): 'import fcntl' at L92 sits inside 'if lock_fd is not None:' (L91) in the finally block. lock_fd is initialised None at L57 and only assigned under 'if sys.platform != \"win32\"' (L58), so L92 is unreachable on Windows. FPLAN-0382 wave 1: line refreshed 89 -> 92 and reason corrected (the old text described the L59 sys.platform guard, not the L91 lock_fd guard) — verified by lifting the rule and re-running the checker, which named L92 exactly."
     },
     {
       "file": "apps/handlers/repair_ops.py",
@@ -291,12 +291,6 @@
       "file": "tests/test_update.py",
       "standard": "encapsulation",
       "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "apps/handlers/repair_ops.py",
-      "standard": "windows_compat",
-      "lines": [89],
-      "reason": "fcntl import guarded by sys.platform != 'win32' check — lock_fd is None on Windows, so this line never executes."
     },
     {
       "file": "apps/handlers/meta_ops.py",
