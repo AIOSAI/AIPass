@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: telegram_relay.py
 # Description: Telegram relay for prax monitor feed
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-24
-# Modified: 2026-06-24
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -188,7 +188,12 @@ def _read_control() -> dict:
         _control_cache = data
         return data
     except (json.JSONDecodeError, ValueError, OSError) as exc:
-        logger.warning("[telegram_relay] Control file parse error, using defaults: %s", exc)
+        logger.warning(
+            "[telegram_relay] The Telegram relay could not read its control file (%s), so it is "
+            "running on defaults — relaying, not paused, all levels. Your saved settings are not "
+            "applied until the file is readable again; the file itself was not modified.",
+            type(exc).__name__,
+        )
         _control_mtime = stat.st_mtime
         _control_cache = {}
         return {}
@@ -304,7 +309,12 @@ def _send_message(text: str) -> bool:
     except (URLError, OSError) as e:
         now = time.monotonic()
         if not _OFFLINE:
-            logger.warning("[telegram_relay] TG relay offline: %s", e)
+            logger.warning(
+                "[telegram_relay] The Telegram relay cannot reach Telegram (%s) — monitor lines "
+                "will not arrive in the chat until it recovers. It keeps retrying with backoff; "
+                "the terminal monitor and the on-disk logs are unaffected.",
+                e,
+            )
             _OFFLINE = True
             _OFFLINE_SINCE = now
             _CURRENT_BACKOFF = _BACKOFF_INITIAL

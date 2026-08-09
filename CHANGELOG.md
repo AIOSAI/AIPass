@@ -11,6 +11,27 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(prax)** — every operator-facing monitor line rewritten in plain
+language that names its subsystem (40 sites across 10 monitoring files,
+by @prax; Patrick ruling). The line that triggered it — `Dropping
+events (102...): Full()` — now reads "The live monitor display queue is
+full — 102 events were skipped from the terminal monitor view since the
+last report. Nothing is lost: the on-disk logs are complete." Split in
+two on the way: the old line reported every enqueue failure as
+overflow, so an unexpected TypeError would have worn the comforting
+"queue is full" wording — expected pressure is now a WARNING saying
+nothing is lost, unexpected failure an ERROR saying "this one is a
+bug." Subsystem vocabulary standardized in the operator's words (live
+monitor display, file watcher, log watcher, Telegram relay, commons
+live feed, branch labelling) — including the instance_lock line that
+sat unremarked for 1h51m on 07-31 while the relay was stranded
+viewer-only. Every reassurance was verified in code before shipping
+("plain language can lie faster than a repr can"). Exception reprs
+gone except two network lines where the errno text IS the actionable
+content. +5 wording-pin tests (1093), canary red on old-line restore,
+live-proven overflow in system_logs. The 30s rate limiter untouched.
+Ruff + seedgo 100%. Suite + lint re-verified by devpulse.
+
 **fix(backup)** — user-supplied relative paths resolve where the user
 actually is, and a live tree changing mid-snapshot no longer aborts the
 cycle (by @backup). Two fixes riding together. CALLER_CWD: backup runs

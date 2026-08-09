@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_watcher_integration.py
 # Description: File Watcher Integration
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -38,6 +38,7 @@ from typing import List, Tuple, Optional, Any
 from datetime import datetime
 
 from aipass.prax.apps.modules.logger import get_direct_logger
+from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
@@ -56,14 +57,16 @@ try:
     from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, global_queue
 
 except ImportError as e:
-    logger.error(f"Import error in file_watcher_integration: {e}")
+    logger.error(
+        f"[file_watcher] The live monitor's file watching is OFF — a component it needs could not "
+        f"be loaded ({type(e).__name__}). File changes will not appear on screen; the log feed and "
+        f"the on-disk logs are unaffected."
+    )
     WATCHDOG_AVAILABLE = False
     start_monitoring = None  # type: ignore[assignment]
     stop_monitoring = None  # type: ignore[assignment]
     MonitoringEvent = None  # type: ignore[assignment, misc]
     global_queue = None  # type: ignore[assignment]
-
-from aipass.prax.apps.handlers.json import json_handler
 
 
 # =============================================================================
@@ -89,7 +92,10 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
         registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
 
         if not registry_path.exists():
-            logger.warning(f"AIPASS_REGISTRY.json not found at {registry_path}")
+            logger.warning(
+                f"[file_watcher] No branch registry at {registry_path}, so the live monitor will "
+                f"watch no branches for file changes. The log feed is unaffected."
+            )
             return []
 
         with open(registry_path, encoding="utf-8") as f:
@@ -97,7 +103,10 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
 
         branches = data.get("branches", [])
         if not branches:
-            logger.warning("No branches found in AIPASS_REGISTRY.json")
+            logger.warning(
+                "[file_watcher] The branch registry lists no branches, so the live monitor will "
+                "watch none of them for file changes. The log feed is unaffected."
+            )
             return []
 
         # Normalize filter to uppercase
@@ -111,7 +120,10 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
             path_str = branch.get("path", "")
 
             if not name or not path_str:
-                logger.warning(f"Skipping invalid branch entry: {branch}")
+                logger.warning(
+                    f"[file_watcher] A branch in the registry has no name or no path, so the live "
+                    f"monitor will not watch it for file changes. Entry: {branch}"
+                )
                 continue
 
             # Apply filter if provided
@@ -120,7 +132,10 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
 
             path = Path(path_str)
             if not path.exists():
-                logger.warning(f"Branch path does not exist: {name} -> {path}")
+                logger.warning(
+                    f"[file_watcher] Branch {name} is in the registry but its folder is missing, so "
+                    f"the live monitor will not watch it for file changes. Expected at: {path}"
+                )
                 continue
 
             branch_paths.append((name, path))
@@ -129,10 +144,18 @@ def load_branch_paths(branch_filter: Optional[List[str]] = None) -> List[Tuple[s
         return branch_paths
 
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in AIPASS_REGISTRY.json: {e}")
+        logger.error(
+            f"[file_watcher] The branch registry is not valid JSON (line {e.lineno}), so the live "
+            f"monitor will watch no branches for file changes. The log feed is unaffected and the "
+            f"registry file was not modified."
+        )
         return []
     except Exception as e:
-        logger.error(f"Error loading AIPASS_REGISTRY.json: {e}")
+        logger.error(
+            f"[file_watcher] Could not read the branch registry ({type(e).__name__}), so the live "
+            f"monitor will watch no branches for file changes. The log feed is unaffected and the "
+            f"registry file was not modified."
+        )
         return []
 
 
@@ -177,10 +200,19 @@ def file_event_callback(branch_name: str, event_type: str, file_path: str):
         success = global_queue.enqueue(event)  # type: ignore[union-attr]
 
         if not success:
-            logger.info(f"Failed to enqueue file event: {branch_name} {action} {file_path}")
+            logger.info(
+                f"[file_watcher] The live monitor display queue is full, or already showed this — "
+                f"file change not added to the terminal monitor view ({branch_name} {action} "
+                f"{file_path}). The file itself is fine."
+            )
 
     except Exception as e:
-        logger.error(f"Error in file_event_callback: {e}")
+        # event_type, not action: action is derived inside the try and may be unbound here.
+        logger.error(
+            f"[file_watcher] The live monitor could not show a file change — unexpected "
+            f"{type(e).__name__} ({branch_name} {event_type} {file_path}). The file itself is fine; "
+            f"file watching continues."
+        )
 
 
 # =============================================================================
@@ -220,18 +252,28 @@ class FileWatcherManager:
             True if started successfully, False otherwise
         """
         if not WATCHDOG_AVAILABLE:
-            logger.error("Cannot start file watcher - watchdog not installed")
+            logger.error(
+                "[file_watcher] The live monitor cannot watch files — the watchdog package is not "
+                "installed. File changes will not appear on screen; the log feed is unaffected."
+            )
             return False
 
         if self.running:
-            logger.warning("File watcher already running")
+            logger.warning(
+                "[file_watcher] The live monitor's file watching is already running — "
+                "the start request was ignored, nothing changed."
+            )
             return True
 
         # Load branch paths from registry
         self.branch_paths = load_branch_paths(self.branch_filter)
 
         if not self.branch_paths:
-            logger.error("No valid branches found - cannot start file watcher")
+            logger.error(
+                "[file_watcher] No watchable branches were found, so the live monitor's file "
+                "watching did not start. File changes will not appear on screen; the log feed is "
+                "unaffected."
+            )
             return False
 
         # Start monitoring with callback
@@ -244,7 +286,10 @@ class FileWatcherManager:
             logger.info("File watcher started successfully")
             return True
         else:
-            logger.error("Failed to start file watcher")
+            logger.error(
+                "[file_watcher] The live monitor's file watching could not be started. File changes "
+                "will not appear on screen; the log feed and the on-disk logs are unaffected."
+            )
             return False
 
     def stop(self):

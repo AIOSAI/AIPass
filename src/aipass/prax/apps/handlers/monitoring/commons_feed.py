@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_feed.py
 # Description: Commons Live Social Feed (read-only monitor view)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-21
-# Modified: 2026-07-21
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -401,7 +401,11 @@ def _poll_worker(
                 if state.visible(event):
                     _emit(event, room_moods)
         except sqlite3.Error as exc:
-            logger.warning("[commons_feed] Poll error: %s", exc)
+            logger.warning(
+                "[commons_feed] The commons live feed could not read new messages this cycle (%s) — "
+                "it will retry on the next poll; nothing in commons.db is changed or lost.",
+                type(exc).__name__,
+            )
         _stop_event.wait(POLL_INTERVAL)
 
 
@@ -435,8 +439,15 @@ def run_commons_feed(args: List[str], relay_config: Optional[dict] = None) -> bo
         conn = connect_readonly(db_path)
         cursors = initial_cursors(conn)
     except sqlite3.Error as exc:
-        logger.warning("[commons_feed] Could not open commons.db read-only: %s", exc)
-        error(f"Could not open commons.db read-only: {exc}")
+        logger.warning(
+            "[commons_feed] The commons live feed could not open commons.db for reading (%s) — "
+            "the feed did not start. The database was not modified.",
+            type(exc).__name__,
+        )
+        error(
+            f"Cannot open the commons database for reading, so the commons live feed did not start. "
+            f"The database itself was not modified. Location: {db_path}"
+        )
         stop_relay()
         return True
 

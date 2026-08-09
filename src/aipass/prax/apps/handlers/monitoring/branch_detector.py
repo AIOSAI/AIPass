@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-08
 # =============================================
 
 """
@@ -78,7 +78,11 @@ class BranchDetector:
             registry_path = self._find_repo_root() / "AIPASS_REGISTRY.json"
 
             if not registry_path.exists():
-                logger.warning(f"Registry not found: {registry_path}")
+                logger.warning(
+                    f"[branch_detector] Branch labelling: no branch registry at {registry_path} — "
+                    f"falling back to the built-in branch list, so recently added branches may be "
+                    f"labelled UNKNOWN on screen."
+                )
                 self._load_fallback_branches()
                 return
 
@@ -87,7 +91,11 @@ class BranchDetector:
 
             branches = data.get("branches", [])
             if not branches:
-                logger.warning("No branches found in registry")
+                logger.warning(
+                    "[branch_detector] Branch labelling: the branch registry lists no branches — "
+                    "falling back to the built-in branch list, so recently added branches may be "
+                    "labelled UNKNOWN on screen."
+                )
                 self._load_fallback_branches()
                 return
 
@@ -97,10 +105,18 @@ class BranchDetector:
             logger.info(f"Loaded {len(self.known_branches)} branches from registry")
 
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in registry: {e}")
+            logger.error(
+                f"[branch_detector] Branch labelling: the branch registry is not valid JSON "
+                f"(line {e.lineno}) — falling back to the built-in branch list, so recently added "
+                f"branches may be labelled UNKNOWN on screen. The registry file was not modified."
+            )
             self._load_fallback_branches()
         except Exception as e:
-            logger.error(f"Error loading registry: {e}")
+            logger.error(
+                f"[branch_detector] Branch labelling: could not read the branch registry "
+                f"({type(e).__name__}) — falling back to the built-in branch list, so recently added "
+                f"branches may be labelled UNKNOWN on screen. The registry file was not modified."
+            )
             self._load_fallback_branches()
 
     def _load_fallback_branches(self):
@@ -262,7 +278,7 @@ class BranchDetector:
         try:
             rel = path.relative_to(projects_base)
         except ValueError:
-            logger.info(f"[branch_detector] Path not under ~/Projects/: {path}")
+            logger.info(f"[branch_detector] Ignoring a file outside the watched area (~/Projects/): {path}")
             return None
 
         parts = rel.parts
@@ -429,7 +445,11 @@ class BranchDetector:
             return "UNKNOWN"
 
         except Exception as e:
-            logger.error(f"Error detecting branch from path {file_path}: {e}")
+            logger.error(
+                f"[branch_detector] Branch labelling failed for a file path — unexpected "
+                f"{type(e).__name__} on {file_path}; the live monitor will show this one as UNKNOWN. "
+                f"The file itself is fine and the event is still displayed."
+            )
             return "UNKNOWN"
 
     def detect_from_log(self, log_file: str) -> str:
@@ -522,7 +542,11 @@ class BranchDetector:
             return "UNKNOWN"
 
         except Exception as e:
-            logger.error(f"Error detecting branch from module {dotted_name}: {e}")
+            logger.error(
+                f"[branch_detector] Branch labelling failed for a module name — unexpected "
+                f"{type(e).__name__} on {dotted_name}; the live monitor will show this one as "
+                f"UNKNOWN. The event is still displayed."
+            )
             return "UNKNOWN"
 
     def reload_registry(self):
