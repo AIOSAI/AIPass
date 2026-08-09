@@ -50,12 +50,6 @@
       "reason": "format_wait() has 5 passing tests. Public utility for schedule display, not called in production yet."
     },
     {
-      "standard": "windows_compat",
-      "file": "apps/handlers/watchdog/registry.py",
-      "lines": [138, 149],
-      "reason": "fcntl imports guarded by early return (sys.platform == win32) at L137. Windows never reaches these lines."
-    },
-    {
       "standard": "encapsulation",
       "file": "tests/test_git_gate.py",
       "reason": "Test imports git_gate.py from ~/.claude/hooks/ via importlib — external hook, not a branch module."

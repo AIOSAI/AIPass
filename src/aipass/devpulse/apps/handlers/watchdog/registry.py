@@ -134,18 +134,18 @@ class _FileLock:
         self._fh = None
 
     def __enter__(self) -> "_FileLock":
-        if sys.platform == "win32":
-            return self  # Windows: skip file locking (single-user typical)
-        import fcntl
+        # Windows: skip file locking entirely (single-user typical).
+        if sys.platform != "win32":
+            import fcntl
 
-        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-        # 'a+' so the file is created if missing and lock survives concurrent opens.
-        self._fh = open(self._lock_path, "a+", encoding="utf-8")
-        fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+            # 'a+' so the file is created if missing and lock survives concurrent opens.
+            self._fh = open(self._lock_path, "a+", encoding="utf-8")
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        if self._fh is not None:
+        if sys.platform != "win32" and self._fh is not None:
             try:
                 import fcntl
 

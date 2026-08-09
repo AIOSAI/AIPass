@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(devpulse)** — watchdog _FileLock fcntl imports restructured into
+checker-recognized platform guards; windows_compat bypass rule DELETED
+(FPLAN-0382 residue, own branch). CI's fresh seedgo-audit caught what
+the local fleet run could not: devpulse's own trued-up lines[139,150]
+rule went inert under wave 2 (windows_compat is line-blind — trigger's
+honours-map was wrong on this one standard, seedgo's AST scan right),
+and the local 17/17 verification was all "(cached)" because the audit
+cache doesn't fingerprint bypass/utils.py — the checker-semantics
+change never busted it. Fix at source instead of file-wide: the
+checker only sees imports INSIDE an if-sys.platform block (the
+early-return guard shape is invisible to it), so __enter__ moved to a
+positive platform guard and __exit__'s guard gained the explicit
+platform check. Rule deleted outright — the honest end-state a
+file-wide bypass would have papered over. 456 devpulse tests green;
+audit --full (uncached) Windows_Compat 100%, Overall 100%. Cache-gap
+finding queued for seedgo's board.
+
 **fix(seedgo)** — FPLAN-0382 wave 2: bypass scoping is real now (by
 @seedgo). is_bypassed rewritten around _scope_matches(): every scope
 the caller can evaluate must match AND at least one declared scope
