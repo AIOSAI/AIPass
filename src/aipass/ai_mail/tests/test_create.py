@@ -93,6 +93,47 @@ def test_create_email_file_json_content(tmp_path: Path):
     assert "timestamp" in data
 
 
+def test_create_email_file_has_id(tmp_path: Path):
+    """Sent records carry an id so they can be referenced from the sent view.
+
+    Without it `drone @ai_mail sent` renders every outbound message as [????????]
+    (format.py falls back to that when `id` is absent) — visible but impossible to
+    cite. Only reply-written files had an id; email and dispatch did not.
+    """
+    user_info = _make_user_info(tmp_path)
+
+    result = mod.create_email_file(
+        to_branch="@admin",
+        subject="Referenceable",
+        message="Body",
+        user_info=user_info,
+    )
+
+    with open(result, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data.get("id"), "sent record must carry an id"
+    assert len(data["id"]) == 8, "id must match the 8-char convention used elsewhere"
+
+
+def test_create_email_file_ids_are_unique(tmp_path: Path):
+    """Two sends in the same second must not collide — filenames are timestamp-based."""
+    user_info = _make_user_info(tmp_path)
+
+    ids = set()
+    for i in range(3):
+        result = mod.create_email_file(
+            to_branch="@admin",
+            subject=f"Subject {i}",
+            message="Body",
+            user_info=user_info,
+        )
+        with open(result, "r", encoding="utf-8") as f:
+            ids.add(json.load(f)["id"])
+
+    assert len(ids) == 3
+
+
 def test_create_email_file_with_reply_to(tmp_path: Path):
     """reply_to field is included when provided."""
     user_info = _make_user_info(tmp_path)

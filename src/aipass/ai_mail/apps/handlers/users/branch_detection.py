@@ -136,12 +136,90 @@ def _synthesize_external_branch(caller_branch: str) -> Optional[Dict]:
     }
 
 
+def _record_resolution(branch_info: Optional[Dict], strategy: str, confidence: str) -> Optional[Dict]:
+    """Log WHO the sender resolved to and WHICH strategy won, then pass the result through.
+
+    Before this, resolve_sender() logged only its pre-resolution input, so a message
+    filed under the wrong citizen left no trace of how it got there — @aipass spent
+    hours of cross-mailbox forensics on one misattribution and still could not tell
+    which strategy fired. Every exit from detect_branch_from_pwd() goes through here.
+
+    `confidence` is "verified" when the identity came from a passport or registry
+    entry, "unverified" when it was taken on trust from the environment or from this
+    process's own cwd. An unverified win that later proves wrong is the thing to grep.
+
+    Args:
+        branch_info: Resolved branch dict, or None if resolution failed.
+        strategy: Which resolution path produced it (input source : method).
+        confidence: "verified" or "unverified".
+
+    Returns:
+        branch_info unchanged — this is a pass-through recorder.
+    """
+    caller_branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
+    resolved_name = (branch_info or {}).get("name", "")
+    resolved_email = (branch_info or {}).get("email", "")
+
+    json_handler.log_operation(
+        "resolve_identity",
+        {
+            "strategy": strategy,
+            "confidence": confidence,
+            "resolved_name": resolved_name,
+            "resolved_email": resolved_email,
+            "resolved_path": (branch_info or {}).get("path", ""),
+            "in_caller_branch": caller_branch,
+            "in_caller_cwd": caller_cwd,
+            "process_cwd": str(Path.cwd()),
+        },
+    )
+
+    if not branch_info:
+        logger.warning(
+            "[identity] UNRESOLVED via %s (caller_branch=%r caller_cwd=%r)",
+            strategy,
+            caller_branch,
+            caller_cwd,
+        )
+        return branch_info
+
+    log = logger.info if confidence == "verified" else logger.warning
+    log(
+        "[identity] resolved %s (%s) via %s [%s]",
+        resolved_email or "?",
+        resolved_name or "?",
+        strategy,
+        confidence,
+    )
+
+    # Both caller signals present but pointing at different branches: we silently
+    # pick AIPASS_CALLER_BRANCH. Legitimate when the caller stood outside any branch
+    # (drone falls back to the env var), so this warns rather than raises — but it is
+    # the one disagreement visible from inside this process, so it gets recorded.
+    if caller_branch and caller_cwd:
+        cwd_root = find_branch_root(Path(caller_cwd))
+        if cwd_root and cwd_root.name.lower() != caller_branch.lstrip("@").lower():
+            logger.warning(
+                "[identity] AMBIGUOUS: AIPASS_CALLER_BRANCH=%r but AIPASS_CALLER_CWD sits in branch %r "
+                "— resolved as %s from the env var. If this message is misattributed, the caller's cwd is why.",
+                caller_branch,
+                cwd_root.name,
+                resolved_email or resolved_name,
+            )
+
+    return branch_info
+
+
 def detect_branch_from_pwd() -> Optional[Dict]:
     """
     Detect which branch is calling based on current working directory.
 
     Walks up directory tree from PWD to find branch root (directory with .trinity/passport.json).
     Then looks up branch info in AIPASS_REGISTRY.json.
+
+    Every exit is recorded by _record_resolution() with the winning strategy, so a
+    wrong sender can be traced to the path that produced it.
 
     Returns:
         Dict with branch info if detected, or None.
@@ -153,20 +231,27 @@ def detect_branch_from_pwd() -> Optional[Dict]:
         if caller_branch:
             contact = _get_contact_info(caller_branch)
             if contact:
-                return contact
+                return _record_resolution(contact, "caller_branch:contact", "verified")
             branch_info = _lookup_branch_by_name(caller_branch)
             if branch_info:
-                return branch_info
-            return _synthesize_external_branch(caller_branch)
+                return _record_resolution(branch_info, "caller_branch:registry", "verified")
+            # Invents a citizen from env vars alone — no passport, no registry entry.
+            return _record_resolution(
+                _synthesize_external_branch(caller_branch), "caller_branch:synthesized", "unverified"
+            )
 
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
+        # No caller env at all means identity comes from THIS process's cwd, which is
+        # the target branch under dispatch — correct there, silently wrong anywhere else.
+        strategy = "caller_cwd:passport_walk" if caller_cwd else "process_cwd:passport_walk"
+        confidence = "verified" if caller_cwd else "unverified"
         cwd = Path(caller_cwd) if caller_cwd else Path.cwd()
 
         branch_root = find_branch_root(cwd)
         if not branch_root:
-            return None
+            return _record_resolution(None, strategy, confidence)
 
-        return get_branch_info_from_registry(branch_root)
+        return _record_resolution(get_branch_info_from_registry(branch_root), strategy, confidence)
 
     except Exception as e:
         logger.warning("[identity] detect_branch_from_pwd() failed: %s", e)

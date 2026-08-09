@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -19,6 +19,42 @@ from typing import Optional, Tuple, List, Dict, Any
 
 from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+
+
+def _log_resolved_sender(user_info: Dict[str, Any], from_branch: Optional[str], strategy: str) -> Dict[str, Any]:
+    """Record WHO the sender resolved to, alongside the input that produced it.
+
+    This function used to log only its pre-resolution input (`from_branch`), so when a
+    COMMONS-authored dispatch was filed under @aipass the log line read `from_branch: null`
+    and nothing else — no record of who it became or which path decided. That gap cost
+    @aipass hours of cross-mailbox forensics for a single misattributed message.
+
+    Args:
+        user_info: The resolved sender dict (email_address, display_name, mailbox_path, ...).
+        from_branch: The explicit sender argument, or None if identity was detected.
+        strategy: Which resolution path produced this sender.
+
+    Returns:
+        user_info unchanged — this is a pass-through recorder.
+    """
+    json_handler.log_operation(
+        "resolved_sender",
+        {
+            "strategy": strategy,
+            "in_from_branch": from_branch,
+            "resolved_email": user_info.get("email_address", ""),
+            "resolved_name": user_info.get("display_name", ""),
+            "mailbox_path": user_info.get("mailbox_path", ""),
+        },
+    )
+    logger.info(
+        "[identity] sender resolved %s (%s) via %s -> mailbox %s",
+        user_info.get("email_address", "?"),
+        user_info.get("display_name", "?"),
+        strategy,
+        user_info.get("mailbox_path", "?"),
+    )
+    return user_info
 
 
 def resolve_sender_info(
@@ -49,22 +85,30 @@ def resolve_sender_info(
             branch_path = Path(branch_info["path"])
             if not branch_path.is_absolute():
                 branch_path = (repo_root / branch_path).resolve()
-            return {
-                "email_address": email_addr,
-                "display_name": branch_info["name"],
-                "mailbox_path": str(branch_path / ".ai_mail.local"),
-                "timestamp_format": "%Y-%m-%d %H:%M:%S",
-            }
+            return _log_resolved_sender(
+                {
+                    "email_address": email_addr,
+                    "display_name": branch_info["name"],
+                    "mailbox_path": str(branch_path / ".ai_mail.local"),
+                    "timestamp_format": "%Y-%m-%d %H:%M:%S",
+                },
+                from_branch,
+                "explicit_from:registry",
+            )
         else:
             branch_name = from_branch.lstrip("@").upper()
-            return {
-                "email_address": email_addr,
-                "display_name": branch_name,
-                "mailbox_path": str(ai_mail_dir.parent / from_branch.lstrip("@").lower() / ".ai_mail.local"),
-                "timestamp_format": "%Y-%m-%d %H:%M:%S",
-            }
+            return _log_resolved_sender(
+                {
+                    "email_address": email_addr,
+                    "display_name": branch_name,
+                    "mailbox_path": str(ai_mail_dir.parent / from_branch.lstrip("@").lower() / ".ai_mail.local"),
+                    "timestamp_format": "%Y-%m-%d %H:%M:%S",
+                },
+                from_branch,
+                "explicit_from:assumed_path",
+            )
     else:
-        return get_current_user_fn()
+        return _log_resolved_sender(get_current_user_fn(), from_branch, "detected_from_caller_env")
 
 
 def send_to_broadcast(

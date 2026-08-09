@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create.py
 # Description: Email File Creation Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-08-07
 # =============================================
 
 """
@@ -16,6 +16,7 @@ Independent handler - no module dependencies.
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
@@ -77,8 +78,14 @@ def create_email_file(
     # Append standard footer to message
     message_with_footer = _get_append_footer()(message)
 
-    # Create email data structure
+    # Create email data structure.
+    # `id` makes the sent record referenceable: files written here are timestamp-named
+    # and carried no id, so `drone @ai_mail sent` rendered every outbound message as
+    # [????????] — visible but impossible to cite. Only reply-written files had one.
+    # This id identifies the SENT record; each delivery mints its own inbox id, since
+    # one sent record can fan out to many recipients on a broadcast.
     email_data = {
+        "id": str(uuid.uuid4())[:8],
         "from": user_info["email_address"],
         "from_name": user_info["display_name"],
         "to": to_branch,
