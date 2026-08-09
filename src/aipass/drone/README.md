@@ -161,7 +161,7 @@ drone/
 │   ├── handlers/                  # Implementation details
 │   │   ├── executor.py            # Safe subprocess execution (timeout, no shell)
 │   │   ├── exceptions.py          # Exception hierarchy (10 exception types)
-│   │   ├── router_handler.py      # Routing implementation + caller detection
+│   │   ├── router_handler.py      # Routing implementation + caller identity resolution
 │   │   ├── registry_handler.py    # Registry file ops + dual registry lookup
 │   │   ├── discovery_handler.py   # Discovery implementation + help parsing
 │   │   ├── module_registry_handler.py  # Module loading (internal + external)
@@ -208,7 +208,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 859 tests across 23 test files
+└── tests/                         # 986 tests across 25 test files
 ```
 
 ### Routing Flow
@@ -230,6 +230,28 @@ Drone routes to two kinds of modules:
 | External | `seedgo`, `cli`, `spawn` | `generic_adapter.capture_main()` via `routing_config.json` |
 
 External modules are declared in `apps/handlers/routing_config.json` with entry points, descriptions, and versions.
+
+### Caller Identity
+
+Every routed command is attributed to a caller, stamped into `AIPASS_CALLER_BRANCH` and the `[CALLER:X]` log tag. `resolve_caller_identity()` in `router_handler.py` weighs two signals:
+
+| Signal | Question it answers | Precedence |
+|--------|--------------------|------------|
+| `AIPASS_BRANCH_NAME` | Who this process **is** (assigned at spawn) | Wins |
+| cwd `.trinity/passport.json` | Who lives **where** the process stands (inferred) | Fallback |
+| cwd `*_REGISTRY.json` | Which **project** the process is in — never a citizen | Last resort |
+
+Assigned identity beats location: an agent that cds into another branch is still itself. Nothing here grants authority — git's owner tier reads passports directly.
+
+**Log severity is chosen by what the outcome means, not by how unusual it looks:**
+
+| Situation | Level | Why |
+|-----------|-------|-----|
+| Assigned identity vs a **passport** naming someone else | `WARNING` | Two citizens claim one process — genuinely abnormal, stays loud |
+| Assigned identity while standing in a **project** root | `INFO` | Not a conflict. A project name is location, not a rival claim of identity — the ordinary shape of every long-lived service |
+| No passport and no registry found | `INFO` | An anonymous caller is a correct outcome. Attribution reads `unknown`; whoever refuses work for want of an identity owns the page |
+
+Identity messages are logged **once per process per signature**. Neither signal can change under a running process, so a repeat restates the first. Suppression is per-process only, so a real conflict recurring across separate invocations still accumulates and still escalates. The per-call `[CALLER:X]` tag and stamp are never suppressed — every call stays individually attributable.
 
 ### Git Access Tiers
 
@@ -346,7 +368,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-807 tests across 22 test files, covering all layers:
+986 tests across 25 test files, covering all layers:
 
 | Area | Files | Tests |
 |------|-------|-------|
@@ -365,12 +387,13 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 ## Known Issues
 
 - `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
+- `reset_identity_log_dedupe()` in `router_handler.py` has no production caller by design — it clears process-lifetime state for the test suite (an autouse conftest fixture) and for long-lived hosts embedding drone as a library. Not bypassed in seedgo: a file-level bypass would blind the detector to real findings in the same file
 - Pyright warns about `json` package name shadowing stdlib — works at runtime
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 99% | **Tests:** 859 pass, 4 skip | **Last Updated:** 2026-07-02
+**Seedgo:** 99% | **Tests:** 981 pass, 5 skip | **Last Updated:** 2026-08-08
 
 ---
 [← Back to AIPass](../../../README.md)

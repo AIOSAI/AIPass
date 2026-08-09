@@ -108,7 +108,7 @@ def route_command(
     # stamped on the work.
     caller = resolve_caller_identity(Path.cwd())
     # UNKNOWN, not an empty tag: an omitted caller reads as "not applicable" and
-    # hides the gap. detect_caller_branch_name already logged the cwd.
+    # hides the gap. detect_caller_signal already logged the cwd.
     caller_tag = f" [CALLER:{caller.upper()}]" if caller else " [CALLER:UNKNOWN]"
     logger.info(
         "Routing @%s%s → %s %s (timeout=%ds)",

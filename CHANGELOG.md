@@ -11,6 +11,27 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(drone)** — caller-identity warnings were a category error reported
+twice per call, fixed at source (router_handler 1.1.0, by @drone). The
+new escalation digest lane's first two catches named this module; the
+real bug was deeper than the digest saw. Identity resolution ran twice
+per route, doubling every log line — and the "identity conflict" warning
+cited a passport at the repo root that has never existed ('aipass' was
+the registry-fallback *project name* arriving indistinguishable from a
+passport identity; 103 of 105 logged conflicts were that shape).
+Detection now returns provenance (passport vs project), messages say
+what is actually true, and severity follows meaning: a real
+two-citizens conflict stays a loud WARNING, an assigned identity
+running at a project root is INFO, an anonymous caller is INFO (a
+correct outcome, not a fault). Repeated explanations dedupe once per
+process — per-process only, so real conflicts recurring across
+invocations still reach the digest, test-pinned. +10 tests (981),
+canary red on all three reverts, live-proven: the exact shapes that
+tripped both digests now produce zero warnings in 10 calls while the
+real-conflict case still warns. First full digest-lane loop closed:
+digest → owner fix → signature quiet. Suite + lint re-verified by
+devpulse.
+
 **fix(prax)** — every operator-facing monitor line rewritten in plain
 language that names its subsystem (40 sites across 10 monitoring files,
 by @prax; Patrick ruling). The line that triggered it — `Dropping
