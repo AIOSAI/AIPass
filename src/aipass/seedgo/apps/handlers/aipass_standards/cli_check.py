@@ -13,6 +13,7 @@ Validates module compliance with AIPass CLI standards.
 Checks console.print() usage, CLI service imports, handler separation.
 """
 
+import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -492,6 +493,21 @@ def check_help_flag(content: str) -> Optional[Dict]:
     }
 
 
+def _module_level_function_names(content: str) -> set:
+    """Return names of functions defined at MODULE level (not methods on a class).
+
+    Walking tree.body rather than ast.walk() is the whole point: a nested def or
+    a class method is not a module-level display helper.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as e:
+        logger.info("Skipping display-function scan: SyntaxError during parse: %s", e)
+        return set()
+
+    return {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
 def check_duplicate_display_functions(content: str, module_path: str = "") -> Optional[Dict]:
     """
     Check for duplicate display functions that should use CLI service instead.
@@ -511,12 +527,14 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     # Display functions that CLI service provides
     cli_display_functions = ["header", "success", "error", "warning", "info"]
 
-    # Look for local function definitions that duplicate CLI service
-    duplicates_found = []
-    for func_name in cli_display_functions:
-        # Check for "def header(" pattern
-        if f"def {func_name}(" in content:
-            duplicates_found.append(func_name)
+    # Look for local function definitions that duplicate CLI service.
+    # Module-level defs only: a substring scan cannot tell a display helper from
+    # a logger METHOD (class TrailLogger: def error(self, ...)), and a class that
+    # exposes .error/.warning/.info is the fleet's logger API, not a duplicate of
+    # cli.display. Parsing also keeps "def error(" inside a string or comment
+    # from reading as a definition.
+    defined_at_module_level = _module_level_function_names(content)
+    duplicates_found = [name for name in cli_display_functions if name in defined_at_module_level]
 
     if duplicates_found:
         return {

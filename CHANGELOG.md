@@ -11,6 +11,36 @@ PyPI version — not the changelog header.
 
 ## [2026-08-08] — post-v2.7.14 train (in progress)
 
+**fix(seedgo)** — handlers checker compared packages, not branches (by
+@seedgo, on @trigger's reproduction; the last CI seedgo-gate blocker).
+Ruling: the published text was the intent — the standard says twice
+that same-branch handler imports are ALLOWED across packages, and
+check_handler_independence() rejected its own shipped ALLOWED example;
+root-level handler files could never pass at all (own_package resolved
+to the filename, exempting an impossible string). Rewritten
+branch-level: cross-BRANCH handler imports forbidden, same-branch
+free; unrecognizable layout returns an explicit "rule not evaluated"
+pass instead of flagging everything. The old json_handler exemption
+removed as a real hole (any branch could import any other's
+json_handler past the DPLAN-0246 encapsulation ruling; fleet-grepped —
+all 4 occurrences comments/strings, AST-invisible). No-regression
+MEASURED, not asserted: all 623 handler files scored under old and new
+logic — 0 newly failing, 142 newly passing across 12 branches (trigger
+reported it but carried only 6; the false positive was quietly taxing
+the whole fleet). Bonus from trigger's third report: cli_check's
+duplicate-display scan was substring-based and read TrailLogger's
+.error() METHOD as a duplicate of cli.display — AST rewrite,
+module-level defs only, canaried 8 cases both directions; trigger can
+drop its cli_flags bypass. Held deliberately: the is_bypassed
+line=None fall-through fix (3 lines, written and MEASURED: 37 files
+across 6 branches would go red from 60 stale line-scoped rules that
+have been silently whole-file bypasses — every checker's top-of-file
+gate matches them, making all 21 per-line call sites dead code) — a
+correct fix with a wrong rollout is still red CI; staged options
+queued for Patrick. 1359 passed (+6), fleet 17/17 Handlers 100%,
+trigger confirmed 100%. Re-verified by devpulse: suite + trigger and
+seedgo audits both 100%.
+
 **fix(trigger)** — escalation-lane audit flags: four resolved at the
 root, the fifth raised as a checker bug instead of routed around (by
 @trigger). silent_catch + error_handling were one finding in two hats:

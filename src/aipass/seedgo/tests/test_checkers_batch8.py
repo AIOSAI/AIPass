@@ -87,7 +87,7 @@ def test_handler_independence_clean(tmp_path):
         "from aipass.seedgo.apps.handlers.json import json_handler\n"
         "\ndef do_work():\n    return True\n"
     )
-    handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "clean.py")
+    handler_path = str(tmp_path / "seedgo" / "apps" / "handlers" / "audit" / "clean.py")
 
     from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
         check_handler_independence,
@@ -97,14 +97,14 @@ def test_handler_independence_clean(tmp_path):
     assert result["passed"] is True
 
 
-def test_handler_independence_cross_import(tmp_path):
-    """Handler importing from another handler package fails."""
+def test_handler_independence_cross_branch_import_fails():
+    """Another BRANCH's handlers are private - importing them is the violation."""
     content = (
-        '"""Cross handler import."""\n'
-        "from aipass.seedgo.apps.handlers.error import error_handler\n"
+        '"""Cross branch import."""\n'
+        "from aipass.memory.apps.handlers.error import error_handler\n"
         "\ndef do_work():\n    return True\n"
     )
-    handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "cross.py")
+    handler_path = "src/aipass/seedgo/apps/handlers/audit/cross.py"
 
     from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
         check_handler_independence,
@@ -112,7 +112,7 @@ def test_handler_independence_cross_import(tmp_path):
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is False
-    assert "Cross-handler imports" in result["message"]
+    assert "Cross-branch handler imports" in result["message"]
 
 
 def test_handler_independence_same_package(tmp_path):
@@ -122,7 +122,7 @@ def test_handler_independence_same_package(tmp_path):
         "from aipass.seedgo.apps.handlers.audit import audit_helper\n"
         "\ndef do_work():\n    return True\n"
     )
-    handler_path = str(tmp_path / "apps" / "handlers" / "audit" / "same.py")
+    handler_path = str(tmp_path / "seedgo" / "apps" / "handlers" / "audit" / "same.py")
 
     from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
         check_handler_independence,
@@ -130,6 +130,101 @@ def test_handler_independence_same_package(tmp_path):
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
+
+
+# --- Same-branch imports are ALLOWED, even across packages (published standard) ---
+# The checker used to compare PACKAGES, which rejected the standard's own
+# documented example and made root-level handler files impossible to pass.
+
+
+def test_handler_independence_allows_the_standards_own_documented_example():
+    """`drone @seedgo standard handlers` prints this exact import as ALLOWED."""
+    content = "from aipass.flow.apps.handlers.registry.load import load_registry\n"
+    handler_path = "src/aipass/flow/apps/handlers/plan/create.py"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is True, "Checker rejects the standard's own ALLOWED example"
+
+
+def test_handler_independence_root_level_file_can_pass():
+    """A handler at the handlers/ ROOT is judged by branch, not by its filename.
+
+    own_package used to become 'escalation.py', so the exemption tested for the
+    string 'handlers.escalation.py' - which no import can ever contain. Root-level
+    handler files could not pass whatever they imported.
+    """
+    content = (
+        "from aipass.trigger.apps.handlers.error_registry import normalize_message\n"
+        "from aipass.trigger.apps.handlers import medic_state\n"
+    )
+    handler_path = "src/aipass/trigger/apps/handlers/escalation.py"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is True
+
+
+def test_handler_independence_same_branch_across_packages():
+    """Sibling packages inside one branch import each other freely."""
+    content = "from aipass.trigger.apps.handlers.medic.state import load\n"
+    handler_path = "src/aipass/trigger/apps/handlers/escalation/runner.py"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is True
+
+
+def test_handler_independence_cross_branch_json_handler_is_not_exempt():
+    """The default-handler exemption must not smuggle a cross-branch import in.
+
+    json_handler is per-branch and dependency-free; reaching for another
+    branch's copy is exactly the coupling the standard blocks.
+    """
+    content = "from aipass.memory.apps.handlers.json import json_handler\n"
+    handler_path = "src/aipass/trigger/apps/handlers/escalation.py"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is False
+
+
+def test_handler_independence_absolute_path_resolves_branch():
+    """The PostToolUse hook passes absolute paths - branch detection must survive it."""
+    content = "from aipass.trigger.apps.handlers.error_registry import n\n"
+    handler_path = "/home/user/Projects/AIPass/src/aipass/trigger/apps/handlers/escalation.py"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), handler_path)
+    assert result["passed"] is True
+
+
+def test_handler_independence_unknown_layout_says_so():
+    """A path with no branch is reported as not-evaluated, not silently passed."""
+    content = "from aipass.memory.apps.handlers.error import error_handler\n"
+
+    from aipass.seedgo.apps.handlers.aipass_standards.handlers_check import (
+        check_handler_independence,
+    )
+
+    result = check_handler_independence(content, _lines(content), "/random/path/handler.py")
+    assert result["passed"] is True
+    assert "could not be determined" in result["message"]
 
 
 def test_handler_independence_fstring_guard_text_not_flagged(tmp_path):

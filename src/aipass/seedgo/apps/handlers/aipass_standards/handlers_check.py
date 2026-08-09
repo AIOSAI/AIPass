@@ -160,49 +160,78 @@ def _line_text(lines: List[str], lineno: int, fallback: str) -> str:
     return fallback
 
 
+def _branch_of_path(module_path: str) -> Optional[str]:
+    """Return the branch a file lives in, from the path segment before 'apps'.
+
+    src/aipass/trigger/apps/handlers/escalation.py -> 'trigger'
+    Absolute paths work too: the repo root ('AIPass') never equals 'apps'.
+    """
+    path_parts = Path(module_path).parts
+    for i, part in enumerate(path_parts):
+        if part == "apps" and i > 0:
+            return path_parts[i - 1]
+    return None
+
+
+def _branch_of_import(module: str) -> Optional[str]:
+    """Return the branch an 'apps.handlers' import targets.
+
+    aipass.trigger.apps.handlers.events.error_detected -> 'trigger'
+    Also handles the bare form: aipass.trigger.apps.handlers -> 'trigger'
+    """
+    prefix = module.split(".apps.handlers", 1)[0]
+    parts = prefix.split(".")
+    return parts[-1] if parts and parts[-1] else None
+
+
 def check_handler_independence(content: str, lines: List[str], module_path: str) -> Dict:
     """
-    Check handler independence - no cross-handler imports except defaults
+    Check handler independence - handlers are private to their own branch.
 
-    Rules:
-    - ALLOWED: from aipass.seedgo.apps.handlers.json import json_handler (default handler)
-    - ALLOWED: from .decorators import catch_errors (same package)
-    - FORBIDDEN: from aipass.seedgo.apps.handlers.error import error_handler (cross-handler)
+    The rule is branch-level, matching the published standard:
+    - ALLOWED: same-branch handler imports, EVEN ACROSS PACKAGES
+      (flow/apps/handlers/plan/create.py -> aipass.flow.apps.handlers.registry.load)
+    - ALLOWED: from .decorators import catch_errors (relative, same package)
+    - FORBIDDEN: cross-BRANCH handler imports -- another branch's handlers are
+      private; consume its modules/ instead.
+
+    Comparing packages instead of branches was the old behaviour. It rejected
+    the standard's own documented ALLOWED example, and for a handler sitting at
+    the handlers/ root it compared against the FILENAME, so such files could
+    never pass whatever they imported.
     """
     forbidden_imports = []
 
-    # Detect handler's own package
-    # e.g., src/aipass/seedgo/apps/handlers/standards/cli_check.py -> package is 'standards'
-    path_parts = Path(module_path).parts
-    own_package = None
-    for i, part in enumerate(path_parts):
-        if part == "handlers" and i + 1 < len(path_parts):
-            own_package = path_parts[i + 1]
-            break
+    own_branch = _branch_of_path(module_path)
+    if own_branch is None:
+        # Not a recognisable branch layout -- the same-branch rule is not
+        # evaluable here. Say so rather than flag every import as cross-branch.
+        return {
+            "name": "Handler independence",
+            "passed": True,
+            "message": "Branch could not be determined from path (independence rule not evaluated)",
+        }
 
-    for lineno, module, names in _iter_import_modules(content):
+    for lineno, module, _names in _iter_import_modules(content):
         if "apps.handlers" not in module:
             continue
 
-        # Allowed: Default handlers (json_handler)
-        if module.endswith("handlers.json") and "json_handler" in names:
+        # Allowed: any handler in this branch, whatever package it sits in
+        if _branch_of_import(module) == own_branch:
             continue
 
-        # Allowed: Same package absolute imports
-        if own_package and f"handlers.{own_package}" in module:
-            continue
-
-        # Forbidden: Cross-handler imports
+        # Forbidden: another branch's handlers are not ours to import
         forbidden_imports.append(f"line {lineno}: {_line_text(lines, lineno, module)}")
 
     if forbidden_imports:
         return {
             "name": "Handler independence",
             "passed": False,
-            "message": "Cross-handler imports detected (except defaults): " + "; ".join(forbidden_imports),
+            "message": "Cross-branch handler imports detected (use that branch's modules/ instead): "
+            + "; ".join(forbidden_imports),
         }
 
-    return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-handler imports detected"}
+    return {"name": "Handler independence", "passed": True, "message": "No forbidden cross-branch handler imports"}
 
 
 def check_auto_detection(content: str) -> Optional[Dict]:

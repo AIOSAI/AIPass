@@ -719,6 +719,80 @@ class TestCheckDuplicateDisplayFunctions:
         assert result["passed"] is False
         assert "error" in result["message"]
 
+    # -- Method vs module-level function (reported by @trigger) --------------
+    # The check used to substring-match "def error(" over raw source, so any
+    # class exposing a logger API tripped it.
+
+    def test_logger_class_methods_are_not_display_duplicates(self):
+        """class TrailLogger: def error(...) is a logger API, not a cli.display copy."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        content = (
+            "class TrailLogger:\n"
+            "    def error(self, message, **fields):\n        pass\n"
+            "    def warning(self, message, **fields):\n        pass\n"
+            "    def info(self, message, **fields):\n        pass\n"
+        )
+        result = check_duplicate_display_functions(content, "/trigger/apps/config.py")
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_module_level_duplicate_still_caught_next_to_a_logger_class(self):
+        """Narrowing to module level must not blind the check to a real duplicate."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        content = "class TrailLogger:\n    def info(self, m):\n        pass\n\ndef success(msg):\n    print(msg)\n"
+        result = check_duplicate_display_functions(content, "/trigger/apps/config.py")
+        assert result is not None
+        assert result["passed"] is False
+        assert "success" in result["message"]
+
+    def test_def_inside_string_literal_is_not_a_definition(self):
+        """Help text quoting "def error(" is not a definition."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        content = 'HELP = """\n  def error(msg)\n"""\n'
+        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_nested_def_is_not_module_level(self):
+        """A closure named info() is local, not a module-level display helper."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        content = "def outer():\n    def info(m):\n        pass\n    return info\n"
+        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_async_module_level_duplicate_is_caught(self):
+        """async def error() at module level is still a duplicate."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        result = check_duplicate_display_functions("async def error(m):\n    pass\n", "/seedgo/apps/modules/a.py")
+        assert result is not None
+        assert result["passed"] is False
+
+    def test_unparseable_file_does_not_crash(self):
+        """A syntax error degrades to no-finding rather than raising."""
+        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
+            check_duplicate_display_functions,
+        )
+
+        result = check_duplicate_display_functions("def broken(:\n", "/seedgo/apps/modules/a.py")
+        assert result is not None
+        assert result["passed"] is True
+
     def test_cli_branch_exempt(self):
         """CLI branch is exempt (it defines these functions)."""
         from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
