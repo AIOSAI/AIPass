@@ -23,12 +23,6 @@
       "reason": "This IS the display handler layer. unified_stream.py is the designated terminal output formatter for the monitoring system. console.print() is its core responsibility, not a violation."
     },
     {
-      "file": "apps/handlers/watcher/reporter.py",
-      "standard": "cli",
-      "pattern": "console.print(",
-      "reason": "Display handler for file change reporting. reporter.py formats and renders file change events to terminal using Rich markup. console.print() is its designated purpose."
-    },
-    {
       "file": "apps/handlers/logging/log_watchdog.py",
       "standard": "error_handling",
       "pattern": "logging.getLogger(",
@@ -272,11 +266,6 @@
       "file": "apps/modules/logger.py",
       "standard": "imports",
       "reason": "logger.py IS the prax logger module \u2014 it cannot import itself. 'Prax logger import not found' is expected."
-    },
-    {
-      "file": "apps/modules/agent_status.py",
-      "standard": "imports",
-      "reason": "agent_status.py manages agent status tracking independently of the prax logging pipeline. Uses get_direct_logger() for its own logging needs."
     },
     {
       "file": "apps/modules/monitor.py",

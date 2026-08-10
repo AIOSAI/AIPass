@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Symbolic Dimension Extractor
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-09
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Symbolic Memory Extractor Handler
 v1 (regex): extract_technical_flow, extract_emotional_journey,
     extract_collaboration_patterns, extract_key_learnings,
     extract_context_triggers, extract_symbolic_dimensions, analyze_conversation
-v2 (LLM):  extract_fragments_llm, analyze_conversation_llm
+v2 (LLM):  extract_fragments_llm
 """
 
 import json
@@ -441,6 +441,16 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
                 all_fragments.append(frag)
 
     all_failed = len(chunks) > 0 and chunks_succeeded == 0 and len(chunk_errors) > 0
+    json_handler.log_operation(
+        "symbolic_extract",
+        {
+            "fragments": len(all_fragments),
+            "messages": len(chat_history),
+            "chunks_succeeded": chunks_succeeded,
+            "chunks_failed": len(chunk_errors),
+            "success": not all_failed,
+        },
+    )
     return {
         "success": not all_failed,
         "fragments": all_fragments,
@@ -450,33 +460,3 @@ def extract_fragments_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         "error": "; ".join(chunk_errors) if all_failed else None,
         "chunk_errors": chunk_errors,
     }
-
-
-def analyze_conversation_llm(chat_history: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Full analysis: LLM fragments + regex metadata merged.
-    Returns status dict with 'fragments', 'metadata', 'message_count'.
-    """
-    if not chat_history:
-        return {"success": True, "fragments": [], "metadata": {}, "message_count": 0, "error": None}
-    llm = extract_fragments_llm(chat_history)
-    reg = analyze_conversation(chat_history)
-    result = {
-        "success": llm.get("success", False),
-        "fragments": llm.get("fragments", []),
-        "metadata": {
-            "timestamp": reg.get("metadata", {}).get("timestamp", datetime.now().isoformat()),
-            "total_chars": reg.get("metadata", {}).get("total_chars", 0),
-            "total_words": reg.get("metadata", {}).get("total_words", 0),
-            "depth": reg.get("metadata", {}).get("depth", "unknown"),
-            "dimensions": reg.get("dimensions", {}),
-            "chunk_count": llm.get("chunk_count", 0),
-        },
-        "message_count": reg.get("message_count", len(chat_history)),
-        "error": llm.get("error"),
-    }
-    json_handler.log_operation(
-        "symbolic_extract",
-        {"fragments": len(result["fragments"]), "messages": result["message_count"], "success": True},
-    )
-    return result

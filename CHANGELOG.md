@@ -9,6 +9,19 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+**chore(memory/seedgo/prax)** — bypass-hygiene train (by @memory, @seedgo,
+@prax; FPLAN-0382 follow-through). Stale bypass.json entries pruned in
+memory and prax after their underlying causes were fixed; @memory's
+symbolic extractor drops the caller-less `analyze_conversation_llm` v2
+twin its bypass had flagged pending-deletion, with test_symbolic_extras
+reshaped to the surviving surface; @seedgo's inert/audit_display refined
+with new test_bypass and test_coverage_audit coverage. 237 touched-file
+tests green at commit time.
+
+---
+
 ## [2026-08-09] — v2.7.15: scope-aware standards, streamer loop kill, Windows tie data-loss fix, aipass read train
 
 **feat(aipass)** — `aipass read` + version truth + Telegram readiness at

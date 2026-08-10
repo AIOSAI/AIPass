@@ -663,6 +663,61 @@ def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
     assert inert.check_branch_info(str(tmp_path)) == []
 
 
+# Out-of-scope rules must be NAMED, not only counted (@prax, mail 83190864):
+# a count alone cannot be acted on, so the branch rationally deletes nothing.
+
+
+def _write_bypass(tmp_path, rules):
+    import json
+
+    (tmp_path / ".seedgo").mkdir()
+    (tmp_path / ".seedgo" / "bypass.json").write_text(json.dumps({"bypass": rules}), encoding="utf-8")
+
+
+def test_out_of_scope_rules_are_named_and_grouped_by_standard(tmp_path):
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    _write_bypass(
+        tmp_path,
+        [
+            {"file": "tests/test_a.py", "standard": "architecture", "reason": "r"},
+            {"file": "tests/test_b.py", "standard": "architecture", "reason": "r"},
+            {"file": "tests/test_c.py", "standard": "documentation", "reason": "r"},
+        ],
+    )
+
+    lines = inert.check_branch_info(str(tmp_path))
+
+    assert "3 bypass rules now suppress nothing" in lines[0]
+    # Every file is recoverable from the output -- the whole point of the ask.
+    assert lines[1] == "  architecture (2): tests/test_a.py, tests/test_b.py"
+    assert lines[2] == "  documentation (1): tests/test_c.py"
+
+
+def test_out_of_scope_listing_is_not_capped(tmp_path):
+    """A silent cap would rebuild the same unactionable count one layer down."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    _write_bypass(
+        tmp_path, [{"file": f"tests/test_{n}.py", "standard": "architecture", "reason": "r"} for n in range(12)]
+    )
+
+    lines = inert.check_branch_info(str(tmp_path))
+
+    assert "12 bypass rules now suppress nothing" in lines[0]
+    for n in range(12):
+        assert f"tests/test_{n}.py" in lines[1]
+
+
+def test_in_scope_rules_are_never_listed_as_out_of_scope(tmp_path):
+    """Negative direction: a live rule on production code must stay silent."""
+    from aipass.seedgo.apps.handlers.bypass import inert
+
+    _write_bypass(tmp_path, [{"file": "apps/x.py", "standard": "architecture", "reason": "r"}])
+
+    assert inert.check_branch_info(str(tmp_path)) == []
+
+
 # The scope map must read POSITIONAL scope args, not just keywords (FPLAN-0384)
 
 

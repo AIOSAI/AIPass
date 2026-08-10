@@ -578,12 +578,6 @@
       "reason": "extract_fragments_llm() has nested JSON parsing with multiple fallback strategies."
     },
     {
-      "file": "apps/handlers/symbolic/extractor.py",
-      "standard": "unused_function",
-      "functions": ["analyze_conversation_llm"],
-      "reason": "PENDING DELETION, awaiting @devpulse go-ahead (FPLAN-0382 wave 1 reply, 2026-08-09). Documented v2 counterpart of analyze_conversation, but it has NO in-tree caller: the production LLM path calls extract_fragments_llm directly (apps/modules/symbolic.py:308), and unlike its v1 twin it is neither re-exported from apps/handlers/symbolic/__init__.py nor wrapped in apps/modules/symbolic.py. Tests only. The old reason ('called conditionally when API key is available') was false."
-    },
-    {
       "file": "tests/test_vector.py",
       "standard": "architecture",
       "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
