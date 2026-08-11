@@ -29,6 +29,17 @@ steady-state 1.73% → 0.27% per handler; synthetic-lock watch woke next tick
 on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 462
 green.
 
+**fix(devpulse)** — the bracket sweep @prax requested, run on devpulse's own
+surfaces (night shift FPLAN-0393): `drone @devpulse --help` was silently
+losing its `[args...]` usage placeholder and `watchdog --help` its optional
+`[command]` — same Rich markup-eating class as the prax fix below. Both
+escaped; devpulse gains its own rendered-output canary suite
+(test_help_markup.py, 7 tests through a REAL Rich console) covering the
+help surfaces plus the watchdog status/cancel `[handle]` prefixes, with a
+control test documenting why `[--timeout SECONDS]` never needed escaping
+(dash-leading tags are not valid Rich markup). Compass/feedback surfaces
+audited clean.
+
 **fix(prax)** — Rich markup no longer eats literal `[bracketed]` text on
 prax's console surfaces (by @prax). Unescaped `[word]` is silently consumed
 as a style tag — `monitor run [branches]` rendered as `monitor run` with no
