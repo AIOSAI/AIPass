@@ -501,3 +501,157 @@ class TestReplacePlaceholders:
         assert result["a"]["b"][0]["c"] == "NEXUS_deep"
         assert result["a"]["b"][1] == "NEXUS_list"
         assert result["a"]["d"] == 99
+
+
+# =============================================
+# Debug level gating (end-to-end, real files)
+# =============================================
+
+
+def _external_logger(setup, tmp_path, module_name, env=None, config=None):
+    """Build a real logger whose two tiers both land inside tmp_path.
+
+    Reuses the external-project routing path so both the system tier and the
+    local tier write to files under tmp_path that the test can read back.
+
+    Returns:
+        Tuple of (logger, system_tier_log_path, local_tier_log_path).
+    """
+    project_dir = tmp_path / "Proj"
+    project_dir.mkdir(exist_ok=True)
+    (project_dir / ".git").mkdir(exist_ok=True)
+    fake_module = str(project_dir / f"{module_name}.py")
+    env_patch = {"AIPASS_BRANCH_NAME": "", "AIPASS_CALLER_CWD": ""}
+    env_patch.update(env or {})
+
+    stack = [
+        patch.object(setup, "detect_external_project", return_value=("proj", project_dir)),
+        patch.object(setup, "detect_branch_from_path", return_value=None),
+        patch.dict("os.environ", env_patch),
+    ]
+    if config is not None:
+        stack.append(patch.object(setup, "load_log_config", return_value=config))
+
+    with stack[0], stack[1], stack[2]:
+        if config is not None:
+            with stack[3]:
+                setup._captured_loggers.clear()
+                logger = setup.setup_individual_logger(module_name, caller_path=fake_module)
+        else:
+            setup._captured_loggers.clear()
+            logger = setup.setup_individual_logger(module_name, caller_path=fake_module)
+
+    return (
+        logger,
+        project_dir / "system_logs" / f"proj_{module_name}.log",
+        project_dir / "logs" / f"{module_name}.log",
+    )
+
+
+def _tiered_config(system_level, local_level):
+    """Config dict with an explicit log_level on each tier."""
+    return {
+        "log_format": "%(levelname)s | %(message)s",
+        "date_format": "%Y-%m-%d %H:%M:%S",
+        "system_logs": {"max_lines": 1000, "backup_count": 3, "log_level": system_level},
+        "local_logs": {"max_lines": 250, "backup_count": 3, "log_level": local_level},
+    }
+
+
+class TestDebugLevelGating:
+    """End-to-end tests for debug() — asserts on real log file contents.
+
+    Every test logs an INFO line alongside the DEBUG line. Without that
+    control, an absent debug marker proves nothing: a broken logger and a
+    correctly-gated one produce the same empty file.
+    """
+
+    def test_debug_is_silent_at_default_level(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Default INFO: debug() reaches no file, while info() reaches both."""
+        from aipass.prax.apps.handlers.logging import setup
+
+        monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
+        logger, sys_log, local_log = _external_logger(setup, tmp_path, "quiet_mod")
+
+        logger.debug("DEBUGMARK_quiet")
+        logger.info("INFOMARK_quiet")
+
+        assert "INFOMARK_quiet" in sys_log.read_text(encoding="utf-8")
+        assert "INFOMARK_quiet" in local_log.read_text(encoding="utf-8")
+        assert "DEBUGMARK_quiet" not in sys_log.read_text(encoding="utf-8")
+        assert "DEBUGMARK_quiet" not in local_log.read_text(encoding="utf-8")
+
+    def test_env_var_lets_debug_reach_both_tiers(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """AIPASS_LOG_LEVEL=DEBUG is the on-demand verbose trail."""
+        from aipass.prax.apps.handlers.logging import setup
+
+        logger, sys_log, local_log = _external_logger(
+            setup, tmp_path, "loud_mod", env={"AIPASS_LOG_LEVEL": "DEBUG"}
+        )
+
+        logger.debug("DEBUGMARK_loud")
+        logger.info("INFOMARK_loud")
+
+        assert "DEBUGMARK_loud" in sys_log.read_text(encoding="utf-8")
+        assert "DEBUGMARK_loud" in local_log.read_text(encoding="utf-8")
+        assert "INFOMARK_loud" in sys_log.read_text(encoding="utf-8")
+
+    def test_config_log_level_is_read(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """The log_level config key reaches a handler — it was dead before."""
+        from aipass.prax.apps.handlers.logging import setup
+
+        monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
+        logger, sys_log, _local = _external_logger(
+            setup, tmp_path, "cfg_mod", config=_tiered_config("DEBUG", "DEBUG")
+        )
+
+        logger.debug("DEBUGMARK_cfg")
+
+        assert "DEBUGMARK_cfg" in sys_log.read_text(encoding="utf-8")
+
+    def test_tiers_gate_independently(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Verbose branch-local file, quiet central aggregation."""
+        from aipass.prax.apps.handlers.logging import setup
+
+        monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
+        logger, sys_log, local_log = _external_logger(
+            setup, tmp_path, "split_mod", config=_tiered_config("INFO", "DEBUG")
+        )
+
+        logger.debug("DEBUGMARK_split")
+        logger.info("INFOMARK_split")
+
+        assert "DEBUGMARK_split" in local_log.read_text(encoding="utf-8")
+        assert "DEBUGMARK_split" not in sys_log.read_text(encoding="utf-8")
+        assert "INFOMARK_split" in sys_log.read_text(encoding="utf-8")
+        assert "INFOMARK_split" in local_log.read_text(encoding="utf-8")
+
+    def test_logger_gate_opens_for_the_most_permissive_tier(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """The logger's own level must not be stricter than either handler.
+
+        The logger gate runs before any handler gate, so a logger left at INFO
+        would drop DEBUG records before the DEBUG-level handler ever saw them.
+        """
+        from aipass.prax.apps.handlers.logging import setup
+
+        monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
+        logger, _sys_log, _local_log = _external_logger(
+            setup, tmp_path, "gate_mod", config=_tiered_config("ERROR", "DEBUG")
+        )
+
+        assert logger.level == 10
+
+    def test_invalid_level_still_logs_at_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """A typo in the config must not silence the logs."""
+        from aipass.prax.apps.handlers.logging import setup
+
+        monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
+        logger, sys_log, _local = _external_logger(
+            setup, tmp_path, "typo_mod", config=_tiered_config("VERBOSE", "VERBOSE")
+        )
+
+        logger.info("INFOMARK_typo")
+        logger.debug("DEBUGMARK_typo")
+
+        assert "INFOMARK_typo" in sys_log.read_text(encoding="utf-8")
+        assert "DEBUGMARK_typo" not in sys_log.read_text(encoding="utf-8")

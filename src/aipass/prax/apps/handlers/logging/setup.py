@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-10
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -15,8 +15,6 @@ Handles dual logging (system-wide + branch-local) and terminal output.
 
 import logging
 import threading
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Dict, Optional
 from logging.handlers import RotatingFileHandler
@@ -28,6 +26,8 @@ from aipass.prax.apps.handlers.config.load import (
     DEFAULT_LOG_LEVEL,
     load_log_config,
     lines_to_bytes,
+    level_to_int,
+    resolve_log_level,
 )
 
 # Import introspection functions
@@ -126,6 +126,14 @@ def setup_individual_logger(
     # Load config-driven limits
     log_config = load_log_config()
 
+    # Per-tier levels: the two log tiers can be quieted independently (verbose
+    # branch-local file, quiet central aggregation). The logger's own gate runs
+    # BEFORE any handler's, so it has to sit at the most permissive of the two
+    # or that tier's records are dropped before its handler ever sees them.
+    system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
+    local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
+    logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
+
     # Use pre-resolved branch if provided, otherwise detect from stack
     import os
 
@@ -167,6 +175,7 @@ def setup_individual_logger(
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
         system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
         system_handler.setFormatter(formatter)
+        system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
         # HANDLER 2: Project local log
@@ -175,11 +184,13 @@ def setup_individual_logger(
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
         local_handler = _safe_rotating_handler(module_log_file, local_max_bytes, local_limits["backup_count"])
         local_handler.setFormatter(formatter)
+        local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
         if _system_logger:
             _system_logger.info(
-                f"Logger created for {module_name} → external project '{project_name}': {system_log_file}, {module_log_file}"
+                f"Logger created for {module_name} → external project '{project_name}': "
+                f"{system_log_file}, {module_log_file}"
             )
     else:
         # INTERNAL: route to AIPass system_logs + branch-local logs
@@ -189,6 +200,7 @@ def setup_individual_logger(
         system_max_bytes = lines_to_bytes(system_limits["max_lines"])
         system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
         system_handler.setFormatter(formatter)
+        system_handler.setLevel(system_level)
         logger.addHandler(system_handler)
 
         # HANDLER 2: Branch-root local log (two-tier: system_logs/ + branch logs/)
@@ -198,11 +210,14 @@ def setup_individual_logger(
         local_max_bytes = lines_to_bytes(local_limits["max_lines"])
         local_handler = _safe_rotating_handler(module_log_file, local_max_bytes, local_limits["backup_count"])
         local_handler.setFormatter(formatter)
+        local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
         if _system_logger:
             _system_logger.info(
-                f"Logger created for {module_name} → system: {system_log_file} ({system_limits['max_lines']} lines), local: {module_log_file} ({local_limits['max_lines']} lines)"
+                f"Logger created for {module_name} → system: {system_log_file} "
+                f"({system_limits['max_lines']} lines), local: {module_log_file} "
+                f"({local_limits['max_lines']} lines)"
             )
 
     # HANDLER 3: Terminal output (if enabled)
@@ -236,8 +251,13 @@ def setup_system_logger() -> logging.Logger:
 
     # Create prax_logger's own logger
     _system_logger = logging.getLogger("prax_system_logger")
-    _system_logger.setLevel(DEFAULT_LOG_LEVEL)
     _system_logger.handlers.clear()
+
+    # Per-tier levels — see setup_individual_logger for why the logger sits at
+    # the most permissive of the two.
+    system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
+    local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
+    _system_logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
     # Formatter shared by both handlers
     log_config_fmt = logging.Formatter(log_config["log_format"], log_config["date_format"])
@@ -248,6 +268,7 @@ def setup_system_logger() -> logging.Logger:
     system_max_bytes = lines_to_bytes(system_limits["max_lines"])
     system_handler = _safe_rotating_handler(system_log_file, system_max_bytes, system_limits["backup_count"])
     system_handler.setFormatter(log_config_fmt)
+    system_handler.setLevel(system_level)
     _system_logger.addHandler(system_handler)
 
     # HANDLER 2: Module-local log (local debugging)
@@ -256,6 +277,7 @@ def setup_system_logger() -> logging.Logger:
     local_max_bytes = lines_to_bytes(local_limits["max_lines"])
     local_handler = _safe_rotating_handler(local_log_file, local_max_bytes, local_limits["backup_count"])
     local_handler.setFormatter(log_config_fmt)
+    local_handler.setLevel(local_level)
     _system_logger.addHandler(local_handler)
 
     # Log system logger creation

@@ -4,8 +4,8 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.0.0
-**Last Updated:** 2026-07-14
+**Version:** 2.1.0
+**Last Updated:** 2026-08-11
 
 ---
 
@@ -119,6 +119,33 @@ logger.info("Processing started")
 
 This works from any branch. Prax detects the caller via stack introspection and routes to the correct log file. If prax fails to import, a NullLogger fallback prevents crashes.
 
+Four levels are available — `debug()`, `info()`, `warning()`, `error()`.
+
+### Log levels
+
+`debug()` is silent by default. Nothing it logs reaches a file until the level is
+lowered, which is the point: use it for the verbose trail you want available on
+demand but absent from normal operation.
+
+```bash
+AIPASS_LOG_LEVEL=DEBUG drone @yourbranch yourcommand   # verbose run
+```
+
+The level can also be set per tier in `prax_json/prax_logger_config.json`, so a
+branch can keep a verbose local log while the central aggregation stays quiet:
+
+```json
+{"config": {"system_logs": {"log_level": "INFO"}, "local_logs": {"log_level": "DEBUG"}}}
+```
+
+Precedence is `AIPASS_LOG_LEVEL` → the tier's `log_level` → `INFO`. An
+unrecognised value warns once and falls back to `INFO` rather than silently
+picking a level nobody asked for.
+
+**Levels bind when a logger is created, not per call.** A long-running process
+(Mission Control, a daemon, a bot) picks up a level change on restart — setting
+the env var mid-flight does nothing for loggers that already exist.
+
 ### Pattern B — Direct Logger (for prax internals)
 
 ```python
@@ -166,7 +193,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1028 tests across 20 files
+└── tests/                             # 1133 tests across 28 files
 ```
 
 ### Design Pattern
@@ -195,30 +222,38 @@ drone @prax monitor run
 
 ## Tests
 
-1028 tests across 20 files, covering all major components:
+1133 tests across 28 files, covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
 | test_filesystem_handler.py | 142 | Multi-CLI adapters, Codex branch detection |
 | test_monitoring_handlers.py | 139 | Branch detector, stream output, event handling |
 | test_operations.py | 99 | Dashboard operations, write-through |
-| test_log_watcher.py | 82 | Log file tailing, agent activity parsing |
-| test_monitor_module.py | 73 | Monitor commands, thread lifecycle (4-thread) |
-| test_logging_handlers.py | 41 | Setup, rotation, introspection, direct logger |
-| test_logging.py | 41 | Core logging system |
-| test_logger_module.py | 40 | Logger init, routing, lifecycle |
+| test_log_watcher.py | 90 | Log file tailing, agent activity parsing |
+| test_monitor_module.py | 66 | Monitor commands, thread lifecycle (4-thread) |
+| test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
+| test_config.py | 61 | Config loading, path resolution, log levels |
+| test_logging_handlers.py | 49 | Setup, rotation, introspection, direct logger |
+| test_logging.py | 47 | Core logging system, debug level gating |
+| test_logger_module.py | 46 | Logger init, routing, lifecycle, NullLogger fallback |
+| test_event_queue.py | 40 | Thread-safe event buffering |
 | test_monitoring_filters.py | 39 | Event filtering rules |
-| test_config.py | 38 | Config loading, path resolution |
-| test_event_queue.py | 35 | Thread-safe event buffering |
+| test_commons_feed.py | 28 | Commons live feed, cursors, room filtering |
+| test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
+| test_rate_tracker.py | 27 | Rate tracking, thresholds, persistence, suppression |
 | test_discovery.py | 25 | Module scanning |
+| test_registry.py | 24 | Module registry |
 | test_watcher.py | 23 | File watcher behavior |
-| test_registry.py | 22 | Module registry |
 | test_json_handler.py | 18 | JSON auto-creation |
 | test_central.py | 14 | Central reader |
-| test_devpulse_dashboard_plugin.py | 12 | Dashboard plugin (git, session, dispatch) |
-| test_log_audit.py | 10 | Log audit |
-| test_rate_tracker.py | 21 | Rate tracking, thresholds, persistence, suppression |
+| test_log_audit.py | 13 | Log audit |
+| test_pid_cache.py | 12 | PID resolution cache |
+| test_devpulse_dashboard_plugin.py | 9 | Dashboard plugin (git, session, dispatch) |
+| test_jsonl_writer.py | 9 | JSONL append writer |
+| test_help_markup.py | 8 | Rendered console output (real Rich console) |
 | test_status.py | 8 | Status commands |
+| test_sweep.py | 6 | Log sweep |
+| test_scaffold.py | 1 | Scaffold placeholder (skipped — branch conftest) |
 
 ## Integration Points
 
@@ -244,7 +279,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-07-14*
+*Last Updated: 2026-08-11*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -11,6 +11,25 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(prax)** — SystemLogger.debug(), and the gate that makes it real (by
+@prax, promised follow-through ex-todo #116, morning-wave dispatch).
+debug() alone would have shipped dead: DEFAULT_LOG_LEVEL="INFO" was
+hardcoded at four setLevel sites, and Python's logger-level gate runs
+before any handler's — DirectLogger has carried a debug() since 2026-02-27
+that never emitted a line. The dormant `log_level` config key (declared
+since 2025, loaded, read by nothing) is now read per tier, plus an
+AIPASS_LOG_LEVEL env override; precedence env → tier → INFO, unrecognised
+values warn once and fall through. Logger sits at min() of the two tiers
+so "quiet central, verbose branch-local" actually works (asserted by
+test). Default behaviour unchanged — no config, no env, nothing new in any
+log. Canary-verified both directions + live-probed on the production path;
+every gating test carries an INFO control line (an absent debug marker
+alone proves nothing). 26 new tests, suite 1132 green, audit 100%. Known
+caveat (documented): levels bind at logger creation — long-running
+processes pick up changes on restart. Two fleet rules now contradict
+shipped code ("logger.debug not supported" in @hooks auto_fix +
+@seedgo standards text); @prax dispatched both owners to retire them.
+
 **feat(daemon)** — fleet inbox sweep: unread mail can no longer rot silently
 (by @daemon, FPLAN-0394, morning-wave dispatch; design from devpulse backlog
 ex-todo #119). Daily 09:00 job (own `.daemon/schedule.json`, wake-only →

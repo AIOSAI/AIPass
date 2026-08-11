@@ -557,3 +557,123 @@ class TestLoadIgnorePatternsFromConfig:
 
         result = ip_mod.load_ignore_patterns_from_config()
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
+
+
+# =============================================
+# resolve_log_level / level_to_int
+# =============================================
+
+
+class TestResolveLogLevel:
+    """Tests for resolve_log_level() — the read side of the log_level config key.
+
+    The key was declared in DEFAULT_SYSTEM_LOGS/DEFAULT_LOCAL_LOGS and returned
+    by load_log_config() long before anything applied it, so a config asking
+    for DEBUG silently got INFO.
+    """
+
+    def test_defaults_to_info_when_nothing_configured(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+
+        assert load_mod.resolve_log_level() == "INFO"
+        assert load_mod.resolve_log_level(None) == "INFO"
+
+    def test_honours_configured_level(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+
+        assert load_mod.resolve_log_level("DEBUG") == "DEBUG"
+        assert load_mod.resolve_log_level("WARNING") == "WARNING"
+
+    def test_level_name_is_case_insensitive(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+
+        assert load_mod.resolve_log_level("debug") == "DEBUG"
+        assert load_mod.resolve_log_level("  Warning  ") == "WARNING"
+
+    def test_env_var_overrides_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "DEBUG")
+
+        assert load_mod.resolve_log_level("ERROR") == "DEBUG"
+
+    def test_empty_env_var_is_ignored(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """An exported-but-empty var must not shadow a real config value."""
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "")
+
+        assert load_mod.resolve_log_level("WARNING") == "WARNING"
+
+    def test_numeric_level_passes_through(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+
+        assert load_mod.resolve_log_level(10) == 10
+
+    def test_invalid_value_falls_back_to_default(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """A typo must not silently pick a level nobody asked for."""
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+
+        assert load_mod.resolve_log_level("VERBOSE") == "INFO"
+
+    def test_invalid_value_warns(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+        load_mod._bad_level_warned.clear()
+        warnings = []
+        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+
+        load_mod.resolve_log_level("LOUD")
+
+        assert len(warnings) == 1
+        assert "LOUD" in warnings[0]
+
+    def test_invalid_value_warns_once_per_value(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """Level resolution runs on every logger init fleet-wide — one typo, one warning."""
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.delenv(load_mod.LOG_LEVEL_ENV, raising=False)
+        load_mod._bad_level_warned.clear()
+        warnings = []
+        monkeypatch.setattr(load_mod.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+
+        for _ in range(5):
+            load_mod.resolve_log_level("LOUD")
+
+        assert len(warnings) == 1
+
+    def test_bad_env_still_falls_through_to_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+        monkeypatch.setenv(load_mod.LOG_LEVEL_ENV, "NOPE")
+        load_mod._bad_level_warned.clear()
+
+        assert load_mod.resolve_log_level("DEBUG") == "DEBUG"
+
+
+class TestLevelToInt:
+    """Tests for level_to_int() — used to pick the permissive tier."""
+
+    def test_converts_level_names(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+
+        assert load_mod.level_to_int("DEBUG") == 10
+        assert load_mod.level_to_int("INFO") == 20
+        assert load_mod.level_to_int("WARNING") == 30
+
+    def test_passes_ints_through(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+
+        assert load_mod.level_to_int(10) == 10
+
+    def test_unknown_name_reads_as_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+
+        assert load_mod.level_to_int("NONSENSE") == 20
+
+    def test_debug_is_more_permissive_than_info(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """min() over the two tiers must pick DEBUG — the property setup.py relies on."""
+        load_mod = _fresh_import_load(monkeypatch, tmp_path)
+
+        assert min(load_mod.level_to_int("DEBUG"), load_mod.level_to_int("INFO")) == 10
