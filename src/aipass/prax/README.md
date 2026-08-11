@@ -43,6 +43,9 @@ drone @prax --version                    # Version string
 drone @prax monitor                      # Show monitor architecture
 drone @prax monitor run                  # Launch Mission Control (all branches)
 drone @prax monitor run seedgo,cli       # Monitor specific branches
+drone @prax monitor run commons          # Live social feed of The Commons
+drone @prax monitor run commons --logs   # Tail commons' technical logs instead
+drone @prax monitor run --relay          # Mirror to Telegram (prax_monitor bot)
 drone @prax monitor --help               # Monitor usage
 ```
 
@@ -56,6 +59,13 @@ Real-time unified console showing:
 - **Soft start** — only shows new activity after launch (seeks to EOF on startup)
 
 Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`.
+
+**Commons feed mode** (`monitor run commons`) is a different watcher, not a branch
+filter — it renders live social activity in The Commons (posts, comments, votes,
+reactions) read-only, instead of file/log events. `--logs` opts back out to tailing
+the commons branch's technical logs. Feed mode adds two interactive commands of its
+own: `filter <room>` (comma-separated) and `filter clear`. `--relay` works in both
+modes, and is also enabled by `AIPASS_PRAX_MONITOR_RELAY=1`.
 
 ### Log Health
 
@@ -227,7 +237,10 @@ drone @prax monitor run
 
 ## Known Issues
 - **inotify exhaustion** — System often near `max_user_watches` limit. Monitor uses polling fallback (functional but slower).
-- **Interactive filtering deferred** — `watch`/`filter` commands in Mission Control are not operational.
+- **Interactive filtering deferred in Mission Control** — `_handle_interactive_cmd` dispatches
+  only `help` and `status`; `watch` and `filter` fall through to "Unknown command". Branch
+  selection is launch-time only (`monitor run seedgo,cli`). Commons feed mode is the exception:
+  it implements `filter <room>` / `filter clear` live. `watch` exists in neither mode.
 
 ---
 

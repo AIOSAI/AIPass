@@ -98,7 +98,7 @@ def _display_rates(results: list, is_scan: bool) -> None:
             console.print(
                 f"  [{color}]{sev.upper()}[/{color}] "
                 f"{r['file']}: {r['rate_lines_per_min']} lines/min "
-                f"({r['size_kb']} KB) [{r['branch']}]"
+                f"({r['size_kb']} KB) \\[{r['branch']}]"
             )
 
     if active:
@@ -107,13 +107,13 @@ def _display_rates(results: list, is_scan: bool) -> None:
         for r in sorted(active, key=lambda x: x["rate_lines_per_min"], reverse=True):
             if r.get("severity"):
                 continue
-            console.print(f"  {r['file']}: {r['rate_lines_per_min']} lines/min ({r['size_kb']} KB) [{r['branch']}]")
+            console.print(f"  {r['file']}: {r['rate_lines_per_min']} lines/min ({r['size_kb']} KB) \\[{r['branch']}]")
 
     if idle and len(idle) <= 10:
         console.print()
         console.print("[dim]Idle files:[/dim]")
         for r in sorted(idle, key=lambda x: x["file"]):
-            console.print(f"  [dim]{r['file']}: {r['size_kb']} KB [{r['branch']}][/dim]")
+            console.print(f"  [dim]{r['file']}: {r['size_kb']} KB \\[{r['branch']}][/dim]")
     elif idle:
         console.print()
         console.print(f"  [dim]{len(idle)} idle files (0 lines/min)[/dim]")

@@ -105,7 +105,7 @@ def print_help():
         ("drone @prax monitor run", "Start monitoring all branches"),
         ("drone @prax monitor run all", "Explicit all-branches monitoring"),
         (
-            "drone @prax monitor run [branches]",
+            "drone @prax monitor run \\[branches]",
             "Monitor specific branches (comma-separated)\n    Example: drone @prax monitor run seedgo,cli,flow",
         ),
         (
@@ -129,8 +129,8 @@ def print_help():
     console.print("\n[yellow]Interactive Mode Commands:[/yellow]")
     console.print("  [cyan]help[/cyan]          Show available commands")
     console.print("  [cyan]status[/cyan]        Display current monitoring state")
-    console.print("  [cyan]filter [branches][/cyan]  Adjust branch filter")
     console.print("  [cyan]quit/exit[/cyan]     Stop monitoring")
+    console.print("  [dim]Commons feed mode adds: filter <room> (comma-separated), filter clear[/dim]")
     console.print("\n[yellow]Examples:[/yellow]")
     console.print("\n  [dim]# Monitor all branches[/dim]")
     console.print("  $ drone @prax monitor run")

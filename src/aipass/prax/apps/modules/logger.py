@@ -160,11 +160,11 @@ def initialize_logging_system():
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
 
-    console.print(f"[{MODULE_NAME}] Initializing system-wide logging...")
+    console.print(f"\\[{MODULE_NAME}] Initializing system-wide logging...")
 
     result = run_initialize(MODULE_NAME)
 
-    console.print(f"[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
+    console.print(f"\\[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
 
 
 def shutdown_logging_system():
@@ -180,11 +180,11 @@ def shutdown_logging_system():
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
 
-    console.print(f"[{MODULE_NAME}] Shutting down logging system...")
+    console.print(f"\\[{MODULE_NAME}] Shutting down logging system...")
 
     run_shutdown(MODULE_NAME)
 
-    console.print(f"[{MODULE_NAME}] Shutdown complete")
+    console.print(f"\\[{MODULE_NAME}] Shutdown complete")
 
 
 # =============================================

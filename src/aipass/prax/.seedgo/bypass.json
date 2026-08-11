@@ -3,19 +3,9 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-08-09T00:00:00.000000"
+    "last_updated": "2026-08-10T00:00:00.000000"
   },
   "bypass": [
-    {
-      "file": "tests/test_config.py",
-      "standard": "documentation",
-      "reason": "Test functions follow pytest naming conventions (test_*). Docstrings on test functions are non-standard in this codebase \u2014 only new tests added in DPLAN-0125 Track G have them. Pre-existing 36 functions comply with project test style."
-    },
-    {
-      "file": "tests/test_config.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/ by convention, not in the 3-layer apps/ structure. This is a false positive for the test directory."
-    },
     {
       "file": "apps/handlers/monitoring/unified_stream.py",
       "standard": "cli",
@@ -403,59 +393,9 @@
       "reason": "queue.Empty is expected control flow from PriorityQueue.get(timeout=N), not an error. Logging it produces 144,000 noise entries per 4hrs of monitoring (10 polls/sec). The empty state IS the normal idle state."
     },
     {
-      "file": "tests/test_logging_handlers.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/ by convention, not in the 3-layer apps/ structure. This is a false positive for the test directory."
-    },
-    {
-      "file": "tests/test_logging_handlers.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Same pattern as test_logging.py and test_config.py."
-    },
-    {
-      "file": "tests/test_logging_handlers.py",
-      "standard": "documentation",
-      "reason": "Test helper functions (fake_sleep, etc.) are internal fixtures. Docstrings on test helpers are optional per pytest conventions."
-    },
-    {
-      "file": "tests/test_monitoring_handlers.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "documentation",
-      "reason": "Pre-existing test functions follow pytest naming conventions (test_*). Original 35 functions were written without docstrings per project test style."
-    },
-    {
       "file": "tests/test_log_watcher.py",
       "standard": "naming",
       "reason": "Pre-existing _RealFSHandler is a private test stub with underscore prefix indicating internal use. Renaming would not improve clarity."
-    },
-    {
-      "file": "tests/test_monitor_module.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
-    },
-    {
-      "file": "tests/test_operations.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
-    },
-    {
-      "file": "tests/test_operations.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. _load_ops() imports operations handler for unit testing. Same pattern as test_logging_handlers.py."
-    },
-    {
-      "file": "tests/test_filesystem_handler.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
     },
     {
       "file": "tests/test_filesystem_handler.py",
@@ -463,24 +403,9 @@
       "reason": "False positive \u2014 /home/ references are test fixture path strings (e.g. Path('/home/user/modules/logger.py')), not real log config."
     },
     {
-      "file": "tests/test_filesystem_handler.py",
-      "standard": "documentation",
-      "reason": "Test helper functions use pytest naming conventions. Internal test stubs do not require docstrings."
-    },
-    {
       "standard": "cli_flags",
       "file": "apps/__init__.py",
       "reason": "Package marker \u2014 not a CLI entry point. --version is in apps/prax.py."
-    },
-    {
-      "file": "tests/test_devpulse_dashboard_plugin.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention, not in the 3-layer apps/ structure. This is standard for all prax test files."
-    },
-    {
-      "file": "tests/test_logging.py",
-      "standard": "architecture",
-      "reason": "Test files live in tests/ by convention, not in the 3-layer apps/ structure. False positive for test directory."
     },
     {
       "file": "tests/test_logging.py",

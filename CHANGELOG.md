@@ -11,6 +11,19 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(prax)** — Rich markup no longer eats literal `[bracketed]` text on
+prax's console surfaces (by @prax). Unescaped `[word]` is silently consumed
+as a style tag — `monitor run [branches]` rendered as `monitor run` with no
+error. Escaped in monitor/prax help, logger lifecycle prints, and every
+log-health row's `[branch]` attribution tag. New rendered-output canary
+suite (test_help_markup.py, 9 tests) renders through a REAL Rich console —
+the shared conftest's MagicMock records calls but never renders, so it
+cannot catch this class. README truthed: commons feed mode documented
+(filter <room>/filter clear, --relay), Known Issues now states exactly
+which interactive commands Mission Control dispatches. 14 stale bypass.json
+entries pruned (test-directory false-positives whose checker causes were
+fixed). Suite 1106 green.
+
 **feat(ai_mail/trigger)** — repeat-warning digests collapse into ONE inbox
 message with a climbing counter (by @ai_mail, @trigger; FPLAN-0389, Patrick
 ruling 2026-08-10). ai_mail's delivery layer gains an opt-in `upsert_key`:
