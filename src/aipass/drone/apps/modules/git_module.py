@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -438,9 +438,16 @@ def _handle_status(args: list[str] | None = None) -> dict:
     if show_all:
         repo_root = lock_handler.find_repo_root()
         result = status_handler.get_branch_status(repo_root)
-        result["message"] = f"{result['total']} file(s) changed in repo"
+        if result.get("ok", True):
+            # only reword the success message — an error message must survive verbatim
+            result["message"] = f"{result['total']} file(s) changed in repo"
     else:
         result = status_handler.get_branch_status(branch_dir)
+
+    if not result.get("ok", True):
+        # a failed git status must FAIL the command — exit 0 here false-greened
+        # scripts and CI into reading an error as a clean tree
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     lines = [result["message"]]
     for f in result["files"]:
@@ -472,6 +479,10 @@ def _handle_diff(args: list[str]) -> dict:
 
     target_dir = lock_handler.find_repo_root() if show_all else branch_dir
     result = diff_handler.get_branch_diff(target_dir, staged=staged)
+
+    if not result.get("ok", True):
+        # same false-green trap as _handle_status — a git failure must exit non-zero
+        return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     output = result["diff"] if result["diff"] else result["message"]
     if not show_all:

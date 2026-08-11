@@ -1536,6 +1536,70 @@ class TestScopeFooter:
 
         assert "showing drone scope" not in result["stdout"]
 
+    # ── false-green regression: a git failure must exit non-zero (backlog flag) ──
+
+    _STATUS_ERR = {"ok": False, "files": [], "total": 0, "message": "git status error: fatal: not a git repository"}
+    _DIFF_ERR = {"ok": False, "diff": "", "files_changed": 0, "message": "git diff error: fatal: bad revision"}
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_status_error_exits_nonzero(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed git status exits 1 with the error on stderr — not a clean 0-changes report."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.status_handler.get_branch_status", return_value=dict(self._STATUS_ERR)):
+                result = handle_command("status", [])
+
+        assert result["exit_code"] == 1
+        assert "git status error" in result["stderr"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_status_all_error_not_overwritten(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--all must not reword an error into 'N file(s) changed in repo' (the false-green shape)."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path):
+                with patch(f"{_GIT_MOD}.status_handler.get_branch_status", return_value=dict(self._STATUS_ERR)):
+                    result = handle_command("status", ["--all"])
+
+        assert result["exit_code"] == 1
+        assert "git status error" in result["stderr"]
+        assert "changed in repo" not in result["stderr"] + result["stdout"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_diff_error_exits_nonzero(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed git diff exits 1 with the error on stderr."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=dict(self._DIFF_ERR)):
+                result = handle_command("diff", [])
+
+        assert result["exit_code"] == 1
+        assert "git diff error" in result["stderr"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_handler_ok_flag_set_on_git_failure(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The status handler itself stamps ok=False when git exits non-zero."""
+        import subprocess as _sp
+
+        monkeypatch.chdir(tmp_path)
+        fake = _sp.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="fatal: not a git repository")
+        with patch("aipass.drone.apps.handlers.git.status_handler.subprocess.run", return_value=fake):
+            result = get_branch_status(tmp_path)
+
+        assert result["ok"] is False
+        assert "git status error" in result["message"]
+
 
 # ===========================================================================
 # Merge joint-decision gate (DPLAN-0256)

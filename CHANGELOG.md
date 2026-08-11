@@ -34,6 +34,16 @@ and the pure `_inflight_from_lines` (the actual production path), restoring
 the audit to 100%; four dead encapsulation bypass rules pruned in the same
 touch.
 
+**fix(drone/git)** — `drone @git status` and `diff` no longer false-green
+on git failure (by @devpulse in @drone's tree — small-fix lane; backlog
+flag from old todo #102). Both exited 0 unconditionally, and `status --all`
+even overwrote the handler's error message with "0 file(s) changed in repo"
+— a failed git read was indistinguishable from a clean tree to scripts and
+CI. Handlers now stamp `ok` on every return; the module surfaces failures
+as exit 1 with the git error verbatim on stderr, and the `--all` reword
+only applies to success. 4 regression tests (module + handler level); drone
+suite 985 green.
+
 **chore(prep-skill)** — /prep now pins the interrupted thread as step 0 and
 ends every run with a mandatory `Resuming:` line naming what was in flight
 and the next concrete action (Patrick, todo #127: auto-triggered preps were

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status_handler.py
 # Description: Scoped git status for branch directories
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -30,7 +30,10 @@ def get_branch_status(branch_dir: Path) -> dict:
         branch_dir: Absolute path to the branch directory.
 
     Returns:
-        Dict with files (list of {status, path}), total (int), and message (str).
+        Dict with ok (bool — False when git itself failed), files (list of
+        {status, path}), total (int), and message (str). Callers must check
+        ``ok``: an error return is otherwise indistinguishable from a clean
+        empty tree, which false-greened `drone @git status` for months.
     """
     repo_root = find_repo_root()
 
@@ -43,10 +46,11 @@ def get_branch_status(branch_dir: Path) -> dict:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.error("git status failed: %s", exc)
-        return {"files": [], "total": 0, "message": f"git status failed: {exc}"}
+        return {"ok": False, "files": [], "total": 0, "message": f"git status failed: {exc}"}
 
     if result.returncode != 0:
         return {
+            "ok": False,
             "files": [],
             "total": 0,
             "message": f"git status error: {result.stderr.strip()}",
@@ -78,4 +82,4 @@ def get_branch_status(branch_dir: Path) -> dict:
     json_handler.log_operation("get_branch_status", {"branch_dir": str(branch_dir), "total": total})
     logger.info(message)
 
-    return {"files": files, "total": total, "message": message}
+    return {"ok": True, "files": files, "total": total, "message": message}
