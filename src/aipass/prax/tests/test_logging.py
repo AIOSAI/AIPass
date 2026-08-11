@@ -585,9 +585,7 @@ class TestDebugLevelGating:
         """AIPASS_LOG_LEVEL=DEBUG is the on-demand verbose trail."""
         from aipass.prax.apps.handlers.logging import setup
 
-        logger, sys_log, local_log = _external_logger(
-            setup, tmp_path, "loud_mod", env={"AIPASS_LOG_LEVEL": "DEBUG"}
-        )
+        logger, sys_log, local_log = _external_logger(setup, tmp_path, "loud_mod", env={"AIPASS_LOG_LEVEL": "DEBUG"})
 
         logger.debug("DEBUGMARK_loud")
         logger.info("INFOMARK_loud")
@@ -601,9 +599,7 @@ class TestDebugLevelGating:
         from aipass.prax.apps.handlers.logging import setup
 
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
-        logger, sys_log, _local = _external_logger(
-            setup, tmp_path, "cfg_mod", config=_tiered_config("DEBUG", "DEBUG")
-        )
+        logger, sys_log, _local = _external_logger(setup, tmp_path, "cfg_mod", config=_tiered_config("DEBUG", "DEBUG"))
 
         logger.debug("DEBUGMARK_cfg")
 
