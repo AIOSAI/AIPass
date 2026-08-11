@@ -64,6 +64,20 @@ def _build_branch_map(registry: dict) -> dict:
     return branch_map
 
 
+def active_branch_map() -> dict:
+    """Return dir_name -> branch_email for every active, registered branch.
+
+    Public entry point so sibling handlers (inbox_scanner) can resolve branch
+    directories to owners without reaching into the private helpers.
+    """
+    return _build_branch_map(_load_registry())
+
+
+def branch_path_for(dir_name: str) -> Path:
+    """Return the on-disk path for a branch directory name."""
+    return _SRC_AIPASS / dir_name
+
+
 def _validate_job(job: dict, file_path: Path) -> bool:
     """Validate a single job dict. Returns True if valid."""
     missing = REQUIRED_JOB_KEYS - set(job.keys())
@@ -113,8 +127,7 @@ def discover_jobs() -> list:
     Each Job dict: {owner, id, schedule, wake, prompt, enabled}
     Only returns jobs from registered, active branches.
     """
-    registry = _load_registry()
-    branch_map = _build_branch_map(registry)
+    branch_map = active_branch_map()
 
     if not branch_map:
         logger.warning("[discovery] No active branches found in registry")

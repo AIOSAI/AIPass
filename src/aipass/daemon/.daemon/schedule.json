@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "branch": "@daemon",
+  "jobs": [
+    {
+      "id": "inbox-sweep",
+      "enabled": true,
+      "schedule": { "type": "daily", "time": "09:00" },
+      "wake": { "fresh": true, "model": "haiku" },
+      "prompt": "Run `drone @daemon inbox-sweep` (no other work), report the summary line it prints, then STOP. Do not update memories, do not open plans."
+    }
+  ]
+}

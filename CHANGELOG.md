@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(daemon)** — fleet inbox sweep: unread mail can no longer rot silently
+(by @daemon, FPLAN-0394, morning-wave dispatch; design from devpulse backlog
+ex-todo #119). Daily 09:00 job (own `.daemon/schedule.json`, wake-only →
+haiku wake runs `drone @daemon inbox-sweep`): scans every active branch's
+inbox for `status=='new'` older than 24h and wakes the owners, oldest-first.
+`inbox_scanner.py` is pure detection (no cross-branch imports);
+`inbox_sweep.py` owns wake policy — one wake per branch per sweep, 2s
+stagger, managers skipped and reported (self-enforced: `@daemon`-sender
+wakes bypass ai_mail's manager gate by design, so the sweep checks
+citizen_class + is_wake_blocked itself), capped at 5 wakes/pass with
+deferred branches named, never dropped (`--limit` overrides; also
+`--dry-run`, `--hours N`). First live dry-run found the disease it was
+built for: 8 stale unread across @backup/@drone/@spawn/@seedgo, oldest 62h.
+44 new tests (suite 344 green), audit 100%, 5 dead bypass rules pruned
+same-touch.
+
 **feat(ai_mail)** — culture fence line in dispatch headers (by @ai_mail,
 DPLAN-0276 leftover, morning-wave dispatch). Both header constants
 (DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER) now carry the attribution

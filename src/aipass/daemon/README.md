@@ -18,6 +18,7 @@ drone @daemon update                    # Status digest
 drone @daemon activity                  # Quick 24h activity summary
 drone @daemon queue                     # View pending scheduled jobs
 drone @daemon run                       # Fire all due jobs now
+drone @daemon inbox-sweep --dry-run     # Who is sitting on stale unread mail
 drone @daemon branch-health DAEMON      # Deep dive on a branch
 drone @daemon install-timer             # Enable systemd 2-min timer
 ```
@@ -55,6 +56,7 @@ daemon/
 │   │   ├── schedule.py        # Scheduled follow-ups — fire-and-forget task management
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── actions.py         # Action registry CLI — list, toggle, info, reminders
+│   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
 │   │   ├── scheduler_ops.py   # Scheduler cron operations facade
 │   │   └── wakeup_ops.py      # Wake-up cron operations facade
 │   ├── handlers/
@@ -64,6 +66,7 @@ daemon/
 │   │   │   └── json_handler.py       # JSON data operations
 │   │   ├── monitoring/
 │   │   │   ├── activity_collector.py  # Collects branch activity data
+│   │   │   ├── inbox_scanner.py       # Cross-branch stale unread-mail detection
 │   │   │   ├── memory_health.py       # Memory health checks
 │   │   │   └── red_flag_detector.py   # Detects anomalies / red flags
 │   │   ├── schedule/
@@ -110,6 +113,11 @@ drone @daemon actions set reminder 7d "msg" --to @branch
 drone @daemon actions set schedule @branch "prompt" daily 04:00
 drone @daemon install-timer           # Install + enable systemd user timer
 drone @daemon uninstall-timer         # Stop + remove systemd user timer
+
+drone @daemon inbox-sweep             # Wake owners of mail unread past 24h
+drone @daemon inbox-sweep --dry-run   # Show who WOULD wake, wake nobody
+drone @daemon inbox-sweep --hours 48  # Custom staleness threshold
+drone @daemon inbox-sweep --limit 3   # Cap wakes for this pass
 ```
 
 Each module accepts `--help` for module-specific usage:
@@ -132,6 +140,7 @@ drone @daemon <command> --help
 | `wakeup_ops` | Wake-up cron operations facade for daemon_wakeup.py | Operational |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
+| `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
 
 ---
 
@@ -174,6 +183,25 @@ Each branch owns its schedule at `src/aipass/<branch>/.daemon/schedule.json`. Th
 ### Staggering
 
 No native offset field. To stagger jobs, seed different `last_run` values in `daemon_json/daemon_runstate.json`.
+
+---
+
+## Fleet Inbox Sweep
+
+Replies never wake their recipient, so a reply landing in a sleeping branch's inbox stays invisible until something looks. `inbox-sweep` is that something.
+
+It reads every active branch's `.ai_mail.local/inbox.json`, finds mailboxes holding `new` (unread) mail older than the threshold, and wakes each owner via `wake_branch()` so the mail finally gets read.
+
+| Rule | Behaviour |
+|------|-----------|
+| Threshold | 24h by default (`--hours N` to override) |
+| Once per branch | One wake per branch per sweep, never more |
+| Managers | Never woken — reported as skipped, their mail lands live |
+| Blocklist | `@devpulse` and anything in ai_mail's `WAKE_BLOCKLIST` is skipped |
+| Cap | 5 wakes per pass (`--limit N`); entries are oldest-first, and deferred branches are named in the output, not silently dropped |
+| Wake model | `sonnet`, staggered 2s apart |
+
+Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbox-sweep`). Run `drone @daemon inbox-sweep --dry-run` any time to see who is sitting on stale mail without waking anyone.
 
 ---
 
@@ -221,11 +249,11 @@ No native offset field. To stagger jobs, seed different `last_run` values in `da
 
 ## Test Suite
 
-- **300 tests** across 15 test files
-- 8/8 modules covered, 30/36 public functions tested
+- **344 tests** across 16 test files
+- 9/9 modules covered, 35/41 public functions tested
 - Seedgo audit: **100%** across all standards
 
-*Last Updated: 2026-06-29*
+*Last Updated: 2026-08-11*
 
 ---
 [← Back to AIPass](../../../README.md)

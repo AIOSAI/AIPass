@@ -114,36 +114,6 @@
       "pattern": "File not in standard 3-layer structure"
     },
     {
-      "file": "tests/test_timer_install.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in 3-layer apps/ structure",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "tests/test_run_module.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in 3-layer apps/ structure",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "tests/test_run_module.py",
-      "standard": "documentation",
-      "reason": "Test methods are self-documenting via descriptive names — pytest convention",
-      "pattern": "missing docstrings"
-    },
-    {
-      "file": "tests/test_scheduler_bot.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in 3-layer apps/ structure",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "tests/test_scheduler_bot.py",
-      "standard": "encapsulation",
-      "reason": "Test file imports handlers directly to unit-test them — standard pytest pattern",
-      "pattern": "Handler imported directly"
-    },
-    {
       "file": "apps/modules/queue.py",
       "standard": "introspection",
       "reason": "Bare 'queue' renders the operational Rich table (td-47). Introspection gate would break the primary use case — users expect the job table, not module metadata.",
@@ -153,6 +123,18 @@
       "file": "apps/modules/timer_install.py",
       "standard": "introspection",
       "reason": "install-timer/uninstall-timer are action commands — no-args IS the action (install). Introspection gate would break primary use case (same pattern as run.py).",
+      "pattern": "no-args gate"
+    },
+    {
+      "file": "apps/modules/inbox_sweep.py",
+      "standard": "encapsulation",
+      "reason": "Authorized cross-branch wake_branch/is_wake_blocked import (DPLAN-0204 §2.8 path A, same as run.py). ai_mail exposes its wake surface only via that handler — ai_mail's own modules and @trigger import it identically; no module entry point exists. Root fix (an ai_mail module wrapper) is tracked separately.",
+      "pattern": "Handler imported directly"
+    },
+    {
+      "file": "apps/modules/inbox_sweep.py",
+      "standard": "introspection",
+      "reason": "Bare 'inbox-sweep' runs the sweep — that IS its primary function, and the scheduled job invokes it with no args. An introspection gate would make the daily job a no-op (same pattern as run.py, queue.py).",
       "pattern": "no-args gate"
     },
     {
