@@ -11,6 +11,18 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(drone/auth)** — passport-gate denial now names the caller's cwd (by
+@devpulse in @drone's tree — small-fix lane; answers @trigger's x10 repeat
+escalations on captured_auth/captured_git_module). The "cannot verify
+caller" warning carried no CWD or PID, so identifying who kept tripping
+the gate took a cross-log timestamp correlation instead of one grep
+(culprits turned out to be sessions running `drone @git status` from
+passport-less dirs like repo root). Message now embeds `caller cwd:`;
+@trigger's normalizer collapses paths to `<path>` (verified), so repeat
+signatures stay unified across callers and the digest upsert counter keeps
+climbing in place. Live-verified from a passport-less dir; drone suite 985
+green.
+
 **feat(prax)** — SystemLogger.debug(), and the gate that makes it real (by
 @prax, promised follow-through ex-todo #116, morning-wave dispatch).
 debug() alone would have shipped dead: DEFAULT_LOG_LEVEL="INFO" was
