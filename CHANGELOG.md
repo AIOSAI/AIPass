@@ -11,6 +11,24 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**perf(devpulse)** — watchdog poll loop 142× cheaper (by @devpulse; todo
+#126, night shift FPLAN-0393). Each 5s tick cost 152ms of CPU (~3% of a
+core per armed watchdog, compounding across concurrent watches): two
+pathlib rglobs over the branch's 300-file transcript dir plus a 1MB tail
+re-read even when nothing changed. agent.py 1.3.0 introduces
+TranscriptScanner — full re-walk only every 60s (os.walk), per-tick is one
+os.stat pass over the cached list (1.07ms), and the in-flight tail parse is
+cached on (size, mtime) since an unchanged file cannot change its last
+entry. Also closes a remaining stall false-positive: a parent blocked on a
+sub-agent that is silently composing (newest transcript idle-looking, no
+growth) now counts the parent's own in-flight Agent tool_use — both the
+newest and newest-top-level transcripts are candidates — and the tracker
+forces a fresh re-walk before ever declaring STALLED so a transcript born
+between refreshes suppresses the false alarm. Live-verified: pidstat
+steady-state 1.73% → 0.27% per handler; synthetic-lock watch woke next tick
+on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 462
+green.
+
 **fix(prax)** — Rich markup no longer eats literal `[bracketed]` text on
 prax's console surfaces (by @prax). Unescaped `[word]` is silently consumed
 as a style tag — `monitor run [branches]` rendered as `monitor run` with no

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-08-11
 # =============================================
 
 """Tests for watch_agent (Phase 1, FPLAN-0186).
@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -291,11 +292,24 @@ def test_last_entry_is_inflight_tool_picks_newest_file(tmp_path):
     assert agent_handler._last_entry_is_inflight_tool(proj) is True
 
 
-def test_stalltracker_reports_stall_after_threshold(monkeypatch, capsys):
+def _stub_scanner(
+    tracker,
+    tick: "bool | Callable[[], bool]" = False,
+    inflight: "bool | Callable[[], bool]" = False,
+):
+    """Pin a tracker's scanner signals. ``tick``/``inflight`` may be bools or
+    zero-arg callables for tests that flip signals mid-flight."""
+    tick_fn = tick if callable(tick) else (lambda: tick)
+    inflight_fn = inflight if callable(inflight) else (lambda: inflight)
+    tracker.scanner.tick = lambda now: tick_fn()
+    tracker.scanner.last_entry_inflight = lambda: inflight_fn()
+    tracker.scanner.refresh = lambda now: None
+
+
+def test_stalltracker_reports_stall_after_threshold(capsys):
     """No activity past STALL_THRESHOLD → a [watchdog.stall] line on stdout."""
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: False)
-    t = agent_handler.StallTracker("@x", Path("/nope"), {}, now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    _stub_scanner(t, tick=False, inflight=False)
 
     t.observe(now=60.0)  # below threshold
     assert "[watchdog.stall]" not in capsys.readouterr().out
@@ -306,11 +320,10 @@ def test_stalltracker_reports_stall_after_threshold(monkeypatch, capsys):
     assert t.stall_reported is True
 
 
-def test_stalltracker_inflight_tool_prevents_stall(monkeypatch, capsys):
+def test_stalltracker_inflight_tool_prevents_stall(capsys):
     """An in-flight tool call resets the idle timer every tick → never a stall."""
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: True)
-    t = agent_handler.StallTracker("@x", Path("/nope"), {}, now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    _stub_scanner(t, tick=False, inflight=True)
 
     for now in (120.0, 240.0, 360.0, 480.0):
         t.observe(now=now)
@@ -320,11 +333,10 @@ def test_stalltracker_inflight_tool_prevents_stall(monkeypatch, capsys):
     assert t.stall_reported is False
 
 
-def test_stalltracker_long_tool_advisory(monkeypatch, capsys):
+def test_stalltracker_long_tool_advisory(capsys):
     """One tool call held in-flight past LONG_TOOL_THRESHOLD → advisory, not a stall."""
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: True)
-    t = agent_handler.StallTracker("@x", Path("/nope"), {}, now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    _stub_scanner(t, tick=False, inflight=True)
 
     t.observe(now=0.0)  # first in-flight tick → anchors in_flight_since
     t.observe(now=agent_handler.StallTracker.LONG_TOOL_THRESHOLD)
@@ -334,13 +346,11 @@ def test_stalltracker_long_tool_advisory(monkeypatch, capsys):
     assert t.long_tool_reported is True
 
 
-def test_stalltracker_resume_clears_stall(monkeypatch, capsys):
+def test_stalltracker_resume_clears_stall(capsys):
     """After a stall, real activity emits [watchdog.resumed] and clears the flag."""
     signals = {"size": False}
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: signals["size"])
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_snapshot_jsonl_sizes", lambda *a, **kw: {})
-    t = agent_handler.StallTracker("@x", Path("/nope"), {}, now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    _stub_scanner(t, tick=lambda: signals["size"], inflight=False)
 
     t.observe(now=agent_handler.StallTracker.STALL_THRESHOLD)  # stall
     assert "[watchdog.stall]" in capsys.readouterr().out
@@ -389,8 +399,8 @@ def test_watch_agent_surfaces_stall_to_stdout(monkeypatch, tmp_path, capsys):
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
     monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: False)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: False)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: False)
     # Lock must outlive STALL_THRESHOLD (300s) or the watch completes stall-free.
     _fake_clock_sleep(agent_handler, monkeypatch, lock_file, unlink_at=400.0)
 
@@ -406,8 +416,8 @@ def test_watch_agent_inflight_tool_no_false_stall(monkeypatch, tmp_path, capsys)
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
     monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
-    monkeypatch.setattr(agent_handler, "_has_jsonl_activity", lambda *a, **kw: False)
-    monkeypatch.setattr(agent_handler, "_last_entry_is_inflight_tool", lambda *a, **kw: True)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: False)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: True)
     _fake_clock_sleep(agent_handler, monkeypatch, lock_file)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=100000, poll_interval=0.01)
@@ -548,6 +558,139 @@ def test_inflight_tool_newest_file_may_be_subagent(tmp_path):
     os.utime(parent, (1, 1))
     os.utime(subfile, (2, 2))
     assert agent_handler._last_entry_is_inflight_tool(proj) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #126 — TranscriptScanner: cheap ticks, cached verdicts, no false stalls
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_scanner_growth_and_steady_state(tmp_path):
+    """Seed at construction; growth is one tick's True, steady state is False."""
+    proj = tmp_path / "proj"
+    f = _write_jsonl(proj, {"type": "user"})
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+
+    assert s.tick(1.0) is False  # nothing changed since the seed pass
+    with f.open("a", encoding="utf-8") as fh:
+        fh.write('{"type": "assistant"}\n')
+    assert s.tick(2.0) is True  # growth
+    assert s.tick(3.0) is False  # steady again
+
+
+def test_scanner_discovers_new_subagent_file_on_refresh(tmp_path):
+    """A transcript born between refreshes is invisible to the stat pass but
+    counts as activity once the refresh interval re-walks the tree."""
+    proj = tmp_path / "proj"
+    _write_jsonl(proj, {"type": "user"})
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    assert s.tick(1.0) is False
+
+    sub = proj / "session-abc" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-x.jsonl").write_text('{"type": "assistant"}\n', encoding="utf-8")
+
+    assert s.tick(2.0) is False  # not yet discovered — stat pass only
+    assert s.tick(2.0 + agent_handler.TranscriptScanner.REFRESH_INTERVAL) is True
+
+
+def test_scanner_vanished_file_is_not_activity(tmp_path):
+    """Deletion (rollover/cleanup) neither crashes the pass nor reads as activity."""
+    proj = tmp_path / "proj"
+    a = _write_jsonl(proj, {"type": "user"}, name="a.jsonl")
+    b = _write_jsonl(proj, {"type": "user"}, name="b.jsonl")
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+
+    a.unlink()
+    assert s.tick(1.0) is False
+    with b.open("a", encoding="utf-8") as fh:
+        fh.write('{"type": "assistant"}\n')
+    assert s.tick(2.0) is True  # survivors still tracked
+
+
+def test_scanner_inflight_verdict_cached_until_file_changes(tmp_path, monkeypatch):
+    """The tail parse runs only when the newest file's (size, mtime) changed —
+    during a genuine silent span every tick reuses the cached verdict."""
+    proj = tmp_path / "proj"
+    _write_jsonl(
+        proj,
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}},
+    )
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    s.tick(1.0)
+
+    reads = {"n": 0}
+    real_tail = agent_handler._tail_lines
+
+    def counting_tail(path, max_bytes=1_000_000):
+        """Count tail reads so the cache's no-re-read guarantee is assertable."""
+        reads["n"] += 1
+        return real_tail(path, max_bytes)
+
+    monkeypatch.setattr(agent_handler, "_tail_lines", counting_tail)
+
+    assert s.last_entry_inflight() is True
+    first = reads["n"]
+    for now in (2.0, 3.0, 4.0):
+        s.tick(now)
+        assert s.last_entry_inflight() is True
+    assert reads["n"] == first  # unchanged file → cached verdict, zero re-reads
+
+    _write_jsonl(
+        proj, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
+    )
+    s.tick(5.0)
+    assert s.last_entry_inflight() is False  # change → re-read → new verdict
+    assert reads["n"] > first
+
+
+def test_scanner_parent_inflight_covers_composing_subagent(tmp_path):
+    """Sub-agent newest but idle-looking (composing writes nothing) while the
+    parent's top-level transcript holds the in-flight Agent tool_use → the
+    parent candidate keeps this out of STALLED (todo #126)."""
+    proj = tmp_path / "proj"
+    parent = _write_jsonl(
+        proj,
+        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Agent"}]}},
+        name="parent.jsonl",
+    )
+    sub = proj / "session-abc" / "subagents"
+    sub.mkdir(parents=True)
+    subfile = sub / "agent-x.jsonl"
+    subfile.write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.utime(parent, (1, 1))
+    os.utime(subfile, (2, 2))  # nested file is newest; its last entry is NOT in-flight
+
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    s.tick(1.0)
+    assert s.last_entry_inflight() is True
+
+
+def test_stall_confirm_refresh_suppresses_false_stall(tmp_path, monkeypatch, capsys):
+    """At the stall threshold the tracker forces a re-walk — a transcript born
+    since the last refresh suppresses the would-be stall."""
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "REFRESH_INTERVAL", 10_000.0)
+    proj = tmp_path / "proj"
+    _write_jsonl(proj, {"type": "user"})
+    t = agent_handler.StallTracker("@x", proj, now=0.0, pid=1)
+    t.observe(now=1.0)
+
+    sub = proj / "session-abc" / "subagents"
+    sub.mkdir(parents=True)
+    (sub / "agent-x.jsonl").write_text('{"type": "assistant"}\n', encoding="utf-8")
+
+    t.observe(now=agent_handler.StallTracker.STALL_THRESHOLD + 1.0)
+    assert "[watchdog.stall]" not in capsys.readouterr().out
+    assert t.stall_reported is False
 
 
 @pytest.mark.skipif(
