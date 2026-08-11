@@ -6,7 +6,8 @@ Purpose: Button up everything at the end of a session — or before a /compact. 
 
 ## Execution
 
-1. Read `.trinity/passport.json` first — re-absorb your identity before writing anything
+0. **Pin the interrupted thread FIRST** — before any wrap-up work, write one sentence naming what the conversation was doing when /prep fired (the live task, question, or build mid-flight — "nothing in flight" counts). Prep often auto-triggers mid-task and the wrap-up steps flush the thread from attention; this line is what gets it back. It becomes the Resuming line at the end.
+1. Read `.trinity/passport.json` — re-absorb your identity before writing anything
 2. Do ALL of the following, then confirm what was updated
 
 ## 1. Memories
@@ -79,4 +80,8 @@ Prep complete:
 - Inbox: [count, action taken]
 - Compass: [entry #N reviewed — verdict]
 - Loose ends: [any flagged]
+
+Resuming: [the step-0 line — what was in flight when /prep fired, and the next concrete action on it]
 ```
+
+**The Resuming line is the LAST line of the /prep reply, always** — even when it's "nothing was in flight; awaiting your direction." If something WAS in flight, don't stop at naming it: pick the thread back up in the same turn (or, before a /compact, make sure the line carries enough for the post-compact self to continue without re-asking). Prep is a pit stop, not a finish line.

@@ -29,6 +29,14 @@ steady-state 1.73% → 0.27% per handler; synthetic-lock watch woke next tick
 on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 462
 green.
 
+**chore(prep-skill)** — /prep now pins the interrupted thread as step 0 and
+ends every run with a mandatory `Resuming:` line naming what was in flight
+and the next concrete action (Patrick, todo #127: auto-triggered preps were
+flushing the live task — the session wrapped up tidily and then lost the
+thread). Pit stop, not a finish line: if something was in flight, the same
+turn picks it back up; before a /compact the line carries enough for the
+post-compact self to continue without re-asking.
+
 **fix(devpulse)** — the bracket sweep @prax requested, run on devpulse's own
 surfaces (night shift FPLAN-0393): `drone @devpulse --help` was silently
 losing its `[args...]` usage placeholder and `watchdog --help` its optional
