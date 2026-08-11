@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2025-12-02
-# Modified: 2025-12-02
+# Modified: 2026-08-10
 # =============================================
 
 """
@@ -11,6 +11,19 @@ Email Delivery Handler
 
 Handles delivery of emails to branch inboxes.
 Independent handler - no module dependencies.
+
+Upsert delivery (``upsert_key``)
+--------------------------------
+A repeating signal — the same WARNING firing every poll — must occupy ONE
+inbox slot, not one per repeat. Senders that repeat give the send a stable
+``upsert_key``; delivery then rewrites the open message carrying that key
+instead of stacking a new one, bumping an ``updates`` counter so the reader
+can see how many times it fired.
+
+The read status is the whole point: an update NEVER flips a message back to
+new and never wakes anything. A repeat is not a fresh demand for attention —
+it is the same demand, louder in the counter only. Closing the message
+re-arms the signature: the next send starts a fresh message at ``updates: 1``.
 """
 
 import json
@@ -251,13 +264,77 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
     )
 
 
+def _coerce_updates(value) -> int:
+    """Read a stored ``updates`` counter defensively, defaulting to 1.
+
+    The counter lives in a hand-editable JSON file, so a string, None or
+    garbage must not crash a delivery — an unreadable counter restarts at 1
+    rather than taking the message down with it.
+    """
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        logger.warning("[delivery] unreadable updates counter %r — restarting at 1", value)
+        return 1
+    return count if count >= 1 else 1
+
+
+def _find_upsert_target(messages: List[Dict], from_addr: str, upsert_key: str) -> Optional[Dict]:
+    """Find the open message this upsert should rewrite.
+
+    Match rule: same sender AND same upsert_key AND not closed. Messages are
+    newest-first, so the first hit is the most recent open one.
+
+    Args:
+        messages: The inbox's message list.
+        from_addr: Sender address of the incoming mail.
+        upsert_key: Stable signature supplied by the sender.
+
+    Returns:
+        The matching message dict (live reference into *messages*), or None.
+    """
+    for msg in messages:
+        if msg.get("upsert_key") != upsert_key:
+            continue
+        if msg.get("from") != from_addr:
+            continue
+        if msg.get("status") == "closed":
+            continue
+        return msg
+    return None
+
+
+def _apply_upsert_update(existing: Dict, email_data: Dict) -> Dict:
+    """Rewrite *existing* in place with the fresh render and a bumped counter.
+
+    Preserves id, original timestamp and status — an update must never flip a
+    message back to new or unread. auto_execute is forced off: an in-place
+    update never wakes or dispatches anything, whatever the sender asked for.
+
+    Args:
+        existing: The matched message dict, mutated in place.
+        email_data: The incoming email data (fresh subject/body/timestamp).
+
+    Returns:
+        The same dict, for convenience.
+    """
+    existing["subject"] = email_data["subject"]
+    existing["message"] = email_data["message"]
+    existing["last_updated"] = email_data["timestamp"]
+    existing["updates"] = _coerce_updates(existing.get("updates")) + 1
+    existing["auto_execute"] = False
+    return existing
+
+
 def deliver_email_to_branch(
-    to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None
+    to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None, upsert_key: Optional[str] = None
 ) -> Tuple[bool, str]:
     """
     Deliver email to target branch's .ai_mail.local/inbox.json file.
 
-    Appends message to inbox JSON messages array.
+    Appends message to inbox JSON messages array — unless an upsert_key is
+    given and an open message from the same sender already carries it, in
+    which case that message is rewritten in place (see module docstring).
 
     Args:
         to_branch: Target email address (e.g., "@admin")
@@ -268,12 +345,21 @@ def deliver_email_to_branch(
             - subject: Email subject
             - message: Email body
             - timestamp: Email timestamp string
+            - upsert_key: Optional, alternative to the keyword argument
         on_delivered: Optional callback(branch_path, new_count, opened_count, total)
             for post-delivery actions (dashboard updates, central sync, etc.)
+        upsert_key: Optional stable signature for a repeating signal. None
+            (the default) is plain delivery: every send is a new message.
+            Takes precedence over email_data["upsert_key"].
 
     Returns:
         Tuple of (success: bool, error_message: str)
         error_message is empty string if successful
+
+    Note:
+        When an upsert_key is in play, the outcome is reported back through
+        email_data["upsert_action"] = "created" | "updated" so the caller can
+        tell a fresh message from a bumped counter without re-reading the inbox.
     """
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
@@ -358,33 +444,59 @@ def deliver_email_to_branch(
             # Auto-migrate old inbox format {"inbox": []} -> v2 schema
             inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
 
-            # Create message object (v2 schema: status instead of read)
-            message = {
-                "id": str(uuid.uuid4())[:8],
-                "timestamp": email_data["timestamp"],
-                "from": email_data["from"],
-                "from_name": email_data["from_name"],
-                "subject": email_data["subject"],
-                "message": email_data["message"],
-                "status": "new",
-                "auto_execute": email_data.get("auto_execute", False),
-                "priority": email_data.get("priority", "normal"),
-            }
+            # Upsert: rewrite the open message carrying this key instead of
+            # stacking a second one. No key = plain delivery, unchanged.
+            effective_key = upsert_key if upsert_key is not None else email_data.get("upsert_key")
+            existing = None
+            if effective_key:
+                existing = _find_upsert_target(inbox_data["messages"], email_data["from"], effective_key)
 
-            if email_data.get("reply_to"):
-                message["reply_to"] = email_data["reply_to"]
+            if existing is not None:
+                _apply_upsert_update(existing, email_data)
+                email_data["upsert_action"] = "updated"
+                updated_in_place = True
+                logger.info(
+                    "[delivery] upsert '%s' updated message %s for %s (updates=%s)",
+                    effective_key,
+                    existing.get("id"),
+                    to_branch,
+                    existing.get("updates"),
+                )
+            else:
+                updated_in_place = False
+                # Create message object (v2 schema: status instead of read)
+                message = {
+                    "id": str(uuid.uuid4())[:8],
+                    "timestamp": email_data["timestamp"],
+                    "from": email_data["from"],
+                    "from_name": email_data["from_name"],
+                    "subject": email_data["subject"],
+                    "message": email_data["message"],
+                    "status": "new",
+                    "auto_execute": email_data.get("auto_execute", False),
+                    "priority": email_data.get("priority", "normal"),
+                }
 
-            if email_data.get("dispatched_to"):
-                message["dispatched_to"] = email_data["dispatched_to"]
+                if email_data.get("reply_to"):
+                    message["reply_to"] = email_data["reply_to"]
 
-            # Store reply_path for cross-project replies.
-            # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
-            reply_path = email_data.get("reply_path") or _resolve_reply_path()
-            if reply_path:
-                message["reply_path"] = reply_path
+                if email_data.get("dispatched_to"):
+                    message["dispatched_to"] = email_data["dispatched_to"]
 
-            # Prepend message to inbox (newest first)
-            inbox_data["messages"].insert(0, message)
+                # Store reply_path for cross-project replies.
+                # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
+                reply_path = email_data.get("reply_path") or _resolve_reply_path()
+                if reply_path:
+                    message["reply_path"] = reply_path
+
+                # Carry the key on the message so the NEXT send can find it
+                if effective_key:
+                    message["upsert_key"] = effective_key
+                    message["updates"] = 1
+                    email_data["upsert_action"] = "created"
+
+                # Prepend message to inbox (newest first)
+                inbox_data["messages"].insert(0, message)
 
             from aipass.ai_mail.apps.handlers.email.inbox_cleanup import _sweep_closed
 
@@ -420,8 +532,11 @@ def deliver_email_to_branch(
     if caller_branch and caller_cwd:
         _auto_register_sender(caller_branch, caller_cwd)
 
-    # Send desktop notification for new email
-    _send_desktop_notification(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
+    # Send desktop notification for new email. An in-place update is the same
+    # signal repeating, so it stays silent — popping a toast per repeat is the
+    # stacking problem again, just on the desktop instead of in the inbox.
+    if not updated_in_place:
+        _send_desktop_notification(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
 
     # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
@@ -567,7 +682,8 @@ if __name__ == "__main__":
     console.print()
     console.print("FUNCTIONS PROVIDED:")
     console.print("  - get_all_branches() -> List[Dict]")
-    console.print("  - deliver_email_to_branch(to_branch, email_data) -> Tuple[bool, str]")
+    console.print("  - deliver_email_to_branch(to_branch, email_data, on_delivered, upsert_key) -> Tuple[bool, str]")
+    console.print("  - deliver_to_inbox_file(inbox_file, email_data) -> Tuple[bool, str, str]")
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  - Independent - no module dependencies")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-22
-# Modified: 2026-04-22
+# Modified: 2026-08-10
 # =============================================
 
 """
@@ -117,6 +117,7 @@ def handle_send(args: List[str]) -> bool:
             target,
             parsed["no_memory_save"],
             from_branch=from_branch,
+            upsert_key=parsed.get("upsert_key"),
         )
 
     console.print(f"\n[bold]Group send to {len(recipients)} recipients...[/bold]")
@@ -132,6 +133,7 @@ def handle_send(args: List[str]) -> bool:
             target,
             parsed["no_memory_save"],
             from_branch=from_branch,
+            upsert_key=parsed.get("upsert_key"),
         ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
@@ -174,14 +176,25 @@ def _send_direct(
     dispatched_to=None,
     no_memory_save=False,
     from_branch=None,
+    upsert_key=None,
 ) -> bool:
-    """Direct email send - thin wrapper over send handlers."""
+    """Direct email send - thin wrapper over send handlers.
+
+    upsert_key: optional repeat signature. When set, the recipient's open
+    message carrying that key from this sender is rewritten in place with a
+    bumped counter instead of a second message landing next to it.
+    """
     try:
         user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
         if auto_execute:
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 
         if to_branch.lower() in ["all", "@all"]:
+            # Broadcast has no single message to update — refuse rather than
+            # silently dropping the key and stacking N messages per repeat.
+            if upsert_key:
+                error("--upsert-key is not supported for broadcast (@all) sends")
+                return False
             return _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to)
 
         success, error_msg = send_to_single(
@@ -199,12 +212,17 @@ def _send_direct(
             _delivery_callback,
             json_handler.log_operation,
             update_central,
+            upsert_key=upsert_key,
         )
 
         if success:
             label = "\\[dispatch: queued for daemon]" if auto_execute else ""
+            if upsert_key:
+                label = f"\\[upsert: {upsert_key}]"
             console.print(f"[green]Email sent to {to_branch} {label}[/green]")
-            if auto_execute:
+            # An upsert send may have landed on an existing message; firing the
+            # dispatch trigger for it would wake work off a repeat signal.
+            if auto_execute and not upsert_key:
                 _fire_dispatch_trigger(to_branch, subject)
             return True
         else:

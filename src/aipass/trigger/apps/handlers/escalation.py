@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-08-09
+# Modified: 2026-08-10
 # =============================================
 
 """
@@ -515,6 +515,13 @@ def _evaluate_digest(
         )
         return "send_failed"
 
+    # Keyed on the SIGNATURE, never on the rendered subject: the subject carries
+    # the repeat count and changes every digest, so it would stop matching on the
+    # first update and start a fresh thread each time. One signature, one message
+    # in @devpulse's inbox, a counter that climbs.
+    upsert_key = f"escalation:{signature}"
+    upsert_result: Dict[str, Any] = {}
+
     try:
         # auto_execute=False: this is an EMAIL, never a dispatch. Managers
         # cannot be woken, and a digest is for reading, not for spawning.
@@ -525,6 +532,8 @@ def _evaluate_digest(
             auto_execute=False,
             reply_to="@trigger",
             from_branch="@trigger",
+            upsert_key=upsert_key,
+            upsert_result=upsert_result,
         )
     except Exception as exc:
         logger.warning(f"digest send raised for {signature}: {exc}", outcome="send_failed")
@@ -545,6 +554,11 @@ def _evaluate_digest(
     entry["digests_sent"] = int(entry.get("digests_sent", 0)) + 1
     # Reset the window so the next digest reports occurrences since this one.
     entry["occurrences"] = []
+    # "created" = a new message in the inbox, "updated" = the existing one grew a
+    # repeat. None means the callback answered without reporting — an older
+    # adapter, or a delivery path that ignored the key. Recording it makes an
+    # in-place update auditable instead of looking like a digest that vanished.
+    upsert_action = upsert_result.get("upsert_action")
     logger.info(
         "digest sent",
         signature=signature,
@@ -553,6 +567,8 @@ def _evaluate_digest(
         count=window_count,
         recipient=recipient,
         reason=reason,
+        upsert_key=upsert_key,
+        upsert_action=upsert_action,
         outcome="sent",
     )
     # Operational record: a digest leaving the branch is an outbound action,
@@ -566,6 +582,8 @@ def _evaluate_digest(
             "branch": branch,
             "count": window_count,
             "recipient": recipient,
+            "upsert_key": upsert_key,
+            "upsert_action": upsert_action,
         },
     )
     return "sent"

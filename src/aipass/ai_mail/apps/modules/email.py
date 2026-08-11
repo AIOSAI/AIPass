@@ -118,6 +118,10 @@ FLAGS:
   --dispatch        Mark as dispatch task (adds dispatch header)
   --reply-to        Redirect replies to a different branch
   --no-memory-save  Skip memory update requirement in dispatch header
+  --upsert-key KEY  Repeat signature: rewrite the recipient's open message
+                    carrying KEY (from you) instead of stacking a new one.
+                    Bumps its update counter, keeps its id and read status,
+                    never wakes anything. Closing it re-arms the signature.
 
 NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"
 """

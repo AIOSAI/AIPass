@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-12-04
-# Modified: 2026-08-09
+# Modified: 2026-08-10
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -34,9 +34,28 @@ def setup_handlers():
         from datetime import datetime
 
         def _send_email_adapter(
-            to_branch, subject, message, auto_execute=False, reply_to="@trigger", from_branch="@trigger", **kwargs
+            to_branch,
+            subject,
+            message,
+            auto_execute=False,
+            reply_to="@trigger",
+            from_branch="@trigger",
+            upsert_key=None,
+            upsert_result=None,
+            **kwargs,
         ):
-            """Adapt error_detected handler's call signature to deliver_email_to_branch."""
+            """Adapt error_detected handler's call signature to deliver_email_to_branch.
+
+            `upsert_key` is named EXPLICITLY, never left to **kwargs: a key that
+            falls into kwargs is dropped silently — no error, no upsert, and the
+            recipient's inbox keeps stacking. Callers that pass no key (medic,
+            runaway) get the untouched one-message-per-send path.
+
+            `upsert_result`, when a dict is passed, receives the delivery outcome
+            ("created" | "updated") that ai_mail writes back onto email_data. The
+            callback contract is `-> bool`, so this sink is the only way a caller
+            can log what actually happened to the message.
+            """
             email_data = {
                 "from": from_branch,
                 "from_name": "TRIGGER",
@@ -47,7 +66,9 @@ def setup_handlers():
             }
             if auto_execute:
                 email_data["message"] = f"⚡ DISPATCH TASK - READ THIS FIRST ⚡\n\n{message}"
-            success, _ = deliver_email_to_branch(to_branch, email_data)
+            success, _ = deliver_email_to_branch(to_branch, email_data, upsert_key=upsert_key)
+            if upsert_result is not None:
+                upsert_result["upsert_action"] = email_data.get("upsert_action")
             return success
 
         set_send_email_callback(_send_email_adapter)

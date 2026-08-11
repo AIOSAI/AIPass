@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(ai_mail/trigger)** — repeat-warning digests collapse into ONE inbox
+message with a climbing counter (by @ai_mail, @trigger; FPLAN-0389, Patrick
+ruling 2026-08-10). ai_mail's delivery layer gains an opt-in `upsert_key`:
+same sender + same key + not-closed updates the existing message in place —
+subject/body refreshed, `updates` counter climbs (inbox row `x4`, view
+header `Updates:`), id and read-state preserved, desktop toast suppressed on
+updates, `auto_execute` forced off in delivery, broadcast+key refused
+loudly. CLI `--upsert-key`. trigger's escalation lane passes
+`escalation:<signature>` threaded explicitly past its `**kwargs` adapter
+(mutation-tested guard); medic/runaway paths byte-identical; upsert outcome
+audited in escalation.jsonl. 56 new tests (ai_mail suite 921, trigger 917),
+seedgo 100% on all touched files, live-proven end to end: created → viewed →
+updated in place, same id, still opened.
+
 **chore(memory/seedgo/prax)** — bypass-hygiene train (by @memory, @seedgo,
 @prax; FPLAN-0382 follow-through). Stale bypass.json entries pruned in
 memory and prax after their underlying causes were fixed; @memory's

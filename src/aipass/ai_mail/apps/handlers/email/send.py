@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-07
+# Modified: 2026-08-10
 # =============================================
 
 """
@@ -193,9 +193,15 @@ def send_to_single(
     on_delivered_callback,
     log_operation_fn,
     update_central_fn,
+    upsert_key: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Execute single-recipient email send.
+
+    Args:
+        upsert_key: Optional stable signature for a repeating signal. When set,
+            delivery rewrites the open message already carrying this key from
+            this sender instead of stacking a new one. None = today's behavior.
 
     Returns:
         Tuple of (success, error_msg). error_msg is None on success.
@@ -214,11 +220,19 @@ def send_to_single(
         email_data["dispatched_to"] = dispatched_to
     if no_memory_save:
         email_data["no_memory_save"] = True
+    # Carried on email_data rather than as a kwarg: delivery honors both, and
+    # this path takes its delivery function by injection.
+    if upsert_key:
+        email_data["upsert_key"] = upsert_key
 
     success, error_msg = deliver_email_to_branch_fn(to_branch, email_data, on_delivered=on_delivered_callback)
 
     if success:
-        log_operation_fn("email_sent", {"to": to_branch, "subject": subject, "auto_execute": auto_execute})
+        payload = {"to": to_branch, "subject": subject, "auto_execute": auto_execute}
+        # Only present for upsert sends — a plain send logs exactly what it always did
+        if email_data.get("upsert_action"):
+            payload["upsert_action"] = email_data["upsert_action"]
+        log_operation_fn("email_sent", payload)
 
         # Fire trigger event (best-effort)
         try:

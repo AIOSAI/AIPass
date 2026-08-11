@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-08-10
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (34/34) | **Tests:** 878 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 921 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -74,6 +74,37 @@ the worst failure shape mail has, because the sender believes it was delivered.
   raises `MarkupError` that aborts the whole listing.
 - **Fail honest** — a row that still cannot render is reprinted raw behind a marker, and
   an unreadable `sent/` file lists as a placeholder. Never a silent skip.
+
+## Repeat Signals (`upsert_key`)
+
+A signal that repeats — the same WARNING firing every poll — must occupy **one**
+inbox slot with a climbing counter, not one slot per repeat. Senders that repeat
+give the send a stable `upsert_key`:
+
+```bash
+drone @ai_mail email @devpulse "WARNING: disk 97%" "body" --upsert-key warn:disk
+```
+
+- **Match** = same `from` **and** same `upsert_key` **and** `status != closed`.
+  On a match the existing message is rewritten in place: fresh subject + body,
+  `last_updated` stamped, `updates` incremented.
+- **The id and the read status are preserved.** Opened stays opened, new stays
+  new. A repeat is the same demand for attention, not a new one — so an update
+  never flips a message back to unread, never fires a desktop notification, and
+  never wakes or dispatches anything (`auto_execute` is forced off on update).
+- **No match** — first send, or the previous one was closed/archived — creates an
+  ordinary new message at `updates: 1`. **Closing re-arms the signature**: the
+  next send starts a fresh message, which is how a resolved warning comes back.
+- **Visibility** — `inbox` prints `x3` on the row, `view` prints
+  `Updates: 3 (last: <timestamp>)` in the header. One message, N stated.
+- `upsert_key=None` (the default) is plain delivery, unchanged for every caller.
+- Not supported for `@all` broadcasts — refused loudly rather than stacking N.
+
+Delivery-layer callers (e.g. `@trigger`, which imports `deliver_email_to_branch`
+directly) pass `upsert_key=` as a keyword or set `email_data["upsert_key"]`;
+both work. The outcome comes back as `email_data["upsert_action"]`
+(`"created"` / `"updated"`), so a caller can log the difference without
+re-reading the inbox.
 
 ## Exit Codes
 
@@ -142,6 +173,25 @@ If all fail, detection returns `None` and the operation fails loudly. Wrong iden
 
 The `--from @branch` flag on send/email commands provides an explicit sender override for callers outside branch directories.
 
+### Address Derivation Hazard
+
+A branch with no explicit `email` field in the registry gets one derived by
+`registry/read.py:_derive_email_from_branch_name()`, which splits the name and
+keeps **one token**:
+
+| Branch name | Rule | Address |
+|---|---|---|
+| `AIPASS.admin` | after the dot | `@admin` |
+| `Glass House` | first word | `@glass` |
+| `AIPASS-HELP` | after the hyphen (AIPASS prefix only) | `@help` |
+| `flight-deck` | before the hyphen | `@flight` |
+
+So a multi-word branch name silently loses everything after the first token, and
+resolution downstream is exact-match (`delivery.py`, `contacts.py`) with no fuzzy
+or prefix fallback anywhere — a truncated address never self-corrects, it just
+fails to route. **Set an explicit `email` in the registry for any branch whose
+name contains a space, dot or hyphen.**
+
 ## Cross-Project Email
 
 External projects (outside the AIPass repo) can send to AIPass branches. On delivery, `delivery.py` stores a `reply_path` on the message (the sender's `inbox.json` path, resolved from `AIPASS_CALLER_CWD`). Replies use `_deliver_via_reply_path()` to write directly to the external inbox without needing registry lookup.
@@ -195,7 +245,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Desktop notifications (dbus direct)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 826 tests across 16 test files
+└── tests/                      # 921 tests across 31 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -209,6 +259,7 @@ ai_mail/
     ├── test_contacts.py        # Address book operations
     ├── test_inbox_ops.py       # Inbox loading + migration
     ├── test_registry_read.py   # Registry parsing + branch lookup
+    ├── test_upsert.py          # upsert_key repeat-signal collapsing (40 tests)
     ├── test_central_writer.py  # Central stats aggregation
     ├── test_cli_routing.py     # CLI routing + help/version
     ├── test_json_handler.py    # JSON I/O helpers

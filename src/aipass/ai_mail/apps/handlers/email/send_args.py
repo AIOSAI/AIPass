@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send_args.py
 # Description: Email Send Argument Parsing Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-10
 # =============================================
 
 """
@@ -34,6 +34,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
             recipients: List[str]
             subject: str | None
             message: str | None
+            upsert_key: str | None
             mode: 'direct' | 'interactive' | 'error'
             error: str | None (set when mode=='error')
     """
@@ -64,6 +65,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
                 "recipients": [],
                 "subject": None,
                 "message": None,
+                "upsert_key": None,
                 "mode": "error",
                 "error": "--from requires a branch address (e.g., --from @spawn)",
             }
@@ -84,8 +86,30 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
                 "recipients": [],
                 "subject": None,
                 "message": None,
+                "upsert_key": None,
                 "mode": "error",
                 "error": "--reply-to requires a branch address (e.g., --reply-to @devpulse)",
+            }
+
+    # Extract --upsert-key (repeat signature: update one message instead of stacking)
+    upsert_key = None
+    if "--upsert-key" in working_args:
+        idx = working_args.index("--upsert-key")
+        if idx + 1 < len(working_args):
+            upsert_key = working_args[idx + 1]
+            working_args = working_args[:idx] + working_args[idx + 2 :]
+        else:
+            return {
+                "auto_execute": auto_execute,
+                "no_memory_save": no_memory_save,
+                "reply_to": reply_to,
+                "from_branch": from_branch,
+                "recipients": [],
+                "subject": None,
+                "message": None,
+                "upsert_key": None,
+                "mode": "error",
+                "error": "--upsert-key requires a signature (e.g., --upsert-key trigger:warn:disk)",
             }
 
     # Separate recipients from subject/message
@@ -121,6 +145,7 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
         "recipients": recipients,
         "subject": subject,
         "message": message,
+        "upsert_key": upsert_key,
         "mode": mode,
         "error": None if mode != "error" else "Usage: send @recipient [subject] [message]",
     }
