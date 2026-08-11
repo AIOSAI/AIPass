@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-10
+**Last Updated:** 2026-08-11
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 921 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 924 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -245,7 +245,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Desktop notifications (dbus direct)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 921 tests across 31 test files
+└── tests/                      # 924 tests across 31 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

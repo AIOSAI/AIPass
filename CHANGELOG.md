@@ -11,6 +11,21 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(ai_mail)** — culture fence line in dispatch headers (by @ai_mail,
+DPLAN-0276 leftover, morning-wave dispatch). Both header constants
+(DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER) now carry the attribution
+fence after the sync-subagents warning: "Found work in the tree you cannot
+explain? REPORT it — never invent an author." Unexplained changes are
+evidence, stated and attributed to no one — the rule that closed the
+DPLAN-0276 invented-author incident now rides every dispatch a recipient
+reads. header.py 1.2.0; 3 canary-verified tests (fence stripped → red,
+restored → green), including one asserting the fence survives
+prepend_dispatch_header. Suite 924 green, audit 100%. The second DPLAN-0276
+leftover (stale TRUST-BREAK banner commands) turned out to live in @hooks'
+config loader, not @ai_mail — @ai_mail measured it (`drone @hooks trust
+enroll` is not a real verb; the working path is `aipass trust <path>`) and
+emailed @hooks so the one-line fix rides their next touch.
+
 **perf(devpulse)** — watchdog poll loop 142× cheaper (by @devpulse; todo
 #126, night shift FPLAN-0393). Each 5s tick cost 152ms of CPU (~3% of a
 core per armed watchdog, compounding across concurrent watches): two

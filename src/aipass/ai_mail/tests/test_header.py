@@ -126,3 +126,24 @@ def test_no_memory_save_header_instructs_synchronous_subagents():
     """No-memory-save variant carries the same sync sub-agents warning."""
     assert "SYNCHRONOUSLY" in mod.NO_MEMORY_SAVE_HEADER
     assert "run_in_background: false" in mod.NO_MEMORY_SAVE_HEADER
+
+
+def test_dispatch_header_carries_culture_fence():
+    """Standard header states the fence: unexplained work is reported, never
+    given an invented author (DPLAN-0276)."""
+    assert "never invent an author" in mod.DISPATCH_HEADER
+    assert "REPORT it" in mod.DISPATCH_HEADER
+    assert "attribute it to no one" in mod.DISPATCH_HEADER
+
+
+def test_no_memory_save_header_carries_culture_fence():
+    """The fence is not a memory-save concern — the private variant carries it too."""
+    assert "never invent an author" in mod.NO_MEMORY_SAVE_HEADER
+    assert "attribute it to no one" in mod.NO_MEMORY_SAVE_HEADER
+
+
+def test_culture_fence_reaches_the_recipient():
+    """The fence survives prepend — it is on the surface a recipient actually reads,
+    not just a module constant."""
+    result = mod.prepend_dispatch_header("Task body.")
+    assert "never invent an author" in result
