@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-14
 # Modified: 2026-08-11
 # =============================================
@@ -206,79 +206,6 @@ def _get_jsonl_projects_dir(branch_path: Path) -> Path:
     return Path.home() / ".claude" / "projects" / encoded
 
 
-def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
-    """Snapshot current sizes of all JSONL files, recursively.
-
-    Recursive because sub-agent transcripts live under ``<session>/subagents/``,
-    not at the top level: a parent waiting on a synchronous sub-agent writes no
-    JSONL of its own while the sub-agent's file grows, so a top-level-only scan
-    misreads that whole span as idle and false-fires STALLED (seen live
-    2026-08-08 on @trigger's digest build). Keys are paths relative to
-    ``projects_dir`` so equal basenames in different session dirs can't collide.
-    """
-    sizes = {}
-    if not projects_dir.exists():
-        return sizes
-    try:
-        for f in projects_dir.rglob("*.jsonl"):
-            try:
-                sizes[str(f.relative_to(projects_dir))] = f.stat().st_size
-            except OSError as exc:
-                logger.info("[watchdog.agent] jsonl snapshot stat failed for %s: %s", f.name, exc)
-    except OSError as exc:
-        logger.info("[watchdog.agent] jsonl snapshot glob failed: %s", exc)
-    return sizes
-
-
-def _has_jsonl_activity(projects_dir: Path, baseline: dict) -> bool:
-    """Return True if any JSONL file grew or a new file appeared since baseline.
-
-    Recursive, keyed by relative path — see ``_snapshot_jsonl_sizes``.
-    """
-    if not projects_dir.exists():
-        return False
-    try:
-        files = list(projects_dir.rglob("*.jsonl"))
-    except OSError as exc:
-        logger.info("[watchdog.agent] jsonl activity glob failed: %s", exc)
-        return False
-    for f in files:
-        try:
-            current_size = f.stat().st_size
-        except OSError as exc:
-            logger.info("[watchdog.agent] jsonl activity stat failed for %s: %s", f.name, exc)
-            continue
-        key = str(f.relative_to(projects_dir))
-        if key not in baseline:
-            return current_size > 0
-        if current_size > baseline[key]:
-            return True
-    return False
-
-
-def _newest_jsonl(projects_dir: Path) -> Path | None:
-    """Return the most-recently-modified .jsonl under projects_dir (recursive), or None."""
-    if not projects_dir.exists():
-        return None
-    try:
-        files = list(projects_dir.rglob("*.jsonl"))
-    except OSError as exc:
-        logger.info("[watchdog.agent] newest jsonl glob failed: %s", exc)
-        return None
-    newest: Path | None = None
-    newest_mtime = -1.0
-    for f in files:
-        try:
-            mtime = f.stat().st_mtime
-        except OSError as exc:
-            logger.info("[watchdog.agent] newest jsonl stat failed for %s: %s", f.name, exc)
-            continue
-        if mtime > newest_mtime:
-            newest_mtime = mtime
-            newest = f
-    return newest
-
-
 def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
     """Non-blank newline-delimited lines from a bounded tail read of ``path``.
     Reads at most ``max_bytes`` from the end so a multi-MB transcript stays
@@ -347,18 +274,6 @@ def _inflight_from_lines(lines: list[str], source: str = "?") -> bool:
         if role == "user":
             return False
     return False
-
-
-def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
-    """Stateless one-shot: in-flight ``tool_use`` as the newest transcript's
-    last message entry. The poll loop reads this through ``TranscriptScanner``
-    (cached list + cached verdicts); this form stays for one-off checks and as
-    the semantic reference the scanner tests are held against.
-    """
-    newest = _newest_jsonl(projects_dir)
-    if newest is None:
-        return False
-    return _inflight_from_lines(_tail_lines(newest), source=newest.name)
 
 
 class TranscriptScanner:
@@ -437,8 +352,11 @@ class TranscriptScanner:
 
     def tick(self, now: float) -> bool:
         """One poll tick: True if any known transcript grew or a newly
-        discovered one has content. Same semantics as ``_has_jsonl_activity``
-        against a baseline taken at the last tick."""
+        discovered one has content, compared against the sizes seen at the
+        previous tick. Recursive coverage matters: sub-agent transcripts live
+        under ``<session>/subagents/``, and a parent waiting on one writes no
+        JSONL of its own while the nested file grows — a top-level-only scan
+        false-fired STALLED on exactly that (live 2026-08-08, @trigger)."""
         if now - self._last_refresh >= self.REFRESH_INTERVAL:
             self.refresh(now)
         prev = self._stat_pass()

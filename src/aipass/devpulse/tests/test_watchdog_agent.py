@@ -230,49 +230,58 @@ def _write_jsonl(projects_dir: Path, *lines: dict, name: str = "session.jsonl") 
     return f
 
 
-def test_last_entry_is_inflight_tool_true_for_assistant_tool_use(tmp_path):
+def _lines(*entries: dict) -> list[str]:
+    """JSON-encode entries as transcript lines for _inflight_from_lines."""
+    return [json.dumps(e) for e in entries]
+
+
+def test_inflight_from_lines_true_for_assistant_tool_use():
     """Last line = assistant message with a tool_use block → in-flight tool call."""
-    proj = tmp_path / "proj"
-    _write_jsonl(
-        proj,
-        {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
-        {
-            "type": "assistant",
-            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "a", "name": "Bash", "input": {}}]},
-        },
+    assert (
+        agent_handler._inflight_from_lines(
+            _lines(
+                {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": "a", "name": "Bash", "input": {}}],
+                    },
+                },
+            )
+        )
+        is True
     )
-    assert agent_handler._last_entry_is_inflight_tool(proj) is True
 
 
-def test_last_entry_is_inflight_tool_false_for_text_and_results(tmp_path):
+def test_inflight_from_lines_false_for_text_results_malformed_empty():
     """Assistant text-only, a returned tool_result, malformed, and empty all → False."""
-    proj = tmp_path / "proj"
-
-    _write_jsonl(
-        proj, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
+    assert (
+        agent_handler._inflight_from_lines(
+            _lines({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "d"}]}})
+        )
+        is False
     )
-    assert agent_handler._last_entry_is_inflight_tool(proj) is False
-
-    _write_jsonl(
-        proj,
-        {
-            "type": "user",
-            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a", "content": "ok"}]},
-        },
+    assert (
+        agent_handler._inflight_from_lines(
+            _lines(
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "a", "content": "ok"}],
+                    },
+                }
+            )
+        )
+        is False
     )
-    assert agent_handler._last_entry_is_inflight_tool(proj) is False
-
-    (proj / "session.jsonl").write_text("{not valid json\n", encoding="utf-8")
-    assert agent_handler._last_entry_is_inflight_tool(proj) is False
-
-    # Nonexistent dir and empty dir → False.
-    assert agent_handler._last_entry_is_inflight_tool(tmp_path / "nope") is False
-    (tmp_path / "empty").mkdir()
-    assert agent_handler._last_entry_is_inflight_tool(tmp_path / "empty") is False
+    assert agent_handler._inflight_from_lines(["{not valid json"]) is False
+    assert agent_handler._inflight_from_lines([]) is False
 
 
-def test_last_entry_is_inflight_tool_picks_newest_file(tmp_path):
-    """With multiple JSONLs, only the most-recently-modified one decides."""
+def test_scanner_newest_file_decides_inflight(tmp_path):
+    """With multiple JSONLs, the most-recently-modified one decides the verdict."""
     proj = tmp_path / "proj"
     old = _write_jsonl(
         proj,
@@ -286,10 +295,13 @@ def test_last_entry_is_inflight_tool_picks_newest_file(tmp_path):
     )
     os.utime(old, (1, 1))
     os.utime(new, (2, 2))
-    assert agent_handler._last_entry_is_inflight_tool(proj) is False  # newest = text-only
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    s.tick(1.0)
+    assert s.last_entry_inflight() is False  # newest = text-only (both top-level)
 
     os.utime(old, (3, 3))  # old is now newest and holds the tool_use
-    assert agent_handler._last_entry_is_inflight_tool(proj) is True
+    s.tick(2.0)
+    assert s.last_entry_inflight() is True
 
 
 def _stub_scanner(
@@ -463,8 +475,9 @@ def test_watch_agent_live_dispatch_completes():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_jsonl_activity_sees_subagent_transcripts(tmp_path):
-    """A sub-agent transcript under <session>/subagents/ counts as activity.
+def test_scanner_sees_subagent_transcript_growth(tmp_path):
+    """A known sub-agent transcript growing under <session>/subagents/ counts
+    as activity per tick.
 
     A parent waiting on a synchronous sub-agent writes no top-level JSONL while
     the sub-agent's nested file grows — top-level-only scanning false-fired
@@ -473,24 +486,18 @@ def test_jsonl_activity_sees_subagent_transcripts(tmp_path):
     _write_jsonl(proj, {"type": "user", "message": {"role": "user", "content": []}})
     sub = proj / "session-abc" / "subagents"
     sub.mkdir(parents=True)
-
-    baseline = agent_handler._snapshot_jsonl_sizes(proj)
-    assert agent_handler._has_jsonl_activity(proj, baseline) is False
-
-    # New nested file appears → activity.
     (sub / "agent-x.jsonl").write_text('{"type": "assistant"}\n', encoding="utf-8")
-    assert agent_handler._has_jsonl_activity(proj, baseline) is True
 
-    # Known nested file grows → activity.
-    baseline = agent_handler._snapshot_jsonl_sizes(proj)
-    assert agent_handler._has_jsonl_activity(proj, baseline) is False
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    assert s.tick(1.0) is False
     with (sub / "agent-x.jsonl").open("a", encoding="utf-8") as fh:
         fh.write('{"type": "assistant"}\n')
-    assert agent_handler._has_jsonl_activity(proj, baseline) is True
+    assert s.tick(2.0) is True
 
 
-def test_jsonl_snapshot_keys_relative_no_basename_collision(tmp_path):
-    """Equal basenames in different session dirs are tracked independently."""
+def test_scanner_no_basename_collision(tmp_path):
+    """Equal basenames in different session dirs are tracked independently
+    (absolute-path keys)."""
     proj = tmp_path / "proj"
     a = proj / "session-a" / "subagents"
     b = proj / "session-b" / "subagents"
@@ -499,45 +506,34 @@ def test_jsonl_snapshot_keys_relative_no_basename_collision(tmp_path):
     (a / "agent-1.jsonl").write_text("x\n", encoding="utf-8")
     (b / "agent-1.jsonl").write_text("longer content\n", encoding="utf-8")
 
-    sizes = agent_handler._snapshot_jsonl_sizes(proj)
-    assert len(sizes) == 2
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    assert len(s.sizes) == 2
+    assert s.tick(1.0) is False
     # Growth in only one of the twins is seen.
     with (a / "agent-1.jsonl").open("a", encoding="utf-8") as fh:
         fh.write("more\n")
-    assert agent_handler._has_jsonl_activity(proj, sizes) is True
+    assert s.tick(2.0) is True
 
 
-def test_inflight_tool_seen_past_bookkeeping_lines(tmp_path):
+def test_inflight_seen_past_bookkeeping_lines():
     """Bookkeeping lines (type: last-prompt) after the assistant tool_use must not
     mask the in-flight signal — the live false-STALLED had exactly this shape."""
-    proj = tmp_path / "proj"
-    _write_jsonl(
-        proj,
-        {
-            "type": "assistant",
-            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
-        },
-        {"type": "last-prompt", "prompt": "..."},
-    )
-    assert agent_handler._last_entry_is_inflight_tool(proj) is True
+    tool_use = {
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
+    }
+    bookkeeping = {"type": "last-prompt", "prompt": "..."}
+    assert agent_handler._inflight_from_lines(_lines(tool_use, bookkeeping)) is True
 
     # But a returned tool_result behind the same bookkeeping → NOT in-flight.
-    _write_jsonl(
-        proj,
-        {
-            "type": "assistant",
-            "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
-        },
-        {
-            "type": "user",
-            "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
-        },
-        {"type": "last-prompt", "prompt": "..."},
-    )
-    assert agent_handler._last_entry_is_inflight_tool(proj) is False
+    tool_result = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
+    }
+    assert agent_handler._inflight_from_lines(_lines(tool_use, tool_result, bookkeeping)) is False
 
 
-def test_inflight_tool_newest_file_may_be_subagent(tmp_path):
+def test_scanner_newest_file_may_be_subagent(tmp_path):
     """The newest transcript can be a nested sub-agent file — its in-flight
     tool_use counts (the sub-agent working IS the parent working)."""
     proj = tmp_path / "proj"
@@ -557,7 +553,9 @@ def test_inflight_tool_newest_file_may_be_subagent(tmp_path):
     )
     os.utime(parent, (1, 1))
     os.utime(subfile, (2, 2))
-    assert agent_handler._last_entry_is_inflight_tool(proj) is True
+    s = agent_handler.TranscriptScanner(proj, now=0.0)
+    s.tick(1.0)
+    assert s.last_entry_inflight() is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

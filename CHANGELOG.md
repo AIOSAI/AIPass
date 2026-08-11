@@ -26,8 +26,13 @@ newest and newest-top-level transcripts are candidates — and the tracker
 forces a fresh re-walk before ever declaring STALLED so a transcript born
 between refreshes suppresses the false alarm. Live-verified: pidstat
 steady-state 1.73% → 0.27% per handler; synthetic-lock watch woke next tick
-on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 462
-green.
+on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 469
+green. Follow-up after CI's fleet audit caught the rewrite honestly
+(unused_function 98%): the four pre-scanner helpers the loop no longer
+calls were deleted rather than bypassed, their tests ported to the scanner
+and the pure `_inflight_from_lines` (the actual production path), restoring
+the audit to 100%; four dead encapsulation bypass rules pruned in the same
+touch.
 
 **chore(prep-skill)** — /prep now pins the interrupted thread as step 0 and
 ends every run with a mandatory `Resuming:` line naming what was in flight

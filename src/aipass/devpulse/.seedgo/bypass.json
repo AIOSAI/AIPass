@@ -48,26 +48,6 @@
       "standard": "unused_function",
       "file": "apps/handlers/watchdog/schedule.py",
       "reason": "format_wait() has 5 passing tests. Public utility for schedule display, not called in production yet."
-    },
-    {
-      "standard": "encapsulation",
-      "file": "tests/test_git_gate.py",
-      "reason": "Test imports git_gate.py from ~/.claude/hooks/ via importlib — external hook, not a branch module."
-    },
-    {
-      "standard": "encapsulation",
-      "file": "tests/test_feedback_module.py",
-      "reason": "Router test imports the feedback storage handler directly to arrange/assert inbox state (save_inbox/load_inbox) — standard test-fixture access, same pattern as test_feedback_storage.py / test_compass_store.py. #681."
-    },
-    {
-      "standard": "encapsulation",
-      "file": "tests/test_owner_guard.py",
-      "reason": "Unit test imports the owner guard handler (its SUT) and patches spawn.registry's get_owner/is_owner — the guard is a shared handler primitive with no apps/modules/ command entry point. Same direct-SUT pattern as test_compass_store.py. #681."
-    },
-    {
-      "standard": "encapsulation",
-      "file": "tests/test_compass_store.py",
-      "reason": "Storage-layer unit test imports the compass handler's store submodule directly to exercise the _verify_fts5 FTS5 probe — there is no apps/modules/ command entry point for compass until P2 (DPLAN-0212). Same pattern as test_feedback_storage.py."
     }
   ],
   "notes": {
