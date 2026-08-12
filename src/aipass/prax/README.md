@@ -4,7 +4,7 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.1.0
+**Version:** 2.2.0
 **Last Updated:** 2026-08-11
 
 ---
@@ -51,6 +51,7 @@ drone @prax monitor --help               # Monitor usage
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
+- **Branch scoping** — `monitor run seedgo,cli` shows only those branches (see below)
 - **Caller attribution** — `CALLER → TARGET` for drone commands
 - **Model tags** — `[BRANCH/model]` (e.g., `[DEVPULSE/opus]`, `[DEVPULSE/gpt-5.4]`)
 - **Multi-CLI** — Claude Code (JSONL), Codex (JSONL) session monitoring
@@ -59,6 +60,21 @@ Real-time unified console showing:
 - **Soft start** — only shows new activity after launch (seeks to EOF on startup)
 
 Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`.
+
+**Branch scoping.** A comma-separated list (`monitor run seedgo,cli`) restricts the
+display to those branches; bare `run` and `run all` show everything, unchanged. A
+scope covers each named branch's log lines, file changes and CLI sessions —
+including session labels that carry a project prefix or model tag
+(`AIPASS/SEEDGO/opus`) — plus commands the branch issued or was targeted by
+(`devpulse → prax` appears in both scopes). Filtering happens at the queue, so
+out-of-scope traffic never occupies a display slot and cannot push wanted events
+out under load. The banner and `status` name the active scope, `status` also
+reports how many events the scope is holding back, and a name that is in no
+branch registry is called out at launch rather than showing a silently empty
+screen. The monitor's own health warnings (file watcher unavailable, and similar)
+bypass the scope — a filter must never hide the reason the screen is empty.
+The scope is set at launch; there is no runtime `filter` command outside commons
+feed mode.
 
 **Commons feed mode** (`monitor run commons`) is a different watcher, not a branch
 filter — it renders live social activity in The Commons (posts, comments, votes,
@@ -187,13 +203,13 @@ prax/
 │       ├── json/                      # Auto-creating JSON handler (config/data/log per module)
 │       ├── json_templates/            # Default JSON templates for auto-creation
 │       ├── logging/                   # Setup, rotation, introspection, override, direct logger
-│       ├── monitoring/                # Event queue, branch detector, stream output, log watcher, rate tracker
+│       ├── monitoring/                # Event queue, branch detector, branch scope, stream output, log watcher, rate tracker
 │       ├── registry/                  # Module registry load/save
 │       ├── status/                    # STATUS.md sync handler (dormant — TDPLAN-0007)
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1133 tests across 28 files
+└── tests/                             # 1197 tests across 29 files
 ```
 
 ### Design Pattern
@@ -222,7 +238,7 @@ drone @prax monitor run
 
 ## Tests
 
-1133 tests across 28 files, covering all major components:
+1197 tests across 29 files, covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -230,13 +246,13 @@ drone @prax monitor run
 | test_monitoring_handlers.py | 139 | Branch detector, stream output, event handling |
 | test_operations.py | 99 | Dashboard operations, write-through |
 | test_log_watcher.py | 90 | Log file tailing, agent activity parsing |
-| test_monitor_module.py | 66 | Monitor commands, thread lifecycle (4-thread) |
+| test_monitor_module.py | 82 | Monitor commands, thread lifecycle (4-thread), branch scoping |
 | test_telegram_relay.py | 62 | Telegram relay, buffering, pause control |
 | test_config.py | 61 | Config loading, path resolution, log levels |
 | test_logging_handlers.py | 49 | Setup, rotation, introspection, direct logger |
 | test_logging.py | 47 | Core logging system, debug level gating |
 | test_logger_module.py | 46 | Logger init, routing, lifecycle, NullLogger fallback |
-| test_event_queue.py | 40 | Thread-safe event buffering |
+| test_event_queue.py | 49 | Thread-safe event buffering, scope suppression |
 | test_monitoring_filters.py | 39 | Event filtering rules |
 | test_commons_feed.py | 28 | Commons live feed, cursors, room filtering |
 | test_instance_lock.py | 28 | Single-instance locking, stale reclaim |
@@ -250,7 +266,8 @@ drone @prax monitor run
 | test_pid_cache.py | 12 | PID resolution cache |
 | test_devpulse_dashboard_plugin.py | 9 | Dashboard plugin (git, session, dispatch) |
 | test_jsonl_writer.py | 9 | JSONL append writer |
-| test_help_markup.py | 8 | Rendered console output (real Rich console) |
+| test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
+| test_help_markup.py | 10 | Rendered console output (real Rich console) |
 | test_status.py | 8 | Status commands |
 | test_sweep.py | 6 | Log sweep |
 | test_scaffold.py | 1 | Scaffold placeholder (skipped — branch conftest) |
@@ -272,10 +289,11 @@ drone @prax monitor run
 
 ## Known Issues
 - **inotify exhaustion** — System often near `max_user_watches` limit. Monitor uses polling fallback (functional but slower).
-- **Interactive filtering deferred in Mission Control** — `_handle_interactive_cmd` dispatches
+- **No runtime filtering in Mission Control** — `_handle_interactive_cmd` dispatches
   only `help` and `status`; `watch` and `filter` fall through to "Unknown command". Branch
-  selection is launch-time only (`monitor run seedgo,cli`). Commons feed mode is the exception:
-  it implements `filter <room>` / `filter clear` live. `watch` exists in neither mode.
+  selection is launch-time only (`monitor run seedgo,cli`) and cannot be changed without a
+  restart. Commons feed mode is the exception: it implements `filter <room>` / `filter clear`
+  live. `watch` exists in neither mode.
 
 ---
 

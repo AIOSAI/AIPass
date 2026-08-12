@@ -53,7 +53,7 @@ apps/
       persistent_alert.py   #   Advisory banners for .aipass/alerts.json
     security/              # Enforcement hooks
       presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
-      edit_gate.py         #   Blocks edits while type errors exist
+      edit_gate.py         #   Fences writes: cross-project, cross-branch, inbox, type errors
       git_gate.py          #   Enforces git access tiers
       rm_gate.py           #   Guards destructive rm commands
       registry_gate.py     #   Guards registry-modifying commands

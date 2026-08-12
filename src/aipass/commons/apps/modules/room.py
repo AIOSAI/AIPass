@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: room.py
 # Description: Room management orchestration module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -131,7 +131,7 @@ def _handle_list_rooms(args: List[str]) -> bool:
     console.print()
 
     if not rooms:
-        console.print("[dim]  No rooms yet. Create one with: room create <name> [description][/dim]")
+        console.print("[dim]  No rooms yet. Create one with: room create <name> \\[description][/dim]")
         console.print()
         return True
 

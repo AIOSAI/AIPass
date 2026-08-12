@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: list_plans.py
 # Description: PLAN listing module with filtering
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2025-11-21
-# Modified: 2025-11-21
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -104,7 +104,7 @@ def print_help():
     console.print("[bold cyan]list_plans[/bold cyan] — List PLAN files from registry")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  drone @flow list [filter]")
+    console.print("  drone @flow list \\[filter]")
     console.print()
     console.print("[yellow]FILTERS:[/yellow]")
     console.print("  open      List open plans only [dim](default)[/dim]")

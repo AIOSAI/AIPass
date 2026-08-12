@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-03
-# Modified: 2026-02-03
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -267,7 +267,7 @@ def _print_help(console):
     console.print("[bold cyan]TRIGGER CORE - Event Bus[/bold cyan]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
-    console.print("  fire <event> [key=value ...]  Fire an event with optional data")
+    console.print("  fire <event> \\[key=value ...]  Fire an event with optional data")
     console.print("  status                        Show registered event handlers")
     console.print("  list                          Alias for status")
     console.print()

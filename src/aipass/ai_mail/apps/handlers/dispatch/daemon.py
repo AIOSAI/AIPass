@@ -489,15 +489,15 @@ def spawn_agent(
         daily[branch_email] = daily.get(branch_email, 0) + 1
         state["daily_counts"] = daily
 
-        # Desktop notification — show who woke and why
+        # Notification feed event — show who woke and why
         notif_title = f"Daemon → {branch_email}"
         notif_body = f'Task from {sender}: "{subject[:80]}"' if subject else f"Dispatch from {sender}"
         try:
             from aipass.ai_mail.apps.handlers.notify import send_notification
 
-            send_notification(notif_title, notif_body, source=branch_email.lstrip("@"))
+            send_notification(notif_title, notif_body, source=branch_email.lstrip("@"), kind="dispatch")
         except Exception:
-            logger.info(f"Desktop notification unavailable for {branch_email}")
+            logger.info(f"Notification feed unavailable for {branch_email}")
 
         logger.info(f'SPAWN {branch_email} PID={monitor_pid} (monitor) sender={sender} subject="{subject[:60]}"')
         log_dispatch(branch_email, monitor_pid, "spawned")

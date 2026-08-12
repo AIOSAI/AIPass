@@ -21,5 +21,6 @@
     ],
     "ask": []
   },
-  "enabledMcpjsonServers": []
+  "enabledMcpjsonServers": [],
+  "autoCompactWindow": 350000
 }

@@ -2,10 +2,11 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2025-11-08
-# Version: 1.1.0
+# Version: 1.2.0
 # Category: ai_mail/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
 #   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
@@ -28,6 +29,20 @@ import shutil
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock
+
+
+@pytest.fixture(autouse=True)
+def _isolate_notification_feed(tmp_path, monkeypatch):
+    """Point the notification feed at tmp_path for EVERY test.
+
+    Call sites in delivery, wake, dispatch_monitor and daemon write a feed line
+    as a side effect. Without this guard a test run appends fake dispatch events
+    to the real .aipass/notifications.jsonl that BAUD renders — the toast era
+    hid that leak because a toast vanishes; a feed line does not.
+    """
+    import aipass.ai_mail.apps.handlers.notify as notify_mod
+
+    monkeypatch.setattr(notify_mod, "FEED_PATH", tmp_path / "feed" / "notifications.jsonl")
 
 
 @pytest.fixture

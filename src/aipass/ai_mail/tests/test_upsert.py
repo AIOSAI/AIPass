@@ -50,7 +50,7 @@ def _silence_json_handler():
 @pytest.fixture(autouse=True)
 def _silence_notifications():
     """Prevent desktop notifications during tests."""
-    with patch.object(delivery_mod, "_send_desktop_notification") as mock_notify:
+    with patch.object(delivery_mod, "_emit_notification_event") as mock_notify:
         yield mock_notify
 
 

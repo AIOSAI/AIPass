@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-08
-# Modified: 2026-05-04
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -161,7 +161,7 @@ def print_help() -> None:
     # Usage
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @cli <command> [args...][/dim]")
+    console.print("  [dim]drone @cli <command> \\[args...][/dim]")
     console.print("  [dim]drone @cli --help[/dim]")
     console.print()
     console.print("\u2500" * 70)

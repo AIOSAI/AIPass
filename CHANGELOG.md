@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**night-shift 2026-08-12** — @baud's first-day field notes turned into three
+same-night fixes (FPLAN-0400, each owner-dispatched, red-first, live-verified
+from the reporting seat): **fix(hooks)** cross-project file fence shipped
+(GH #733: edit_gate 1.3.0 gains a project layer — a projects/* seat could
+write src/aipass/* unchallenged because both path sides resolved to empty
+branch; upward+sideways now blocked, downward allowed, proven through the
+real bridge from @baud's seat). **fix(ai_mail)** refused sends no longer
+recorded as delivered (sent record was stamped before delivery; refusals now
+restamped with reason, kept as evidence) + the scrambled refusal output was
+a real routing bug (send handler answered for commands it didn't own, so the
+router re-ran failed sends — doubled records included; hard command gate,
+refusals exit 2, outcomes announced instead of intent). **fix(memory)**
+GH #728 normalize guardrail fails-open fixed for real (per-entry number
+validation — crash mode structurally gone; unreadable rows hold their index
+and warn on three channels; numeric-string numbers self-heal on next touch).
+Plus: fleet-wide `autoCompactWindow` 350k stamped (17/17 branches + dispatch
+pin via @ai_mail, m11 phase 4), the fleet rich-markup sweep (29 sites) rides
+this train, and BAUD m11 settings arc closed out (baud repo 5d340b7).
+Issues #733/#728 commented and left open pending independent verify.
+
 **fix(trigger)** — escalation signatures no longer fragment on counts and
 citizen names (by @trigger off a devpulse dispatch; the 2026-08-11 storm
 put 18 digests for ONE logical event in the manager inbox — the state

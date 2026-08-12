@@ -75,6 +75,31 @@ class TestHelpPlaceholders:
 
 
 # ---------------------------------------------------------------------------
+# Scoped banner
+# ---------------------------------------------------------------------------
+
+
+class TestScopedBannerRenders:
+    """The scope names must reach the terminal, not just console.print."""
+
+    def _banner(self, scope_args):
+        from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
+
+        scope = parse_scope(scope_args)
+        return _render(
+            "aipass.prax.apps.modules.monitor",
+            lambda m: m.console.print(f"[green]{m._mode_line(scope)}[/green]"),
+        )
+
+    def test_scoped_banner_shows_branch_names(self):
+        output = self._banner(["seedgo,cli"])
+        assert "scoped to SEEDGO, CLI" in output
+
+    def test_unscoped_banner_unchanged(self):
+        assert "all branches, all levels, no filters" in self._banner([])
+
+
+# ---------------------------------------------------------------------------
 # log-health branch attribution
 # ---------------------------------------------------------------------------
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -177,8 +177,8 @@ def print_help():
     console.print()
 
     console.print(
-        "Commands: search, rollover [run|status|check|sync-lines|push], lint,"
-        " pool [process|status], symbolic, templates, verify, watch"
+        "Commands: search, rollover \\[run|status|check|sync-lines|push], lint,"
+        " pool \\[process|status], symbolic, templates, verify, watch"
     )
     console.print()
 

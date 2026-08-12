@@ -855,14 +855,14 @@ def wake_branch(
             lock_file.unlink(missing_ok=True)
             return status, False
 
-    # Desktop notification
+    # Notification feed event
     notif_body = custom_message[:80] if custom_message else "Manual wake: check inbox"
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"))
+        send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"), kind="wake")
     except Exception:
-        logger.info("[wake] Desktop notification unavailable")
+        logger.info("[wake] Notification feed unavailable")
 
     return status, True
 

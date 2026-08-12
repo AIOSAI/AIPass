@@ -1,14 +1,23 @@
 # =================== AIPass ====================
 # Name: test_notify.py
-# Description: Tests for desktop notification handler
-# Version: 1.0.0
+# Description: Tests for the notification feed writer
+# Version: 2.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-08-11
 # =============================================
 
-"""Tests for notify module -- dbus and notify-send notification paths."""
+"""Tests for notify module -- JSONL notification feed writer.
 
-import subprocess
+Every assertion here reads the real file the writer produced on a tmp_path
+feed. The only mocks are json_handler (audit log) and logger (output noise) --
+never the write path itself.
+"""
+
+import json
+import threading
+from datetime import datetime
+from pathlib import Path
+
 import pytest
 from unittest.mock import MagicMock
 
@@ -25,176 +34,239 @@ def _suppress_log_operation(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _suppress_logger(monkeypatch):
-    """Suppress logger output during tests."""
-    monkeypatch.setattr(mod, "logger", MagicMock())
+def _capture_logger(monkeypatch):
+    """Replace the logger so failure paths can be asserted on."""
+    fake = MagicMock()
+    monkeypatch.setattr(mod, "logger", fake)
+    return fake
 
 
-# --- send_notification tests ------------------------------------------
+@pytest.fixture
+def feed(tmp_path, monkeypatch):
+    """Point the writer at a temp feed file and hand back its path."""
+    path = tmp_path / ".aipass" / "notifications.jsonl"
+    monkeypatch.setattr(mod, "FEED_PATH", path)
+    return path
 
 
-def test_send_notification_returns_true_when_dbus_succeeds(monkeypatch):
-    """Returns True when dbus path succeeds on first try."""
-    monkeypatch.setattr(mod, "_send_via_dbus", lambda *a: True)
-    monkeypatch.setattr(mod, "_send_via_notify_send", lambda *a: False)
-
-    result = mod.send_notification("Title", "Body", "spawn")
-    assert result is True
+def _lines(path: Path):
+    """Read the feed back as parsed JSON objects."""
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def test_send_notification_falls_back_to_notify_send(monkeypatch):
-    """Falls back to notify-send when dbus fails, returns True on fallback success."""
-    monkeypatch.setattr(mod, "_send_via_dbus", lambda *a: False)
-    monkeypatch.setattr(mod, "_send_via_notify_send", lambda *a: True)
-
-    result = mod.send_notification("Title", "Body", "spawn")
-    assert result is True
+# --- Contract: what a feed line contains ------------------------------
 
 
-def test_send_notification_returns_false_when_both_fail(monkeypatch):
-    """Returns False when both dbus and notify-send fail."""
-    monkeypatch.setattr(mod, "_send_via_dbus", lambda *a: False)
-    monkeypatch.setattr(mod, "_send_via_notify_send", lambda *a: False)
+def test_send_notification_writes_one_line_to_the_feed(feed):
+    """A single call appends exactly one line to the feed file."""
+    assert mod.send_notification("Title", "Body", "devpulse", "mail") is True
 
-    result = mod.send_notification("Title", "Body", "spawn")
-    assert result is False
-
-
-def test_send_notification_default_source(monkeypatch):
-    """Default source parameter is 'ai_mail'."""
-    captured = {}
-
-    def fake_dbus(title, body, source, icon):
-        captured["source"] = source
-        return True
-
-    monkeypatch.setattr(mod, "_send_via_dbus", fake_dbus)
-
-    mod.send_notification("Title", "Body")
-    assert captured["source"] == "ai_mail"
+    assert feed.read_text(encoding="utf-8").count("\n") == 1
+    assert len(_lines(feed)) == 1
 
 
-# --- _send_via_dbus tests --------------------------------------------
+def test_feed_line_carries_the_full_contract_schema(feed):
+    """The line has exactly the five contract keys, with the passed values."""
+    mod.send_notification("DEVPULSE -> AI_MAIL", "Retire OS toasts", "devpulse", "mail")
+
+    event = _lines(feed)[0]
+    assert set(event) == {"ts", "kind", "title", "body", "source"}
+    assert event["title"] == "DEVPULSE -> AI_MAIL"
+    assert event["body"] == "Retire OS toasts"
+    assert event["source"] == "devpulse"
+    assert event["kind"] == "mail"
 
 
-def test_send_via_dbus_constructs_correct_command(monkeypatch):
-    """Passes correct arguments to subprocess.run."""
-    captured_args = {}
+def test_ts_is_iso8601_with_timezone_offset(feed):
+    """ts round-trips through datetime.fromisoformat and carries an offset."""
+    mod.send_notification("T", "B", "ai_mail", "system")
 
-    def fake_run(cmd, **kwargs):
-        captured_args["cmd"] = cmd
-        captured_args["kwargs"] = kwargs
-        result = MagicMock()
-        result.returncode = 0
-        return result
-
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/python3")
-
-    mod._send_via_dbus("Test Title", "Test Body", "drone", "dialog-warning")
-
-    cmd = captured_args["cmd"]
-    assert cmd[0] == "/usr/bin/python3"
-    assert cmd[1] == "-c"
-    assert cmd[2] == mod._DBUS_SCRIPT
-    assert cmd[3] == "drone"
-    assert cmd[4] == "dialog-warning"
-    assert cmd[5] == "Test Title"
-    assert cmd[6] == "Test Body"
-    assert captured_args["kwargs"]["timeout"] == 5
+    parsed = datetime.fromisoformat(_lines(feed)[0]["ts"])
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() is not None
 
 
-def test_send_via_dbus_returns_true_on_success(monkeypatch):
-    """Returns True when subprocess exits with code 0."""
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: mock_result)
-    monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/python3")
+def test_source_strips_leading_at_sign(feed):
+    """source is the branch name with no @, whichever form the caller passes."""
+    mod.send_notification("T", "B", "@wake_target", "wake")
 
-    assert mod._send_via_dbus("T", "B", "s", "i") is True
+    assert _lines(feed)[0]["source"] == "wake_target"
 
 
-def test_send_via_dbus_returns_false_on_nonzero_exit(monkeypatch):
-    """Returns False when subprocess exits with nonzero code."""
-    mock_result = MagicMock()
-    mock_result.returncode = 1
-    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: mock_result)
-    monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/python3")
+def test_defaults_are_ai_mail_and_system(feed):
+    """Omitted source/kind default to the documented values."""
+    mod.send_notification("T", "B")
 
-    assert mod._send_via_dbus("T", "B", "s", "i") is False
-
-
-def test_send_via_dbus_returns_false_on_subprocess_error(monkeypatch):
-    """Returns False on SubprocessError."""
-
-    def raise_error(*a, **kw):
-        raise subprocess.SubprocessError("timeout")
-
-    monkeypatch.setattr(mod.subprocess, "run", raise_error)
-    monkeypatch.setattr(mod.shutil, "which", lambda name: "/usr/bin/python3")
-
-    assert mod._send_via_dbus("T", "B", "s", "i") is False
+    event = _lines(feed)[0]
+    assert event["source"] == "ai_mail"
+    assert event["kind"] == "system"
 
 
-def test_send_via_dbus_returns_false_on_file_not_found(monkeypatch):
-    """Returns False when python binary not found."""
+@pytest.mark.parametrize("kind", ["mail", "wake", "dispatch", "system"])
+def test_all_four_contract_kinds_are_written_verbatim(feed, kind):
+    """Each of the four valid kinds survives unchanged."""
+    mod.send_notification("T", "B", "ai_mail", kind)
 
-    def raise_error(*a, **kw):
-        raise FileNotFoundError("python3")
-
-    monkeypatch.setattr(mod.subprocess, "run", raise_error)
-    monkeypatch.setattr(mod.shutil, "which", lambda name: None)
-
-    assert mod._send_via_dbus("T", "B", "s", "i") is False
+    assert _lines(feed)[0]["kind"] == kind
 
 
-# --- _send_via_notify_send tests --------------------------------------
+def test_unknown_kind_is_coerced_to_system_and_logged(feed, _capture_logger):
+    """An off-contract kind is recorded as system -- and the swap is named, not silent."""
+    mod.send_notification("T", "B", "ai_mail", "explosion")
+
+    assert _lines(feed)[0]["kind"] == "system"
+    assert _capture_logger.warning.called
+    logged = str(_capture_logger.warning.call_args)
+    assert "explosion" in logged
 
 
-def test_send_via_notify_send_returns_true_on_success(monkeypatch):
-    """Returns True when notify-send succeeds."""
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **kw: mock_result)
+def test_multiline_body_stays_a_single_feed_line(feed):
+    """Newlines in the body are JSON-escaped, never a second line."""
+    mod.send_notification("T", "line one\nline two\nline three", "ai_mail", "mail")
 
-    assert mod._send_via_notify_send("Title", "Body", "dialog-information") is True
-
-
-def test_send_via_notify_send_passes_correct_args(monkeypatch):
-    """Passes correct arguments to subprocess.run."""
-    captured = {}
-
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
-        return MagicMock(returncode=0)
-
-    monkeypatch.setattr(mod.subprocess, "run", fake_run)
-
-    mod._send_via_notify_send("Hello", "World", "dialog-warning")
-
-    assert captured["cmd"] == ["notify-send", "-i", "dialog-warning", "Hello", "World"]
-    assert captured["kwargs"]["capture_output"] is True
-    assert captured["kwargs"]["timeout"] == 5
+    assert feed.read_text(encoding="utf-8").count("\n") == 1
+    assert _lines(feed)[0]["body"] == "line one\nline two\nline three"
 
 
-def test_send_via_notify_send_returns_false_on_file_not_found(monkeypatch):
-    """Returns False when notify-send is not installed."""
-
-    def raise_error(*a, **kw):
-        raise FileNotFoundError("notify-send")
-
-    monkeypatch.setattr(mod.subprocess, "run", raise_error)
-
-    assert mod._send_via_notify_send("T", "B", "i") is False
+# --- Append-only behaviour -------------------------------------------
 
 
-def test_send_via_notify_send_returns_false_on_subprocess_error(monkeypatch):
-    """Returns False on SubprocessError."""
+def test_appends_preserve_earlier_events_in_order(feed):
+    """The feed is append-only: three calls leave three lines, oldest first."""
+    for i in range(3):
+        mod.send_notification(f"Title {i}", "B", "ai_mail", "system")
 
-    def raise_error(*a, **kw):
-        raise subprocess.SubprocessError("broken pipe")
+    titles = [event["title"] for event in _lines(feed)]
+    assert titles == ["Title 0", "Title 1", "Title 2"]
 
-    monkeypatch.setattr(mod.subprocess, "run", raise_error)
 
-    assert mod._send_via_notify_send("T", "B", "i") is False
+def test_missing_parent_directory_is_created(tmp_path, monkeypatch):
+    """A feed under a directory that does not exist yet still gets written."""
+    path = tmp_path / "brand" / "new" / "notifications.jsonl"
+    monkeypatch.setattr(mod, "FEED_PATH", path)
+
+    assert mod.send_notification("T", "B") is True
+    assert path.exists()
+
+
+def test_lock_file_lives_beside_the_feed(feed):
+    """The advisory lock is a sibling file, not the feed itself."""
+    mod.send_notification("T", "B")
+
+    assert (feed.parent / mod.FEED_LOCK_NAME).exists()
+    assert len(_lines(feed)) == 1
+
+
+def test_concurrent_appends_do_not_lose_or_corrupt_lines(feed):
+    """8 threads x 20 appends = 160 intact JSON lines, none interleaved."""
+
+    def worker(worker_id):
+        for i in range(20):
+            mod.send_notification(f"w{worker_id}-{i}", "B", "ai_mail", "system")
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    events = _lines(feed)
+    assert len(events) == 160
+    assert len({event["title"] for event in events}) == 160
+
+
+# --- Trim policy ------------------------------------------------------
+
+
+def test_feed_under_cap_is_never_trimmed(feed, monkeypatch):
+    """Below FEED_MAX_LINES every line stays."""
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 5)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 2)
+
+    for i in range(5):
+        mod.send_notification(f"Title {i}", "B")
+
+    assert len(_lines(feed)) == 5
+
+
+def test_trim_keeps_the_newest_lines_once_past_the_cap(feed, monkeypatch):
+    """Past the cap the feed drops to FEED_KEEP_LINES -- the NEWEST ones."""
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 5)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 2)
+
+    for i in range(6):
+        mod.send_notification(f"Title {i}", "B")
+
+    titles = [event["title"] for event in _lines(feed)]
+    assert titles == ["Title 4", "Title 5"]
+
+
+def test_trimmed_feed_stays_valid_jsonl(feed, monkeypatch):
+    """Every surviving line still parses -- the trim cuts on line boundaries."""
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 3)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 2)
+
+    for i in range(10):
+        mod.send_notification(f"Title {i}", 'body with, commas and "quotes"')
+
+    events = _lines(feed)
+    assert len(events) == 2
+    assert all(set(event) == {"ts", "kind", "title", "body", "source"} for event in events)
+
+
+def test_trim_leaves_no_temp_file_behind(feed, monkeypatch):
+    """The .trim staging file is replaced into place, never left on disk."""
+    monkeypatch.setattr(mod, "FEED_MAX_LINES", 2)
+    monkeypatch.setattr(mod, "FEED_KEEP_LINES", 1)
+
+    for i in range(4):
+        mod.send_notification(f"Title {i}", "B")
+
+    assert not (feed.parent / f"{feed.name}.trim").exists()
+
+
+def test_trim_reports_false_when_feed_is_within_cap(feed):
+    """_trim_feed returns False when there is nothing to do."""
+    mod.send_notification("T", "B")
+
+    assert mod._trim_feed(feed) is False
+
+
+def test_trim_reports_false_and_logs_when_feed_is_unreadable(tmp_path, _capture_logger):
+    """A missing feed is an error the trim states, not a crash it hides."""
+    missing = tmp_path / "not_here.jsonl"
+
+    assert mod._trim_feed(missing) is False
+    assert _capture_logger.error.called
+
+
+# --- Fail honest ------------------------------------------------------
+
+
+def test_write_failure_returns_false_and_logs_error(tmp_path, monkeypatch, _capture_logger):
+    """An unwritable feed path fails loudly: False plus a logged error."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("i am a file, not a directory", encoding="utf-8")
+    monkeypatch.setattr(mod, "FEED_PATH", blocker / "notifications.jsonl")
+
+    assert mod.send_notification("T", "B") is False
+    assert _capture_logger.error.called
+
+
+def test_no_toast_path_survives_anywhere_in_the_module():
+    """Retirement pin: no executable dbus / notify-send / subprocess path remains.
+
+    The module docstring still *names* the retired transports, so this scans for
+    what would run them -- literals and calls -- not for the words themselves.
+    """
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+
+    assert '"notify-send"' not in source
+    assert "import dbus" not in source
+    assert "SessionBus" not in source
+    assert "subprocess." not in source
+    assert not hasattr(mod, "subprocess")
+    assert not hasattr(mod, "shutil")
+    assert not hasattr(mod, "_send_via_dbus")
+    assert not hasattr(mod, "_send_via_notify_send")
+    assert not hasattr(mod, "_DBUS_SCRIPT")

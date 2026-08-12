@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router.py
 # Description: Command routing logic for the drone module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -81,8 +81,8 @@ def print_help() -> None:
     console.print("router — Command routing logic")
     console.print()
     console.print("Commands:")
-    console.print("  route <target> <cmd> [args]   Route command to a branch")
-    console.print("  route_all <cmd> [args]        Route command to all branches")
+    console.print("  route <target> <cmd> \\[args]   Route command to a branch")
+    console.print("  route_all <cmd> \\[args]        Route command to all branches")
 
 
 def route_command(

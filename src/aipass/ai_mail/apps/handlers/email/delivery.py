@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2025-12-02
-# Modified: 2026-08-10
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -532,11 +532,11 @@ def deliver_email_to_branch(
     if caller_branch and caller_cwd:
         _auto_register_sender(caller_branch, caller_cwd)
 
-    # Send desktop notification for new email. An in-place update is the same
-    # signal repeating, so it stays silent — popping a toast per repeat is the
-    # stacking problem again, just on the desktop instead of in the inbox.
+    # Write a feed event for new email. An in-place update is the same signal
+    # repeating, so it stays silent — one feed line per repeat is the stacking
+    # problem again, just in the bell instead of in the inbox.
     if not updated_in_place:
-        _send_desktop_notification(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
+        _emit_notification_event(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
 
     # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
@@ -550,10 +550,10 @@ def deliver_email_to_branch(
 
 
 def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str, str]:
-    """Write *email_data* to an inbox.json file and fire a desktop notification.
+    """Write *email_data* to an inbox.json file and fire a notification event.
 
     Single canonical path for direct-path delivery (used by cross-project
-    reply.py to replace the raw-write backdoor).  Always fires notify-send.
+    reply.py to replace the raw-write backdoor).  Always writes to the feed.
 
     Args:
         inbox_file: Absolute path to the target inbox.json.
@@ -608,7 +608,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
         logger.warning("[delivery] deliver_to_inbox_file lock failed %s: %s", inbox_file, exc)
         return False, f"Failed to acquire inbox lock: {exc}", ""
 
-    _send_desktop_notification(
+    _emit_notification_event(
         email_data.get("from", "@unknown"),
         email_data.get("to", str(inbox_file)),
         email_data.get("subject", ""),
@@ -624,12 +624,12 @@ _NOTIFICATION_MAX = 3
 _NOTIFICATION_WINDOW = 30.0  # seconds
 
 
-def _send_desktop_notification(sender: str, recipient: str, subject: str, message: str = "") -> None:
+def _emit_notification_event(sender: str, recipient: str, subject: str, message: str = "") -> None:
     """
-    Send desktop notification for new email using notify-send.
+    Write a "mail" event to the notification feed for new email.
 
-    Rate-limited: max 3 notifications per recipient within 30 seconds.
-    Gracefully handles cases where notify-send is not available.
+    Rate-limited: max 3 events per recipient within 30 seconds.
+    Desktop toasts are retired — this appends to the shared feed BAUD reads.
 
     Args:
         sender: Email sender address (e.g., @devpulse)
@@ -663,10 +663,10 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(title, body, source=sender_name)
+        send_notification(title, body, source=sender.replace("@", ""), kind="mail")
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
     except Exception as e:
-        logger.warning("[delivery] _send_desktop_notification() failed for %s: %s", recipient, e)
+        logger.warning("[delivery] _emit_notification_event() failed for %s: %s", recipient, e)
         return
 
 
@@ -682,8 +682,8 @@ if __name__ == "__main__":
     console.print()
     console.print("FUNCTIONS PROVIDED:")
     console.print("  - get_all_branches() -> List[Dict]")
-    console.print("  - deliver_email_to_branch(to_branch, email_data, on_delivered, upsert_key) -> Tuple[bool, str]")
-    console.print("  - deliver_to_inbox_file(inbox_file, email_data) -> Tuple[bool, str, str]")
+    console.print("  - deliver_email_to_branch(to_branch, email_data, on_delivered, upsert_key) -> Tuple\\[bool, str]")
+    console.print("  - deliver_to_inbox_file(inbox_file, email_data) -> Tuple\\[bool, str, str]")
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  - Independent - no module dependencies")

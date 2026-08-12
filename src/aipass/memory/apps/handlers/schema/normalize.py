@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: normalize.py
 # Description: Memory File Schema Normalizer
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-01-22
-# Modified: 2026-06-08
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -12,6 +12,10 @@ Memory File Schema Normalizer
 Reconciles memory files against their canonical template schema.
 Strips any key not present in the template at every level (root,
 document_metadata, limits, status). Template = the whole truth.
+
+Also holds the newest-first re-sort guardrail. It never fails open silently:
+an entry with an unusable 'number' is reported (result warnings + prax WARNING)
+and left at its index while the rows beside it are still ordered.
 """
 
 import json
@@ -25,6 +29,9 @@ from aipass.memory.apps.handlers.json import json_handler
 logger = get_system_logger()
 
 _MEMORY_ROOT = Path(__file__).parents[3]  # normalize.py -> schema/ -> handlers/ -> apps/ -> memory/
+
+# Containers held newest-first by contract — rollover archives their tail as "oldest"
+_SORTED_CONTAINERS = ("sessions", "key_learnings", "todos", "observations")
 
 
 def _load_template(file_path: Path) -> Dict[str, Any] | None:
@@ -53,6 +60,69 @@ def _strip_orphan_keys(data: Dict, allowed: set, level_name: str, changes: list)
     for key in orphans:
         del data[key]
         changes.append(f"Stripped orphan '{key}' from {level_name}")
+
+
+def _read_entry_number(entry: Any) -> int | None:
+    """Read an entry's 'number' as an int, or None when it cannot be one.
+
+    Numeric strings and integral floats are readable (they are repaired in
+    place by the caller); missing keys, booleans, and anything else are not.
+    """
+    if not isinstance(entry, dict):
+        return None
+
+    value = entry.get("number")
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        digits = candidate[1:] if candidate.startswith(("-", "+")) else candidate
+        return int(candidate) if digits.isascii() and digits.isdigit() else None
+    return None
+
+
+def _sort_container_newest_first(container: list, container_name: str, changes: list, warnings: list) -> list | None:
+    """Order the numbered entries of a container newest-first, tolerating bad rows.
+
+    An entry whose 'number' cannot be read keeps its exact index and costs the
+    rows beside it nothing; the readable entries are ordered among the slots
+    they already occupy. Unreadable rows are always reported (GH #728: this
+    guardrail used to skip the whole container silently on a single bad entry).
+
+    Returns the reordered list, or None when the container carries no numbers
+    at all — the legitimate shape for todos, which is not a defect.
+    """
+    numbers = [_read_entry_number(entry) for entry in container]
+    slots = [i for i, number in enumerate(numbers) if number is not None]
+    unreadable = [i for i, number in enumerate(numbers) if number is None]
+
+    if not slots:
+        return None
+
+    # Repair readable-but-wrongly-typed numbers so the container stops degrading
+    for i in slots:
+        stored = container[i].get("number")
+        if not isinstance(stored, int) or isinstance(stored, bool):
+            container[i]["number"] = numbers[i]
+            changes.append(f"{container_name}[{i}]: repaired number {stored!r} -> {numbers[i]}")
+
+    if unreadable:
+        warnings.append(
+            f"{container_name}: {len(unreadable)} entry(ies) at index {unreadable} carry no usable "
+            f"'number' — newest-first guardrail ordered the other {len(slots)} only, "
+            f"unreadable rows left in place"
+        )
+
+    ordered = list(container)
+    for slot, entry in zip(slots, sorted((container[i] for i in slots), key=lambda e: e["number"], reverse=True)):
+        ordered[slot] = entry
+
+    return ordered
 
 
 def _find_repo_root() -> Path:
@@ -86,6 +156,7 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
         return {"success": False, "error": f"Failed to read: {e}"}
 
     changes = []
+    warnings = []
 
     # Ensure document_metadata exists
     if "document_metadata" not in data:
@@ -142,15 +213,18 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
             _strip_orphan_keys(metadata["status"], set(tmpl_status.keys()), "status", changes)
 
     # Sort list entries newest-first by number (self-heal guardrail)
-    for container_name in ("sessions", "key_learnings", "todos", "observations"):
+    for container_name in _SORTED_CONTAINERS:
         container = data.get(container_name)
-        if isinstance(container, list) and len(container) > 1:
-            has_numbers = all(isinstance(e, dict) and "number" in e for e in container)
-            if has_numbers:
-                sorted_entries = sorted(container, key=lambda e: e["number"], reverse=True)
-                if sorted_entries != container:
-                    data[container_name] = sorted_entries
-                    changes.append(f"{container_name}: re-sorted by number (newest-first)")
+        if not isinstance(container, list) or len(container) <= 1:
+            continue
+
+        sorted_entries = _sort_container_newest_first(container, container_name, changes, warnings)
+        if sorted_entries is not None and sorted_entries != container:
+            data[container_name] = sorted_entries
+            changes.append(f"{container_name}: re-sorted by number (newest-first)")
+
+    for warning in warnings:
+        logger.warning(f"[normalize] {file_path.name}: {warning}")
 
     # Write if changes made and not dry run
     if changes and not dry_run:
@@ -163,10 +237,17 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
             return {"success": False, "error": f"Failed to write: {e}"}
 
     json_handler.log_operation(
-        "normalize_memory_file", {"file": file_path.name, "changes": len(changes), "success": True}
+        "normalize_memory_file",
+        {"file": file_path.name, "changes": len(changes), "warnings": len(warnings), "success": True},
     )
 
-    return {"success": True, "file": str(file_path), "changes": changes, "dry_run": dry_run}
+    return {
+        "success": True,
+        "file": str(file_path),
+        "changes": changes,
+        "warnings": warnings,
+        "dry_run": dry_run,
+    }
 
 
 def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
@@ -193,7 +274,14 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
         logger.warning(f"[normalize] Failed to read registry: {e}")
         return {"success": False, "error": f"Failed to read registry: {e}"}
 
-    results = {"success": True, "files_checked": 0, "files_modified": 0, "dry_run": dry_run, "details": []}
+    results = {
+        "success": True,
+        "files_checked": 0,
+        "files_modified": 0,
+        "files_with_warnings": 0,
+        "dry_run": dry_run,
+        "details": [],
+    }
 
     for branch in branches:
         branch_path = Path(branch.get("path", ""))
@@ -213,9 +301,21 @@ def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
             results["files_checked"] += 1
             result = normalize_memory_file(file_path, dry_run=dry_run)
 
-            if result["success"] and result.get("changes"):
+            if not result["success"]:
+                continue
+
+            if result.get("changes"):
                 results["files_modified"] += 1
-                results["details"].append({"file": file_name, "changes": result["changes"]})
+            if result.get("warnings"):
+                results["files_with_warnings"] += 1
+            if result.get("changes") or result.get("warnings"):
+                results["details"].append(
+                    {
+                        "file": file_name,
+                        "changes": result["changes"],
+                        "warnings": result["warnings"],
+                    }
+                )
 
     return results
 
@@ -236,9 +336,12 @@ if __name__ == "__main__":
         result = normalize_all_memory_files(dry_run=args.dry_run)
         print(f"Files checked: {result['files_checked']}")
         print(f"Files modified: {result['files_modified']}")
+        print(f"Files with warnings: {result['files_with_warnings']}")
         if result["details"]:
             print("\nChanges:")
             for detail in result["details"]:
                 print(f"  {detail['file']}:")
                 for change in detail["changes"]:
                     print(f"    - {change}")
+                for warning in detail["warnings"]:
+                    print(f"    ! WARNING: {warning}")

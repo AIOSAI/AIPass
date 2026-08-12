@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: format.py
 # Description: Email Formatting Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-10
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -188,9 +188,17 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
         lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {timestamp}{repeat}")
     else:
         recipient = escape(str(email_data.get("to", "Unknown")))
-        lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}")
+        # A sent record whose delivery was refused must not read like every
+        # delivered row next to it — that identical rendering is what let a
+        # cross-project sender take "it's in my sent folder" as proof it arrived.
+        refused = " [red]REFUSED[/red]" if email_data.get("status") == "refused" else ""
+        lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}{refused}")
 
     lines.append(f"   Subject: {escape(str(email_data.get('subject', 'No Subject')))}")
+
+    if email_data.get("status") == "refused":
+        reason = escape(str(email_data.get("refused_reason", "no reason recorded")))
+        lines.append(f"   [red]Not delivered:[/red] {reason}")
 
     # Preview
     message = email_data.get("message", "")

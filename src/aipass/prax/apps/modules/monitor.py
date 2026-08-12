@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -64,6 +64,7 @@ _display_thread: Optional[threading.Thread] = None
 _file_watcher_thread: Optional[threading.Thread] = None
 _log_watcher_thread: Optional[threading.Thread] = None
 _rate_tracker_thread: Optional[threading.Thread] = None
+_active_scope: Optional[Any] = None  # BranchScope for this run — None when unscoped
 
 
 def print_introspection():
@@ -72,10 +73,11 @@ def print_introspection():
     _handlers = [
         ("1. unified_stream.py", "print_event() - Terminal output formatting"),
         ("2. branch_detector.py", "detect_branch_from_path() - Path-to-branch mapping"),
-        ("3. interactive_filter.py", "FilterState, parse_command() - Runtime filtering"),
+        ("3. interactive_filter.py", "parse_command(), get_help_text() - Interactive command parsing"),
         ("4. monitoring_filters.py", "should_monitor(), get_priority() - Event filtering"),
         ("5. event_queue.py", "MonitoringEvent, MonitoringQueue - Event buffering"),
         ("6. module_tracker.py", "ModuleTracker - Module execution tracking"),
+        ("7. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
     ]
     console.print()
     console.print("[bold cyan]PRAX Monitor Module[/bold cyan]")
@@ -87,10 +89,10 @@ def print_introspection():
     console.print("[yellow]Connected Handlers (apps/handlers/monitoring/):[/yellow]")
     for name, desc in _handlers:
         console.print(f"\n  [cyan]{name}[/cyan]\n     [dim]{desc}[/dim]")
-    console.print("\n  [cyan]7. file watcher (threaded)[/cyan]")
+    console.print("\n  [cyan]8. file watcher (threaded)[/cyan]")
     console.print("     [dim]Real-time file change detection using watchdog[/dim]")
     console.print("     [green]STATUS: Active - monitors ECOSYSTEM_ROOT recursively[/green]")
-    console.print("\n  [cyan]8. log monitor (threaded)[/cyan]")
+    console.print("\n  [cyan]9. log monitor (threaded)[/cyan]")
     console.print("     [dim]Log stream processing from SYSTEM_LOGS_DIR[/dim]")
     console.print("     [green]STATUS: Active - watches *.log files for new entries[/green]")
     console.print("\n[dim]Run 'drone @prax monitor --help' for usage[/dim]\n")
@@ -135,7 +137,12 @@ def print_help():
     console.print("\n  [dim]# Monitor all branches[/dim]")
     console.print("  $ drone @prax monitor run")
     console.print("\n  [dim]# Monitor specific branches[/dim]")
-    console.print("  $ drone @prax monitor run seedgo,cli,flow\n")
+    console.print("  $ drone @prax monitor run seedgo,cli,flow")
+    console.print(
+        "\n  [dim]A scope covers each named branch's logs, file changes and CLI sessions,"
+        "\n  plus commands it issued or was targeted by. The scope is set at launch"
+        "\n  (there is no runtime filter command) and the banner names it.[/dim]\n"
+    )
 
 
 # =============================================================================
@@ -202,16 +209,65 @@ def _load_relay_config() -> Optional[dict]:
         return None
 
 
+def _known_branch_names() -> set:
+    """Registry branch names, used only to spot a typo'd scope. Empty on failure."""
+    try:
+        from aipass.prax.apps.handlers.monitoring.branch_detector import get_detector
+
+        return set(get_detector().known_branches)
+    except Exception as e:
+        logger.info("[monitor] Could not read known branches for scope check: %s", e)
+        return set()
+
+
+def _warn_unknown_scope(scope) -> None:
+    """Tell the operator when a scoped name matches no known branch.
+
+    Without this, a misspelled branch produces a live monitor that shows
+    nothing at all and never explains why.
+    """
+    unknown = scope.unknown_names(_known_branch_names())
+    if not unknown:
+        return
+    names = ", ".join(unknown)
+    console.print(
+        f"[yellow]Branch scope: {names} is not a known branch — nothing will be shown for it. "
+        f"Check the spelling, or run without a branch list to see everything.[/yellow]"
+    )
+    logger.warning(
+        f"[monitor] Branch scope requested a name that is not in the branch registry ({names}); "
+        f"the live monitor will show nothing for it. Monitoring continues for the other names. "
+        f"No files were changed."
+    )
+
+
+def _mode_line(scope) -> str:
+    """The one place that describes what this run is showing.
+
+    Banner and `status` share it so a scoped run can never claim 'all
+    branches, no filters' in one surface and the truth in the other.
+    """
+    if scope is not None and scope.is_scoped:
+        return f"Live — scoped to {scope.describe()}, all levels"
+    return "Live — all branches, all levels, no filters"
+
+
 def _run_monitor(args: List[str]) -> bool:
-    """Launch Mission Control live monitoring."""
-    global _event_queue, _module_tracker
+    """Launch Mission Control live monitoring, optionally scoped to branches."""
+    global _event_queue, _module_tracker, _active_scope
     global _display_thread, _file_watcher_thread, _log_watcher_thread, _rate_tracker_thread
+
+    from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 
     json_handler.log_operation("monitor_started", {"args": args})
     logger.info(f"Starting unified monitoring (args: {args})")
 
+    scope = parse_scope(args)
+    _active_scope = scope if scope.is_scoped else None
+
     # Initialize monitoring subsystems
     _event_queue = MonitoringQueue()
+    _event_queue.set_scope(_active_scope)
     _module_tracker = ModuleTracker()
     _stop_event.clear()
 
@@ -229,7 +285,9 @@ def _run_monitor(args: List[str]) -> bool:
     console.print()
     header("PRAX Mission Control - Unified Monitoring")
     console.print()
-    console.print("[green]Live — all branches, all levels, no filters[/green]")
+    console.print(f"[green]{_mode_line(scope)}[/green]")
+    if scope.is_scoped:
+        _warn_unknown_scope(scope)
     if _is_tty:
         console.print("[dim]Type 'help' for commands[/dim]")
     else:
@@ -377,6 +435,8 @@ def _emit_watcher_event(level: str, message: str) -> None:
     if not _event_queue:
         return
     priority = 1 if level == "error" else 2
+    # bypass_scope: this is the monitor reporting on itself ("file events
+    # disabled"). A branch scope must not hide the reason the screen is empty.
     _event_queue.enqueue(
         MonitoringEvent(
             priority=priority,
@@ -386,7 +446,8 @@ def _emit_watcher_event(level: str, message: str) -> None:
             level=level,
             timestamp=datetime.now(),
             message=message,
-        )
+        ),
+        bypass_scope=True,
     )
 
 
@@ -623,14 +684,18 @@ def _interactive_loop():
 
 
 def _print_status():
-    """Display current monitoring status"""
-    global _event_queue
+    """Display current monitoring status, including the active branch scope."""
+    global _event_queue, _active_scope
 
     console.print()
     console.print("[bold cyan]Monitoring Status:[/bold cyan]")
-    console.print("  [green]Mode:[/green] Live — all branches, all levels, no filters")
+    console.print(f"  [green]Mode:[/green] {_mode_line(_active_scope)}")
     if _event_queue:
         console.print(f"  [yellow]Queue size:[/yellow] {_event_queue.size()}")
+        # A scoped screen goes quiet on purpose; say how much was held back so
+        # a working filter never reads as a dead monitor.
+        if _active_scope is not None and _active_scope.is_scoped:
+            console.print(f"  [yellow]Hidden by scope:[/yellow] {_event_queue.suppressed_count()} events")
     console.print()
 
 
@@ -659,10 +724,10 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    # Prepare arguments for handle_command
-    _cmd_args = []
-    if args.branches:
-        _cmd_args = [args.branches]
+    # Prepare arguments for handle_command. The branch list is a 'run' argument —
+    # passing it as the subcommand made standalone `monitor.py seedgo` print
+    # "Unknown monitor subcommand" instead of monitoring seedgo.
+    _cmd_args = ["run", args.branches] if args.branches else []
 
     # Execute monitor command
     handled = handle_command("monitor", _cmd_args)

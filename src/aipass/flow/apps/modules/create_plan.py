@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -140,8 +140,8 @@ def print_help():
     console.print("[bold cyan]create_plan[/bold cyan] — Create new PLAN file")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print('  drone @flow create <location> "Subject" [type]')
-    console.print('  drone @flow create <location> "Subject" [template] [type]')
+    console.print('  drone @flow create <location> "Subject" \\[type]')
+    console.print('  drone @flow create <location> "Subject" \\[template] \\[type]')
     console.print()
 
     registry = load_registry()

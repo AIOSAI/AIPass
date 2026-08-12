@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Registry operations for branch management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -121,5 +121,5 @@ def print_help() -> None:
     console.print()
     console.print("Commands:")
     console.print("  load                Load and show registry stats")
-    console.print("  branches [type]     List branches, optionally by type")
+    console.print("  branches \\[type]     List branches, optionally by type")
     console.print("  lookup <name>       Look up a specific branch")

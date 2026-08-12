@@ -204,7 +204,13 @@ class TestHandleCommand:
         assert result is True
 
     def test_dispatch_unknown_subcommand(self, monkeypatch):
-        """Unknown subcommand prints error and returns False."""
+        """Unknown subcommand prints its own error and still returns True.
+
+        "dispatch" WAS recognised — this module owns it and has already said
+        what is wrong with the subcommand. Returning False sent the router on
+        to print "Unknown command: dispatch" underneath, so one mistyped
+        subcommand produced two contradictory errors.
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -213,8 +219,14 @@ class TestHandleCommand:
         from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", ["bogus"])
-        assert result is False
-        assert any("Unknown" in e for e in errors)
+        assert result is True
+        assert any("Unknown dispatch subcommand" in e for e in errors)
+
+    def test_non_dispatch_command_is_declined(self):
+        """A command this module does not own returns False, unhandled."""
+        from aipass.ai_mail.apps.modules.dispatch import handle_command
+
+        assert handle_command("email", ["@target", "Subject", "Body"]) is False
 
 
 # ===========================================================================
@@ -439,8 +451,13 @@ class TestOrchestrateWake:
         result = _orchestrate_wake(["help"])
         assert result is True
 
-    def test_missing_branch_after_flags_returns_false(self, monkeypatch):
-        """Only flags (--fresh) without a branch returns False."""
+    def test_missing_branch_after_flags_reports_and_stays_handled(self, monkeypatch):
+        """Only flags (--fresh) without a branch errors but stays handled.
+
+        error() marks the process failed (exit 2). Returning False here made
+        the router add "Unknown command: dispatch" on top of "Missing branch
+        argument" and exit 1 — unroutable — for a command it had routed.
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -449,7 +466,7 @@ class TestOrchestrateWake:
         from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
         result = _orchestrate_wake(["--fresh"])
-        assert result is False
+        assert result is True
         assert any("Missing" in e for e in errors)
 
     def test_blocked_branch_shows_error(self, monkeypatch):
@@ -494,11 +511,17 @@ class TestOrchestrateWake:
         combined = " ".join(printed)
         assert "WAKE OK" in combined
 
-    def test_failed_wake_returns_false(self, monkeypatch):
-        """Failed wake returns False (wake_branch returns success=False)."""
+    def test_failed_wake_reports_error_and_stays_handled(self, monkeypatch):
+        """A failed wake calls error() and still returns True.
+
+        The step-status block alone never marked the command failed, so a dead
+        wake exited 0 and any script reading the code was told it worked.
+        """
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE FAILED: spawn error"
 
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
@@ -515,7 +538,8 @@ class TestOrchestrateWake:
             from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
             result = _orchestrate_wake(["@branch"])
-        assert result is False
+        assert result is True
+        assert any("Wake failed for @branch" in e for e in errors)
 
     def test_fresh_flag(self, monkeypatch):
         """--fresh flag is passed through to wake_branch."""
@@ -710,7 +734,12 @@ class TestOrchestrateDispatchSend:
         assert "sent" in combined.lower()
 
     def test_send_failure_calls_dispatch_send_error(self, monkeypatch):
-        """Send failure calls dispatch_send_error and returns False."""
+        """Send failure calls dispatch_send_error and stays handled.
+
+        Returning False here is what made a refused cross-project dispatch run
+        twice: the router moved on to the next module, which sent it again and
+        then printed "Unknown command: dispatch".
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -731,9 +760,14 @@ class TestOrchestrateDispatchSend:
 
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
-        assert result is False
-        assert any("Send failed" in e for e in errors)
+        assert result is True
+        assert any("Dispatch to @target not sent" in e for e in errors)
         assert len(dispatch_error_calls) == 1
+        # The pre-send "Sending dispatch email to ..." announcement is gone.
+        # drone replays stdout before stderr, so a progress line printed before
+        # the send always landed BELOW the refusal — reading as "it failed,
+        # and then it sent".
+        assert not any("Sending dispatch email" in p for p in printed)
 
     def test_send_ok_but_wake_failure_shows_warning(self, monkeypatch):
         """Send succeeds but wake fails -- returns True but shows error."""
@@ -893,8 +927,8 @@ class TestOrchestrateDispatchSend:
 
         assert result is True
 
-    def test_send_phase_exception_returns_false(self, monkeypatch):
-        """Exception during send phase returns False."""
+    def test_send_phase_exception_reports_and_stays_handled(self, monkeypatch):
+        """An exception in the send phase errors out but stays handled."""
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -912,8 +946,8 @@ class TestOrchestrateDispatchSend:
 
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
-        assert result is False
-        assert any("Send failed" in e for e in errors)
+        assert result is True
+        assert any("Dispatch to @target not sent: boom" in e for e in errors)
 
 
 # ===========================================================================

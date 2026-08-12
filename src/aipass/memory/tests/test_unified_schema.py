@@ -201,6 +201,232 @@ class TestNormalizerNumberSort:
         assert result["changes"] == []
 
 
+class TestNormalizerUnsortableEntries:
+    """GH #728 — the newest-first guardrail must never fail open silently.
+
+    One entry with an unusable 'number' used to disable the re-sort for the
+    whole container with no log line and no changes record; repairing only
+    that entry then crashed sorted() on a sibling whose number was a string.
+    """
+
+    @staticmethod
+    def _write(f: Path, sessions: list) -> None:
+        _write_json(
+            f,
+            {
+                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
+                "sessions": sessions,
+            },
+        )
+
+    def test_numbered_entries_still_sort_around_an_unsortable_row(self, monkeypatch, tmp_path):
+        """One entry without 'number' must not forfeit protection for the good rows."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+                {"date": "2026-01-09", "summary": "NO NUMBER"},
+                {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+                {"number": 5, "date": "2026-01-05", "summary": "Fifth"},
+            ],
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["success"] is True
+        sessions = json.loads(f.read_text(encoding="utf-8"))["sessions"]
+        # Unsortable row keeps its exact index; numbered rows fill the slots they held.
+        assert sessions[1]["summary"] == "NO NUMBER"
+        assert [e.get("number") for e in sessions] == [9, None, 5, 2]
+        assert any("re-sorted" in c for c in result["changes"])
+
+    def test_unsortable_row_is_reported_in_the_result(self, monkeypatch, tmp_path):
+        """The skip must be recorded — container name and offending index."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+                {"date": "2026-01-05", "summary": "NO NUMBER"},
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+            ],
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        warnings = result["warnings"]
+        assert len(warnings) == 1
+        assert "sessions" in warnings[0]
+        assert "[1]" in warnings[0]
+
+    def test_unsortable_row_is_logged_at_warning(self, monkeypatch, tmp_path):
+        """Operators get a log line — a guardrail that declines to run says so."""
+        norm, _ = _import_normalize(monkeypatch)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(norm, "logger", mock_logger)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+                {"date": "2026-01-05", "summary": "NO NUMBER"},
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+            ],
+        )
+
+        norm.normalize_memory_file(f)
+
+        assert mock_logger.warning.called
+        logged = " ".join(str(call) for call in mock_logger.warning.call_args_list)
+        assert "sessions" in logged
+
+    def test_string_number_does_not_crash_and_is_repaired(self, monkeypatch, tmp_path):
+        """The half-repaired container from the issue: 'number' as a string."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+                {"number": "9", "date": "2026-01-09", "summary": "Ninth"},
+                {"number": 5, "date": "2026-01-05", "summary": "Fifth"},
+            ],
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["success"] is True
+        sessions = json.loads(f.read_text(encoding="utf-8"))["sessions"]
+        assert [e["number"] for e in sessions] == [9, 5, 2]
+        assert all(isinstance(e["number"], int) for e in sessions)
+        assert any("repaired" in c for c in result["changes"])
+
+    def test_both_defects_together_is_the_real_world_case(self, monkeypatch, tmp_path):
+        """One string number AND one missing key — the file that prompted #728."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+                {"date": "2026-01-04", "summary": "NO NUMBER"},
+                {"number": "9", "date": "2026-01-09", "summary": "Ninth"},
+            ],
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["success"] is True
+        sessions = json.loads(f.read_text(encoding="utf-8"))["sessions"]
+        assert [e.get("number") for e in sessions] == [9, None, 2]
+        assert result["warnings"]
+
+    def test_non_dict_entry_is_tolerated_not_fatal(self, monkeypatch, tmp_path):
+        """A stray scalar in the list must not crash the normalize path."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 2, "date": "2026-01-02", "summary": "Second"},
+                "corrupt-scalar",
+                {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+            ],
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["success"] is True
+        sessions = json.loads(f.read_text(encoding="utf-8"))["sessions"]
+        assert sessions[1] == "corrupt-scalar"
+        assert [e.get("number") for e in sessions if isinstance(e, dict)] == [9, 2]
+        assert result["warnings"]
+
+    def test_container_without_any_numbers_stays_silent(self, monkeypatch, tmp_path):
+        """todos carry no numbers by design — that shape must not warn."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        _write_json(
+            f,
+            {
+                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
+                "todos": [
+                    {"task": "Second thing", "status": "open"},
+                    {"task": "First thing", "status": "open"},
+                ],
+            },
+        )
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["warnings"] == []
+        assert not any("re-sorted" in c for c in result["changes"])
+
+    def test_warning_alone_does_not_rewrite_the_file(self, monkeypatch, tmp_path):
+        """Reporting is not a mutation — a correctly ordered file is left byte-identical."""
+        norm, _ = _import_normalize(monkeypatch)
+        f = tmp_path / "test.local.json"
+        self._write(
+            f,
+            [
+                {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+                {"number": 5, "date": "2026-01-05", "summary": "Fifth"},
+                {"date": "2026-01-02", "summary": "NO NUMBER"},
+            ],
+        )
+        before = f.read_text(encoding="utf-8")
+
+        result = norm.normalize_memory_file(f)
+
+        assert result["warnings"]
+        assert result["changes"] == []
+        assert f.read_text(encoding="utf-8") == before
+
+    def test_number_reader_accepts_only_real_entry_numbers(self, monkeypatch):
+        """Pin the readable/unreadable boundary — bools and odd digits are not numbers."""
+        norm, _ = _import_normalize(monkeypatch)
+
+        readable = {3: 3, "9": 9, " 12 ": 12, "-4": -4, 1.0: 1}
+        for value, expected in readable.items():
+            assert norm._read_entry_number({"number": value}) == expected, value
+
+        for value in (True, False, None, 1.5, "1.5", "nine", "12a", "", "²", {"x": 1}):
+            assert norm._read_entry_number({"number": value}) is None, value
+
+        assert norm._read_entry_number({}) is None
+        assert norm._read_entry_number("corrupt-scalar") is None
+
+    def test_all_files_run_counts_warned_files(self, monkeypatch, tmp_path):
+        """normalize_all surfaces warned files instead of reporting clean."""
+        norm, _ = _import_normalize(monkeypatch)
+        branch_dir = tmp_path / "branch"
+        branch_dir.mkdir()
+        _write_json(
+            branch_dir / "BRANCH.local.json",
+            {
+                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
+                "sessions": [
+                    {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
+                    {"date": "2026-01-05", "summary": "NO NUMBER"},
+                    {"number": 2, "date": "2026-01-02", "summary": "Second"},
+                ],
+            },
+        )
+        registry_path = tmp_path / "AIPASS_REGISTRY.json"
+        registry_path.write_text(
+            json.dumps({"branches": [{"name": "BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
+        )
+
+        with patch.object(norm, "_find_repo_root", return_value=tmp_path):
+            result = norm.normalize_all_memory_files()
+
+        assert result["files_with_warnings"] == 1
+        assert result["details"][0]["warnings"]
+
+
 # ===========================================================================
 # 2. Extractor: key_learnings list trimming
 # ===========================================================================

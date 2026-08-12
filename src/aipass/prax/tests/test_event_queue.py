@@ -558,3 +558,83 @@ class TestDropReportWording:
 
         assert event_queue_module.logger.warning.call_count == 1
         assert q._dropped == 9, "events after the report still counted for the next one"
+
+
+# =============================================
+# BRANCH SCOPE FILTERING
+# =============================================
+
+
+class TestQueueScope:
+    """A launch-time branch scope drops non-matching events before they take a slot.
+
+    Filtering at enqueue (not at display) means an out-of-scope flood cannot
+    evict the events the operator actually asked to watch.
+    """
+
+    @staticmethod
+    def _scope(*names):
+        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
+
+        return BranchScope(names)
+
+    def test_default_queue_is_unscoped(self, MonitoringQueue, MonitoringEvent):
+        """No scope set — every branch still queues, unchanged behaviour."""
+        q = MonitoringQueue(maxsize=10)
+        assert q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="SEEDGO", message="a")) is True
+        assert q.suppressed_count() == 0
+
+    def test_in_scope_event_queues(self, MonitoringQueue, MonitoringEvent):
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        assert q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="SEEDGO", message="a")) is True
+        assert q.size() == 1
+
+    def test_out_of_scope_event_is_dropped(self, MonitoringQueue, MonitoringEvent):
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        assert q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FLOW", message="a")) is False
+        assert q.size() == 0
+
+    def test_suppressed_events_are_counted(self, MonitoringQueue, MonitoringEvent):
+        """Status output can then say the screen is quiet because of the scope."""
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        for i in range(3):
+            q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FLOW", message=f"a{i}"))
+        assert q.suppressed_count() == 3
+
+    def test_out_of_scope_drop_is_not_an_overflow_report(self, event_queue_module, MonitoringQueue, MonitoringEvent):
+        """Scoped-out events are wanted-gone, not lost — no warning, no error."""
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FLOW", message="a"))
+        assert event_queue_module.logger.warning.call_count == 0
+        assert event_queue_module.logger.error.call_count == 0
+        assert q._dropped == 0
+
+    def test_bypass_scope_always_queues(self, MonitoringQueue, MonitoringEvent):
+        """Monitor self-diagnostics ('file watcher unavailable') survive any scope."""
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        event = MonitoringEvent(priority=1, event_type="log", branch="PRAX", message="watcher down")
+        assert q.enqueue(event, bypass_scope=True) is True
+        assert q.size() == 1
+
+    def test_scope_can_be_cleared(self, MonitoringQueue, MonitoringEvent):
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope("SEEDGO"))
+        q.set_scope(None)
+        assert q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FLOW", message="a")) is True
+
+    def test_unscoped_scope_object_filters_nothing(self, MonitoringQueue, MonitoringEvent):
+        """An empty BranchScope is 'all branches', not 'no branches'."""
+        q = MonitoringQueue(maxsize=10)
+        q.set_scope(self._scope())
+        assert q.enqueue(MonitoringEvent(priority=1, event_type="log", branch="FLOW", message="a")) is True
+
+    def test_stopped_queue_still_refuses_bypass_events(self, MonitoringQueue, MonitoringEvent):
+        q = MonitoringQueue(maxsize=10)
+        q.stop()
+        event = MonitoringEvent(priority=1, event_type="log", branch="PRAX", message="late")
+        assert q.enqueue(event, bypass_scope=True) is False

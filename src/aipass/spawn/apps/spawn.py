@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-14
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -30,7 +30,7 @@ def print_help():
     console.print()
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @spawn create [class] <target_path> [options][/dim]")
+    console.print("  [dim]drone @spawn create \\[class] <target_path> \\[options][/dim]")
     console.print("  [dim]drone @spawn update <@branch | class --all> [--apply][/dim]")
     console.print(
         "  [dim]drone @spawn repair <project_path> [--clean-pollution | --relocate @branch <path>] [--apply][/dim]"
@@ -39,7 +39,7 @@ def print_help():
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
     console.print()
-    console.print("  [green]create[/green] [class] <path>         Create a new branch from template")
+    console.print("  [green]create[/green] \\[class] <path>         Create a new branch from template")
     console.print(
         "  [green]update[/green] <@branch>              Update single branch from templates (preview-only by default)"
     )

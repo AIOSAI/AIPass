@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-07-04
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -921,7 +921,7 @@ def print_help() -> None:
     console.print("  [green]aipass init run --template <name>[/green]    [dim]# select template[/dim]")
     console.print("  [green]aipass init run --dry-run[/green]            [dim]# walk all stages, no writes[/dim]")
     console.print("  [green]aipass init --list[/green]                   [dim]# list available templates[/dim]")
-    console.print("  [green]aipass init update [target][/green]          [dim]# refresh scaffold + git auth[/dim]")
+    console.print("  [green]aipass init update \\[target][/green]          [dim]# refresh scaffold + git auth[/dim]")
     console.print("  [green]aipass init update --dry-run[/green]         [dim]# preview git-auth repairs only[/dim]")
     console.print()
     console.print("[yellow]STAGES:[/yellow] 10 stages, each saved — resume on ctrl-C")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-02-02
-# Modified: 2026-02-02
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -76,7 +76,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         args: Command arguments
 
     Returns:
-        True if command handled, False otherwise
+        True if command handled, False otherwise.
+
+        "Handled" means recognised and run — not "it worked". A failed send or
+        wake reports itself through error(), which sets the process failure flag
+        main() maps to exit 2. Returning False for a failure sent the router on
+        to the next module, which re-ran the send and then printed
+        "Unknown command: dispatch" over a dispatch it had just attempted.
     """
     if command != "dispatch":
         return False
@@ -104,7 +110,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     else:
         error(f"Unknown dispatch subcommand: {subcommand}")
         print_help()
-        return False
+        return True
 
 
 def _orchestrate_status() -> bool:
@@ -190,7 +196,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
 
     if not filtered:
         error("Missing branch argument")
-        return False
+        return True
 
     branch_email = filtered[0]
     custom_message = filtered[1] if len(filtered) > 1 else None
@@ -216,7 +222,12 @@ def _orchestrate_wake(args: List[str]) -> bool:
     # Print step-by-step status
     console.print(dispatch_status.format())
 
-    return success
+    if not success:
+        # The status block shows which step failed but never marks the command
+        # failed, so a dead wake exited 0. Say it once, out loud.
+        error(f"Wake failed for {branch_email} — see the step status above")
+
+    return True
 
 
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
@@ -263,7 +274,11 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
 
     # --- Step 1: Send dispatch email ---
-    console.print(f"\nSending dispatch email to {target}...")
+    # No "Sending..." announcement before the fact. Progress goes to stdout and
+    # failures to stderr, and drone captures each stream whole and replays
+    # stdout first — so a pre-send progress line always surfaced BELOW the
+    # refusal it preceded, reading as "it failed, and then it sent". The send is
+    # sub-second: announce the outcome, not the intent.
 
     from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info, send_to_single
     from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
@@ -308,9 +323,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         )
 
         if not send_ok:
-            error(f"Send failed: {send_error}")
+            error(f"Dispatch to {target} not sent: {send_error}")
             dispatch_send_error(target, subject, send_error or "", deliver_email_to_branch)
-            return False
+            return True
 
         console.print(f"[green]Email sent to {target}[/green]")
 
@@ -323,8 +338,8 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     except Exception as e:
         logger.error(f"[dispatch] Send phase failed: {e}")
-        error(f"Send failed: {e}")
-        return False
+        error(f"Dispatch to {target} not sent: {e}")
+        return True
 
     # --- Step 2: Wake the branch ---
     console.print(f"\nWaking {target}...")

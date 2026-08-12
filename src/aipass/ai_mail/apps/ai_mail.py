@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ai_mail.py
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-08-07
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -83,7 +83,7 @@ def print_help():
     console.print()
 
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [cyan]drone @ai_mail[/cyan] <command> [args]")
+    console.print("  [cyan]drone @ai_mail[/cyan] <command> \\[args]")
     console.print("  [cyan]drone @ai_mail --help[/cyan]")
     console.print()
 

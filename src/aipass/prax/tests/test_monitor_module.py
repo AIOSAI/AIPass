@@ -1294,3 +1294,168 @@ class TestGetWatchDirectoriesEdgeCases:
 
         paths = [p for p, _r in result]
         assert codex_sessions in paths
+
+
+# ---------------------------------------------------------------------------
+# Branch scoping — `monitor run seedgo,cli` (devpulse 5331acc2)
+# ---------------------------------------------------------------------------
+
+
+def _run_scoped(mod, args):
+    """Run _run_monitor with threads/loop stubbed; returns the mocked queue instance."""
+    import pytest
+
+    with (
+        patch.object(mod, "_start_threads"),
+        patch.object(mod, "_interactive_loop"),
+        patch.object(mod, "_stop_threads"),
+        patch.object(sys.stdin, "isatty", return_value=True),
+        pytest.raises(SystemExit),
+    ):
+        mod._run_monitor(args)
+    return mod.MonitoringQueue.return_value
+
+
+def _installed_scope_is_unscoped(queue):
+    """True when nothing was installed, or what was installed filters nothing."""
+    if not queue.set_scope.called:
+        return True
+    scope = queue.set_scope.call_args.args[0]
+    return scope is None or scope.is_scoped is False
+
+
+def _printed(mod):
+    """All strings passed to console.print during the call."""
+    return [str(c.args[0]) for c in mod.console.print.call_args_list if c.args]
+
+
+class TestBranchScopeWiring:
+    """The branch list reaches the queue instead of being logged and dropped."""
+
+    def test_scope_installed_on_queue(self):
+        """`run seedgo,cli` sets a scope naming exactly those branches."""
+        mod = _import_monitor()
+        queue = _run_scoped(mod, ["seedgo,cli"])
+        queue.set_scope.assert_called_once()
+        scope = queue.set_scope.call_args.args[0]
+        assert scope.names == ("SEEDGO", "CLI")
+
+    def test_bare_run_installs_no_scope(self):
+        """All-branches monitoring must not gain a filter."""
+        mod = _import_monitor()
+        queue = _run_scoped(mod, [])
+        assert _installed_scope_is_unscoped(queue)
+
+    def test_all_keyword_installs_no_scope(self):
+        mod = _import_monitor()
+        queue = _run_scoped(mod, ["all"])
+        assert _installed_scope_is_unscoped(queue)
+
+    def test_relay_flag_is_not_a_branch(self):
+        """--relay is stripped before scope parsing."""
+        mod = _import_monitor()
+        queue = _run_scoped(mod, ["--relay"])
+        assert _installed_scope_is_unscoped(queue)
+
+
+class TestBannerTruth:
+    """The banner may never claim 'all branches, no filters' while scoped."""
+
+    def test_unscoped_banner_unchanged(self):
+        mod = _import_monitor()
+        _run_scoped(mod, [])
+        assert any("all branches, all levels, no filters" in line for line in _printed(mod))
+
+    def test_scoped_banner_names_the_scope(self):
+        mod = _import_monitor()
+        _run_scoped(mod, ["devpulse,seedgo"])
+        assert any("DEVPULSE, SEEDGO" in line for line in _printed(mod))
+
+    def test_scoped_banner_drops_the_all_branches_claim(self):
+        mod = _import_monitor()
+        _run_scoped(mod, ["devpulse"])
+        for line in _printed(mod):
+            assert "all branches" not in line, f"scoped run still claims all branches: {line}"
+            assert "no filters" not in line, f"scoped run still claims no filters: {line}"
+
+    def test_status_unscoped_unchanged(self):
+        mod = _import_monitor()
+        setattr(mod, "_event_queue", None)
+        setattr(mod, "_active_scope", None)
+        mod._print_status()
+        assert any("all branches, all levels, no filters" in line for line in _printed(mod))
+
+    def test_status_names_the_scope(self):
+        """`status` inside a scoped monitor reports the scope, not 'no filters'."""
+        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
+
+        mod = _import_monitor()
+        queue = MagicMock()
+        queue.size.return_value = 2
+        queue.suppressed_count.return_value = 41
+        setattr(mod, "_event_queue", queue)
+        setattr(mod, "_active_scope", BranchScope(["SEEDGO"]))
+
+        mod._print_status()
+        lines = _printed(mod)
+        assert any("SEEDGO" in line for line in lines)
+        assert not any("no filters" in line for line in lines)
+        assert any("41" in line for line in lines), "hidden-event count explains a quiet screen"
+
+
+class TestUnknownScopeWarning:
+    """A typo'd branch would otherwise be an empty screen with no explanation."""
+
+    def test_unknown_branch_warns(self):
+        mod = _import_monitor()
+        with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
+            _run_scoped(mod, ["seedgoo"])
+        assert any("seedgoo" in line.lower() for line in _printed(mod))
+
+    def test_known_branch_does_not_warn(self):
+        mod = _import_monitor()
+        with patch.object(mod, "_known_branch_names", return_value={"SEEDGO", "PRAX"}):
+            _run_scoped(mod, ["seedgo"])
+        assert not any("not a known branch" in line.lower() for line in _printed(mod))
+
+    def test_no_registry_means_no_warning(self):
+        """Cannot check == cannot claim. An empty registry read never cries wolf."""
+        mod = _import_monitor()
+        with patch.object(mod, "_known_branch_names", return_value=set()):
+            _run_scoped(mod, ["whatever"])
+        assert not any("not a known branch" in line.lower() for line in _printed(mod))
+
+    def test_known_branch_names_survives_failure(self):
+        """A broken registry read must not stop the monitor from starting."""
+        mod = _import_monitor()
+        with patch(
+            "aipass.prax.apps.handlers.monitoring.branch_detector.get_detector",
+            side_effect=OSError("nope"),
+        ):
+            assert mod._known_branch_names() == set()
+
+
+class TestWatcherEventsBypassScope:
+    """'File watcher unavailable' must not be filtered out by a branch scope."""
+
+    def test_emit_watcher_event_bypasses_scope(self):
+        mod = _import_monitor()
+        queue = MagicMock()
+        setattr(mod, "_event_queue", queue)
+        mod._emit_watcher_event("error", "File watcher: completely unavailable")
+        assert queue.enqueue.call_args.kwargs.get("bypass_scope") is True
+
+
+class TestIntrospectionTruth:
+    """Introspection lists what the handlers actually expose."""
+
+    def test_no_filterstate_claim(self):
+        """interactive_filter.py has no FilterState — it never had one."""
+        mod = _import_monitor()
+        mod.print_introspection()
+        assert not any("FilterState" in line for line in _printed(mod))
+
+    def test_branch_scope_handler_listed(self):
+        mod = _import_monitor()
+        mod.print_introspection()
+        assert any("branch_scope.py" in line for line in _printed(mod))

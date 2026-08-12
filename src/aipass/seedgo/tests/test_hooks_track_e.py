@@ -251,7 +251,7 @@ def test_deliver_to_inbox_file_writes_message_and_returns_id(tmp_path):
         "message": "body",
         "timestamp": "2026-04-21 00:00:00",
     }
-    with patch.object(delivery, "_send_desktop_notification"):
+    with patch.object(delivery, "_emit_notification_event"):
         success, error_msg, reply_id = delivery.deliver_to_inbox_file(inbox, email_data)
 
     assert success is True

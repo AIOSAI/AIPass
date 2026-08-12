@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-22
-# Modified: 2026-08-10
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -79,9 +79,18 @@ def _get_branch_info_fn():
 
 COMMAND = "send"
 
+# The only commands this module answers to. It used to ignore `command`
+# entirely and run a send for whatever reached it, so every command an earlier
+# module declined — `dispatch`, and any send another module had already run and
+# reported as failed — was executed here a second time. That is what put two
+# sent records on disk and printed every refusal twice.
+COMMANDS = ("send", "email")
+
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Module discovery entry point — routes to handle_send."""
+    """Module discovery entry point — routes send/email to handle_send."""
+    if command not in COMMANDS:
+        return False
     if not args:
         print_introspection()
         return True
@@ -92,23 +101,33 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 
 def handle_send(args: List[str]) -> bool:
-    """Orchestrate email sending workflow."""
+    """Orchestrate email sending workflow.
+
+    Returns True for "I recognised and ran this command", which is not "it
+    worked" — a refused delivery already reported itself through error(), which
+    sets the process failure flag that main() maps to exit 2. Returning False
+    here sent the router on to the next module, which ran the send again and
+    then printed "Unknown command: email" over a command it had just executed.
+    """
     json_handler.log_operation("send_email_initiated", {"args_count": len(args)})
     parsed = parse_send_args(args)
 
     if parsed["mode"] == "error":
         error(parsed["error"])
         console.print('   Multiple: send @branch1 @branch2 "Subject" "Message"')
-        return False
+        return True
 
     if parsed["mode"] == "interactive":
-        return _send_interactive()
+        # A cancelled or failed interactive send is still a handled command —
+        # returning its bool made "Cancelled" fall through to "Unknown command: email".
+        _send_interactive()
+        return True
 
     recipients = parsed["recipients"]
     from_branch = parsed.get("from_branch")
     if len(recipients) == 1:
         target = resolve_dispatch_target(recipients[0], parsed["auto_execute"], _get_branch_info_fn())
-        return _send_direct(
+        _send_direct(
             recipients[0],
             parsed["subject"],
             parsed["message"],
@@ -119,6 +138,7 @@ def handle_send(args: List[str]) -> bool:
             from_branch=from_branch,
             upsert_key=parsed.get("upsert_key"),
         )
+        return True
 
     console.print(f"\n[bold]Group send to {len(recipients)} recipients...[/bold]")
     ok = 0
@@ -137,7 +157,7 @@ def handle_send(args: List[str]) -> bool:
         ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
-    return ok > 0
+    return True
 
 
 def _send_interactive() -> bool:

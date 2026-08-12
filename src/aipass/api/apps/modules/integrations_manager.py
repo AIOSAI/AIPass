@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: integrations_manager.py
 # Description: Integrations command module — list and call generic contracts
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-04-15
+# Modified: 2026-08-11
 # =============================================
 """
 Integrations Module
@@ -51,7 +51,7 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print("  drone @api integrations list")
-    console.print("  drone @api integrations call <contract> [args...]")
+    console.print("  drone @api integrations call <contract> \\[args...]")
     console.print()
     console.print("[dim]Drivers live in apps/integrations/{project}/driver.py (gitignored)[/dim]")
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-03-17
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -118,8 +118,8 @@ def print_help() -> None:
     console.print()
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @<target> <command> [args...][/dim]")
-    console.print("  [dim]drone <built-in> [args...][/dim]")
+    console.print("  [dim]drone @<target> <command> \\[args...][/dim]")
+    console.print("  [dim]drone <built-in> \\[args...][/dim]")
     console.print("  [dim]drone --help[/dim]")
     console.print()
     console.print(table)

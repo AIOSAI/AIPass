@@ -575,9 +575,12 @@ def main():
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
-    # Pin agent context window to 200k (Sonnet 5 is 1M native; without this,
-    # agents inherit 1M which causes cost + runaway risk).
-    spawn_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "200000"
+    # Pin agent context window to 350k for every dispatched agent, whatever the
+    # model (Patrick's ruling, 2026-08-11). Model-independent on purpose: without
+    # the pin an agent inherits its model's native window (1M on some), which
+    # carries cost + runaway risk. Written after the CLAUDE* strip above so the
+    # pin survives and a parent's own window never leaks through.
+    spawn_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "350000"
     # Strip caller identity vars to prevent dispatch context leakage.
     spawn_env.pop("AIPASS_CALLER_BRANCH", None)
     spawn_env.pop("AIPASS_CALLER_CWD", None)
@@ -824,14 +827,13 @@ def main():
         status = f"MAX TURNS HIT ({duration}s)"
     logger.info("[monitor] @%s %s — %ds", branch_name, status, duration)
 
-    # Desktop notification on completion
+    # Notification feed event on completion
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        icon = "dialog-information" if exit_code == 0 and not bg_orphaned else "dialog-warning"
-        send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, icon=icon)
+        send_notification(f"@{branch_name} {status}", f"Duration: {duration}s", source=branch_name, kind="dispatch")
     except Exception:
-        logger.info("[monitor] Desktop notification unavailable")
+        logger.info("[monitor] Notification feed unavailable")
 
     # ─── Wake-back: wake the dispatcher ────────────────────
     wake_result = _wake_sender(sender, branch_email, exit_code, lock_file)

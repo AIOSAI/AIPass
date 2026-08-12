@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flow.py
 # Description: Entry point CLI for drone @flow — plan lifecycle management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -224,7 +224,7 @@ def print_help(modules: List[Any]):
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @flow <command> [args...][/dim]")
+    console.print("  [dim]drone @flow <command> \\[args...][/dim]")
     console.print("  [dim]drone @flow --help[/dim]")
     console.print()
     console.print("─" * 70)

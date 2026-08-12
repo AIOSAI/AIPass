@@ -5,11 +5,11 @@
 **Purpose:** Inter-agent messaging for AIPass. File-based email system that lets agents send, receive, and process messages using `@branch` addresses. No SMTP, no external services — just JSON files and symbolic routing.
 **Module:** `aipass.ai_mail`
 **Created:** 2025-11-08
-**Last Updated:** 2026-08-11
+**Last Updated:** 2026-08-12
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 924 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 961 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -69,6 +69,10 @@ the worst failure shape mail has, because the sender believes it was delivered.
   slice `messages[:20]` (the newest) and then reverse for oldest-first reading order.
   Reversing before slicing kept the oldest 20 and hid every new arrival in a busy inbox.
 - **`view latest`** reads `messages[0]`, not `[-1]`, for the same reason.
+- **`sent` sorts by mtime, not filename.** The folder holds two naming schemes —
+  `create.py` writes `<YYYYMMDD_HHMMSS>_<subject>.json`, `reply.py` writes `<id>.json`
+  — and in a filename sort every hex id outranks every digit, so a mailbox with 20
+  replies in it hid every recent send behind them.
 - **Markup escaping** — subject, preview, sender and recipient are sender-controlled and
   are escaped in `format.py`. Unescaped, `[dim]` silently swallows text and `[/rc]`
   raises `MarkupError` that aborts the whole listing.
@@ -90,7 +94,7 @@ drone @ai_mail email @devpulse "WARNING: disk 97%" "body" --upsert-key warn:disk
   `last_updated` stamped, `updates` incremented.
 - **The id and the read status are preserved.** Opened stays opened, new stays
   new. A repeat is the same demand for attention, not a new one — so an update
-  never flips a message back to unread, never fires a desktop notification, and
+  never flips a message back to unread, never writes a notification event, and
   never wakes or dispatches anything (`auto_execute` is forced off on update).
 - **No match** — first send, or the previous one was closed/archived — creates an
   ordinary new message at `updates: 1`. **Closing re-arms the signature**: the
@@ -106,14 +110,83 @@ both work. The outcome comes back as `email_data["upsert_action"]`
 (`"created"` / `"updated"`), so a caller can log the difference without
 re-reading the inbox.
 
+## Notification Feed
+
+Desktop toasts are retired (Patrick's ruling, 2026-08-11) — no D-Bus, no
+notify-send, no fallback that still toasts. `notify.py` appends notification
+events to a shared JSONL feed that BAUD's notification bell reads.
+
+```
+path : <repo root>/.aipass/notifications.jsonl
+line : {"ts": ISO8601, "kind": "mail"|"wake"|"dispatch"|"system",
+        "title": str, "body": str, "source": branch name (no @)}
+```
+
+- **Append-only, one object per line.** Readers never write; the feed carries no
+  read flags — BAUD tracks read state locally.
+- **Four writers, four kinds** — `delivery.py` (`mail`), `wake.py` (`wake`),
+  `daemon.py` (`dispatch`, spawn), `dispatch_monitor.py` (`dispatch`, completion).
+  An off-contract `kind` is recorded as `system` and the substitution is logged,
+  never silently accepted.
+- **Concurrency** — those four are separate processes. Each append is a single
+  `O_APPEND` write; the trim is a read-modify-write. Both take the same advisory
+  lock (`.notifications.lock`, a sibling file — the trim replaces the feed inode),
+  so an append can never land inside a trim and be dropped.
+- **Trim policy** — past 400 lines the feed drops to its newest 200. A bell shows
+  recent events; older ones have no reader.
+- **Fail honest** — a failed feed write is logged and returns `False`. Nothing
+  falls back to a toast.
+
+Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: four
+call sites write feed lines as a side effect, and an unguarded suite run
+appends fake dispatch events to the real feed BAUD renders.
+
+## Refused Sends
+
+The sent record is written **before** delivery is attempted, because delivery needs the
+loaded email data. So a send the cross-project fence turns away has already left a file
+on disk. `send.py` restamps it:
+
+```
+status          : "refused"
+refused_reason  : the delivery error, verbatim
+refused_at      : when the refusal was recorded
+```
+
+- **Restamped, never deleted.** The attempt is evidence — a sender who saw an error must
+  still be able to cite what they tried to send and to whom.
+- **Visible as refused.** `sent` prints `REFUSED` on the row and `Not delivered: <reason>`
+  under the subject. Identical rendering is what let a cross-project sender read
+  "it's in my sent folder" as proof it arrived.
+- **Broadcasts** carry one record for N recipients: refused only when *zero* were
+  delivered. A partial broadcast is a real send.
+
 ## Exit Codes
 
 `0` success · `1` unroutable command · `2` routed but failed.
 
-Handlers return `True` for "I recognised this command", which is not "it worked".
-`error()` sets a process failure flag that `main()` maps through `resolve_exit()`, so a
-failed delivery or an invalid reply_path exits nonzero instead of reporting success to
-the caller's script.
+Handlers return `True` for "I recognised **and ran** this command", which is not "it
+worked". `error()` sets a process failure flag that `main()` maps through
+`resolve_exit()`, so a failed delivery or an invalid reply_path exits nonzero instead of
+reporting success to the caller's script.
+
+Returning `False` for a failure is not a smaller mistake — it is a different bug:
+`route_command()` walks modules until one returns `True`, so a handler that ran a send,
+failed, and returned `False` sent the router on to the **next** module, which ran the
+same send again and then printed `Unknown command: email` over a command it had just
+executed. Two sent records, two error lines, one contradiction, exit 1 instead of 2.
+
+Each module answers only for the commands it owns (`email_send.COMMANDS`,
+`dispatch` for the dispatch module). A module that answers to any command name it is
+handed will re-run its own work under someone else's.
+
+### Output ordering
+
+Progress goes to stdout and failures to stderr, and `drone` captures each stream whole
+and replays **stdout first**. A progress line printed before an operation therefore
+surfaces *below* the failure it preceded. Announce outcomes, not intent, on any path
+that can fail — `dispatch` no longer prints `Sending dispatch email to ...` ahead of a
+send that the fence may refuse.
 
 ## Email Lifecycle
 
@@ -243,7 +316,7 @@ ai_mail/
 │       ├── json_utils/
 │       │   └── json_handler.py # Auto-creating JSON system
 │       ├── paths.py            # Shared find_repo_root() utility
-│       ├── notify.py           # Desktop notifications (dbus direct)
+│       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
 └── tests/                      # 924 tests across 31 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
@@ -263,7 +336,8 @@ ai_mail/
     ├── test_central_writer.py  # Central stats aggregation
     ├── test_cli_routing.py     # CLI routing + help/version
     ├── test_json_handler.py    # JSON I/O helpers
-    ├── test_notify.py          # Desktop notification dbus calls
+    ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
+    ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     └── test_paths.py           # find_repo_root() utility
 ```
 
@@ -281,7 +355,7 @@ ai_mail/
 - **Dispatch system** — autonomous task execution via `auto_execute` emails
 - **Branch contacts** — address book for `@branch` routing
 - **trigger branch** — `deliver_email_to_branch()` imported directly for event-driven delivery
-- **Desktop** — dbus notifications for delivery, wake, completion events
+- **BAUD** — `.aipass/notifications.jsonl` feed for delivery, wake, dispatch events
 
 ## Known Issues
 

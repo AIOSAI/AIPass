@@ -19,6 +19,7 @@ from .monitoring_filters import (
     apply_content_filter,
     filter_log_content,
 )
+from .branch_scope import BranchScope, parse_scope
 from .event_queue import MonitoringEvent, MonitoringQueue, global_queue
 from .module_tracker import ModuleTracker
 from .filesystem_handler import MonitoringFileHandler
@@ -43,6 +44,8 @@ __all__ = [
     "get_content_filter",
     "apply_content_filter",
     "filter_log_content",
+    "BranchScope",
+    "parse_scope",
     "MonitoringEvent",
     "MonitoringQueue",
     "global_queue",

@@ -45,17 +45,46 @@ class MonitoringEvent:
 class MonitoringQueue:
     """Thread-safe event queue with deduplication"""
 
-    def __init__(self, maxsize: int = 1000):
+    def __init__(self, maxsize: int = 1000, scope=None):
         self.queue = PriorityQueue(maxsize=maxsize)
         self.recent_events = []  # For deduplication
         self.lock = threading.Lock()
         self._stopped = threading.Event()
         self._dropped = 0
         self._last_drop_warning = 0.0
+        self._scope = scope  # BranchScope or None — set once at monitor start
+        self._scope_suppressed = 0
 
-    def enqueue(self, event: MonitoringEvent) -> bool:
-        """Add event to queue (thread-safe)"""
+    def set_scope(self, scope) -> None:
+        """Restrict the queue to a branch scope (None clears it).
+
+        Filtering here rather than at display keeps out-of-scope traffic from
+        occupying queue slots, so a noisy branch cannot evict the events the
+        operator actually asked to watch.
+        """
+        self._scope = scope
+
+    def suppressed_count(self) -> int:
+        """Events kept off-screen by the branch scope (not lost data)."""
+        return self._scope_suppressed
+
+    def enqueue(self, event: MonitoringEvent, bypass_scope: bool = False) -> bool:
+        """Add event to queue (thread-safe).
+
+        Args:
+            event: The event to display
+            bypass_scope: Ignore the branch scope — for the monitor's own health
+                messages, which must reach the operator whatever they scoped to.
+        """
         if self._stopped.is_set():
+            return False
+
+        scope = self._scope
+        if not bypass_scope and scope is not None and not scope.matches_event(event):
+            # Not a drop: the operator asked for this to be off-screen. Kept out
+            # of the overflow counter on purpose — nothing failed here.
+            with self.lock:
+                self._scope_suppressed += 1
             return False
 
         # Simple deduplication + queue put under single lock

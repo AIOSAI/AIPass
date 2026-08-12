@@ -317,6 +317,29 @@ PRAX_QUEUE_B = (
 )
 
 
+# The four @devpulse diffed out of their inbox on the evening of 2026-08-11,
+# copied verbatim from the live state file. Same warning family as the pair
+# above, arriving in a costume the first fix was never measured against: the
+# count sits mid-sentence and the source is a slash-compound carrying a citizen
+# name AND a model name. The last two differ ONLY by the count.
+PRAX_QUEUE_LOG_DAEMON = (
+    "[event_queue] The live monitor display queue is full — 5 events were skipped from the "
+    "terminal monitor view since the last report (latest: log from DAEMON). Nothing is lost: "
+    "the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_SEEDGO = (
+    "[event_queue] The live monitor display queue is full — 8 events were skipped from the "
+    "terminal monitor view since the last report (latest: agent from AIPASS/SEEDGO/opus). "
+    "Nothing is lost: the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_FABLE = (
+    "[event_queue] The live monitor display queue is full — 11 events were skipped from the "
+    "terminal monitor view since the last report (latest: agent from AIPASS/DEVPULSE/claude-fable-5). "
+    "Nothing is lost: the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT = PRAX_QUEUE_AGENT_FABLE.replace("11 events", "10 events")
+
+
 class TestSignatureFragmentation:
     """One logical event must not mint a signature per repeat.
 
@@ -366,6 +389,36 @@ class TestSignatureFragmentation:
         first = lane.compute_signature("WARNING", "hooks", "gate", "@vera .trinity/local.json over budget")
         second = lane.compute_signature("WARNING", "hooks", "gate", "@nobody .trinity/local.json over budget")
         assert first == second
+
+    def test_the_slash_compound_source_token_is_one_signature(self, lane) -> None:
+        """@devpulse's 2026-08-11 evening counterexample, verbatim from their inbox.
+
+        Four signatures they diffed by hand. The varying tokens are a mid-sentence
+        count (5/8/10/11) and a compound source token that carries an uppercase
+        citizen name AND a model name inside a slash-path shape. Pinned because a
+        counterexample is only answered once; a test answers it forever.
+        """
+        signatures = {
+            lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", message)
+            for message in (PRAX_QUEUE_AGENT_SEEDGO, PRAX_QUEUE_AGENT_FABLE, PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT)
+        }
+        assert len(signatures) == 1
+
+    def test_a_model_name_carrying_a_digit_does_not_fork_the_signature(self, lane) -> None:
+        """'opus' vs 'claude-fable-5' — the trailing digit must not mint a second row."""
+        first = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/SEEDGO/opus")
+        second = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/DEVPULSE/claude-fable-5")
+        assert first == second
+
+    def test_the_source_kind_still_separates_signatures(self, lane) -> None:
+        """The counterpart guard: 'log from' and 'agent from' are different conditions.
+
+        @devpulse ruled the residual source kinds are MEANING, not fragmentation.
+        This pins that ruling so a future widening cannot quietly erase it.
+        """
+        as_log = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_LOG_DAEMON)
+        as_agent = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_AGENT_SEEDGO)
+        assert as_log != as_agent
 
     def test_owning_branch_still_separates_signatures(self, lane) -> None:
         """Collapsing names in the TEXT must not collapse the branch field itself."""
