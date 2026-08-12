@@ -115,8 +115,11 @@ def test_dispatch_status_find_step_distinguishes_gate_outcomes():
     skipped.info("manager", "mail only, wake skipped")
     bypassed = DispatchStatus()
     bypassed.ok("manager", "gate bypassed — daemon-scheduled self-wake")
-    assert skipped.find_step("manager")[0] == "info"
-    assert bypassed.find_step("manager")[0] == "ok"
+    skipped_step = skipped.find_step("manager")
+    bypassed_step = bypassed.find_step("manager")
+    assert skipped_step is not None and bypassed_step is not None
+    assert skipped_step[0] == "info"
+    assert bypassed_step[0] == "ok"
 
 
 def test_dispatch_status_find_step_returns_last_occurrence():
@@ -1411,3 +1414,187 @@ class TestWakeBranch:
         )
         status, ok = wake_branch("@testbranch")
         assert ok is True
+
+
+# --- scheduled lane (DPLAN-0287) ---------------------------------------
+
+
+def _make_scheduled_fixtures(tmp_path, monkeypatch, email="@testbranch", citizen_class="manager"):
+    """Branch + registry + passport for scheduled-lane tests.
+
+    `email` other than @testbranch is added as a second registry entry pointing
+    at the same directory — these tests care about the address, not the tree.
+    """
+    branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+    if email != "@testbranch":
+        registry_file = tmp_path / "AIPASS_REGISTRY.json"
+        data = json.loads(registry_file.read_text(encoding="utf-8"))
+        data["branches"].append({"name": email.lstrip("@").upper(), "email": email, "path": str(branch_path)})
+        registry_file.write_text(json.dumps(data), encoding="utf-8")
+
+    trinity = branch_path / ".trinity"
+    trinity.mkdir(parents=True, exist_ok=True)
+    (trinity / "passport.json").write_text(
+        json.dumps({"identity": {"citizen_class": citizen_class}}),
+        encoding="utf-8",
+    )
+    return branch_path
+
+
+def _record_spawn_routes(monkeypatch):
+    """Capture both spawn routes so a test can name which one a wake took.
+
+    tmux interactive goes through subprocess.run; the headless monitor pipeline
+    goes through subprocess.Popen. Recording both is what makes "it went the
+    other way" a readable failure instead of a missing-call one.
+    """
+    calls: dict = {"tmux": [], "popen": []}
+
+    def _fake_run(cmd, **kwargs):
+        calls["tmux"].append(list(cmd))
+
+        class _Done:
+            returncode = 0
+            stderr = ""
+
+        return _Done()
+
+    def _fake_popen(cmd, **kwargs):
+        calls["popen"].append({"cmd": list(cmd), "env": dict(kwargs.get("env") or {})})
+        return _FakeProc()
+
+    monkeypatch.setattr(wake_mod.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr("subprocess.Popen", _fake_popen)
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.notify.send_notification",
+        lambda *a, **kw: None,
+        raising=False,
+    )
+    return calls
+
+
+class TestScheduledManagerLane:
+    """The opt-in scheduled lane: manager wakes run headless with the 350k pin.
+
+    The pin itself lives in dispatch_monitor (see
+    test_dispatch_monitor.test_auto_compact_window_pinned_to_350k). What wake
+    can prove is the route: a scheduled manager wake must hand off to the
+    monitor, because the monitor is the only thing that writes the pin.
+    """
+
+    def test_daemon_manager_wake_is_interactive_tmux_with_no_pin(self, tmp_path, monkeypatch):
+        """The hole this lane closes: a @daemon-sender manager wake spawns tmux.
+
+        tmux never touches dispatch_monitor, so nothing sets
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW — the session inherits its model's
+        native window and sits unattended. True before and after this change:
+        the un-scheduled manager path is deliberately untouched.
+        """
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon")
+
+        assert ok is True
+        assert [c[:2] for c in calls["tmux"]] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        assert calls["popen"] == [], "interactive manager wake must not reach the monitor pipeline"
+        # No monitor process means no pin site at all.
+        assert not any(str(wake_mod.MONITOR_SCRIPT) in " ".join(c) for c in calls["tmux"])
+
+    def test_scheduled_manager_wake_routes_headless_through_monitor(self, tmp_path, monkeypatch):
+        """scheduled=True on a manager routes to dispatch_monitor, not tmux."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True)
+
+        assert ok is True
+        assert calls["tmux"] == [], "scheduled manager wake must not spawn an interactive session"
+        assert len(calls["popen"]) == 1
+        assert str(wake_mod.MONITOR_SCRIPT) in calls["popen"][0]["cmd"]
+        assert any(s[0] == "ok" and s[1] == "scheduled" for s in status.steps)
+
+    def test_scheduled_manager_wake_hands_the_pin_site_the_spawn(self, tmp_path, monkeypatch):
+        """The monitor is argv[1] and wake's own env carries no CLAUDE_* leak.
+
+        dispatch_monitor writes the 350k pin after stripping CLAUDE*; wake must
+        deliver a spawn that is (a) the monitor and (b) free of a parent window
+        that could otherwise be read as the effective pin.
+        """
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "999999")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True)
+
+        assert ok is True
+        spawned = calls["popen"][0]
+        assert spawned["cmd"][1] == str(wake_mod.MONITOR_SCRIPT)
+        assert not any(k.startswith("CLAUDE") for k in spawned["env"])
+
+    def test_scheduled_wake_refuses_blocklisted_target_with_named_reason(self, tmp_path, monkeypatch):
+        """@devpulse stays refused in the scheduled lane — named reason, no spawn."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@devpulse", sender="@daemon", scheduled=True)
+
+        assert ok is False
+        blocked = status.find_step("blocklist")
+        assert blocked is not None, "refusal must be a named step, not a silent False"
+        assert blocked[0] == "fail"
+        assert "@devpulse" in blocked[2]
+        assert calls["popen"] == [] and calls["tmux"] == []
+
+    def test_scheduled_blocklist_refusal_survives_an_unreadable_passport(self, tmp_path, monkeypatch):
+        """The refusal is checked before the passport read, so a missing or
+        corrupt passport can never be the reason a blocked target gets spawned."""
+        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
+        (branch_path / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@devpulse", sender="@daemon", scheduled=True)
+
+        assert ok is False
+        assert status.find_step("blocklist") is not None
+        assert calls["popen"] == [] and calls["tmux"] == []
+
+    def test_scheduled_defaults_false_and_is_keyword_only(self, tmp_path, monkeypatch):
+        """The param cannot be set positionally — existing call sites keep their meaning."""
+        import inspect
+
+        param = inspect.signature(wake_branch).parameters["scheduled"]
+        assert param.default is False
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+
+    def test_scheduled_false_keeps_manager_wake_interactive(self, tmp_path, monkeypatch):
+        """Explicit scheduled=False on a manager is the tmux path, unchanged."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=False)
+
+        assert ok is True
+        assert [c[:2] for c in calls["tmux"]] == [["tmux", "new-session"], ["tmux", "send-keys"]]
+        assert calls["popen"] == []
+
+    def test_scheduled_non_manager_spawn_is_byte_identical(self, tmp_path, monkeypatch):
+        """Non-manager target: scheduled=True changes nothing about the spawn."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok_default = wake_branch("@testbranch", custom_message="nightly sweep", sender="@daemon")
+        _, ok_scheduled = wake_branch("@testbranch", custom_message="nightly sweep", sender="@daemon", scheduled=True)
+
+        assert ok_default is True and ok_scheduled is True
+        assert len(calls["popen"]) == 2
+        assert calls["popen"][0]["cmd"] == calls["popen"][1]["cmd"]
+        assert calls["tmux"] == []

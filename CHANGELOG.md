@@ -11,6 +11,16 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(ai_mail)** — scheduled-manager headless lane (by @ai_mail, DPLAN-0287
+daemon-to-production). `wake_branch()` gains keyword-only `scheduled=False`:
+daemon-scheduled wakes of manager-class citizens now route headless through
+the dispatch-monitor pipeline (350k pin applies) instead of an unattended,
+unpinned interactive tmux session; WAKE_BLOCKLIST targets are refused in the
+scheduled lane with a named reason (lane-gated, fail-closed). Defaults keep
+every existing path byte-identical — manual manager self-wakes stay
+interactive. 8 tests red-first, suite green, audit 100%. Groundwork for the
+5am steward rotation (@daemon building the rotation primitive in parallel).
+
 **fix(prax)** — live-monitor display crash no longer kills the Telegram relay
 (by @prax, morning trigger-triage dispatch). One tailed log line carrying a
 bracketed path (`[/usr/bin]`) raised an uncaught Rich MarkupError inside

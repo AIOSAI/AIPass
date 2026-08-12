@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 961 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 969 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -209,7 +209,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 ### Wake Pipeline
 
 1. `dispatch.py` orchestrates: send email via `send_to_single()`, then wake via `wake_branch()`
-2. `wake.py` resolves the branch from the registry, checks `citizen_class` (managers are mail-only — wake skips), finds the `claude` binary, spawns a subprocess
+2. `wake.py` resolves the branch from the registry, checks `citizen_class` (managers are mail-only — wake skips, unless the scheduled lane below applies), finds the `claude` binary, spawns a subprocess
 3. `dispatch_monitor.py` wraps the claude process with safety features:
    - **Startup health check** — monitors JSONL session files for 90s, kills if no activity
    - **Auto-retry** — 3 strikes: attempt 1+2 resume, attempt 3 fresh (new session)
@@ -222,11 +222,41 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 - PID-based locking prevents concurrent agents per branch (`.dispatch.lock`)
 - Max turns per wake, max dispatches per branch per day
 - `WAKE_BLOCKLIST` protects `@devpulse` from cross-branch manual wakes
-- **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on all wake paths. Mail delivers, wake skips
+- **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The two exceptions are named below
 - **Self-wake guard** — if sender equals target, wake-back is skipped (prevents self-loops)
 - **Chain termination** — wake-back sessions carry an empty sender, so the chain always stops at the original dispatcher
 - `dispatch_monitor.py` strips `AIPASS_CALLER_*` env vars to prevent parent context leaking into agent identity
 - `AIPASS_BRANCH_NAME` env var set in spawn_env for CWD-independent identity
+
+### Scheduled Lane (`scheduled=True`)
+
+`wake_branch()` takes a keyword-only `scheduled` flag — the opt-in for a wake fired
+by a clock rather than by a person (DPLAN-0287, the 5am maintenance rotation).
+
+```python
+from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+
+status, ok = wake_branch("@devpulse", custom_message=prompt, sender="@daemon", scheduled=True)
+```
+
+| Target | `scheduled=False` (default) | `scheduled=True` |
+|---|---|---|
+| manager, sender `@daemon` | interactive tmux session | **headless via `dispatch_monitor`** |
+| manager, any other sender | mail only, wake skipped | headless via `dispatch_monitor` |
+| non-manager | monitor pipeline | monitor pipeline (identical) |
+| on `WAKE_BLOCKLIST` | unchanged per path | **refused, never spawned** |
+
+- **Why headless.** The interactive spawn never touches `dispatch_monitor`, so it gets
+  no `CLAUDE_CODE_AUTO_COMPACT_WINDOW` pin, no bounce email and no lock cleanup — an
+  unattended 5am session would inherit its model's native window with nobody watching.
+  Routing the scheduled lane through the monitor is what makes the 350k pin apply.
+- **The blocklist is checked before the passport read.** A missing or corrupt
+  `passport.json` must never be the reason a blocked target gets spawned. Refusal is a
+  named `blocklist` fail step, not a bare `False`.
+- **Default `False` changes nothing.** Manual manager self-wakes stay interactive tmux;
+  inbox-sweep and `@daemon`'s `run.py` don't pass the param, so they are untouched.
+- **Reading the outcome** — `status.find_step("scheduled")` is present only for the
+  headless lane; the interactive spawn names its tmux session in the `spawn` step.
 
 ### Daemon
 

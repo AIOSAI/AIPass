@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-02
-# Modified: 2026-08-04
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -517,11 +517,12 @@ def _spawn_manager_interactive(
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
-    Managers are never headless — they run interactive sessions the user can
-    attach to (same pattern as the manual tmux interactive wake). Used only
-    for @daemon-scheduled self-wakes that passed the manager gate. No dispatch
-    lock or monitor: the occupancy check is the one-instance guard for
-    interactive sessions.
+    The attended path: a session the user can attach to (same pattern as the
+    manual tmux interactive wake). Used only for @daemon self-wakes that passed
+    the manager gate WITHOUT scheduled=True — the scheduled lane goes headless
+    instead (DPLAN-0287). No dispatch lock or monitor here: the occupancy check
+    is the one-instance guard for interactive sessions, which also means no
+    context pin, no bounce email and no lock cleanup.
     """
     if shutil.which("tmux") is None:
         status.fail("tmux", "tmux not found — cannot spawn interactive manager session")
@@ -574,6 +575,8 @@ def wake_branch(
     auto: bool = False,
     sender: str = "@devpulse",
     model: Optional[str] = None,
+    *,
+    scheduled: bool = False,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -586,6 +589,14 @@ def wake_branch(
         sender: Return-to-sender for bounce emails
         model: Model shorthand ("sonnet", "opus", "haiku") or full model ID.
                Defaults to opus (Patrick ruling 2026-08-01: agents run opus).
+        scheduled: Keyword-only opt-in for the scheduled lane (DPLAN-0287) —
+               an unattended run fired by a clock, not by a person. A manager
+               target then wakes HEADLESS through dispatch_monitor (which pins
+               CLAUDE_CODE_AUTO_COMPACT_WINDOW) instead of an unattended tmux
+               session nobody is watching, and a WAKE_BLOCKLIST target is
+               refused outright. Non-manager targets are unaffected apart from
+               that refusal. Default False leaves every existing caller's
+               behaviour exactly as it was.
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
@@ -594,8 +605,10 @@ def wake_branch(
         A manager target returns True having deliberately woken nothing — mail is
         delivered and the wake is skipped by design (see Step 3). Callers that need
         to know whether a process actually started must check
-        status.find_step("manager"): "info" = gate skipped the wake, "ok" = the
-        @daemon self-wake exception applied and the spawn went ahead.
+        status.find_step("manager"): "info" = gate skipped the wake, "ok" = a
+        manager spawn went ahead. Which spawn it was is named separately:
+        status.find_step("scheduled") is present only for the headless lane, and
+        the interactive tmux spawn reports its session in the "spawn" step.
     """
     json_handler.log_operation(
         "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}
@@ -618,11 +631,26 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
+    # Step 2b: Blocklist — the scheduled lane never spawns a blocked target.
+    # Checked BEFORE the passport read on purpose: an unreadable or missing
+    # passport must never be the reason @devpulse gets spawned at 5am. The
+    # manual/dispatch paths keep enforcing this in dispatch.py._orchestrate_wake;
+    # this is the same rule at the one entry point a scheduler calls directly.
+    if scheduled and is_wake_blocked(email):
+        status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the scheduled lane")
+        logger.warning("[wake] BLOCKED %s — scheduled wake refused by WAKE_BLOCKLIST", email)
+        return status, False
+
     # Step 3: Manager check — managers are never woken, mail only.
-    # Exception: @daemon scheduler fires. A branch's .daemon/schedule.json is
-    # self-authored (the daemon cannot write another branch's files), so a
-    # daemon-scheduled wake is the manager waking ITSELF — consent is the
-    # schedule's existence. Dispatch/manual wakes remain blocked.
+    # Exceptions, in order:
+    #   scheduled=True  → headless through dispatch_monitor. An unattended 5am
+    #     run must carry the monitor's guarantees (context pin, bounce, lock
+    #     cleanup); a tmux session with no one attached has none of them.
+    #   sender=@daemon  → interactive tmux. A branch's .daemon/schedule.json is
+    #     self-authored (the daemon cannot write another branch's files), so a
+    #     daemon-scheduled wake is the manager waking ITSELF — consent is the
+    #     schedule's existence.
+    # Dispatch/manual wakes remain blocked.
     passport_file = branch_path / ".trinity" / "passport.json"
     manager_scheduled = False  # daemon-scheduled manager wake → interactive tmux spawn
     try:
@@ -630,7 +658,11 @@ def wake_branch(
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
         if citizen_class == "manager":
-            if sender == "@daemon":
+            if scheduled:
+                status.ok("manager", f"{email} manager gate bypassed — scheduled wake")
+                status.ok("scheduled", "Headless lane — dispatch_monitor pipeline (context pin applies)")
+                logger.info("[wake] %s manager woken headless — scheduled lane", email)
+            elif sender == "@daemon":
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
@@ -673,8 +705,9 @@ def wake_branch(
 
     status.ok("occupancy", "No interactive session")
 
-    # Managers never run headless: a daemon-scheduled manager wake spawns an
-    # interactive tmux session instead of the -p/monitor pipeline below.
+    # A @daemon-sender manager wake spawns an interactive tmux session instead
+    # of the -p/monitor pipeline below. The scheduled lane deliberately does not
+    # set this flag — an unattended run belongs in the monitored pipeline.
     if manager_scheduled:
         return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, model, status)
 
