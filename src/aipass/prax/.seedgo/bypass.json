@@ -13,78 +13,6 @@
       "reason": "This IS the display handler layer. unified_stream.py is the designated terminal output formatter for the monitoring system. console.print() is its core responsibility, not a violation."
     },
     {
-      "file": "apps/handlers/logging/log_watchdog.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax logging infrastructure \u2014 this file IS part of the logging system. Cannot import from aipass.prax.apps.modules.logger (circular dependency). stdlib logging.getLogger() is the correct pattern for logging infrastructure internals."
-    },
-    {
-      "file": "apps/handlers/logging/introspection.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax logging infrastructure \u2014 directly imported by logger.py (import chain). Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/logging/setup.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax logging infrastructure \u2014 directly imported by logger.py (import chain). Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/logging/terminal/filtering.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax logging infrastructure \u2014 part of the terminal output subsystem within handlers/logging/. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/config/load.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py line 69. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/config/ignore_patterns.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 imported transitively by logger.py via discovery/filtering.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py line 75. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/discovery/watcher.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py line 64. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/discovery/scanner.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 imported by logging/lifecycle.py which is in logger.py's dependency graph. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/registry/load.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py line 68. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/registry/save.py",
-      "standard": "error_handling",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 imported by discovery/watcher.py which is in logger.py's dependency graph. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
-    },
-    {
-      "file": "apps/handlers/config/load.py",
-      "standard": "log_visibility",
-      "pattern": "logging.getLogger(",
-      "reason": "Prax import chain \u2014 directly imported by logger.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency). Logs route correctly via stdlib logger with prax naming."
-    },
-    {
       "file": "apps/handlers/config/ignore_patterns.py",
       "standard": "log_visibility",
       "pattern": "logging.getLogger(",
@@ -121,18 +49,6 @@
       "reason": "Prax import chain \u2014 imported via discovery/watcher.py. Cannot import from aipass.prax.apps.modules.logger (circular dependency)."
     },
     {
-      "file": "apps/handlers/discovery/scanner.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 config/load.py provides shared constants (ECOSYSTEM_ROOT, paths) used by all prax handlers. It is shared infrastructure, not an encapsulation violation."
-    },
-    {
-      "file": "apps/handlers/discovery/filtering.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports ignore patterns config. config/ is shared infrastructure within prax."
-    },
-    {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "handlers",
       "reason": "Architectural \u2014 imports config.load (shared infrastructure) and trigger.modules.core (optional cross-branch integration with graceful fallback)."
@@ -143,66 +59,9 @@
       "reason": "Architectural \u2014 imports config.load (shared infrastructure), trigger (optional integration), and uses module_name parameter for explicit caller attribution in monitoring context."
     },
     {
-      "file": "apps/handlers/monitoring/branch_detector.py",
-      "standard": "handlers",
-      "reason": "Architectural \u2014 module_name parameter used for explicit branch detection context. Auto-detection via inspect.stack() is not appropriate for a detection utility that receives context from callers."
-    },
-    {
-      "file": "apps/handlers/monitoring/module_tracker.py",
-      "standard": "handlers",
-      "reason": "Architectural \u2014 module_name parameter used for explicit module tracking. Auto-detection via inspect.stack() would defeat the purpose of a tracker that receives module names from external sources."
-    },
-    {
-      "file": "apps/handlers/monitoring/file_watcher_integration.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.watcher",
-      "reason": "Architectural \u2014 integrates with watcher/monitor.py for file watching coordination. Both are part of the monitoring subsystem."
-    },
-    {
-      "file": "apps/handlers/monitoring/filesystem_handler.py",
-      "standard": "handlers",
-      "pattern": "from aipass.trigger",
-      "reason": "Architectural \u2014 optional trigger integration for file system events. Import has graceful fallback if trigger is unavailable."
-    },
-    {
-      "file": "apps/handlers/monitoring/unified_stream.py",
-      "standard": "handlers",
-      "reason": "Architectural \u2014 module_name parameter used for display attribution. Auto-detection via inspect.stack() would resolve to the display thread, not the originating module."
-    },
-    {
-      "file": "apps/handlers/registry/save.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports PRAX_ROOT, ECOSYSTEM_ROOT from config.load (shared infrastructure)."
-    },
-    {
-      "file": "apps/handlers/registry/load.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports PRAX_ROOT from config.load (shared infrastructure)."
-    },
-    {
-      "file": "apps/handlers/status/sync.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports _find_repo_root from config.load (shared infrastructure)."
-    },
-    {
-      "file": "apps/handlers/logging/override.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 logging infrastructure imports config.load for path resolution. Part of prax logging internals."
-    },
-    {
       "file": "apps/handlers/logging/direct.py",
       "standard": "handlers",
       "reason": "Architectural \u2014 imports config.load (shared infrastructure) and uses module_name parameter for explicit direct-logging binding. Auto-detection is the default (get_direct_logger()), but the internal class accepts explicit names for infrastructure callers."
-    },
-    {
-      "file": "apps/handlers/logging/operations.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports PRAX_JSON_DIR from config.load (shared infrastructure)."
     },
     {
       "file": "apps/handlers/logging/lifecycle.py",
@@ -213,23 +72,6 @@
       "file": "apps/handlers/logging/setup.py",
       "standard": "handlers",
       "reason": "Architectural \u2014 logging infrastructure imports config.load for path configuration. Uses module_name parameter for explicit logger setup per-module. Auto-detection is not appropriate for a setup function that configures loggers for specified modules."
-    },
-    {
-      "file": "apps/handlers/config/load.py",
-      "standard": "handlers",
-      "reason": "Architectural \u2014 module_name parameter in get_module_logs_dir() receives explicit module names for log path resolution. This is the config API \u2014 callers pass module names, it resolves paths."
-    },
-    {
-      "file": "apps/handlers/central/reader.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports _find_repo_root from config.load (shared infrastructure)."
-    },
-    {
-      "file": "apps/handlers/logging/terminal/formatting.py",
-      "standard": "handlers",
-      "pattern": "from aipass.prax.apps.handlers.config",
-      "reason": "Architectural \u2014 imports DEFAULT_LOG_LEVEL from config.load (shared infrastructure)."
     },
     {
       "file": "apps/handlers/logging/terminal/filtering.py",
@@ -247,30 +89,9 @@
       "reason": "Monitor is a 3-thread architecture (display, file watcher, log watcher) that is tightly coupled by design. The threads share state (queues, positions dict, stop events) making splitting impractical without introducing complex inter-module synchronization. Direct JSON read of registry at line 344 is a one-time startup operation for branch discovery \u2014 routing through json_handler would add unnecessary dependency for a simple registry read."
     },
     {
-      "file": "apps/handlers/dashboard/agent_status_writer.py",
-      "standard": "debug_print",
-      "pattern": "print(ok)",
-      "reason": "False positive \u2014 print(ok) is inside a subprocess script string passed to python -c, not a bare print() call in this module's execution context."
-    },
-    {
-      "file": "apps/modules/logger.py",
-      "standard": "imports",
-      "reason": "logger.py IS the prax logger module \u2014 it cannot import itself. 'Prax logger import not found' is expected."
-    },
-    {
       "file": "apps/modules/monitor.py",
       "standard": "imports",
       "reason": "False positive \u2014 stdlib imports (lines 49-55) are correctly before aipass imports (lines 58+). Checker misidentifies docstring content as import lines."
-    },
-    {
-      "file": "apps/modules/dashboard.py",
-      "standard": "documentation",
-      "reason": "False positive \u2014 multiline function signatures cause the docstring checker to miss existing docstrings."
-    },
-    {
-      "file": "apps/handlers/monitoring/filesystem_handler.py",
-      "standard": "documentation",
-      "reason": "False positive \u2014 property getter/setter and watchdog callback methods with multiline signatures."
     },
     {
       "file": "apps/handlers/watcher/monitor.py",
@@ -278,54 +99,14 @@
       "reason": "False positive \u2014 placeholder class methods inside except block detected as missing docstrings."
     },
     {
-      "file": "apps/handlers/dashboard/operations.py",
-      "standard": "documentation",
-      "reason": "False positive \u2014 multiline function signature causes docstring checker to miss existing docstring."
-    },
-    {
-      "file": "apps/handlers/logging/monitoring.py",
-      "standard": "documentation",
-      "reason": "False positive \u2014 multiline function signature causes docstring checker to miss existing docstring."
-    },
-    {
-      "file": "apps/modules/dashboard.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 __all__ is a Python convention (PEP 8), not a user-defined constant requiring UPPER_CASE."
-    },
-    {
-      "file": "apps/modules/logger.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 __all__ is a Python convention (PEP 8), not a user-defined constant requiring UPPER_CASE."
-    },
-    {
-      "file": "apps/modules/monitor.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 _monitoring_active is a mutable threading flag (threading.Event), not a constant."
-    },
-    {
       "file": "apps/handlers/monitoring/monitoring_filters.py",
       "standard": "naming",
       "reason": "Redundant prefix in filename \u2014 monitoring_filters.py in monitoring/ dir. Renaming to filters.py would break existing imports across multiple files. Deferred to avoid churn."
     },
     {
-      "file": "apps/handlers/monitoring/file_watcher_integration.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 start_monitoring, stop_monitoring, MonitoringEvent are re-exported imports at module level, not constants. They are function/class references imported for external consumers."
-    },
-    {
-      "file": "apps/handlers/monitoring/filesystem_handler.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 _trigger_available is a mutable flag set conditionally in try/except, not a constant."
-    },
-    {
       "file": "apps/handlers/logging/direct.py",
       "standard": "naming",
       "reason": "False positive \u2014 logger_key, target, sys_limits, backupCount, encoding, local_limits, key are local variables inside functions, not module-level constants. backupCount follows logging.handlers.RotatingFileHandler parameter naming."
-    },
-    {
-      "file": "apps/handlers/logging/monitoring.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 module_name and counter are local variables inside functions, not module-level constants."
     },
     {
       "file": "apps/handlers/logging/override.py",
@@ -358,11 +139,6 @@
       "reason": "on_created(), on_modified(), on_deleted(), on_moved() are watchdog.FileSystemEventHandler callbacks \u2014 called by watchdog.Observer at runtime via method dispatch."
     },
     {
-      "file": "apps/handlers/logging/terminal/formatting.py",
-      "standard": "unused_function",
-      "reason": "format() is a logging.Formatter.format() override \u2014 called by the Python logging framework when formatting log records, not by name in branch code."
-    },
-    {
       "file": "apps/handlers/logging/monitoring.py",
       "standard": "unused_function",
       "reason": "run_monitoring_loop() is the handler entry point for continuous monitoring \u2014 designed to be called by the logger module or daemon processes as a long-running loop."
@@ -371,11 +147,6 @@
       "file": "apps/modules/logger.py",
       "standard": "unused_function",
       "reason": "initialize_logging_system() and shutdown_logging_system() are public API lifecycle functions exported in __all__ \u2014 designed to be called by other branches and entry points to start/stop the logging system."
-    },
-    {
-      "file": "apps/handlers/dashboard/template_pusher.py",
-      "standard": "naming",
-      "reason": "False positive \u2014 'changed' is a local variable inside _apply_structural_updates(), not a module-level constant."
     },
     {
       "file": "apps/modules/status.py",
@@ -391,26 +162,6 @@
       "file": "apps/handlers/monitoring/event_queue.py",
       "standard": "silent_catch",
       "reason": "queue.Empty is expected control flow from PriorityQueue.get(timeout=N), not an error. Logging it produces 144,000 noise entries per 4hrs of monitoring (10 polls/sec). The empty state IS the normal idle state."
-    },
-    {
-      "file": "tests/test_log_watcher.py",
-      "standard": "naming",
-      "reason": "Pre-existing _RealFSHandler is a private test stub with underscore prefix indicating internal use. Renaming would not improve clarity."
-    },
-    {
-      "file": "tests/test_filesystem_handler.py",
-      "standard": "log_structure",
-      "reason": "False positive \u2014 /home/ references are test fixture path strings (e.g. Path('/home/user/modules/logger.py')), not real log config."
-    },
-    {
-      "standard": "cli_flags",
-      "file": "apps/__init__.py",
-      "reason": "Package marker \u2014 not a CLI entry point. --version is in apps/prax.py."
-    },
-    {
-      "file": "tests/test_logging.py",
-      "standard": "log_structure",
-      "reason": "Test assertions reference _AIPASS_PKG_ROOT which resolves to /home/ paths at runtime. Not log config \u2014 test path constants."
     },
     {
       "file": "apps/handlers/monitoring/commons_feed.py",
