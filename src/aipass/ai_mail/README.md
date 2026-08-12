@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 969 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 996 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -275,6 +275,40 @@ Branch identity detection follows a priority chain in `detect_branch_from_pwd()`
 If all fail, detection returns `None` and the operation fails loudly. Wrong identity is worse than no identity.
 
 The `--from @branch` flag on send/email commands provides an explicit sender override for callers outside branch directories.
+
+### Verified-Caller Rail
+
+`--from` and `--sender` are **claims, not credentials**. Both land on
+`wake_branch(sender=...)`, and that value is not only a bounce address — a
+sender in `PRIVILEGED_SENDERS` unlocks a wake lane. Until this rail, any citizen
+could run `dispatch @manager --from @daemon` and wake a manager (found by a
+@devpulse scout, DPLAN-0288; traced, not executed).
+
+`handlers/users/verified_caller.py` draws the line:
+
+| | claimed identity (`--from` / `--sender`) | verified identity |
+|---|---|---|
+| source | a CLI string | `AIPASS_CALLER_BRANCH`, else a passport walk up `AIPASS_CALLER_CWD` |
+| authors the mail | yes | — |
+| gates a privilege | **never** | yes |
+
+- **`resolve_verified_caller()`** — `@branch`, or `""` when unprovable. There is
+  deliberately **no `Path.cwd()` fallback**: drone runs a routed module with
+  `cwd=<target branch>` and a dispatched agent with `cwd=<its own tree>`, so this
+  process's directory says nothing about who called.
+- **`sender_claim_refusal(claimed)`** — a reason string when the claim is
+  privilege-bearing and doesn't match the verified caller (including when there
+  is no caller to match: unprovable is refused, not assumed). Refusal happens
+  **before the send**, so a spoof attempt leaves no delivered email behind, and
+  exits `2`.
+- **`resolve_wake_sender(claimed)`** — verified caller first, the claim only as a
+  fallback, which the refusal has already guaranteed is not privilege-bearing.
+  So `--from @spawn` from @seedgo's seat still authors the mail as `@spawn` while
+  the wake — and therefore wake-back — is attributed to `@seedgo`.
+- **`PRIVILEGED_SENDERS`** lives at the boundary that enforces it, because
+  `wake_branch` cannot: its in-process callers (@daemon's `run.py`) have no
+  caller env and are trusted by import instead. A test scans `wake.py` for
+  `sender == "@x"` gates and fails if one is missing from the set.
 
 ### Address Derivation Hazard
 

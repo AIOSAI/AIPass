@@ -210,13 +210,22 @@ def _orchestrate_wake(args: List[str]) -> bool:
         )
         return True
 
+    # --sender is a CLI string and reaches wake_branch's privilege-bearing
+    # `sender` param, exactly like --from does on the dispatch-send path.
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+
+    refusal = sender_claim_refusal(use_sender)
+    if refusal:
+        error(f"Wake refused: {refusal}")
+        return True
+
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
     console.print(f"\n⏳ Waking {branch_email}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
     dispatch_status, success = wake_branch(
-        branch_email, custom_message, fresh=use_fresh, sender=use_sender, model=use_model
+        branch_email, custom_message, fresh=use_fresh, sender=resolve_wake_sender(use_sender), model=use_model
     )
 
     # Print step-by-step status
@@ -269,6 +278,16 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     target = filtered[0]
     subject = filtered[1]
     body = filtered[2]
+
+    # --from is an unauthenticated string. It may author the mail, but it must
+    # not buy a wake lane: refused BEFORE the send, so a spoof attempt leaves
+    # no delivered dispatch email behind claiming to be from someone it isn't.
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+
+    refusal = sender_claim_refusal(from_branch)
+    if refusal:
+        error(f"Dispatch to {target} refused: {refusal}")
+        return True
 
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
@@ -346,8 +365,13 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
+    # The wake is attributed to the VERIFIED caller, not to the mail's author:
+    # --from moves who the email is from, never who the wake came from.
     dispatch_status, wake_ok = wake_branch(
-        target, fresh=use_fresh, sender=user_info.get("email_address", "@ai_mail"), model=use_model
+        target,
+        fresh=use_fresh,
+        sender=resolve_wake_sender(user_info.get("email_address", "@ai_mail")),
+        model=use_model,
     )
     console.print(dispatch_status.format())
 

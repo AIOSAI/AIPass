@@ -37,8 +37,39 @@ from aipass.spawn.apps.handlers.meta_ops import (
     save_branch_meta,
 )
 from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
-from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.class_registry import get_template_dir, refuse_forbidden_class
 from aipass.spawn.apps.handlers.json import json_handler
+
+
+def resolve_sync_template_class(citizen_class: str, branch_name: str) -> Path:
+    """Resolve a passport's citizen_class to a template dir for a sync rebuild.
+
+    A merely-unknown class still falls back to aipass_framework (sync repairs
+    drifted branches; a stale class name shouldn't block the repair). A
+    FORBIDDEN class does not: "admin" is a devpulse-only registry privilege,
+    so sync refuses to scaffold anything claiming it (DPLAN-0288).
+
+    Args:
+        citizen_class: The value read from the branch's passport.
+        branch_name: Branch name, for the refusal message.
+
+    Returns:
+        Path to the template directory to rebuild against.
+
+    Raises:
+        ValueError: The class is forbidden — caller must skip this branch.
+    """
+    refusal = refuse_forbidden_class(citizen_class)
+    if refusal:
+        raise ValueError(f"{branch_name}: {refusal}")
+
+    try:
+        return get_template_dir(citizen_class)
+    except ValueError:
+        logger.warning(
+            f"[sync-registry] Unknown class '{citizen_class}' for {branch_name}, falling back to aipass_framework"
+        )
+        return get_template_dir("aipass_framework")
 
 
 def _derive_description(branch_path: Path) -> str:
@@ -288,14 +319,13 @@ def sync_registry(fix: bool = False) -> dict:
                     except (json.JSONDecodeError, IOError) as e:
                         logger.warning(f"Failed to read passport for citizen class detection ({name}): {e}")
 
-                # Load template registry for that class (fall back to aipass_framework if unknown)
+                # Resolve the template for that class — forbidden classes refuse
+                # loudly and skip the branch rather than being scaffolded.
                 try:
-                    template_dir = get_template_dir(citizen_class)
-                except ValueError:
-                    logger.warning(
-                        f"[sync-registry] Unknown class '{citizen_class}' for {name}, falling back to aipass_framework"
-                    )
-                    template_dir = get_template_dir("aipass_framework")
+                    template_dir = resolve_sync_template_class(citizen_class, name)
+                except ValueError as e:
+                    logger.error(f"[sync-registry] {e}")
+                    continue
                 template_registry = load_template_registry(template_dir)
                 if template_registry:
                     branch_meta = generate_branch_meta(branch_path, template_registry)

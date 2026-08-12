@@ -11,6 +11,42 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**security(ai_mail)** — sender-spoof holes closed on both doors (by @ai_mail,
+FPLAN-0401 phase 1, DPLAN-0288). The `--from` flag (dispatch-send) and the
+`--sender` flag (wake path — second door self-found by @ai_mail, not in the
+scout report) were unauthenticated strings fed straight into `wake_branch`'s
+privileged `sender` param: any caller could claim `@daemon` and unlock the
+interactive manager wake. New `verified_caller.py` rail resolves the real
+caller from `AIPASS_CALLER_BRANCH` / passport-walk (never bare cwd); a
+privilege-bearing claim the rail can't prove is refused loudly BEFORE the
+send; ordinary `--from` mail identity untouched; the wake sender (and
+wake-back) now always attribute to whoever actually ran the command. 27 tests
+red-first incl. a structural canary that fails if a future sender literal in
+wake.py skips the privileged set. Live-proven refusals (exit 2). Suite 996
+green, audit 100%.
+
+**feat(spawn)** — admin-grant ceremony support + admin never mintable (by
+@spawn, FPLAN-0401 phase 2, DPLAN-0288). `ensure_admin()` mirrors the
+sealed-owner writer: sets `admin:true` on the devpulse registry ENTRY only —
+the seat is a constant, any other name is a named refusal with zero writes;
+CLI `drone @spawn grant-admin` takes no branch argument by design (Patrick's
+one-time ceremony). Success output states the honesty leg: the flag is one of
+five legs, alone it grants nothing. `FORBIDDEN_CLASSES={'admin'}` fenced at
+five doors incl. PRE-parse (create's grammar would otherwise swallow "admin"
+as a target path and never reach a class check — self-found). 28 tests
+red-first, suite 409 green, audit 100%.
+
+**feat(devpulse)** — birth-certificate admin grant tooling (by devpulse,
+FPLAN-0401 phase 3, DPLAN-0288). Patrick's design: the admin privilege rides
+on devpulse's EXISTING birth certificate (SYSTEM-minted 2026-03-07, in
+spawn's never-update list, untracked by git). New `admin_grant` module —
+keygen (`~/.aipass/admin_grant.key`, 0600, outside every repo), mint (signed
+`privileges` block, HMAC-SHA256 over canonical cert), verify (the 5-leg
+contract: verified caller → registry-resolved cert path → content →
+signature → registry flag; every refusal named, missing key = lane dark).
+Ceremony verbs owner-gated. 17 tests incl. the tamper canary (any
+post-signing edit kills the signature), suite 486 green, checklist clean.
+
 **feat(daemon)** — nightly steward rotation shipped dark (by @daemon,
 DPLAN-0287 daemon-to-production). New `rotation` schedule type: one
 fleet-steward job (05:00, sonnet, ships `enabled:false` — flip to go live)

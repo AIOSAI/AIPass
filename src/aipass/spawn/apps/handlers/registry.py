@@ -25,6 +25,13 @@ Identity model (DPLAN-0239, settled 2026-07-11):
       ``ensure_project_has_owner`` at creation time. ``citizen_class ==
       'manager'`` is a cosmetic preference for the seating heuristic,
       never the gate — the entry ``owner: true`` IS the gate.
+
+  admin (entry field, ``True`` / absent) — DPLAN-0288
+      One seat only: devpulse. Written by ``ensure_admin`` (the sanctioned
+      path, exposed as ``drone @spawn grant-admin``) during Patrick's
+      ceremony. This flag on its own GRANTS NOTHING — it is leg 5 of a
+      five-leg contract (verified caller, cert path, cert content, HMAC
+      signature, this flag); the lane stays dark unless all five pass.
 """
 
 import sys
@@ -37,6 +44,10 @@ from aipass.spawn.apps.handlers.json import json_handler
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
+
+# The one seat that may ever carry the registry admin flag (DPLAN-0288).
+# A constant, never a caller-chosen parameter — see ensure_admin().
+ADMIN_BRANCH = "devpulse"
 
 
 def is_protected(branch_name, branch_dir=None, registry_path=None):
@@ -407,6 +418,64 @@ def ensure_project_has_owner(registry_path):
     save_registry(registry_path, reg_data)
     logger.info("[registry] Set owner=true on %s (registry entry)", owner_branch.get("name", "?"))
     return True
+
+
+def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
+    """Set ``admin: true`` on the devpulse entry of the root registry.
+
+    The sanctioned write path for Patrick's admin ceremony (DPLAN-0288),
+    mirroring ``ensure_project_has_owner``: authority is written to the
+    REGISTRY ENTRY, never to a passport a branch can edit on itself.
+
+    HARD FENCE: ``branch_name`` exists so the refusal is testable, not so
+    callers can choose a seat. Anything other than ``ADMIN_BRANCH`` is
+    refused by name — this helper can never grant admin to anyone else.
+
+    The flag alone grants NOTHING: the admin dispatch lane verifies five
+    legs (verified caller, cert path, cert content, signature, this flag).
+
+    Args:
+        registry_path: Path to the root ``AIPASS_REGISTRY.json``.
+            Auto-discovered via ``find_registry()`` when omitted.
+        branch_name: Must be devpulse (case-insensitive). Anything else refuses.
+
+    Returns:
+        Tuple of (status, reason) where status is one of:
+            "granted"  — flag newly written
+            "already"  — flag was already true, nothing written
+            "refused"  — nothing written, reason names why
+    """
+    requested = (branch_name or "").strip().lower()
+    if requested != ADMIN_BRANCH:
+        reason = (
+            f"REFUSED: admin is a {ADMIN_BRANCH}-only privilege — "
+            f"ensure_admin cannot grant it to '{branch_name or '(empty)'}'. "
+            "The seat is a constant, not a parameter."
+        )
+        logger.warning("[registry] %s", reason)
+        return "refused", reason
+
+    registry_path = Path(registry_path) if registry_path else find_registry()
+    reg_data = load_registry(registry_path)
+    branches = branches_as_list(reg_data.get("branches", []))
+
+    for branch in branches:
+        if branch.get("name", "").lower() != ADMIN_BRANCH:
+            continue
+        if branch.get("admin") is True:
+            reason = f"{ADMIN_BRANCH} entry already carries admin:true in {registry_path.name}"
+            logger.info("[registry] %s", reason)
+            return "already", reason
+        branch["admin"] = True
+        save_registry(registry_path, reg_data)
+        reason = f"Granted admin:true to the {ADMIN_BRANCH} entry in {registry_path.name}"
+        logger.info("[registry] %s", reason)
+        json_handler.log_operation("admin_granted", data={"branch": ADMIN_BRANCH})
+        return "granted", reason
+
+    reason = f"REFUSED: no {ADMIN_BRANCH} entry in {registry_path} — nothing written"
+    logger.warning("[registry] %s", reason)
+    return "refused", reason
 
 
 def backfill_owner_and_registry_id(registry_path):
