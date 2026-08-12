@@ -2,7 +2,7 @@
 
 # Seedgo
 
-**Purpose:** Standards compliance platform for AIPass. Audits all 11 core agents against 42 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
+**Purpose:** Standards compliance platform for AIPass. Audits all 11 core agents against 43 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
 **Version:** 2.0.0
 **Created:** 2026-03-05
@@ -22,7 +22,7 @@ drone @seedgo standard cli              # Look up what a standard checks
 ## Overview
 
 ### What I Do
-- Audit all 11 core agents against 40 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, etc.)
+- Audit all 11 core agents against 43 code standards + diagnostics (architecture, CLI, imports, logging, naming, silent catch, deep nesting, etc.)
 - Score files 0-100 per standard and report violations with actionable details
 - Manage bypass rules (`.seedgo/bypass.json`) for deliberate exceptions
 - Run pyright diagnostics across branches for type error detection
@@ -49,14 +49,14 @@ drone @seedgo --help                                   # Full command listing
 drone @seedgo --version                                # Version string
 
 # Audit
-drone @seedgo audit aipass                             # Audit all 11 agents (40 standards + diagnostics)
+drone @seedgo audit aipass                             # Audit all 11 agents (43 standards + diagnostics)
 drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
-drone @seedgo standard                                 # List all 42 standards
+drone @seedgo standard                                 # List all 43 standards
 drone @seedgo standard cli                             # Show standard content (short form)
-drone @seedgo standards_query aipass_standards         # List all 42 standards in pack
+drone @seedgo standards_query aipass_standards         # List all 43 standards in pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
 
 # Per-file Check
@@ -108,7 +108,7 @@ seedgo/
 │   │   ├── readme_update.py         # README generation module
 │   │   └── test_map.py              # Custom function test coverage mapping
 │   └── handlers/                    # 9 handler directories
-│       ├── aipass_standards/        # 40 checker standards (120 files)
+│       ├── aipass_standards/        # 43 checker standards (123 files)
 │       │   ├── *_check.py           # Checker implementations (score 0-100)
 │       │   ├── *_content.py         # Queryable standard content
 │       │   └── *.md                 # Standard documentation
@@ -130,7 +130,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 43 test files, 1328 tests
+├── tests/                           # 44 test files, 1476 tests
 ├── drone_adapter.py                 # Drone routing bridge
 ├── .trinity/                        # Identity + memory
 ├── .seedgo/                         # Self-bypass rules
@@ -154,7 +154,7 @@ seedgo/
 
 ---
 
-## The 40 Standards
+## The 43 Standards
 
 | Standard | Scope | What It Checks |
 |----------|-------|----------------|
@@ -187,6 +187,7 @@ seedgo/
 | output_routing | all_files | Status output via @cli helpers, not raw console.print |
 | permission_flags | all_files | No dangerous permission overrides |
 | readme | branch_level | README.md exists and is current |
+| rich_markup | all_files | Literal `[placeholders]` Rich silently eats at render time |
 | ruff | branch_level + per-file | Ruff linter compliance |
 | shebang | all_files | No shebang lines in library code |
 | silent_catch | all_files | No bare except/pass patterns |
@@ -228,7 +229,7 @@ Provider settings route all events through the bridge (`claude.py`), which dispa
 
 ## Tests
 
-- **43 test files**, all passing
+- **44 test files**, all passing
 - **0 type errors** (pyright)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 

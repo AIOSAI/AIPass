@@ -12,3 +12,6 @@ build/
 *.log
 *.tmp
 *.swp
+
+# Machine-local audit artifact (regenerated on every audit run)
+.seedgo/last_audit.json

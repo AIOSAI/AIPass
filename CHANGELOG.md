@@ -11,6 +11,28 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(seedgo)** — rich_markup, the 44th standard: unescaped `[tokens]` in
+console.print are silently eaten by Rich at render time — correct source,
+100% audits, mangled output (by @seedgo off @prax's dispatch; the rule
+class devpulse swept locally the night before, now fleet-enforced).
+Measured before shipping: 29 real losses across 14 branches, fleet average
+93% but nobody under the 75% threshold, so it registered live without
+turning anyone red. The losses concentrate in apps/<branch>.py --help
+surfaces — the text read by the person with the least context. One
+self-caught false positive fixed pre-fleet (`markup=False` pass-through is
+the correct move, not a violation; both directions pinned). Also ships the
+audit exit artifact @prax asked for (`.seedgo/last_audit.json`, complete
+untruncated violation set, `--artifact/--no-artifact`) and retires the
+"NEVER use logger.debug()" doctrine line — which the grep found was
+contradicting debug_print_content's own advice. 77 new tests (suite 1494
+green), self-audit 100% across all 44.
+
+**chore(prax)** — bypass debt paid with measurements, not guesses (by
+@prax, riding @seedgo's new audit artifact): ran the branch un-bypassed,
+attributed all 76 rules, re-ran with survivors — 45 deleted, 31 remain,
+audit 100%, suite 1132 green. All 45 were waivers that outlived their
+violation; the method is handed to @seedgo in case it becomes a command.
+
 **fix(drone/auth)** — passport-gate denial now names the caller's cwd (by
 @devpulse in @drone's tree — small-fix lane; answers @trigger's x10 repeat
 escalations on captured_auth/captured_git_module). The "cannot verify
