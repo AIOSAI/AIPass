@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-06-15
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from typing import List
 from aipass.prax import logger
 from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
+from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
@@ -97,6 +98,9 @@ def print_help():
     console.print("              [dim]+/-15 min window, once per hour.[/dim]")
     console.print("    [cyan]once[/cyan]      due_date: YYYY-MM-DD")
     console.print("              [dim]Fires when date <= today, then marks completed.[/dim]")
+    console.print("    [cyan]rotation[/cyan]  time: HH:MM")
+    console.print("              [dim]Daily window, but wakes the NEXT citizen on the fleet[/dim]")
+    console.print("              [dim]roster instead of the owner. See drone @daemon rotation.[/dim]")
     console.print()
     console.print("  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models)")
     console.print()
@@ -118,11 +122,18 @@ def _should_notify(job: dict) -> bool:
     return job.get("notify", True)
 
 
-def _fire_job(job: dict) -> tuple:
+def _fire_job(job: dict, runstate: dict) -> tuple:
     """Fire a single job via direct wake_branch import (DPLAN-0204 path A).
+
+    Rotation jobs don't wake their owner — they wake tonight's steward — so they
+    are handed to the rotation module, which owns target selection and pointer
+    state (DPLAN-0287).
 
     Returns (ok: bool, error_msg: str).
     """
+    if job.get("schedule", {}).get("type") == ROTATION_TYPE:
+        return fire_rotation(job, runstate)
+
     # Cross-branch handler import authorized by DPLAN-0204 §2.8
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch  # noqa: E402
     from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
@@ -212,9 +223,15 @@ def run_tick(dry_run: bool = False) -> dict:
     # Step 3: Load runstate and check due
     runstate = load_runstate()
 
-    # Prune orphan runstate entries
+    # Prune orphan runstate entries. Persist immediately when anything changed:
+    # pruning happens on every tick but the save used to live inside the fire
+    # loop, so quiet ticks dropped their prunes and stale entries survived for
+    # months (DPLAN-0287 piece 3).
     active_keys = {job_key(j["owner"], j["id"]) for j in jobs}
-    prune_orphans(runstate, active_keys)
+    pruned = prune_orphans(runstate, active_keys)
+    if pruned and not dry_run:
+        save_runstate(runstate)
+        _log(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
 
     due_jobs = [j for j in enabled if is_job_due(j, runstate)]
     results["due"] = len(due_jobs)
@@ -236,7 +253,7 @@ def run_tick(dry_run: bool = False) -> dict:
 
     # Step 4: Fire due jobs
     for job in due_jobs:
-        ok, error_msg = _fire_job(job)
+        ok, error_msg = _fire_job(job, runstate)
         if ok:
             results["fired"] += 1
             update_job_runstate(runstate, job["owner"], job["id"], job["schedule"])

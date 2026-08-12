@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-06-15
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -183,6 +183,8 @@ def is_job_due(job: dict, runstate: dict) -> bool:
 
     checkers = {
         "daily": lambda: _is_daily_due(schedule, last_run, now),
+        # A rotation job is a daily job that picks a different target each night.
+        "rotation": lambda: _is_daily_due(schedule, last_run, now),
         "hourly": lambda: _is_hourly_due(schedule, last_run, now),
         "interval": lambda: _is_interval_due(schedule, last_run, now),
         "once": lambda: _is_once_due(schedule, completed, now),
@@ -204,7 +206,7 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
     now = datetime.now()
     sched_type = schedule.get("type", "")
 
-    if sched_type == "daily":
+    if sched_type in ("daily", "rotation"):
         target_time = schedule.get("time", "00:00")
         try:
             target_h, target_m = map(int, target_time.split(":"))

@@ -41,6 +41,7 @@ from aipass.daemon.apps.modules import (
     timer_install,
     queue,
     inbox_sweep,
+    rotation,
 )
 
 
@@ -63,7 +64,7 @@ def get_modules() -> List[Any]:
         List of module objects with handle_command function
     """
     modules = []
-    for mod in [update, schedule, activity_report, actions, run, timer_install, queue, inbox_sweep]:
+    for mod in [update, schedule, activity_report, actions, run, timer_install, queue, inbox_sweep, rotation]:
         if hasattr(mod, "handle_command"):
             modules.append(mod)
     return modules
@@ -158,6 +159,7 @@ def print_help(modules: List[Any]):
         ("activity-report", "Full detailed activity report (--json for raw)."),
         ("branch-health", "Single branch deep dive (e.g., branch-health DAEMON)."),
         ("run", "One scheduler tick: discover .daemon/ jobs, fire due ones."),
+        ("rotation", "Steward rotation — roster, whose turn is next, recent turns."),
         ("inbox-sweep", "Wake branches sitting on mail unread past 24h."),
         ("install-timer", "Install + enable daemon-tick systemd user timer (~2 min)."),
         ("uninstall-timer", "Stop + remove daemon-tick systemd user timer."),
@@ -183,6 +185,7 @@ def print_help(modules: List[Any]):
     console.print("  [yellow]Scheduler:[/yellow]")
     console.print("    [dim]drone @daemon queue[/dim]                             [dim]# View pending jobs[/dim]")
     console.print("    [dim]drone @daemon run[/dim]                               [dim]# Fire due jobs now[/dim]")
+    console.print("    [dim]drone @daemon rotation[/dim]                          [dim]# Whose steward night[/dim]")
     console.print("    [dim]drone @daemon install-timer[/dim]                     [dim]# Enable systemd timer[/dim]")
     console.print()
     console.print("  [yellow]Fleet mail:[/yellow]")

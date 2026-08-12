@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_scanner.py
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-08-11
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -22,7 +22,12 @@ from typing import List, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
-from aipass.daemon.apps.handlers.schedule.discovery import active_branch_map, branch_path_for
+from aipass.daemon.apps.handlers.schedule.discovery import (
+    MANAGER_CLASS,
+    active_branch_map,
+    branch_path_for,
+    citizen_class_for,
+)
 
 DEFAULT_STALE_HOURS = 24
 
@@ -77,15 +82,8 @@ def _skip_reason(branch_path: Path, owner: str) -> Optional[str]:
     Only passport-local reasons are decided here. ai_mail's wake blocklist is a
     wake-policy concern and is applied by the inbox_sweep module.
     """
-    passport_file = branch_path / ".trinity" / "passport.json"
-    try:
-        with open(passport_file, "r", encoding="utf-8") as f:
-            passport = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
-        logger.info("[inbox_scanner] Could not read passport for %s: %s", owner, e)
-        return None
-
-    if passport.get("identity", {}).get("citizen_class", "") == "manager":
+    if citizen_class_for(branch_path) == MANAGER_CLASS:
+        logger.info("[inbox_scanner] %s is manager-class — not wakeable", owner)
         return SKIP_MANAGER
 
     return None

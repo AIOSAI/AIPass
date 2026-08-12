@@ -18,6 +18,7 @@ drone @daemon update                    # Status digest
 drone @daemon activity                  # Quick 24h activity summary
 drone @daemon queue                     # View pending scheduled jobs
 drone @daemon run                       # Fire all due jobs now
+drone @daemon rotation                  # Whose steward night is next
 drone @daemon inbox-sweep --dry-run     # Who is sitting on stale unread mail
 drone @daemon branch-health DAEMON      # Deep dive on a branch
 drone @daemon install-timer             # Enable systemd 2-min timer
@@ -57,6 +58,7 @@ daemon/
 │   │   ├── activity_report.py # Branch activity report generator
 │   │   ├── actions.py         # Action registry CLI — list, toggle, info, reminders
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
+│   │   ├── rotation.py        # Steward rotation — wake policy + status surface
 │   │   ├── scheduler_ops.py   # Scheduler cron operations facade
 │   │   └── wakeup_ops.py      # Wake-up cron operations facade
 │   ├── handlers/
@@ -70,6 +72,9 @@ daemon/
 │   │   │   ├── memory_health.py       # Memory health checks
 │   │   │   └── red_flag_detector.py   # Detects anomalies / red flags
 │   │   ├── schedule/
+│   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
+│   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
+│   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
 │   │   │   ├── task_registry.py       # Task registry for scheduled items
 │   │   │   └── .archive/             # assistant_notifier, telegram_notifier (archived)
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
@@ -118,6 +123,9 @@ drone @daemon inbox-sweep             # Wake owners of mail unread past 24h
 drone @daemon inbox-sweep --dry-run   # Show who WOULD wake, wake nobody
 drone @daemon inbox-sweep --hours 48  # Custom staleness threshold
 drone @daemon inbox-sweep --limit 3   # Cap wakes for this pass
+
+drone @daemon rotation                # Roster, whose turn is next, recent turns
+drone @daemon rotation --json         # Same state, machine-readable
 ```
 
 Each module accepts `--help` for module-specific usage:
@@ -141,12 +149,15 @@ drone @daemon <command> --help
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
 | `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
+| `rotation` | Nightly steward rotation — roster, pointer, turn history | Operational *(job ships disabled)* |
 
 ---
 
 ## Scheduling Jobs
 
-Each branch owns its schedule at `src/aipass/<branch>/.daemon/schedule.json`. The daemon discovers and fires — branches define their own jobs.
+Each citizen owns its schedule at `<branch>/.daemon/schedule.json`. The daemon discovers and fires — citizens define their own jobs.
+
+Two trees are swept: framework citizens under `src/aipass/*` (listed in `AIPASS_REGISTRY.json`) and project citizens under `projects/<name>/*` (listed in that project's own sealed `<NAME>_REGISTRY.json`). A project registry's paths resolve against its own project root, never the repo root — `src/baud/baud` exists in both trees, and resolving repo-first picks the wrong directory. Vera-Studio is a separate repo and is out of scope until multi-root discovery exists.
 
 ### Job file schema
 
@@ -174,6 +185,7 @@ Each branch owns its schedule at `src/aipass/<branch>/.daemon/schedule.json`. Th
 | `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per day. |
 | `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per hour. |
 | `once` | `due_date: "YYYY-MM-DD"` | Date <= today, then marks completed. |
+| `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See below. |
 
 ### Wake options
 
@@ -249,11 +261,11 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Test Suite
 
-- **344 tests** across 16 test files
-- 9/9 modules covered, 35/41 public functions tested
+- **406 tests** across 18 test files
+- 10/10 modules covered, 44/50 public functions tested
 - Seedgo audit: **100%** across all standards
 
-*Last Updated: 2026-08-11*
+*Last Updated: 2026-08-12*
 
 ---
 [← Back to AIPass](../../../README.md)

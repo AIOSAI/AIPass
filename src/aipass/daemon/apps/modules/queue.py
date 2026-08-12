@@ -60,6 +60,8 @@ def _schedule_human(job: dict) -> str:
         return sched.get("due_date", "?")
     if sched_type == "daily":
         return f"daily @ {sched.get('time', '??:??')}"
+    if sched_type == "rotation":
+        return f"rotation @ {sched.get('time', '??:??')}"
     if sched_type == "hourly":
         m = sched.get("time", "0")
         return f"hourly @ :{int(m):02d}"

@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(daemon)** — nightly steward rotation shipped dark (by @daemon,
+DPLAN-0287 daemon-to-production). New `rotation` schedule type: one
+fleet-steward job (05:00, sonnet, ships `enabled:false` — flip to go live)
+walks the citizen roster one branch per night with a templated steward prompt
+(inbox → todos → logs → self-audit → APLAN → report); busy target = logged
+miss, pointer advances, no starvation logic. @devpulse never on the roster;
+managers excluded behind `include_managers:false` with a live signature probe
+on wake_branch's `scheduled` param (lane detected: manager wakes go headless +
+pinned the moment the knob flips). Discovery widened to `projects/*` sealed
+registries (five manager seats found and swept — roster unchanged until the
+knob, by design). Runstate prune now persists on no-fire ticks (stale June
+entries finally cleared). 62 new tests (40 rotation), suite 406 green, audit
+100%. First live steward night still unproven — flip is the ceremony.
+
 **feat(ai_mail)** — scheduled-manager headless lane (by @ai_mail, DPLAN-0287
 daemon-to-production). `wake_branch()` gains keyword-only `scheduled=False`:
 daemon-scheduled wakes of manager-class citizens now route headless through

@@ -238,6 +238,48 @@ class TestIsJobDue:
         assert is_job_due(job, {"jobs": {}}) is False
 
 
+# ── rotation schedule type (DPLAN-0287 piece 1) ──────
+
+
+def rotation_job(time_str: str) -> dict:
+    """A rotation job targeting a given HH:MM."""
+    return {
+        "owner": "@daemon",
+        "id": "fleet-steward",
+        "enabled": True,
+        "schedule": {"type": "rotation", "time": time_str},
+        "prompt": "STEWARD NIGHT for {branch}.",
+    }
+
+
+class TestRotationDue:
+    def test_due_inside_the_window(self):
+        now = datetime.now()
+        assert is_job_due(rotation_job(now.strftime("%H:%M")), {"jobs": {}}) is True
+
+    def test_not_due_outside_the_window(self):
+        far = (datetime.now() + timedelta(hours=6)).strftime("%H:%M")
+        assert is_job_due(rotation_job(far), {"jobs": {}}) is False
+
+    def test_fires_once_per_night(self):
+        now = datetime.now()
+        runstate = {"jobs": {"@daemon/fleet-steward": {"last_run": now.isoformat()}}}
+        assert is_job_due(rotation_job(now.strftime("%H:%M")), runstate) is False
+
+    def test_disabled_rotation_never_fires(self):
+        job = rotation_job(datetime.now().strftime("%H:%M"))
+        job["enabled"] = False
+        assert is_job_due(job, {"jobs": {}}) is False
+
+    def test_next_run_is_the_next_night(self):
+        runstate = {"jobs": {}}
+        update_job_runstate(runstate, "@daemon", "fleet-steward", {"type": "rotation", "time": "05:00"})
+        next_run = runstate["jobs"]["@daemon/fleet-steward"]["next_run"]
+        assert next_run is not None
+        assert datetime.fromisoformat(next_run).strftime("%H:%M") == "05:00"
+        assert datetime.fromisoformat(next_run) > datetime.now()
+
+
 # ── update_job_runstate ──────────────────────────────
 
 

@@ -142,6 +142,24 @@
       "standard": "modules",
       "reason": "Installer module — mkdir for ~/.config/systemd/user/ is the core purpose. Direct file ops are inherent to the install function.",
       "pattern": "direct file operations"
+    },
+    {
+      "file": "apps/modules/rotation.py",
+      "standard": "encapsulation",
+      "reason": "Authorized cross-branch wake_branch/is_wake_blocked import (DPLAN-0204 §2.8 path A, same as run.py and inbox_sweep.py). ai_mail exposes its wake surface only via that handler; no module entry point exists. Root fix (an ai_mail module wrapper) is tracked separately.",
+      "pattern": "Handler imported directly"
+    },
+    {
+      "file": "apps/modules/rotation.py",
+      "standard": "introspection",
+      "reason": "Bare 'rotation' renders the operational status view — roster, whose turn is next, recent turns. That IS the primary use case (same pattern as queue.py, run.py); an introspection gate would hide it behind module metadata.",
+      "pattern": "no-args gate"
+    },
+    {
+      "file": "apps/modules/rotation.py",
+      "standard": "modules",
+      "reason": "fire_rotation() calls wake_branch, which lives in ai_mail's handler layer — seedgo blocks handler->other-branch-handler imports outright, so the wake cannot move down to handlers/. Roster, pointer state and prompt rendering DID move: handlers/schedule/rotation.py holds all of it. What stays here is wake policy only, mirroring inbox_sweep.py.",
+      "pattern": "fire_rotation"
     }
   ],
   "notes": {
