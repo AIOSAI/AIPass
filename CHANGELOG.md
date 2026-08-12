@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(trigger)** — escalation signatures no longer fragment on counts and
+citizen names (by @trigger off a devpulse dispatch; the 2026-08-11 storm
+put 18 digests for ONE logical event in the manager inbox — the state
+table held 148 signatures for it, 30% of the cap). The collapse is local
+to the escalation signature path (registry fingerprints keep their finer
+grain for `errors list`/medic): standalone numbers with optional short
+unit suffix → `<id>` (the suffix rule caught "1237ms" durations — and with
+them a second, unreported 72-signature hooks-gate storm), registered
+citizen names + any `@handle` → `<branch>`. The placeholder deliberately
+matches the registry's `<id>` token — a different token measurably
+re-fragments at the 100 boundary. Measured on live state: prax event
+148→6, hooks storm 72→6, corpus 500→250; the residual 6 are genuine
+source-kind variance (file/log/agent/hook), meaning not values, left
+untouched. Also a test-integrity catch: a MagicMock'd normalizer had one
+test green without ever running the code it named, and two more vacuous
+via numeric distinguishers — all five repaired against the real
+normalizer. 12 new tests incl. the pinned storm pair, canary red-first
+(9/12 red on revert, 3 anti-over-collapse guards correctly green both
+ways), suite 929 green, audit 100%.
+
 **fix(skills/telegram)** — log streamer 400s root-caused and killed (by
 @skills off a devpulse escalation dispatch; 80 lifetime failures since
 08-08). One log line over Telegram's ~4096 cap slipped the batch guard —

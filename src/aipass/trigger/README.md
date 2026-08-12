@@ -182,6 +182,16 @@ Digests are **email, never dispatch** (`auto_execute=False`). The default recipi
 
 **One signature, one message.** Digests are delivered with `upsert_key="escalation:<signature>"`, so a repeat *updates the existing message in place* — the counter climbs (`Updates: N`), the body refreshes to the latest numbers, read-state is preserved, and no notification fires. The key is the **signature**, never the rendered subject: the subject carries the repeat count and changes every digest, so keying on it would start a fresh thread each time. A digest that lands as an update is recorded as `upsert_action` in `logs/escalation.jsonl` and in the `escalation_digest_sent` operation, so an in-place update is auditable instead of looking like a digest that vanished. Cooldown semantics are unchanged — it now paces in-place updates rather than new mail, and `Digests sent` still counts every digest that left the branch. Closing the message ends the thread: the next digest creates a fresh one.
 
+**What makes a signature.** `sha1(LEVEL|BRANCH|module|normalized_message)[:12]`. The message goes through the error registry's `normalize_message` (paths, timestamps, hashes, 3+ digit IDs), then through a second pass that is **local to this lane** — registry fingerprints keep their finer grain, so `errors list` and medic dispatch are untouched by anything here. That second pass collapses what varies between *repeats of one condition* rather than between errors:
+
+| Collapsed | To | Why |
+|---|---|---|
+| Any standalone number, plus a short unit suffix (`20`, `1237ms`, `pid 4471`) | `<id>` | A climbing count or a duration is the same condition recurring. The suffix is load-bearing: there is no word boundary between digits and letters, so a bare `\b\d+\b` leaves `1237ms` alone |
+| Registered citizen names, from `AIPASS_REGISTRY.json` (TTL-cached) | `<branch>` | "latest: log from SEEDGO" and "from PRAX" are one queue-full condition, not two |
+| Any `@handle`, registered or not | `<branch>` | An unregistered name must not fragment what the registered ones unify |
+
+The placeholder is `<id>` on purpose — the same token the registry normalizer emits for 3+ digits. A different token would make the two passes disagree at the 100 boundary, and `99 events` / `101 events` would keep minting separate signatures.
+
 **Digest body carries the investigation:** signature, level, branch, module, occurrences in window, lifetime count, first/last seen, log file path, why it escalated, and the last N sample lines.
 
 **Config knobs** — operator-editable, live in `trigger_json/custom_config/trigger.config.json` under `escalation` (S193 doctrine: the file on disk is runtime authority; `config_loader.DEFAULT_CONFIG` is only the regeneration seed):

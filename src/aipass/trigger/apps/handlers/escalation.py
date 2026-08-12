@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-08
-# Modified: 2026-08-10
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -41,10 +41,12 @@ that directory and regenerates a blank template over anything parked there.
 """
 
 import hashlib
+import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from aipass.trigger.apps.config import (
     TRIGGER_JSON_DIR,
@@ -113,12 +115,109 @@ def get_config() -> Dict[str, Any]:
     return cfg
 
 
+def _find_repo_root() -> Path:
+    """Walk up from this file to find the repo root (contains AIPASS_REGISTRY.json)."""
+    for parent in [TRIGGER_ROOT] + list(TRIGGER_ROOT.parents):
+        if (parent / "AIPASS_REGISTRY.json").exists():
+            return parent
+    return Path.cwd()
+
+
+BRANCH_REGISTRY_FILE = _find_repo_root() / "AIPASS_REGISTRY.json"
+
+# Citizen names read from the registry, cached on a short TTL exactly like
+# get_config() above and for the same reason: this runs once per watched log
+# line, and a file read per line would put IO on the hot path.
+#
+# TTL rather than an mtime check, deliberately. Measured on this filesystem, two
+# writes moments apart report an IDENTICAL st_mtime AND st_mtime_ns — the clock
+# is coarser than the interval — so a spawn that rewrites the registry twice in
+# one tick would pin a stale name list until some later write happened to land
+# on a different tick. A TTL has no tie to lose: staleness is bounded by the
+# clock instead of by a comparison that can silently never fire.
+_branch_names_cache: Tuple[float, Optional[re.Pattern]] = (0.0, None)
+
+# An @handle, registered or not. The registry pattern below only knows citizens
+# that exist; this one collapses any handle, so an unregistered name in a
+# message cannot fragment a signature the registered ones unify.
+HANDLE_PATTERN = re.compile(r"@\w+")
+
+# Any standalone number, with an optional short unit suffix so a duration is
+# collapsed too. The suffix matters more than it looks: there is no word
+# boundary between the digits and the letters in "1237ms", so a bare \b\d+\b
+# leaves it untouched. Measured on the state file, that one gap was 76 separate
+# signatures for a single hooks gate firing — a second storm hiding behind the
+# one that was reported.
+#
+# Replaced with the SAME <id> placeholder the registry normalizer uses for 3+
+# digits. Pick a different token and the two rules disagree at the 100 boundary:
+# "99 events" and "101 events" would keep minting separate signatures for one
+# condition, because the registry pass has already rewritten the larger number.
+NUMBER_PATTERN = re.compile(r"\b\d+[a-zA-Z]{0,3}\b")
+
+
+def _branch_name_pattern() -> Optional[re.Pattern]:
+    """Compile an alternation of registered citizen names, or None if unreadable.
+
+    Returns:
+        Case-insensitive word-bounded pattern over registry names, or None when
+        the registry is missing or unparseable (callers then skip name collapse)
+    """
+    global _branch_names_cache
+    checked_at, cached = _branch_names_cache
+    now = time.time()
+    # `checked_at`, not `cached`, decides freshness: a missing registry is a
+    # perfectly good cached answer, and re-reading it per log line to rediscover
+    # that it is still missing is the hot-path IO this cache exists to avoid.
+    if checked_at and now - checked_at < CONFIG_TTL_SECONDS:
+        return cached
+
+    pattern: Optional[re.Pattern] = None
+    try:
+        data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
+        names = {str(b["name"]).upper() for b in data.get("branches", []) if b.get("name")}
+        if names:
+            # Longest first so AI_MAIL is matched before AI, if such a pair
+            # ever exists.
+            ordered = sorted(names, key=len, reverse=True)
+            pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in ordered) + r")\b", re.IGNORECASE)
+    except Exception as exc:
+        logger.warning(f"branch registry unreadable, names will not collapse: {exc}")
+
+    _branch_names_cache = (now, pattern)
+    return pattern
+
+
+def _collapse_repeat_variables(text: str) -> str:
+    """Collapse the values that vary between repeats of one condition.
+
+    The registry normalizer strips what varies between *errors* — paths,
+    timestamps, hashes, big IDs. Repeat detection needs more: a message whose
+    only difference is a count or a named citizen is the SAME condition
+    recurring, and must land on one signature or the digest fragments.
+
+    Args:
+        text: Message already through the registry normalizer
+
+    Returns:
+        Text with standalone integers and citizen names replaced by placeholders
+    """
+    text = NUMBER_PATTERN.sub("<id>", text)
+    names = _branch_name_pattern()
+    if names is not None:
+        text = names.sub("<branch>", text)
+    return HANDLE_PATTERN.sub("<branch>", text)
+
+
 def _normalize(message: str) -> str:
     """Strip variable data from a message so repeats share one signature.
 
     Reuses the error registry's normalizer (paths, timestamps, hashes, IDs)
     so an escalation signature lines up with the fingerprint an operator
-    already sees in `errors list`.
+    already sees in `errors list`, then collapses the repeat-only variables
+    on top. That second pass is deliberately LOCAL to this lane: registry
+    fingerprints keep their finer grain, so `errors list` and medic dispatch
+    are unaffected by anything decided here.
 
     Args:
         message: Raw message text
@@ -129,7 +228,7 @@ def _normalize(message: str) -> str:
     try:
         from aipass.trigger.apps.handlers.error_registry import normalize_message
 
-        return normalize_message(message)
+        return _collapse_repeat_variables(normalize_message(message))
     except Exception as exc:
         logger.warning(f"normalizer unavailable, signing on raw text: {exc}")
         return message

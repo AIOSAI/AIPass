@@ -62,8 +62,10 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
     escalation._config_cache = (0.0, None)
+    escalation._branch_names_cache = (0.0, None)
     yield escalation
     escalation._config_cache = (0.0, None)
+    escalation._branch_names_cache = (0.0, None)
 
 
 @pytest.fixture
