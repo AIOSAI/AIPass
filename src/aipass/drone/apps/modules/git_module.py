@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-08-11
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -69,6 +69,27 @@ _COMMANDS = (
 )
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
+
+# gh's default `issue view` render asks GitHub for repository.issue.projectCards
+# — a Projects-classic field the API now rejects outright, so the call returns the
+# deprecation notice and no issue at all.  Rendering from pinned --json fields never
+# requests it.  Callers who already chose a rendering keep their own invocation.
+_ISSUE_VIEW_RENDER_FLAGS = ("--json", "-q", "--jq", "-t", "--template", "-w", "--web")
+_ISSUE_VIEW_COMMENT_FLAGS = ("-c", "--comments")
+
+_ISSUE_VIEW_FIELDS = "number,title,state,author,createdAt,url,labels,body"
+
+_ISSUE_VIEW_TEMPLATE = (
+    "#{{.number}} {{.title}}\n"
+    "{{.state}} · opened by {{.author.login}} · {{.createdAt}}"
+    "{{range .labels}} [{{.name}}]{{end}}\n"
+    "{{.url}}\n\n"
+    "{{.body}}\n"
+)
+
+_ISSUE_VIEW_COMMENTS_TEMPLATE = _ISSUE_VIEW_TEMPLATE + (
+    "{{range .comments}}\n--- {{.author.login}} · {{.createdAt}}\n\n{{.body}}\n{{end}}"
+)
 
 # Count flags whose value lives in the following arg — skipped, not warned about
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
@@ -207,8 +228,29 @@ def _handle_tag(args: list[str]) -> dict:
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
 
+def _rewrite_issue_view(args: list[str]) -> list[str]:
+    """Render ``issue view`` from pinned JSON fields instead of gh's default view.
+
+    Returns args untouched for every other issue subcommand, and for callers who
+    already picked a rendering — their flags conflict with ``--json`` and their
+    choice is theirs to keep.
+    """
+    if not args or args[0] != "view":
+        return args
+    if any(arg in _ISSUE_VIEW_RENDER_FLAGS for arg in args):
+        return args
+
+    wants_comments = any(arg in _ISSUE_VIEW_COMMENT_FLAGS for arg in args)
+    kept = [arg for arg in args if arg not in _ISSUE_VIEW_COMMENT_FLAGS]
+    fields = _ISSUE_VIEW_FIELDS + ",comments" if wants_comments else _ISSUE_VIEW_FIELDS
+    template = _ISSUE_VIEW_COMMENTS_TEMPLATE if wants_comments else _ISSUE_VIEW_TEMPLATE
+    return kept + ["--json", fields, "--template", template]
+
+
 def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
     """Pass through to gh CLI for issue, run, and workflow subcommands."""
+    if subcommand == "issue":
+        args = _rewrite_issue_view(args)
     cmd = ["gh", subcommand] + args
     try:
         result = subprocess.run(
