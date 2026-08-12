@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.1.1
+# Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-03-09
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -20,6 +20,8 @@ from datetime import datetime
 from typing import Optional, Dict, List
 from threading import Lock
 
+from rich.markup import escape
+
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 
@@ -35,6 +37,20 @@ except ImportError as e:
 
 # Thread safety
 _print_lock = Lock()
+
+
+def _plain(text: str) -> str:
+    """Escape text that came from a branch, so Rich shows it instead of parsing it.
+
+    Everything the monitor displays is other people's output — tailed log lines,
+    command strings, file paths. Rich reads ``[word]`` as a style tag, which gives
+    untrusted text two ways to hurt: ``[event_queue]`` is swallowed silently, and
+    a path like ``[/usr/bin]`` raises MarkupError. The second one killed the live
+    monitor's display thread on 2026-08-11 and left the queue with no consumer for
+    ~20 hours. Escape at every point where dynamic text enters a markup string.
+    """
+    return escape(str(text))
+
 
 # Color schemes by event type and level
 COLORS = {
@@ -137,18 +153,21 @@ def print_event(event_type: str, branch: str, message: str, level: str = "info",
             base_branch = base_branch[:-6]
         branch_color = BRANCH_COLORS.get(base_branch, "white")
 
-        # Format branch label with optional PID
+        # Format branch label with optional PID. The surrounding brackets are
+        # meant to be seen, so the whole group is escaped — an uppercase label
+        # survived Rich by luck, a lowercase one would be parsed as a tag.
         if pid:
             branch_label = f"{branch_upper}:{pid}"
         else:
             branch_label = branch_upper
-        branch_formatted = f"[{branch_color}][{branch_label:<{BRANCH_WIDTH}}][/{branch_color}]"
+        label_text = _plain(f"[{branch_label:<{BRANCH_WIDTH}}]")
+        branch_formatted = f"[{branch_color}]{label_text}[/{branch_color}]"
 
         # Get message color based on level
         msg_color = LEVEL_COLORS.get(level, "white")
 
         # Format and print - timestamp, branch colored, message colored by level
-        console.print(f"[dim]{timestamp}[/dim] {branch_formatted} [{msg_color}]{message}[/{msg_color}]")
+        console.print(f"[dim]{timestamp}[/dim] {branch_formatted} [{msg_color}]{_plain(message)}[/{msg_color}]")
 
 
 def print_command_separator(branch: str, command: str, caller: Optional[str] = None, target: Optional[str] = None):
@@ -170,18 +189,15 @@ def print_command_separator(branch: str, command: str, caller: Optional[str] = N
         context_parts = []
         if caller and caller.upper() != "UNKNOWN":
             caller_color = BRANCH_COLORS.get(caller.upper(), "cyan")
-            context_parts.append(f"[{caller_color}]{caller}[/{caller_color}]")
+            context_parts.append(f"[{caller_color}]{_plain(caller)}[/{caller_color}]")
         if target:
             target_color = BRANCH_COLORS.get(target.upper(), "cyan")
-            if context_parts:
-                context_parts.append(f"→ [{target_color}]{target}[/{target_color}]")
-            else:
-                context_parts.append(f"→ [{target_color}]{target}[/{target_color}]")
+            context_parts.append(f"→ [{target_color}]{_plain(target)}[/{target_color}]")
 
         if context_parts:
             console.print(f"  {' '.join(context_parts)}")
 
-        console.print(f"[bold {branch_color}]▶ {command}[/bold {branch_color}]")
+        console.print(f"[bold {branch_color}]▶ {_plain(command)}[/bold {branch_color}]")
         console.print(f"[bold {branch_color}]{'─' * 60}[/bold {branch_color}]")
 
 
@@ -204,7 +220,7 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
         else:
             style = "white"
             symbol = "?"
-        console.print(f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK {message}[/{style}]")
+        console.print(f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK {_plain(message)}[/{style}]")
 
 
 def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):

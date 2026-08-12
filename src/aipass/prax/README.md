@@ -4,8 +4,8 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.2.0
-**Last Updated:** 2026-08-11
+**Version:** 2.3.0
+**Last Updated:** 2026-08-12
 
 ---
 
@@ -75,6 +75,15 @@ screen. The monitor's own health warnings (file watcher unavailable, and similar
 bypass the scope — a filter must never hide the reason the screen is empty.
 The scope is set at launch; there is no runtime `filter` command outside commons
 feed mode.
+
+**Display resilience.** Everything on screen is other branches' output, so every
+dynamic value is escaped before it reaches Rich — a tailed line containing
+`[/usr/bin]` is shown, not parsed. If a line still cannot be drawn, the failure
+costs that one line: the display thread reports it (rate-limited, in plain
+language) and keeps consuming. It is the queue's only consumer, and a consumer
+that dies leaves the queue permanently full with nobody to empty it. The
+Telegram relay is fed before the console for the same reason — one sink failing
+must not take the other with it.
 
 **Commons feed mode** (`monitor run commons`) is a different watcher, not a branch
 filter — it renders live social activity in The Commons (posts, comments, votes,
@@ -209,7 +218,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1197 tests across 29 files
+└── tests/                             # 1222 tests across 30 files
 ```
 
 ### Design Pattern
@@ -238,7 +247,7 @@ drone @prax monitor run
 
 ## Tests
 
-1197 tests across 29 files, covering all major components:
+1222 tests across 30 files, covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -267,6 +276,7 @@ drone @prax monitor run
 | test_devpulse_dashboard_plugin.py | 9 | Dashboard plugin (git, session, dispatch) |
 | test_jsonl_writer.py | 9 | JSONL append writer |
 | test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
+| test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
 | test_help_markup.py | 10 | Rendered console output (real Rich console) |
 | test_status.py | 8 | Status commands |
 | test_sweep.py | 6 | Log sweep |
@@ -297,7 +307,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-08-11*
+*Last Updated: 2026-08-12*
 
 ---
 [← Back to AIPass](../../../README.md)

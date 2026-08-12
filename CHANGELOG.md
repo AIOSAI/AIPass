@@ -11,6 +11,26 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(prax)** — live-monitor display crash no longer kills the Telegram relay
+(by @prax, morning trigger-triage dispatch). One tailed log line carrying a
+bracketed path (`[/usr/bin]`) raised an uncaught Rich MarkupError inside
+`_display_worker`, killing the queue's only consumer — the relay hangs off the
+same thread, so Patrick's TG monitor feed went silently dark 2026-08-11 11:29
+while event_queue warned "queue full" every 30s (1144 warnings across rotated
+logs; the flood was the alarm, not the fire). unified_stream 0.2.0 escapes
+every dynamic value before markup (bracketed paths crashed; `[event_queue]`
+prefixes were silently eaten); monitor 0.4.0 guards each render (one undrawable
+line costs one line, failures counted + rate-limited) and relays BEFORE
+rendering so a console failure can never take the feed again. Separate defect
+self-found while proving: the service's `run` argv token was parsed as a branch
+scope once scoping became real (08-11 fix), so a naive restart would have come
+up scoped to nonexistent branch RUN — leading `run` now recognized as the
+subcommand (monitor.py `_standalone_run_args`). Red-first A/B on the real
+stack + headless live injection; 25 new tests through a REAL Rich console
+(shared conftest MagicMock cannot fail this class); suite 1221 green, audit
+100%. The queue-full WARNING stays loud by design — it was the only instrument
+still reporting the outage.
+
 **night-shift 2026-08-12** — @baud's first-day field notes turned into three
 same-night fixes (FPLAN-0400, each owner-dispatched, red-first, live-verified
 from the reporting seat): **fix(hooks)** cross-project file fence shipped

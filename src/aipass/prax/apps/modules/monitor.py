@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.3.1
+# Version: 0.4.0
 # Created: 2025-11-23
-# Modified: 2026-08-08
+# Modified: 2026-08-12
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -65,6 +65,11 @@ _file_watcher_thread: Optional[threading.Thread] = None
 _log_watcher_thread: Optional[threading.Thread] = None
 _rate_tracker_thread: Optional[threading.Thread] = None
 _active_scope: Optional[Any] = None  # BranchScope for this run — None when unscoped
+
+# Console render failures: counted, and reported at most this often (seconds).
+_RENDER_WARNING_INTERVAL = 30.0
+_render_failures: int = 0
+_last_render_warning: float = 0.0
 
 
 def print_introspection():
@@ -270,6 +275,7 @@ def _run_monitor(args: List[str]) -> bool:
     _event_queue.set_scope(_active_scope)
     _module_tracker = ModuleTracker()
     _stop_event.clear()
+    _reset_render_failure_state()
 
     # Initialize Telegram relay (--relay flag or env var)
     _relay_enabled = "--relay" in args or is_relay_enabled_by_env()
@@ -347,10 +353,8 @@ def _stop_threads():
     logger.info("All monitoring threads stopped")
 
 
-def _render_event(event) -> None:
-    """Render a single monitoring event to the console, and relay to Telegram."""
-    branch_pid = _get_pid_for_branch(event.branch)
-
+def _print_event_to_console(event) -> None:
+    """Write one event to the terminal in the shape its type calls for."""
     if event.event_type == "command":
         caller = getattr(event, "caller", None)
         target = None
@@ -362,14 +366,53 @@ def _render_event(event) -> None:
     elif event.event_type == "hook":
         print_hook_event(event.branch, event.message, event.action)
     else:
-        print_event(event.event_type, event.branch, event.message, event.level, pid=branch_pid)
+        print_event(event.event_type, event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
 
+
+def _render_event(event) -> None:
+    """Send one event to both sinks: the Telegram relay and the console.
+
+    The relay goes first, deliberately. Both sinks used to hang off one code
+    path, so when the console raised on an unrenderable line it also cost the
+    Telegram feed — two failures from one cause. Relaying first means a line the
+    terminal cannot draw still reaches the chat.
+    """
     relay_event(event)
+    _print_event_to_console(event)
+
+
+def _reset_render_failure_state() -> None:
+    """Clear the render-failure counters (called at monitor start)."""
+    global _render_failures, _last_render_warning
+    _render_failures = 0
+    _last_render_warning = 0.0
+
+
+def _report_render_failures(exc: Exception, latest) -> None:
+    """Report events the console could not draw, in plain language.
+
+    Rate-limited on the same reasoning as the queue-full warning: this lands in
+    a log prax itself tails, so per-event logging would turn one broken renderer
+    into a self-feeding firehose.
+    """
+    logger.error(
+        f"[monitor] The live monitor could not draw an event on screen — {type(exc).__name__} "
+        f"(latest: {latest.event_type} from {latest.branch}); {_render_failures} events were "
+        f"skipped from the terminal view since the last report. Monitoring continues and the "
+        f"on-disk logs are complete. This one is a bug."
+    )
 
 
 def _display_worker():
-    """Display thread - pulls events from queue and displays them. No filtering."""
-    global _event_queue
+    """Display thread — pulls events from the queue and displays them. No filtering.
+
+    Every event is rendered inside a guard. This thread is the queue's ONLY
+    consumer: before the guard existed, one unrenderable line (a tailed path
+    containing '[/usr/bin]', 2026-08-11) killed the thread, and the queue then
+    sat full for the life of the process, warning every 30s with nobody left to
+    display anything. One bad event may cost its own line and nothing more.
+    """
+    global _event_queue, _render_failures, _last_render_warning
 
     while not _stop_event.is_set():
         if not _event_queue:
@@ -377,8 +420,23 @@ def _display_worker():
             continue
 
         event = _event_queue.dequeue(timeout=0.1)
-        if event:
+        if event is None:
+            continue
+
+        try:
             _render_event(event)
+        except Exception as exc:
+            # Every failure is recorded at debug (silent unless someone asks for
+            # a verbose run); the ERROR summary below is the operator-facing one
+            # and is rate-limited so a broken renderer cannot flood a log prax
+            # itself tails.
+            logger.debug("[monitor] Event render failed: %s (%s from %s)", exc, event.event_type, event.branch)
+            _render_failures += 1
+            now = time.monotonic()
+            if now - _last_render_warning >= _RENDER_WARNING_INTERVAL:
+                _report_render_failures(exc, event)
+                _render_failures = 0
+                _last_render_warning = now
 
 
 def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -699,6 +757,25 @@ def _print_status():
     console.print()
 
 
+def _standalone_run_args(tokens: List[str], passthrough: List[str]) -> List[str]:
+    """Turn `python -m ...monitor [run] [branches] [--flags]` into handle_command args.
+
+    A leading 'run' is the subcommand, not a branch name. Before launch-time
+    scoping existed this did not matter — a stray 'run' was parsed and then
+    ignored — so the systemd unit's `monitor run` worked by accident. Once the
+    scope became real, that same token asked for a branch called 'run' and the
+    service came up watching nothing (caught live 2026-08-12). Flags are passed
+    through rather than rejected, so `run --relay` works without the env var.
+    """
+    tokens = list(tokens)
+    saw_run = bool(tokens) and tokens[0] == "run"
+    if saw_run:
+        tokens.pop(0)
+    if not saw_run and not tokens and not passthrough:
+        return []
+    return ["run", *tokens, *passthrough]
+
+
 # MAIN BLOCK (Standalone execution support)
 
 if __name__ == "__main__":
@@ -711,9 +788,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PRAX Unified Monitoring - Mission Control", add_help=False)
     parser.add_argument("--help", action="store_true", help="Show help message")
     parser.add_argument("--introspect", action="store_true", help="Show module introspection")
-    parser.add_argument("branches", nargs="?", help="Branches to monitor (comma-separated)")
+    parser.add_argument("tokens", nargs="*", help="Optional 'run' subcommand and/or branches (comma-separated)")
 
-    args = parser.parse_args()
+    args, _passthrough = parser.parse_known_args()
 
     # Handle flags
     if args.help:
@@ -727,7 +804,7 @@ if __name__ == "__main__":
     # Prepare arguments for handle_command. The branch list is a 'run' argument —
     # passing it as the subcommand made standalone `monitor.py seedgo` print
     # "Unknown monitor subcommand" instead of monitoring seedgo.
-    _cmd_args = ["run", args.branches] if args.branches else []
+    _cmd_args = _standalone_run_args(args.tokens, _passthrough)
 
     # Execute monitor command
     handled = handle_command("monitor", _cmd_args)
