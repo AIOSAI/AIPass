@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_streamer.py
 # Description: Stream system log lines to Telegram via batched daemon thread
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-26
-# Modified: 2026-08-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -26,7 +26,7 @@ import json
 import threading
 from pathlib import Path
 from typing import Dict, List
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 # Logging
@@ -39,6 +39,10 @@ from aipass.skills.apps.handlers.json import json_handler
 
 BATCH_INTERVAL = 5.0
 TELEGRAM_MAX_LENGTH = 4000
+
+# Room reserved on each chunk of a split line for the " [i/n]" continuation
+# marker, so a chunk plus its marker still fits inside TELEGRAM_MAX_LENGTH.
+CHUNK_MARKER_ROOM = 16
 
 
 def _get_system_logs_dir():
@@ -84,6 +88,22 @@ _SELF_LOG_SOURCES = (
     "captured_botfather_",
     "captured_log_streamer",
 )
+
+
+def _split_oversized_line(line: str) -> List[str]:
+    """Split one log line that cannot fit in a single Telegram message.
+
+    Batching only ever splits BETWEEN lines, so a single line longer than the
+    cap slips through whole and Telegram answers 400 "message is too long".
+    A router or audit line carrying a serialised payload does exactly that.
+    """
+    if len(line) <= TELEGRAM_MAX_LENGTH:
+        return [line]
+
+    body = TELEGRAM_MAX_LENGTH - CHUNK_MARKER_ROOM
+    chunks = [line[i : i + body] for i in range(0, len(line), body)]
+    total = len(chunks)
+    return [f"{chunk} [{i}/{total}]" for i, chunk in enumerate(chunks, 1)]
 
 
 def _is_self_log_line(line: str) -> bool:
@@ -137,8 +157,11 @@ class LogStreamer:
         Self-exclusion runs first and is unconditional — it holds even at
         level_filter='all', so no INFO (or WARNING) added to this code path by
         anyone can re-enter the stream and feed the loop.
+
+        Blank lines are dropped by rule: they carry nothing to forward, and a
+        batch made only of them is a payload Telegram rejects outright.
         """
-        lines = [ln for ln in lines if not _is_self_log_line(ln)]
+        lines = [ln for ln in lines if ln.strip() and not _is_self_log_line(ln)]
         if self._level_filter == "all":
             return lines
         return [ln for ln in lines if any(m in ln for m in _LEVEL_MARKERS)]
@@ -208,7 +231,15 @@ class LogStreamer:
     # -----------------------------------------
 
     def _send_message(self, message: str) -> bool:
-        """Send a message to Telegram. Returns True on success."""
+        """Send a message to Telegram. Returns True on success.
+
+        An empty or whitespace-only payload is refused here rather than sent:
+        Telegram answers those with 400 ("message text is empty" /
+        "text must be non-empty"), and there is nothing to deliver anyway.
+        """
+        if not message.strip():
+            return False
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = json.dumps(
             {
@@ -223,6 +254,23 @@ class LogStreamer:
             with urlopen(req, timeout=10) as resp:
                 result = json.loads(resp.read())
                 return result.get("ok", False)
+        except HTTPError as e:
+            # Telegram names the offense in the response BODY ("message is too
+            # long", "message text is empty", ...). str(e) is only the status
+            # line, so discarding the body turns every rejection into the same
+            # unactionable "HTTP Error 400: Bad Request".
+            detail = ""
+            try:
+                detail = json.loads(e.read().decode("utf-8", "ignore")).get("description", "")
+            except (ValueError, OSError) as read_err:
+                logger.warning("Could not read Telegram rejection body: %s", read_err)
+            logger.warning(
+                "Telegram rejected send (HTTP %s): %s [payload %d chars]",
+                e.code,
+                detail or "no description in response body",
+                len(message),
+            )
+            return False
         except (URLError, Exception) as e:
             logger.warning("Telegram send failed: %s", e)
             return False
@@ -231,6 +279,10 @@ class LogStreamer:
         """Split lines into messages respecting TELEGRAM_MAX_LENGTH, send each."""
         if not lines:
             return
+
+        # Oversized lines are chunked BEFORE batching. Batching alone splits
+        # only between lines, so one line over the cap would still be sent whole.
+        lines = [chunk for line in lines for chunk in _split_oversized_line(line)]
 
         batch: List[str] = []
         batch_len = 0

@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(skills/telegram)** — log streamer 400s root-caused and killed (by
+@skills off a devpulse escalation dispatch; 80 lifetime failures since
+08-08). One log line over Telegram's ~4096 cap slipped the batch guard —
+`if batch_len + line_len > MAX and batch:` never flushes an EMPTY batch, so
+an oversized line went out whole; 5/5 correlation between >4000-char router
+lines and 400s within 2-6s, burst window = @seedgo's audit window. The API
+named the offense once asked: probed sendMessage with real credentials —
+"message is too long" confirmed; MarkdownV2 escaping empirically RULED OUT
+(4000 chars of brackets/underscores/stars accepted; no parse_mode on this
+path). log_streamer.py 1.2.0: oversized lines chunk with lossless [i/n]
+markers before batching, empty/whitespace payloads refused pre-network,
+blank lines dropped by stated rule, and the 400 response body is now
+LOGGED with payload size instead of discarded. Live-proven: the actual
+5,167-char offender now delivers as 2 messages; post-restart canary (5,300
+chars + blank + whitespace) produced zero 400s. 10 new tests, telegram
+suite 1083 green, audit 100%.
+
 **feat(seedgo)** — rich_markup, the 44th standard: unescaped `[tokens]` in
 console.print are silently eaten by Rich at render time — correct source,
 100% audits, mangled output (by @seedgo off @prax's dispatch; the rule
