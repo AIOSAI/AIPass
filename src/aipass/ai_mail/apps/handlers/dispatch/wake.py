@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-02
 # Modified: 2026-08-12
 # =============================================
@@ -467,11 +467,18 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
 # ─── Branch Resolution ──────────────────────────────────
 
 
-def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
+def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
 
-    Checks the AIPass registry first, then falls back to the caller's
-    project registry via AIPASS_CALLER_CWD for cross-project dispatch.
+    Checks the AIPass registry first, then falls back to the caller's project
+    registry via AIPASS_CALLER_CWD for cross-project dispatch.
+
+    Args:
+        branch_email: Target address, with or without the leading @.
+        admin: Only a VERIFIED admin caller (5 legs, checked by the caller —
+            never claimed here) may see step 3, the projects/* sweep. Left
+            False, this function behaves exactly as it did before phase 5:
+            no widening for anyone unverified.
     """
     email = f"@{branch_email.lstrip('@').lower()}"
 
@@ -501,6 +508,23 @@ def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
                     return branch_path, email
         except Exception as e:
             logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
+
+    # Step 3: Hosted projects (verified-admin only — the cross-project bridge).
+    # Runs last so a local branch always wins, and runs at all only when the
+    # caller already proved the grant. Unverified callers never reach here.
+    if admin:
+        try:
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+            project_branches = get_project_tree_branches(_REPO_ROOT)
+            branch_path_str = project_branches.get(email, "")
+            if branch_path_str:
+                branch_path = Path(branch_path_str)
+                if branch_path.exists():
+                    logger.info("[wake] %s resolved via projects/ sweep — admin bridge", email)
+                    return branch_path, email
+        except Exception as e:
+            logger.warning("[wake] resolve_branch projects sweep failed: %s", e)
 
     return None
 
@@ -633,7 +657,7 @@ def wake_branch(
         return status, False
 
     # Step 2: Resolve branch
-    result = resolve_branch(branch_email)
+    result = resolve_branch(branch_email, admin=admin)
     if result is None:
         status.fail("resolve", f"Branch not found: {branch_email}")
         return status, False

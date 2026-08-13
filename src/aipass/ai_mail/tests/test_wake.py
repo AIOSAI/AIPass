@@ -463,8 +463,14 @@ def test_resolve_branch_not_in_registry(repo_root):
     assert result is None
 
 
-def test_resolve_branch_no_registry(repo_root):
-    """Returns None when registry file does not exist."""
+def test_resolve_branch_no_registry(repo_root, monkeypatch):
+    """Returns None when registry file does not exist.
+
+    Clears AIPASS_CALLER_CWD explicitly: with it set, step 2's caller-project
+    walk finds the real repo registry and this test would assert the opposite
+    of its own name depending on who ran it.
+    """
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
     result = resolve_branch("@flow")
     assert result is None
 

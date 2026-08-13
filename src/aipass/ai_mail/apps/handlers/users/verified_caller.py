@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-12
 # Modified: 2026-08-12
 # =============================================
@@ -204,6 +204,34 @@ def verify_admin_caller(
     else:
         logger.info("[identity] admin grant not granted: %s", reason)
     return verified, reason
+
+
+def is_verified_admin_caller() -> bool:
+    """True only when the caller IS the admin holder and all five legs pass.
+
+    The single boolean the cross-project bridge consumes. Two gates, in order:
+
+    1. The verified-caller rail must say this process IS the holder. Every other
+       citizen short-circuits here and does zero file I/O — noise control, NOT
+       security (leg 1 inside the reference decides that, independently).
+    2. The 5-leg grant must verify. Any raise is a refusal: the bridge fails
+       closed, never open.
+
+    Deliberately NOT cached. A revoked grant has to take effect on the next
+    call; a per-process cache would keep a torn-up grant alive until restart,
+    which is failing open.
+
+    Returns:
+        True if this caller may cross project boundaries, False otherwise.
+    """
+    if resolve_verified_caller() != ADMIN_HOLDER:
+        return False
+    try:
+        verified, _reason = verify_admin_caller()
+    except Exception as exc:
+        logger.warning("[identity] admin verification failed unexpectedly: %s", exc)
+        return False
+    return bool(verified)
 
 
 if __name__ == "__main__":

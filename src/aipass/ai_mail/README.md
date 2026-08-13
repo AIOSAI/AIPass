@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1021 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1039 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -290,6 +290,29 @@ status, ok = wake_branch(target, sender=..., admin=is_admin)
 - `status.find_step("admin")` marks the lane; when both flags are set the
   scheduled lane wins and reports itself, so a 5am rotation is never logged as an
   admin dispatch.
+
+### Cross-Project Bridge (verified-admin only)
+
+Citizens under `projects/*` (e.g. @baud) sit behind two walls, and phase 5 of
+FPLAN-0401 puts one door in each — openable only with the grant:
+
+- **Resolution.** `resolve_branch(email, admin=False)` gains a third step: an
+  `admin`-only sweep of `projects/*/*_REGISTRY.json` under the repo root. It runs
+  **last**, so a local branch always wins and the sweep is a fallback, never a
+  preempt. Left at its default the function behaves exactly as it did before —
+  there is no resolution widening for anyone unverified.
+- **Delivery.** `_check_cross_project_boundary()` gains a verified-admin
+  exemption, and the branch map gains the same sweep. The exemption is checked
+  **last**, once a refusal is otherwise certain, so ordinary same-project mail
+  never reads the grant.
+- **One boolean, no cache.** Both halves consult
+  `verified_caller.is_verified_admin_caller()` — rail says holder, then all five
+  legs. Deliberately uncached: a per-process cache would keep a revoked grant
+  alive until restart, which is failing open. A raising verifier is a refusal.
+- **Dark today.** No key → no bridge, end to end: @baud does not resolve and the
+  boundary refuses with the same wording as before. Vera-Studio (a separate repo)
+  is out of scope — this reads the projects the repo already hosts, and is not a
+  multi-root discovery layer.
 
 ### Daemon
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.1.1
+# Version: 3.2.0
 # Created: 2025-12-02
-# Modified: 2026-08-11
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -233,6 +233,10 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
     sender (from AIPASS_CALLER_CWD) and recipient (from resolved branch path).
     Same-project and host-to-host mail passes through unchanged.
 
+    A VERIFIED admin caller is exempt — that is the cross-project bridge
+    (FPLAN-0401 phase 5). The exemption is checked LAST, only once a refusal is
+    otherwise certain, so ordinary same-project mail never touches the grant.
+
     Returns:
         (True, error_message) to refuse, (False, "") to allow.
     """
@@ -249,6 +253,18 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
         return False, ""
 
     if sender_root == recipient_root:
+        return False, ""
+
+    # Everything below this line is a refusal — so this is where, and the only
+    # place where, the grant is worth reading. Fails closed: no key, no bridge.
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    if verified_caller.is_verified_admin_caller():
+        logger.info(
+            "[delivery] cross-project boundary exempted for verified admin: %s -> %s",
+            sender_root,
+            recipient_root,
+        )
         return False, ""
 
     sender_name = sender_email or os.environ.get("AIPASS_CALLER_BRANCH", "unknown")
@@ -391,6 +407,16 @@ def deliver_email_to_branch(
         if caller_cwd:
             caller_branches = _load_caller_project_branches(caller_cwd)
             branches.update(caller_branches)
+
+    if to_branch not in branches:
+        # Hosted projects (verified-admin only — the cross-project bridge).
+        # Last resort, and gated: an unverified caller's map never widens.
+        from aipass.ai_mail.apps.handlers.users import verified_caller
+
+        if verified_caller.is_verified_admin_caller():
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+            branches.update(get_project_tree_branches(_REPO_ROOT))
 
     if to_branch not in branches:
         error_msg = f"Unknown branch email: {to_branch} (available: {len(branches)} branches)"

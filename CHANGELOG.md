@@ -11,6 +11,20 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(ai_mail)** — cross-project bridge, built dark (by @ai_mail, FPLAN-0401
+phase 5, DPLAN-0288). Verified-admin dispatches can now resolve and deliver
+into `projects/*` trees (@baud et al.): branch resolution gains an admin-only
+sweep of `projects/*/*_REGISTRY.json` that runs LAST (a local branch always
+wins), and `_check_cross_project_boundary` gains a verified-admin exemption
+placed after every existing early-return — same-project mail never touches
+the grant (tested), everyone else's refusal wording unchanged character for
+character. Privilege verdict deliberately NOT cached per process (a cache
+keeps a torn-up grant alive = failing open). Gates mutation-proven (`if
+True:` substitution sent 4 tests red incl. both lane-dark end-to-ends). 18
+tests red-first, suite 1039 green, audit 100%, no new bypasses. One
+pre-existing env-sensitive test fixed and flagged. Vera-Studio (separate
+repo) stays phase 2.
+
 **feat(ai_mail)** — admin dispatch lane, built dark (by @ai_mail, FPLAN-0401
 phase 4, DPLAN-0288). `wake_branch()` gains keyword-only `admin=False`: a
 VERIFIED devpulse dispatch to a manager-class target now routes headless
