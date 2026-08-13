@@ -11,6 +11,18 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(skills)** — telegram send path stops escalating network blips (by
+@skills, base_bot v1.6.1, FPLAN-0402, error 9353d1ae). `send_message`
+exhaustion is now classified with the same `_is_network_error()` the poll
+path already used: unreachable host logs WARNING ("sendMessage abandoned...
+Telegram unreachable") instead of a flat ERROR; API rejections and unknown
+faults still log ERROR. Retry budget, backoff timing, and the
+`messages_failed` health counter unchanged, so real outages stay visible.
+Bonus in the same function: HTTPError caught separately with the description
+pulled from the response body — a 400 now names its cause. 7 new tests plus
+a real-stack proof (broken `socket.getaddrinfo` through genuine urllib);
+telegram suite 1090 green, audit 100%, all 5 bots restarted.
+
 **fix(ai_mail)** — cross-project replies deliver back (by @ai_mail, FPLAN-0401
 phase 5b — the gap the live proof caught: the first-ever admin dispatch
 reached @baud, but @baud's reply was refused at the boundary; test suites

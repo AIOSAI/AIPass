@@ -246,9 +246,7 @@ class TestReplyReturnPath:
         """
         seat = repo / "projects" / "baud"
         (seat / ".ai_mail.local" / "inbox.json").write_text(
-            json.dumps(
-                {"messages": [{"id": "abc123", "from": "@devpulse", "reply_to": "@flow", "subject": "Admin"}]}
-            ),
+            json.dumps({"messages": [{"id": "abc123", "from": "@devpulse", "reply_to": "@flow", "subject": "Admin"}]}),
             encoding="utf-8",
         )
         refused, _ = self._boundary(

@@ -1,4 +1,5 @@
 {
+  "autoCompactEnabled": true,
   "autoCompactWindow": 350000,
   "enabledMcpjsonServers": [],
   "model": "fable",
