@@ -17,6 +17,7 @@ a signed privilege block on the existing birth certificate.
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import err_console, warning
+from aipass.devpulse.apps.handlers.json import json_handler
 
 from aipass.devpulse.apps.handlers.owner.admin_grant import (
     generate_key,
@@ -119,12 +120,17 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != "admin_grant":
         return False
 
-    if not args or args[0] in ("--help", "-h", "help"):
+    if not args:
+        print_introspection()
+        return True
+
+    if args[0] in ("--help", "-h", "help"):
         console.print(HELP_TEXT)
         return True
 
     verb, rest = args[0], args[1:]
     logger.info("[admin_grant] verb=%s", verb)
+    json_handler.log_operation("admin_grant", {"verb": verb})
 
     if verb == "status":
         _cmd_status()

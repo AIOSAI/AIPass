@@ -48,6 +48,7 @@ from datetime import date
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.devpulse.apps.handlers.json import json_handler
 
 # Branch root: .../src/aipass/devpulse (this file sits at apps/handlers/owner/)
 _BRANCH_ROOT = Path(__file__).resolve().parents[3]
@@ -112,6 +113,7 @@ def generate_key(key_path: Path = DEFAULT_KEY_PATH, force: bool = False) -> tupl
     key_path.write_text(secrets.token_hex(32) + "\n", encoding="utf-8")
     key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
     logger.info("[admin_grant] signing key generated at %s", key_path)
+    json_handler.log_operation("admin_grant", {"op": "keygen", "ok": True}, module_name="admin_grant")
     return True, f"signing key generated at {key_path} (0600)"
 
 
@@ -154,6 +156,7 @@ def mint_grant(
 
     cert_path.write_text(json.dumps(cert, indent=2) + "\n", encoding="utf-8")
     logger.info("[admin_grant] admin grant minted + signed on %s", cert_path)
+    json_handler.log_operation("admin_grant", {"op": "mint", "ok": True}, module_name="admin_grant")
     return True, f"admin grant minted + signed on {cert_path}"
 
 
