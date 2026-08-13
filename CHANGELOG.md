@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-08-12] — v2.7.16: admin grant lane live, cross-project bridge, BAUD product night, telegram blip fix
 
 **fix(skills)** — telegram send path stops escalating network blips (by
 @skills, base_bot v1.6.1, FPLAN-0402, error 9353d1ae). `send_message`
