@@ -892,6 +892,151 @@ class TestAutoCompactSnapshotBudget:
         assert "regular newest" in remaining_summaries
 
 
+class TestAutoCompactSameDaySnapshots:
+    """DPLAN-0290 item 3 — the snapshot lane must drain even when every snapshot is dated today.
+
+    Snapshots are machine-written several times in one day, so at cap the oldest
+    one is essentially always dated today. The safety valve's date rule refused
+    exactly those entries, so the detector re-fired on the same file forever
+    while the extractor archived nothing: the skip loop.
+    """
+
+    @staticmethod
+    def _setup(ext, mocks, tmp_path, sessions, cap=3, count=10):
+        data = {
+            "document_metadata": {"schema_version": "3.0.0", "status": {}},
+            "sessions": sessions,
+        }
+        file_path = tmp_path / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        mocks["config_loader"].section.return_value = {
+            "defaults": {},
+            "per_branch": {tmp_path.name.lower(): {"local": {"sessions": {"count": count, "auto_compact_cap": cap}}}},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+        return file_path, data
+
+    def test_same_day_snapshots_drain_at_cap(self, monkeypatch, tmp_path):
+        """3 snapshots, all written today, cap 3 -> the oldest one archives."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 25, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 22, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: a", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        assert result["success"] is True
+        assert result.get("skipped") is not True, "snapshot lane skipped — the file cannot drain"
+        assert {e["summary"] for e in result["extracted"]} == {"AUTO-COMPACT SNAPSHOT: a"}
+        assert "regular newest" in {e["summary"] for e in data["sessions"]}
+
+    def test_skip_loop_terminates(self, monkeypatch, tmp_path):
+        """Repeated runs must reach a steady state below the cap, not re-trigger forever."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [{"number": 40, "date": today, "summary": "regular newest", "status": "completed"}]
+        sessions += [
+            {"number": 30 - i, "date": today, "summary": f"snap-{i}", "status": "auto-compact"} for i in range(5)
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        # The write path is mocked here, so `data` (mutated in place by each run)
+        # is what the next run would read on a live system.
+        archived_total = 0
+        snapshots = [e for e in sessions if e.get("status") == "auto-compact"]
+        for _ in range(5):
+            result = ext.extract_items(file_path)
+            assert result["success"] is True
+            archived_total += len(result.get("extracted", []))
+            snapshots = [e for e in data["sessions"] if e.get("status") == "auto-compact"]
+            if len(snapshots) < 3:
+                break
+
+        assert archived_total > 0, "nothing ever archived — the skip loop is live"
+        assert len(snapshots) == 2, f"snapshot lane never drained below cap: {len(snapshots)} left"
+
+    def test_snapshot_numbered_above_head_is_still_refused(self, monkeypatch, tmp_path):
+        """Relaxing the date rule must not relax the ordering rule."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 28, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"number": 99, "date": today, "summary": "misplaced-high-number", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "misplaced-high-number" not in archived
+        assert "misplaced-high-number" in {e["summary"] for e in data["sessions"]}
+
+    def test_snapshot_without_a_number_keeps_the_date_guard(self, monkeypatch, tmp_path):
+        """When ordering cannot decide, the conservative date rule still applies."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 30, "date": today, "summary": "regular newest", "status": "completed"},
+            {"number": 29, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: c", "status": "auto-compact"},
+            {"number": 28, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: b", "status": "auto-compact"},
+            {"date": today, "summary": "numberless-fresh-snapshot", "status": "auto-compact"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "numberless-fresh-snapshot" not in archived
+        assert "numberless-fresh-snapshot" in {e["summary"] for e in data["sessions"]}
+
+    def test_regular_session_dated_today_is_still_refused(self, monkeypatch, tmp_path):
+        """DPLAN-0278 protection for the regular lane is untouched by the snapshot relaxation."""
+        ext, mocks = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+        sessions = [
+            {"number": 4, "date": "2026-01-04", "summary": "regular newest", "status": "completed"},
+            {"number": 3, "date": "2026-01-03", "summary": "regular second", "status": "completed"},
+            {"number": 9, "date": today, "summary": "AUTO-COMPACT SNAPSHOT: fresh", "status": "auto-compact"},
+            {"number": 1, "date": today, "summary": "fresh-write-at-tail", "status": "completed"},
+        ]
+        file_path, data = self._setup(ext, mocks, tmp_path, sessions, cap=3, count=2)
+
+        result = ext.extract_items(file_path)
+
+        archived = {e["summary"] for e in result.get("extracted", [])}
+        assert "fresh-write-at-tail" not in archived
+        assert "fresh-write-at-tail" in {e["summary"] for e in data["sessions"]}
+
+    def test_is_misplaced_entry_date_guard_matrix(self, monkeypatch):
+        """Pin the helper directly: what each guard mode decides."""
+        ext, _ = _import_extractor(monkeypatch)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        fresh_today = {"number": 5, "date": today}
+        above_head = {"number": 99, "date": "2020-01-01"}
+        numberless = {"date": today}
+
+        # Date guard on (regular lanes) — unchanged behaviour
+        assert ext._is_misplaced_entry(fresh_today, 10) is True
+        assert ext._is_misplaced_entry(above_head, 10) is True
+        assert ext._is_misplaced_entry(numberless, 10) is True
+
+        # Date guard off (snapshot lane) — ordering decides, date does not
+        assert ext._is_misplaced_entry(fresh_today, 10, date_guard=False) is False
+        assert ext._is_misplaced_entry(above_head, 10, date_guard=False) is True
+        # ...unless ordering cannot decide, then the date rule still protects
+        assert ext._is_misplaced_entry(numberless, 10, date_guard=False) is True
+
+
 class TestNewestFirstOrderingGuard:
     """Rollover must not trust stored order — the tail is only 'oldest' if the array is newest-first."""
 

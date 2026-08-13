@@ -6,7 +6,7 @@
 **Module:** `aipass.flow`
 **Version:** 2.2.2
 **Created:** 2025-11-15
-**Last Updated:** 2026-08-08
+**Last Updated:** 2026-08-13
 
 ---
 
@@ -111,7 +111,7 @@ flow/
 │   ├── audit_plans/             # APLAN templates (default)
 │   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 774 tests, 22 test files
+├── tests/                       # 787 tests, 22 test files
 └── .archive/                    # Archived legacy code
 ```
 
@@ -190,6 +190,32 @@ Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared ru
 
 ---
 
+## Dashboard Writes — quick_status Is Shared Ground
+
+`DASHBOARD.local.json` has one `quick_status` block and more than one writer.
+`@prax`'s dashboard refresh contributes `todo_count` (read straight from
+`.trinity/local.json`); Flow's plan push contributes `active_plans` and
+`commons_mentions`. Whole-block replacement means last-writer-wins silently
+deletes the other's fields — a plan close used to zero the todo count on every
+branch card until the next prax refresh.
+
+Flow's push therefore **merges** (`_calculate_quick_status` in
+`apps/handlers/dashboard/push_branch_dashboard.py`):
+
+| Keys | Behaviour |
+|------|-----------|
+| `active_plans`, `commons_mentions` | recomputed — Flow is the authority |
+| `new_mail`, `opened_mail` | preserved if already set, seeded only when absent (@prax reads `inbox.json` first-hand; we only see the possibly-stale `ai_mail` section) |
+| `action_required`, `summary` | recomputed over every counter present, foreign ones included |
+| anything else | carried through untouched |
+
+A foreign key named `*_count` holding an integer is additionally read as a
+counter, so it still reaches `action_required` and the summary line
+(`todo_count: 9` → `"9 todos"`). Every other foreign key is passed through
+without interpretation.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -208,9 +234,9 @@ Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared ru
 ## Quality
 
 - **Seedgo:** 100%
-- **Tests:** 774 passed, 88/88 public functions tested (100%)
+- **Tests:** 787 passed, 88/88 public functions tested (100%)
 - **Source files:** 40 tracked by seedgo
-- **Last audit:** 2026-08-08
+- **Last audit:** 2026-08-13
 - **Battle test:** 16/16 commands pass via drone CLI (2026-04-22)
 
 ### Known Issues
@@ -222,7 +248,7 @@ Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared ru
 
 ---
 
-*Last Updated: 2026-08-08*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

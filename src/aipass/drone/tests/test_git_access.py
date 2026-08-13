@@ -435,12 +435,16 @@ class TestExternalRepoVerbTranslation:
         monkeypatch.chdir(home)
         return home
 
-    @pytest.mark.parametrize("command", ["commit", "sync", "checkout", "unlock"])
+    @pytest.mark.parametrize("command", ["commit", "sync", "checkout", "unlock", "tag"])
     def test_portable_verbs_work(self, vera_home: Path, command: str) -> None:
-        """P1 scope: these translate to any git repo and must work for its manager."""
+        """Translated scope: these work in any git repo for its manager.
+
+        'tag' joined the list in DPLAN-0290 item 1 — the handler tags that repo's
+        own HEAD, so the gate no longer has a half-run to protect anyone from.
+        """
         assert verify_git_access(command) == "VERA"
 
-    @pytest.mark.parametrize("command", ["dev-pr", "pr", "merge", "tag", "fix"])
+    @pytest.mark.parametrize("command", ["dev-pr", "pr", "merge", "fix"])
     def test_aipass_flow_verbs_refuse_honestly(self, vera_home: Path, command: str) -> None:
         """These assume our dev→PR→main flow; refusing beats half-running in someone's repo."""
         with pytest.raises(PermissionError, match="not translated for external repos"):

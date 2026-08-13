@@ -292,7 +292,14 @@ def test_status_returns_dict(trigger_cls):
 
 
 def test_duplicate_handler_registration(trigger_cls):
-    """on() with the same handler twice registers it twice (both fire)."""
+    """on() with the same handler twice registers it ONCE — one fire, one call.
+
+    This test used to assert 2, pinning the double-registration defect as if it
+    were a feature. It is the reason the defect survived: any correct fix looked
+    like a regression. The invariant a bus owes its callers is that a handler
+    registered for an event runs once per fire, no matter how many times the
+    wiring pass ran.
+    """
     call_count = 0
 
     def counting_handler(**kwargs):
@@ -304,11 +311,16 @@ def test_duplicate_handler_registration(trigger_cls):
 
     trigger_cls.fire("dup")
 
-    assert call_count == 2
+    assert call_count == 1
+    assert len(trigger_cls._handlers["dup"]) == 1
 
 
-def test_off_duplicate_removes_one(trigger_cls):
-    """off() removes only one instance of a duplicate-registered handler."""
+def test_off_removes_a_handler_registered_twice(trigger_cls):
+    """One off() is enough, because one on() is all that ever landed.
+
+    Under the old append-blindly behaviour a caller had to call off() as many
+    times as the wiring pass had run, which nothing tracked.
+    """
     call_count = 0
 
     def counting_handler(**kwargs):
@@ -321,8 +333,45 @@ def test_off_duplicate_removes_one(trigger_cls):
 
     trigger_cls.fire("dup")
 
-    # One copy was removed, one remains
-    assert call_count == 1
+    assert call_count == 0
+
+
+def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
+    """The real-world path: setup_handlers() explicitly, then the lazy re-run.
+
+    setup_handlers() does not set _initialized, so the next fire() calls
+    _ensure_initialized() and wires everything a second time. Every handler in
+    that pass is a module-level function — the same object both times — so the
+    bus saw one event as two. Downstream that defeats medic gate 3, which needs
+    count >= 2 to dispatch: a single occurrence counted twice walks the gate.
+    """
+    calls = []
+
+    def handler_a(**kwargs):
+        calls.append("a")
+
+    def handler_b(**kwargs):
+        calls.append("b")
+
+    for _ in range(2):  # stands in for the two wiring passes
+        trigger_cls.on("error_detected", handler_a)
+        trigger_cls.on("error_detected", handler_b)
+
+    trigger_cls.fire("error_detected")
+
+    assert calls == ["a", "b"]
+
+
+def test_distinct_handlers_still_both_register(trigger_cls):
+    """The anti-over-correction guard: dedupe must not collapse DIFFERENT handlers."""
+    calls = []
+
+    trigger_cls.on("dup", lambda **kw: calls.append("first"))
+    trigger_cls.on("dup", lambda **kw: calls.append("second"))
+
+    trigger_cls.fire("dup")
+
+    assert calls == ["first", "second"]
 
 
 def test_deferred_queue_for_nested_fire(trigger_cls):

@@ -260,6 +260,19 @@
         "start_background"
       ],
       "reason": "Threaded broker entrypoint, exercised by tests/test_broker.py; production uses blocking start(); intentionally not called in shipped non-test code."
+    },
+    {
+      "file": "apps/plugins/devpulse_ops/auth.py",
+      "standard": "encapsulation",
+      "lines": [
+        27
+      ],
+      "reason": "Line 27 imports AIPASS_REGISTRY_NAME from handlers/git/repo_context.py — drone-internal, same branch, same subsystem (merge/sync/fix_plugin hold the identical rule for lock_handler). The alternative is a second literal of the registry filename: the auth gate and the tag handler must agree on which repo is AIPass's own, and two copies of that fact can drift. Line-scoped on purpose — auth.py is the git authority gate and any OTHER direct handler import in it must still be reported."
+    },
+    {
+      "file": "apps/handlers/git/repo_context.py",
+      "standard": "json_structure",
+      "reason": "Pure predicate — one constant and one boolean over the filesystem, no operation to log. A log_operation() call here would fire on every git command to record 'a question was asked'; the callers that ACT on the answer (tag_handler, auth) log their own outcomes. Wiring json_handler in to satisfy the checker would be scaffolding, not logging."
     }
   ],
   "notes": {

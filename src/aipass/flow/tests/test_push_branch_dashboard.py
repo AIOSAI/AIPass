@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_branch_dashboard.py
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-08-13
 # =============================================
 
 """Tests for push_branch_dashboard handler — branch dashboard push."""
@@ -118,6 +118,38 @@ class TestWriteDashboardSection:
         assert updated["quick_status"]["action_required"] is True
         assert updated["quick_status"]["new_mail"] == 3
         assert updated["quick_status"]["active_plans"] == 2
+
+    def test_preserves_foreign_quick_status_keys(self, tmp_path):
+        """A quick_status key written by another service survives our push."""
+        mod = _import_mod()
+        existing = {
+            "branch": "TEST",
+            "last_updated": "",
+            # @prax's schema: has todo_count, has no commons_mentions
+            "quick_status": {
+                "new_mail": 1,
+                "opened_mail": 0,
+                "active_plans": 0,
+                "todo_count": 9,
+                "action_required": True,
+                "summary": "1 new emails, 9 todos",
+            },
+            "sections": {
+                "ai_mail": {"managed_by": "ai_mail", "new": 1},
+            },
+        }
+        dashboard_path = tmp_path / "DASHBOARD.local.json"
+        dashboard_path.write_text(json.dumps(existing), encoding="utf-8")
+
+        section_data = {"managed_by": "flow", "active_count": 0}
+        result = mod._write_dashboard_section(tmp_path, "flow", section_data)
+
+        assert result is True
+        updated = json.loads(dashboard_path.read_text(encoding="utf-8"))
+        quick = updated["quick_status"]
+        assert quick["todo_count"] == 9, "foreign key was clobbered by the flow push"
+        assert "9 todos" in quick["summary"]
+        assert quick["new_mail"] == 1
 
     def test_returns_false_on_exception(self, tmp_path):
         """Returns False when an exception occurs during write."""
@@ -294,6 +326,131 @@ class TestCalculateQuickStatus:
         result = mod._calculate_quick_status(sections)
         assert result["new_mail"] == 7
         assert result["action_required"] is True
+
+
+# ═══════════════════════════════════════════════════════════
+# 3b. _calculate_quick_status — merge semantics (foreign keys)
+# ═══════════════════════════════════════════════════════════
+
+
+class TestCalculateQuickStatusMerge:
+    """quick_status has multiple writers — we update our keys, preserve theirs."""
+
+    def test_unknown_keys_survive_verbatim(self):
+        """Keys we know nothing about are carried through untouched."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+        existing = {"todo_count": 9, "custom_flag": "keep-me", "nested": {"a": 1}}
+
+        result = mod._calculate_quick_status(sections, existing)
+
+        assert result["todo_count"] == 9
+        assert result["custom_flag"] == "keep-me"
+        assert result["nested"] == {"a": 1}
+
+    def test_foreign_counter_keeps_action_required(self):
+        """A foreign *_count still pending means the branch still needs action."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, {"todo_count": 9})
+
+        assert result["action_required"] is True
+        assert result["summary"] == "9 todos"
+
+    def test_foreign_counter_at_zero_stays_all_clear(self):
+        """A zeroed foreign counter is preserved but raises no flag."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, {"todo_count": 0})
+
+        assert result["todo_count"] == 0
+        assert result["action_required"] is False
+        assert result["summary"] == "All clear"
+
+    def test_foreign_non_counter_is_preserved_but_not_interpreted(self):
+        """Only *_count keys are read as counters; other keys are data we pass on."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, {"last_refresh_ms": 1500})
+
+        assert result["last_refresh_ms"] == 1500
+        assert result["action_required"] is False
+        assert "1500" not in result["summary"]
+
+    def test_non_numeric_foreign_counter_does_not_raise(self):
+        """A *_count key holding junk is preserved, never compared numerically."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, {"todo_count": None, "err_count": "n/a"})
+
+        assert result["todo_count"] is None
+        assert result["err_count"] == "n/a"
+        assert result["action_required"] is False
+
+    def test_our_own_keys_win_over_stale_values(self):
+        """Keys we own are recomputed, never inherited from the previous write."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 1}, "flow": {"active_count": 2}, "commons_activity": {"mentions": 0}}
+        existing = {"active_plans": 99, "commons_mentions": 99, "summary": "stale"}
+
+        result = mod._calculate_quick_status(sections, existing)
+
+        assert result["active_plans"] == 2
+        assert result["commons_mentions"] == 0
+        assert result["summary"] == "1 new emails, 2 active plans"
+
+    def test_mail_counts_already_set_are_not_downgraded(self):
+        """@prax reads inbox.json first-hand; our stale section view must not overwrite it."""
+        mod = _import_mod()
+        # Section says nothing is open; the live inbox (via @prax) says one is.
+        sections = {"ai_mail": {"new": 0, "opened": 0}, "flow": {"active_count": 0}}
+        existing = {"new_mail": 0, "opened_mail": 1}
+
+        result = mod._calculate_quick_status(sections, existing)
+
+        assert result["opened_mail"] == 1
+        assert result["summary"] == "1 opened"
+
+    def test_mail_counts_seeded_when_absent(self):
+        """On a dashboard with no mail counts yet, we seed them from the ai_mail section."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 3, "opened": 2}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, {"todo_count": 1})
+
+        assert result["new_mail"] == 3
+        assert result["opened_mail"] == 2
+        assert result["summary"] == "3 new emails, 2 opened, 1 todos"
+
+    def test_summary_lists_our_parts_then_foreign(self):
+        """Foreign counters are appended after the parts we compute."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 1}, "flow": {"active_count": 2}, "commons_activity": {"mentions": 3}}
+
+        result = mod._calculate_quick_status(sections, {"todo_count": 4})
+
+        assert result["summary"] == "1 new emails, 2 active plans, 3 mentions, 4 todos"
+
+    def test_no_existing_block_behaves_as_before(self):
+        """Omitting the existing block keeps the original single-writer behaviour."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        assert mod._calculate_quick_status(sections) == mod._calculate_quick_status(sections, {})
+
+    def test_non_dict_existing_is_ignored(self):
+        """A corrupt (non-dict) quick_status block does not break the write."""
+        mod = _import_mod()
+        sections = {"ai_mail": {"new": 0}, "flow": {"active_count": 0}}
+
+        result = mod._calculate_quick_status(sections, "not-a-dict")
+
+        assert result["summary"] == "All clear"
+        assert result["action_required"] is False
 
 
 # ═══════════════════════════════════════════════════════════
@@ -701,6 +858,50 @@ class TestPushFlowToBranchDashboard:
         flow_section = updated["sections"]["flow"]
         assert flow_section["active_count"] == 1
         assert flow_section["active_plans"][0]["id"] == "FPLAN-0001"
+
+    def test_push_preserves_another_services_todo_count(self, tmp_path, mock_json_handler):
+        """End-to-end: closing a plan must not wipe @prax's todo_count off the card."""
+        mod = _import_mod()
+        dashboard_path = tmp_path / "DASHBOARD.local.json"
+        dashboard_path.write_text(
+            json.dumps(
+                {
+                    "sections": {"ai_mail": {"managed_by": "ai_mail", "new": 0}},
+                    "quick_status": {
+                        "new_mail": 0,
+                        "opened_mail": 0,
+                        "active_plans": 1,
+                        "todo_count": 10,
+                        "action_required": True,
+                        "summary": "1 active plans, 10 todos",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # Registry says the branch's last plan just closed — active drops to zero.
+        mock_registry = {
+            "plans": {
+                "FPLAN-0001": {
+                    "subject": "Closed plan",
+                    "status": "closed",
+                    "closed": datetime.now(timezone.utc).isoformat(),
+                    "file_path": str(tmp_path / "FPLAN-0001_closed.md"),
+                    "location": str(tmp_path),
+                },
+            },
+            "next_number": 2,
+        }
+        with patch.object(mod, "_load_registry", return_value=mock_registry):
+            result = mod.push_flow_to_branch_dashboard(tmp_path)
+
+        assert result is True
+        quick = json.loads(dashboard_path.read_text(encoding="utf-8"))["quick_status"]
+        assert quick["active_plans"] == 0, "our own key must be recomputed"
+        assert quick["todo_count"] == 10, "foreign key was clobbered by the flow push"
+        assert quick["action_required"] is True, "10 todos still need attention"
+        assert quick["summary"] == "10 todos"
 
     def test_returns_false_on_exception(self, tmp_path):
         """Returns False when an exception occurs in the main handler."""

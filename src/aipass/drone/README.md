@@ -74,7 +74,7 @@ drone @git sync --autostash      # Sync with autostash for dirty trees
 drone @git smart-sync            # Fetch + detect divergence + rebase
 drone @git unlock --force        # Force-release the PR lock
 drone @git system-pr "desc"      # DEPRECATED — returns error message
-drone @git tag v2.6.1            # Create + push annotated release tag
+drone @git tag v2.6.1            # Create + push annotated release tag (see Tag lanes)
 drone @git fix                   # Auto-fix stuck rebase / detached HEAD
 drone @git fix --dry-run         # Detect issues without fixing
 
@@ -195,7 +195,8 @@ drone/
 │   │       ├── close_pr_handler.py          # Close PR by number (gh pr close)
 │   │       ├── status_handler.py            # Scoped git status (subprocess)
 │   │       ├── sync_handler.py              # Safe main sync (--autostash support)
-│   │       └── tag_handler.py               # Release tagging (version + exists guards)
+│   │       ├── repo_context.py              # Which repo is underfoot — AIPass's own or external
+│   │       └── tag_handler.py               # Release tagging (two lanes: AIPass main, external HEAD)
 │   └── plugins/
 │       ├── devpulse_ops/          # Privileged git operations (auth-gated)
 │       │   ├── auth.py            # Passport-based identity gate (owner tier earned per-repo)
@@ -208,7 +209,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1002 tests across 25 test files
+└── tests/                         # 1019 tests across 25 test files
 ```
 
 ### Routing Flow
@@ -266,6 +267,24 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 
 - Auth is checked once at the top of `git_module.handle_command()` before any handler is called
 - Unauthorized commands return a clear "Access denied" message with the caller's tier
+
+### Tag lanes — AIPass vs an external repo
+
+`tag` is one verb with two release lanes, chosen by the repo the command will actually run in (`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it doesn't). The gate that used to refuse `tag` from a `projects/*` seat is gone: it now translates.
+
+| | AIPass repo | External project seat |
+|---|---|---|
+| What gets tagged | `origin/main` | that repo's current **HEAD**, any branch |
+| Version guard | `pyproject.toml` + `src/aipass/__init__.py` on origin/main must both match | **none** — manifests and cadence belong to the repo owner |
+| Name rule | `vX.Y.Z` | anything `git check-ref-format` accepts (`v0.1.0-rc1`, `2026.08.1`, …) |
+| Duplicate guard | refuses if the tag exists locally or on the remote | same, and the remote check's exit code is verified — an unreachable remote refuses instead of tagging blind |
+| Push | `git push origin <tag>` | same, to that repo's own origin |
+
+Both lanes create **annotated** tags. Names that git would read as a flag (empty, leading `-`) are refused before any argv is built.
+
+Why no version guard outside AIPass: an external repo has its own manifests (baud carries three) and its own release lane. Reading ours out of someone else's tree would be an invented rule, so version discipline stays with the repo owner (DPLAN-0290 item 1, Patrick's ruling).
+
+Both lanes are covered by `tests/test_tag_handler.py`, where `TestAipassSeatUnchanged` pins the AIPass lane argv-for-argv so translation elsewhere cannot move it. The external lane was additionally proven end to end against a throwaway repo with a real bare origin — real tag, real push, both duplicate halves — by a local acceptance script in `artifacts/` (that directory is git-ignored, so it is not in a clone).
 
 ### gh Passthrough Rendering
 
@@ -378,12 +397,12 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1002 tests across 25 test files, covering all layers:
+1019 tests across 25 test files, covering all layers:
 
 | Area | Files | Tests |
 |------|-------|-------|
 | Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py` | ~128 |
-| Git operations | `test_git_module.py`, `test_system_pr.py`, `test_devpulse_plugins.py`, `test_git_access.py`, `test_tag_handler.py` | ~187 |
+| Git operations | `test_git_module.py`, `test_system_pr.py`, `test_devpulse_plugins.py`, `test_git_access.py`, `test_tag_handler.py` | ~204 |
 | Handlers | `test_executor.py`, `test_registry_handler.py`, `test_discovery.py` | ~99 |
 | Infrastructure | `test_generic_adapter.py`, `test_module_registry.py`, `test_config.py` | ~66 |
 | Features | `test_commands.py`, `test_scan.py`, `test_json_handler.py`, `test_rm.py` | ~181 |
@@ -402,7 +421,7 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1002 pass, 5 skip | **Last Updated:** 2026-08-12
+**Seedgo:** 100% | **Tests:** 1019 pass, 5 skip | **Last Updated:** 2026-08-12
 
 ---
 [← Back to AIPass](../../../README.md)

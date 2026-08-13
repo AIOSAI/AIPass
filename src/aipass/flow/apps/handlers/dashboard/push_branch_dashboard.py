@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_branch_dashboard.py
 # Description: Push flow section to branch dashboards
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-01
-# Modified: 2026-03-01
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -61,6 +61,18 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 # Dashboard template path (package-relative)
 DASHBOARD_TEMPLATE_FILE = _PKG_ROOT / "devpulse" / "templates" / "DASHBOARD.template.json"
 
+# quick_status ownership. Flow is the authority for plan counts and the only
+# writer that emits commons_mentions, so it always recomputes those.
+OWNED_KEYS = frozenset({"active_plans", "commons_mentions"})
+
+# Mail counts mirror data Flow does not own — @prax sources them straight from
+# inbox.json, while all we can see is the (possibly stale) ai_mail section. We
+# seed them on a fresh dashboard but never overwrite a value already there.
+MIRROR_KEYS = frozenset({"new_mail", "opened_mail"})
+
+# Computed from every counter in the merged block, ours and foreign alike.
+DERIVED_KEYS = frozenset({"action_required", "summary"})
+
 
 # =============================================
 # DASHBOARD WRITE (local — no cross-branch imports)
@@ -73,7 +85,8 @@ def _write_dashboard_section(branch_path: Path, section_name: str, section_data:
 
     Self-contained dashboard write — equivalent to DevPulse write_section()
     but without cross-branch imports. Loads existing dashboard, updates
-    the named section, recalculates quick_status, and saves.
+    the named section, merge-updates quick_status (our keys recomputed,
+    other writers' keys preserved), and saves.
 
     Args:
         branch_path: Path to branch root directory
@@ -105,7 +118,7 @@ def _write_dashboard_section(branch_path: Path, section_name: str, section_data:
 
         section_data["last_updated"] = datetime.now().isoformat()
         dashboard["sections"][section_name] = section_data
-        dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"])
+        dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], dashboard.get("quick_status"))
         dashboard["last_updated"] = datetime.now().isoformat()
 
         dashboard_path.write_text(json.dumps(dashboard, indent=2))
@@ -151,47 +164,109 @@ def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
     }
 
 
-def _calculate_quick_status(sections: Dict[str, Any]) -> Dict[str, Any]:
+def _as_count(value: Any) -> int:
+    """Read a quick_status value as a count — anything non-integer reads as 0."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return value
+
+
+def _foreign_counters(existing: Dict[str, Any]) -> Dict[str, int]:
     """
-    Calculate quick_status from live section data.
+    Extract positive `*_count` counters written by other services.
+
+    quick_status has several writers with different schemas (@prax's refresh
+    contributes `todo_count`, for one). We cannot interpret arbitrary foreign
+    keys, but a key named `*_count` holding a real integer is unambiguously a
+    counter, so it can still feed action_required and the summary line.
+
+    Args:
+        existing: The quick_status block currently on disk
+
+    Returns:
+        Mapping of foreign counter key -> positive count
+    """
+    known = OWNED_KEYS | MIRROR_KEYS | DERIVED_KEYS
+    counters: Dict[str, int] = {}
+    for key, value in existing.items():
+        if key in known or not key.endswith("_count"):
+            continue
+        if _as_count(value) > 0:
+            counters[key] = value
+    return counters
+
+
+def _counter_label(key: str) -> str:
+    """Turn a foreign counter key into a summary label ('todo_count' -> 'todos')."""
+    label = key[: -len("_count")].replace("_", " ").strip()
+    return label if label.endswith("s") else f"{label}s"
+
+
+def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> Dict[str, Any]:
+    """
+    Recalculate the quick_status keys Flow owns, preserving every other key.
+
+    quick_status is shared ground: @prax's dashboard refresh writes it too,
+    with a different set of keys. Replacing the whole block means whichever
+    service wrote last silently deletes the other's fields — that is how a
+    plan close used to zero `todo_count` on a branch card. So we merge:
+
+      - OWNED_KEYS   recomputed from live section data (we are the authority)
+      - MIRROR_KEYS  preserved if already set, seeded only when absent
+      - DERIVED_KEYS recomputed over every counter present, foreign included
+      - anything else carried through untouched
 
     Args:
         sections: All dashboard sections dict
+        existing: The quick_status block currently on disk (ignored if not a dict)
 
     Returns:
-        Quick status dict
+        Quick status dict — our keys recomputed, other writers' keys preserved
     """
+    existing = existing if isinstance(existing, dict) else {}
+
     ai_mail = sections.get("ai_mail", {})
     flow = sections.get("flow", {})
     commons = sections.get("commons_activity", {})
 
-    new_mail = ai_mail.get("new", ai_mail.get("unread", 0))
-    opened_mail = ai_mail.get("opened", 0)
+    # Mirror keys: never downgrade a value another writer sourced first-hand.
+    new_mail = existing["new_mail"] if "new_mail" in existing else ai_mail.get("new", ai_mail.get("unread", 0))
+    opened_mail = existing["opened_mail"] if "opened_mail" in existing else ai_mail.get("opened", 0)
+
     active_plans = flow.get("active_count", 0)
     if isinstance(active_plans, list):
         active_plans = len(active_plans)
-    mentions = commons.get("mentions", 0)
+    active_plans = _as_count(active_plans)
+    mentions = _as_count(commons.get("mentions", 0))
 
-    action_required = new_mail > 0 or active_plans > 0 or mentions > 0
+    foreign = _foreign_counters(existing)
+
+    action_required = _as_count(new_mail) > 0 or active_plans > 0 or mentions > 0 or bool(foreign)
 
     parts = []
-    if new_mail > 0:
+    if _as_count(new_mail) > 0:
         parts.append(f"{new_mail} new emails")
-    if opened_mail > 0:
+    if _as_count(opened_mail) > 0:
         parts.append(f"{opened_mail} opened")
     if active_plans > 0:
         parts.append(f"{active_plans} active plans")
     if mentions > 0:
         parts.append(f"{mentions} mentions")
+    parts.extend(f"{count} {_counter_label(key)}" for key, count in foreign.items())
 
-    return {
-        "new_mail": new_mail,
-        "opened_mail": opened_mail,
-        "active_plans": active_plans,
-        "commons_mentions": mentions,
-        "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear",
-    }
+    # Foreign keys first (preserved verbatim), then the values we stand behind.
+    merged = dict(existing)
+    merged.update(
+        {
+            "new_mail": new_mail,
+            "opened_mail": opened_mail,
+            "active_plans": active_plans,
+            "commons_mentions": mentions,
+            "action_required": action_required,
+            "summary": ", ".join(parts) if parts else "All clear",
+        }
+    )
+    return merged
 
 
 # =============================================

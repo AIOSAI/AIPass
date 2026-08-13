@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.6.0
+# Version: 0.7.0
 # Created: 2025-11-16
-# Modified: 2026-08-07
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -171,20 +171,29 @@ def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
 # =============================================================================
 
 
-def _is_misplaced_entry(entry: Any, head_number: int | None) -> bool:
+def _is_misplaced_entry(entry: Any, head_number: int | None, date_guard: bool = True) -> bool:
     """
     An entry in the tail (about to be archived as "oldest") that is dated
     today or numbered above the array's head is not oldest history — it's a
     fresh write landed at the wrong end (post-compact convention loss).
+
+    `date_guard=False` drops the "dated today" half for lanes where entries are
+    machine-written many times a day, so today's date says nothing about whether
+    an entry is fresh (see the auto-compact lane in _extract_items_v2). Ordering
+    still decides, and when ordering CANNOT decide — no usable number on the
+    entry or the head — the date rule stays on, whatever the caller asked for.
     """
     if not isinstance(entry, dict):
         return False
-    if entry.get("date") == datetime.now().strftime("%Y-%m-%d"):
-        return True
+
     number = entry.get("number")
-    if isinstance(number, int) and isinstance(head_number, int) and number > head_number:
-        return True
-    return False
+    if isinstance(number, int) and isinstance(head_number, int):
+        if number > head_number:
+            return True
+        if not date_guard:
+            return False
+
+    return entry.get("date") == datetime.now().strftime("%Y-%m-%d")
 
 
 def _ensure_newest_first(entries: list, array_name: str, branch_key: str) -> tuple[list, bool]:
@@ -219,11 +228,19 @@ def _ensure_newest_first(entries: list, array_name: str, branch_key: str) -> tup
 
 
 def _extract_tail_excess(
-    entries: list, limit: int | None, head_number: int | None, array_name: str, branch_key: str
+    entries: list,
+    limit: int | None,
+    head_number: int | None,
+    array_name: str,
+    branch_key: str,
+    date_guard: bool = True,
 ) -> list:
     """
     Select the oldest entries beyond `limit` for archival, holding back any
     that look like misplaced fresh writes (safety valve).
+
+    `date_guard=False` is for lanes whose entries are written many times a day
+    — see _is_misplaced_entry.
 
     Returns the list of entries safe to archive; may be empty.
     """
@@ -232,12 +249,13 @@ def _extract_tail_excess(
     excess = max(len(entries) - limit, 1)
     candidate_tail = entries[-excess:]  # oldest from end
 
+    reason = "numbered above head" if not date_guard else "dated today or numbered above head"
     archivable = []
     for entry in candidate_tail:
-        if _is_misplaced_entry(entry, head_number):
+        if _is_misplaced_entry(entry, head_number, date_guard=date_guard):
             logger.warning(
                 f"[extractor] {branch_key}/{array_name}: refusing to archive misplaced entry "
-                f"(dated today or numbered above head #{head_number}) — treating as a fresh "
+                f"({reason} #{head_number}) — treating as a fresh "
                 f"write, not oldest history: {entry}"
             )
         else:
@@ -296,8 +314,17 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         auto_compact_cap = session_limits.get("auto_compact_cap")
         if auto_compact_cap is not None:
             auto_entries = [e for e in sessions if isinstance(e, dict) and e.get("status") == "auto-compact"]
+            # Snapshots are machine-written several times a day, so at cap the oldest
+            # one is nearly always dated today. Keeping the date rule here refused every
+            # candidate and the detector re-fired on the same file forever (DPLAN-0290
+            # item 3): the lane's order is what says which snapshot is oldest, not its date.
             archived_auto = _extract_tail_excess(
-                auto_entries, auto_compact_cap, head_number, "sessions(auto-compact)", branch_key
+                auto_entries,
+                auto_compact_cap,
+                head_number,
+                "sessions(auto-compact)",
+                branch_key,
+                date_guard=False,
             )
             if archived_auto:
                 archived_ids = {id(e) for e in archived_auto}

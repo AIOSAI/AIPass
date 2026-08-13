@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Trigger event bus for AIPass system-wide event handling
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-02-03
-# Modified: 2026-08-11
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -98,8 +98,21 @@ class Trigger:
 
     @classmethod
     def on(cls, event: str, handler: Callable):
-        """Register handler for event"""
-        cls._handlers.setdefault(event, []).append(handler)
+        """Register handler for event, at most once.
+
+        Registration is idempotent BY DESIGN, not as a convenience. Two wiring
+        passes over the same handler set are routine here — setup_handlers() can
+        be called explicitly and does not set _initialized, so the next fire()
+        runs _ensure_initialized() and wires everything again. Appending blindly
+        made the bus deliver one event twice, and downstream that defeats medic
+        gate 3: the gate needs count >= 2 before it dispatches, so a single
+        occurrence counted twice walks straight through it and mails a branch
+        about a one-off. Registering the same callable twice for one event has
+        no legitimate meaning — an event fires a handler once.
+        """
+        handlers = cls._handlers.setdefault(event, [])
+        if handler not in handlers:
+            handlers.append(handler)
 
     @classmethod
     def off(cls, event: str, handler: Callable):

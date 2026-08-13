@@ -11,6 +11,49 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(drone)** — the tag verb learns external repos (by @drone, FPLAN-0403,
+DPLAN-0290 night shift). Two lanes chosen by the repo the command runs in:
+external seats (projects/*) tag their own repo's current HEAD and push to
+their own origin — names validated by `git check-ref-format`, duplicate guard
+kept both sides, and a new `ls-remote` exit-code guard so an unreachable
+remote can't read as "no such tag" and stamp over a live release. The AIPass
+lane is untouched and argv-pinned by regression test. New
+`handlers/git/repo_context.py` owns "is this AIPass's repo". 17 tests
+red-first, 1019 green, live-proven from the real baud seat.
+
+**feat(trigger)** — reload sentinel: the watcher notices its own code change
+(by @trigger, FPLAN-0404, DPLAN-0290). Every 30s the service compares handler
+and module mtimes against its startup snapshot; on change it exits 75 and
+systemd restarts it onto the new code. Settle guard (15s) refuses mid-save
+restarts; an unsupervised process logs loudly instead of exiting (a stale
+watcher beats no watcher). Live-fired three times the same night unprompted.
+Also: `Trigger.on()` is now idempotent — double-registration had been pinned
+as a feature by two tests asserting `call_count == 2`, delivering every event
+twice and walking medic gate 3 on single occurrences. 957 green, audit 100%.
+
+**fix(memory)** — auto-compact snapshots drain past the date valve (by
+@memory, DPLAN-0283/0290). The v2 extractor's snapshot rule existed; the
+skip-loop was DPLAN-0278's safety valve refusing any tail entry "dated
+today" — and snapshots are machine-written same-day by nature, so every
+candidate was refused forever. New `date_guard` param: the auto-compact lane
+trusts ordering over dates; the conservative rule stays everywhere it still
+discriminates (above-head and numberless entries refused in both lanes).
+Skip loop proven to terminate on a sandbox copy; 6 tests (3 red-first,
+3 protection), 1063 green. No live rollover run — the rule is dark until one.
+
+**fix(flow, prax)** — quick_status stops clobbering itself (by @flow
+FPLAN-0405 + @prax off @flow's dispatch, DPLAN-0290; the bug behind
+Patrick's "zero todos" BAUD card). Two writers replaced the whole
+`quick_status` block with different schemas — every plan close wiped
+`todo_count` off the cards, every prax refresh wiped `commons_mentions`, and
+flow's push also flipped mail counts from a stale mirror. Flow now merges by
+ownership class (OWNED recomputed / MIRROR preserved / DERIVED recomputed
+over all counters including foreign / foreign verbatim); prax fixed the
+mirror in BOTH copies of its calculator — the second one, on the live
+refresh path, was the one outside code-reading's reach. Live-proven from
+both directions: `todo_count` and `commons_mentions` now coexist through
+either writer. 787 + 1240 green, both audits 100%.
+
 **fix(devpulse)** — watchdog resolves projects/* citizens (todo #132,
 DPLAN-0290 night shift item 0). `watchdog agent @baud` reported
 agent-not-found minutes after the admin lane's first dispatch reached that

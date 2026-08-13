@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -24,6 +24,7 @@ logger = get_direct_logger()
 
 # Same-package imports allowed
 from .operations import create_fresh_dashboard, save_dashboard  # noqa: E402
+from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status  # noqa: E402
 
 # Cross-handler imports for central reader
 from ..central.reader import read_all_centrals  # noqa: E402
@@ -153,43 +154,13 @@ def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     return {"managed_by": "memory", "vectors_stored": local_vectors, "notes": {}, "last_updated": mb_last_updated}
 
 
-def _read_todo_count(branch_path: Path) -> int:
-    """Read todos[] length from .trinity/local.json."""
-    local_path = branch_path / ".trinity" / "local.json"
-    if not local_path.exists():
-        return 0
-    try:
-        data = json.loads(local_path.read_text())
-        return len(data.get("todos", []))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read todos from %s: %s", local_path, exc)
-        return 0
-
-
-def _read_mail_counts(branch_path: Path) -> tuple:
-    """Read new/opened mail counts from .ai_mail.local/inbox.json."""
-    inbox_path = branch_path / ".ai_mail.local" / "inbox.json"
-    if not inbox_path.exists():
-        return (0, 0)
-    try:
-        data = json.loads(inbox_path.read_text())
-        new_mail = 0
-        opened_mail = 0
-        for msg in data.get("messages", []):
-            status = msg.get("status", "")
-            if status == "new" or (not status and not msg.get("read", False)):
-                new_mail += 1
-            elif status == "opened":
-                opened_mail += 1
-        return (new_mail, opened_mail)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read inbox from %s: %s", inbox_path, exc)
-        return (0, 0)
-
-
 def _calculate_quick_status(sections: Dict, branch_path: Path) -> Dict:
     """
     Calculate quick_status from branch data sources.
+
+    Thin delegate to the single implementation in status.py. This was a full
+    copy until 2026-08-13; the copy never grew status.py's list-shape guard,
+    which is how one bug survived in two places (@flow, DPLAN-0290 item 4).
 
     Args:
         sections: All dashboard sections dict
@@ -198,32 +169,7 @@ def _calculate_quick_status(sections: Dict, branch_path: Path) -> Dict:
     Returns:
         Quick status dict with counts, action flag, and summary
     """
-    flow = sections.get("flow", {})
-
-    new_mail, opened_mail = _read_mail_counts(branch_path)
-    active_plans = flow.get("active_plans", 0)
-    todo_count = _read_todo_count(branch_path)
-
-    action_required = new_mail > 0 or active_plans > 0
-
-    parts = []
-    if new_mail > 0:
-        parts.append(f"{new_mail} new emails")
-    if opened_mail > 0:
-        parts.append(f"{opened_mail} opened")
-    if active_plans > 0:
-        parts.append(f"{active_plans} active plans")
-    if todo_count > 0:
-        parts.append(f"{todo_count} todos")
-
-    return {
-        "new_mail": new_mail,
-        "opened_mail": opened_mail,
-        "active_plans": active_plans,
-        "todo_count": todo_count,
-        "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear",
-    }
+    return calculate_quick_status(sections, branch_path)
 
 
 def _prune_deprecated_sections(dashboard: Dict) -> None:
@@ -297,8 +243,13 @@ def refresh_all_dashboards() -> Dict:
             _preserve_write_through_sections(dashboard, branch_path, branch_name)
             _prune_deprecated_sections(dashboard)
 
-            # Calculate quick status (ai_mail section still present for counts)
-            dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], branch_path)
+            # Calculate quick status (ai_mail section still present for counts).
+            # Merged over what is already on disk: the dashboard was rebuilt from
+            # the template, so other services' keys live only in the old file.
+            dashboard["quick_status"] = merge_quick_status(
+                read_existing_quick_status(branch_path),
+                _calculate_quick_status(dashboard["sections"], branch_path),
+            )
             dashboard["sections"].pop("ai_mail", None)
 
             # Save
@@ -363,7 +314,10 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
         _preserve_write_through_sections(dashboard, branch_path, branch_name)
         _prune_deprecated_sections(dashboard)
 
-        dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], branch_path)
+        dashboard["quick_status"] = merge_quick_status(
+            read_existing_quick_status(branch_path),
+            _calculate_quick_status(dashboard["sections"], branch_path),
+        )
         dashboard["sections"].pop("ai_mail", None)
 
         save_dashboard(branch_path, dashboard)

@@ -82,7 +82,7 @@ memory/
 │       ├── vector/              # embedder.py, embed_subprocess.py
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1046 tests
+├── tests/                       # 1063 tests
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -102,6 +102,14 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
 ```
 
 Rollover writes safety copies (`rollover_backup_*.json`) into `<branch>/.backup/` — a shared runtime namespace (see `@backup`'s README for all writers).
+
+### Safety valve and the two session lanes
+
+`sessions` holds two lanes with separate budgets: regular entries against `count`, and AUTO-COMPACT SNAPSHOT entries (`status == "auto-compact"`) against `auto_compact_cap`. Snapshots never push regular sessions out early, and vice versa.
+
+Before archiving a tail entry as "oldest", `_is_misplaced_entry()` holds back anything that looks like a fresh write landed at the wrong end — numbered above the array head, or dated today (DPLAN-0278).
+
+The **date** half is off for the snapshot lane (`date_guard=False`). Snapshots are machine-written several times a day, so at cap the oldest one is nearly always dated today: the valve refused every candidate, the lane could never drain, and the detector re-fired on the same file forever — a skip loop. Ordering says which snapshot is oldest there, not the date. Numbering still guards both lanes, and when an entry carries no usable `number` the date rule stays on regardless of the caller (DPLAN-0290 item 3).
 
 ### Newest-first guardrail (normalize)
 
@@ -172,7 +180,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 1057 passed, 0 failures, 0 skips
+- **Tests:** 1063 passed, 0 failures, 0 skips
 - **Seedgo:** 100%
 
 ---
@@ -185,7 +193,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ---
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

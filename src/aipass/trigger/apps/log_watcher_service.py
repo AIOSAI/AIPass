@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -23,6 +23,7 @@ import signal
 import sys
 import threading
 
+import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.modules.branch_log_events import (
     start as start_branch_watcher,
@@ -84,12 +85,26 @@ def main() -> None:
         started.append("system")
     print(f"[trigger-log-watcher] Running ({', '.join(started)} watchers active)")
 
+    # Watch our OWN handler code for changes. This process holds those modules
+    # in memory for its whole life, so a fix shipped to disk does nothing until
+    # it restarts — a gap that twice left this branch reporting a fix live while
+    # the old code was still the one running. The sentinel sets the same
+    # stop_event as a signal would, so the wait below is the only exit path.
+    reload_requested = reload_sentinel.start(stop_event)
+
     # Block until shutdown signal
     stop_event.wait()
 
     # Graceful shutdown
     stop_branch_watcher()
     stop_system_watcher()
+
+    if reload_requested():
+        # NOT a clean exit on purpose: the unit ships Restart=on-failure, which
+        # would read 0 as "job done" and leave the watcher down.
+        print(f"[trigger-log-watcher] Handler code changed — exiting {reload_sentinel.RELOAD_EXIT_CODE} to reload")
+        sys.exit(reload_sentinel.RELOAD_EXIT_CODE)
+
     print("[trigger-log-watcher] Stopped")
 
 

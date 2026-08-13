@@ -4,8 +4,8 @@
 
 **Purpose:** System-wide logging, real-time monitoring, and dashboard infrastructure for AIPass.
 **Module:** `aipass.prax`
-**Version:** 2.3.0
-**Last Updated:** 2026-08-12
+**Version:** 2.4.0
+**Last Updated:** 2026-08-13
 
 ---
 
@@ -190,6 +190,15 @@ from aipass.prax.apps.modules.dashboard import write_section
 write_section(branch_path, "ai_mail", {"new": 3, "total": 5})
 ```
 
+**quick_status has many writers.** prax refresh, `write_section()` and other
+branches (@flow's push) all touch the same block. Every prax write path now
+*merges*: it recomputes the keys prax owns (`new_mail`, `opened_mail`,
+`active_plans`, `todo_count`, `action_required`, `summary`) and carries every
+other key through untouched. The invariant, agreed with @flow: **no writer
+deletes a key it did not write.** The calculation itself lives in exactly one
+place (`handlers/dashboard/status.py::calculate_quick_status`) — `refresh.py`
+and `operations.py` delegate to it.
+
 ## Architecture
 
 ```
@@ -218,7 +227,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1222 tests across 30 files
+└── tests/                             # 1241 tests across 31 files
 ```
 
 ### Design Pattern
@@ -247,7 +256,7 @@ drone @prax monitor run
 
 ## Tests
 
-1222 tests across 30 files, covering all major components:
+1241 tests across 31 files, covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -277,6 +286,7 @@ drone @prax monitor run
 | test_jsonl_writer.py | 9 | JSONL append writer |
 | test_branch_scope.py | 37 | Branch scope parsing, label matching, attribution |
 | test_display_resilience.py | 25 | Markup escaping, display-worker survival, standalone args |
+| test_dashboard_merge.py | 19 | quick_status merge, foreign-key preservation, plan-count shapes |
 | test_help_markup.py | 10 | Rendered console output (real Rich console) |
 | test_status.py | 8 | Status commands |
 | test_sweep.py | 6 | Log sweep |
@@ -307,7 +317,7 @@ drone @prax monitor run
 
 ---
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -3,40 +3,40 @@
     "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
     "updated": "2026-08-09",
-    "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
-    "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
-    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead."
+    "description": "Standards bypass configuration for @trigger \u2014 rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
+    "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing \u2014 do not hand-adjust line numbers.",
+    "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one \u2014 error_handling on events/error_detected.py \u2014 was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead."
   },
   "bypass": [
     {
       "file": "apps/config.py",
       "standard": "silent_catch",
       "pattern": "guarded prax import / sidecar write failure / tmp cleanup",
-      "reason": "Three sites, all structurally unloggable. L35: guarded `from aipass.prax import append_jsonl` — config.py is imported by everything and cannot hard-depend on prax (circular). L71: append_trail's own write failure — you cannot log a failure to log, so it is returned as False and COUNTED on TrailLogger.dropped, surfaced by callers (escalation get_stats). L170: atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
+      "reason": "Three sites, all structurally unloggable. L35: guarded `from aipass.prax import append_jsonl` \u2014 config.py is imported by everything and cannot hard-depend on prax (circular). L71: append_trail's own write failure \u2014 you cannot log a failure to log, so it is returned as False and COUNTED on TrailLogger.dropped, surfaced by callers (escalation get_stats). L170: atomic_write_json unlinking its temp file on an already-failing write; the original exception is re-raised on the next line."
     },
     {
       "file": "apps/modules/core.py",
       "standard": "silent_catch",
       "pattern": "ImportError console fallback / _coerce_value cascade",
-      "reason": "L35: ImportError fallback that constructs a rich Console instead — the alternative IS the handling. L185/L189: _coerce_value() tries int, then float, then returns the string. try/except is the control flow for type coercion here, not error suppression."
+      "reason": "L35: ImportError fallback that constructs a rich Console instead \u2014 the alternative IS the handling. L185/L189: _coerce_value() tries int, then float, then returns the string. try/except is the control flow for type coercion here, not error suppression."
     },
     {
       "file": "apps/handlers/log_watcher.py",
       "standard": "silent_catch",
       "pattern": "timestamp format probe loop",
-      "reason": "L314: `except ValueError: continue` inside a loop that tries each known timestamp format. Failure of one format is not an error — exhausting ALL of them is, and that case logs a warning at L318 after the loop."
+      "reason": "L314: `except ValueError: continue` inside a loop that tries each known timestamp format. Failure of one format is not an error \u2014 exhausting ALL of them is, and that case logs a warning at L318 after the loop."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "silent_catch",
       "pattern": "guarded error_registry import",
-      "reason": "L91: `except ImportError` on the error_registry import. The handler is not silent about it — the except body sets _REGISTRY_DISPATCH_AVAILABLE = False and defines six named fallback functions so dispatch degrades to always-allow. FILE-WIDE, not line-scoped: silent_catch_check never passes a line to is_bypassed(), so a `lines` key here would match nothing. Cost accepted: a NEW silent catch anywhere in this file is also suppressed."
+      "reason": "L91: `except ImportError` on the error_registry import. The handler is not silent about it \u2014 the except body sets _REGISTRY_DISPATCH_AVAILABLE = False and defines six named fallback functions so dispatch degrades to always-allow. FILE-WIDE, not line-scoped: silent_catch_check never passes a line to is_bypassed(), so a `lines` key here would match nothing. Cost accepted: a NEW silent catch anywhere in this file is also suppressed."
     },
     {
       "file": "apps/handlers/events/startup.py",
       "standard": "silent_catch",
       "pattern": "timestamp format probe loop",
-      "reason": "L185: `except ValueError: continue` in _parse_timestamp's format loop — same probe idiom as log_watcher.py. When every format fails the function returns None and the caller decides. FILE-WIDE because silent_catch_check passes no line."
+      "reason": "L185: `except ValueError: continue` in _parse_timestamp's format loop \u2014 same probe idiom as log_watcher.py. When every format fails the function returns None and the caller decides. FILE-WIDE because silent_catch_check passes no line."
     },
     {
       "file": "apps/config.py",
@@ -48,7 +48,7 @@
       "file": "apps/modules/core.py",
       "standard": "error_handling",
       "pattern": "_coerce_value int-then-float probe",
-      "reason": "L185-186: `except ValueError: pass` in _coerce_value, falling through from the int() attempt to the float() attempt. Nothing is swallowed — the last branch returns the raw string. Re-derived 2026-08-09: the old reason here described a checker misattribution at 'line 73' that no longer occurs. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
+      "reason": "L185-186: `except ValueError: pass` in _coerce_value, falling through from the int() attempt to the float() attempt. Nothing is swallowed \u2014 the last branch returns the raw string. Re-derived 2026-08-09: the old reason here described a checker misattribution at 'line 73' that no longer occurs. FILE-WIDE: error_handling_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/error_reporter.py",
@@ -60,19 +60,19 @@
       "file": "apps/handlers/watchers/log_watcher.py",
       "standard": "handlers",
       "pattern": "module_name auto-detection + bus import",
-      "reason": "Two findings, one rule (the checker gives neither a line). module_name is supplied by the watcher's own parse of the log line, not inspect.stack() — the calling frame is watchdog's thread, which knows nothing about which branch wrote the line. L353 imports the trigger bus because a watchdog callback's whole job is to bridge the filesystem to the event bus."
+      "reason": "Two findings, one rule (the checker gives neither a line). module_name is supplied by the watcher's own parse of the log line, not inspect.stack() \u2014 the calling frame is watchdog's thread, which knows nothing about which branch wrote the line. L353 imports the trigger bus because a watchdog callback's whole job is to bridge the filesystem to the event bus."
     },
     {
       "file": "apps/handlers/events/runaway_handler.py",
       "standard": "handlers",
       "pattern": "cross-branch wake_branch import",
-      "reason": "L344: inline `from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch` after email delivery. ai_mail exposes no modules/ entry point for wake — dispatch.wake IS the public surface. Cross-branch, so seedgo's same-branch handler-import allowance does not cover it. FILE-WIDE: handlers_check passes no line."
+      "reason": "L344: inline `from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch` after email delivery. ai_mail exposes no modules/ entry point for wake \u2014 dispatch.wake IS the public surface. Cross-branch, so seedgo's same-branch handler-import allowance does not cover it. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "handlers",
       "pattern": "cross-branch wake_branch import",
-      "reason": "L598: the same inline wake_branch import as runaway_handler.py, for the same reason — the medic dispatch has to wake the branch it just mailed. FILE-WIDE: handlers_check passes no line."
+      "reason": "L598: the same inline wake_branch import as runaway_handler.py, for the same reason \u2014 the medic dispatch has to wake the branch it just mailed. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/events/warning_logged.py",
@@ -84,13 +84,13 @@
       "file": "apps/handlers/events/registry.py",
       "standard": "handlers",
       "pattern": "handler imports modules (orchestration)",
-      "reason": "L23 imports the trigger bus and L33 imports ai_mail's email_send. This file exists to wire handlers to the bus and inject the send callback — importing both is its entire purpose. FILE-WIDE: handlers_check passes no line."
+      "reason": "L23 imports the trigger bus and L33 imports ai_mail's email_send. This file exists to wire handlers to the bus and inject the send callback \u2014 importing both is its entire purpose. FILE-WIDE: handlers_check passes no line."
     },
     {
       "file": "apps/handlers/error_reporter.py",
       "standard": "architecture",
       "pattern": "handler importing from parent module",
-      "reason": "L148 imports apps/modules/core to fire error_detected — the same import architecture_check and handlers_check both flag. A reporter that cannot publish reports nothing. FILE-WIDE: architecture_check passes no line to is_bypassed()."
+      "reason": "L148 imports apps/modules/core to fire error_detected \u2014 the same import architecture_check and handlers_check both flag. A reporter that cannot publish reports nothing. FILE-WIDE: architecture_check passes no line to is_bypassed()."
     },
     {
       "file": "apps/handlers/watchers/log_watcher.py",
@@ -107,9 +107,11 @@
     {
       "file": "apps/handlers/events/runaway_handler.py",
       "standard": "encapsulation",
-      "lines": [344],
+      "lines": [
+        344
+      ],
       "pattern": "from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch",
-      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes — re-derive rather than nudge it."
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). ai_mail publishes no modules/ entry point for waking a branch, so dispatch.wake is the only door. Line number drifts if anything above L344 changes \u2014 re-derive rather than nudge it."
     },
     {
       "file": "apps/log_watcher_service.py",
@@ -120,54 +122,76 @@
     {
       "file": "apps/log_watcher_service.py",
       "standard": "debug_print",
-      "lines": [66, 77, 85, 93],
+      "lines": [
+        67,
+        78,
+        86,
+        105,
+        108
+      ],
       "pattern": "journald status lines",
-      "reason": "LINE-SCOPED AND HONOURED: debug_print_check filters per line. These four are the daemon's lifecycle lines (signal received, both watchers failed, running, stopped) going to journald. The fifth print, in the __main__ block, the checker already exempts."
+      "reason": "LINE-SCOPED AND HONOURED: debug_print_check filters per line. These are the daemon's lifecycle lines going to journald (signal received, both watchers failed, running, reloading on changed handler code, stopped). The print in the __main__ block the checker already exempts. Re-derived 2026-08-12 after the reload-sentinel wiring shifted every number and added the reload line - nudged numbers are how a line-scoped bypass rots."
     },
     {
       "file": "apps/log_watcher_service.py",
       "standard": "help_text",
-      "lines": [17],
+      "lines": [
+        17
+      ],
       "pattern": "python -m in module docstring",
-      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form."
+      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie \u2014 drone does not start this unit; the line below it gives the systemctl form."
     },
     {
       "file": "apps/config.py",
       "standard": "imports",
       "pattern": "no `from aipass.prax import logger`",
-      "reason": "config.py cannot import the prax logger — every trigger module imports config, and prax imports back. It uses TrailLogger instead: a real logger object writing JSONL to a sidecar, defined in this file so the one unloggable except block lives here once. FILE-WIDE: imports_check always passes line=None."
+      "reason": "config.py cannot import the prax logger \u2014 every trigger module imports config, and prax imports back. It uses TrailLogger instead: a real logger object writing JSONL to a sidecar, defined in this file so the one unloggable except block lives here once. FILE-WIDE: imports_check always passes line=None."
     },
     {
       "file": "apps/handlers/events/registry.py",
       "standard": "trigger",
       "category": "initialization",
       "pattern": "setup_handlers",
-      "reason": "setup_handlers() is wiring, not an event handler — it handles no event, it calls trigger.on() to register the handle_{event} callbacks. Naming it handle_something would misdescribe it."
+      "reason": "setup_handlers() is wiring, not an event handler \u2014 it handles no event, it calls trigger.on() to register the handle_{event} callbacks. Naming it handle_something would misdescribe it."
     },
     {
       "file": "apps/handlers/events/pr_status_sync.py",
       "standard": "unused_function",
-      "functions": ["handle_pr_created", "handle_pr_merged"],
-      "reason": "NAME-SCOPED AND HONOURED: unused_function_check passes the function name to is_bypassed(). TDPLAN-0007 decommissioned status-sync — registry.py's trigger.on() calls are commented out, so both handlers are unreferenced by design while the module and its tests are kept for revival. Candidate for .archive/ if revival is off the table."
+      "functions": [
+        "handle_pr_created",
+        "handle_pr_merged"
+      ],
+      "reason": "NAME-SCOPED AND HONOURED: unused_function_check passes the function name to is_bypassed(). TDPLAN-0007 decommissioned status-sync \u2014 registry.py's trigger.on() calls are commented out, so both handlers are unreferenced by design while the module and its tests are kept for revival. Candidate for .archive/ if revival is off the table."
     },
     {
       "file": "apps/handlers/medic_state.py",
       "standard": "unused_function",
-      "functions": ["get_volume_muted_branches"],
-      "reason": "NAME-SCOPED AND HONOURED. The plain-list accessor beside get_volume_muted_branches_detail(); medic.py renders the detail variant, so only the 5 assertions in test_medic_state.py call this one. Kept as the symmetric half of the public read API — delete it and the tests if that symmetry is not worth the rule."
+      "functions": [
+        "get_volume_muted_branches"
+      ],
+      "reason": "NAME-SCOPED AND HONOURED. The plain-list accessor beside get_volume_muted_branches_detail(); medic.py renders the detail variant, so only the 5 assertions in test_medic_state.py call this one. Kept as the symmetric half of the public read API \u2014 delete it and the tests if that symmetry is not worth the rule."
+    },
+    {
+      "file": "apps/log_watcher_service.py",
+      "standard": "encapsulation",
+      "lines": [
+        26
+      ],
+      "pattern": "import aipass.trigger.apps.handlers.reload_sentinel",
+      "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it."
     }
   ],
   "notes": {
-    "usage": "Add entries to 'bypass' list to exclude specific violations. One rule per real violation — re-derive against the checkers, never guess line numbers.",
-    "line_scoping": "A `lines` key is ONLY honoured by checkers that pass a line to is_bypassed(): encapsulation, debug_print, help_text, cli (its print half), hardcoded_path, hardcoded_key, log_level, log_handler, log_visibility, output_routing, permission_flags, stderr_routing, windows_compat. silent_catch, error_handling, handlers, architecture, imports, trigger and readme call is_bypassed() with no line at all — on those standards a `lines` key is at best a comment and, once seedgo's wave-2 fix lands, will make the rule match nothing. Use `functions` for unused_function; it is name-scoped and honoured.",
+    "usage": "Add entries to 'bypass' list to exclude specific violations. One rule per real violation \u2014 re-derive against the checkers, never guess line numbers.",
+    "line_scoping": "A `lines` key is ONLY honoured by checkers that pass a line to is_bypassed(): encapsulation, debug_print, help_text, cli (its print half), hardcoded_path, hardcoded_key, log_level, log_handler, log_visibility, output_routing, permission_flags, stderr_routing, windows_compat. silent_catch, error_handling, handlers, architecture, imports, trigger and readme call is_bypassed() with no line at all \u2014 on those standards a `lines` key is at best a comment and, once seedgo's wave-2 fix lands, will make the rule match nothing. Use `functions` for unused_function; it is name-scoped and honoured.",
     "fields": {
-      "file": "Relative path from branch root (required) — matched as a substring of the checked path",
+      "file": "Relative path from branch root (required) \u2014 matched as a substring of the checked path",
       "standard": "Standard name: cli, imports, naming, etc. (required)",
-      "lines": "Optional — specific line numbers. Honoured only by the checkers listed in line_scoping",
-      "functions": "Optional — function names, honoured by unused_function",
-      "category": "Optional — read by trigger_check (e.g. handler_layer, initialization)",
-      "pattern": "Optional — records the construct being bypassed. Documentation only; no checker reads it",
-      "reason": "Required — why this bypass exists, and why it is file-wide if it is"
+      "lines": "Optional \u2014 specific line numbers. Honoured only by the checkers listed in line_scoping",
+      "functions": "Optional \u2014 function names, honoured by unused_function",
+      "category": "Optional \u2014 read by trigger_check (e.g. handler_layer, initialization)",
+      "pattern": "Optional \u2014 records the construct being bypassed. Documentation only; no checker reads it",
+      "reason": "Required \u2014 why this bypass exists, and why it is file-wide if it is"
     }
   }
 }
