@@ -9,6 +9,18 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+**fix(devpulse)** — watchdog resolves projects/* citizens (todo #132,
+DPLAN-0290 night shift item 0). `watchdog agent @baud` reported
+agent-not-found minutes after the admin lane's first dispatch reached that
+seat: the resolver checked the main registry and external `~/Projects` roots
+but never descended into `<repo>/projects/*/` where project citizens live.
+New sweep of `projects/*/*_REGISTRY.json` mirrors ai_mail's admin-lane scan
+and runs AFTER the main registry so a local branch always wins a name
+collision (tested both ways, red-first, world pinned to tmp_path). Suite 488
+green; live-proven against the exact failing command.
+
 ## [2026-08-12] — v2.7.16: admin grant lane live, cross-project bridge, BAUD product night, telegram blip fix
 
 **fix(trigger tests)** — signature-fragmentation tests pin their own registry

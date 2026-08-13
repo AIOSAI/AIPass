@@ -97,6 +97,52 @@ def test_watch_agent_branch_not_found(monkeypatch, tmp_path):
     assert result["exit_code"] is None
 
 
+def test_resolve_branch_path_finds_projects_citizen(monkeypatch, tmp_path):
+    """A projects/* citizen resolves via the in-repo project registry sweep.
+
+    Live failure 2026-08-12: watchdog agent @baud reported agent-not-found
+    right after the admin lane opened — the resolver checked the main
+    registry and external ~/Projects roots but never descended into
+    <repo>/projects/*/ where project citizens actually live. The whole
+    world is pinned to tmp_path here (repo root, caller cwd, home) so the
+    real tree can neither save nor break this test.
+    """
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+    branch_dir = tmp_path / "projects" / "baud" / "src" / "baud" / "baud"
+    branch_dir.mkdir(parents=True)
+    project_registry = {"branches": [{"name": "BAUD", "email": "@baud", "path": "src/baud/baud"}]}
+    (tmp_path / "projects" / "baud" / "BAUD_REGISTRY.json").write_text(json.dumps(project_registry), encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
+    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+
+    resolved = agent_handler._resolve_branch_path("@baud")
+    assert resolved is not None
+    assert resolved.resolve() == branch_dir.resolve()
+
+
+def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
+    """A name in BOTH registries resolves to the main-registry branch — local always wins."""
+    local_dir = tmp_path / "src" / "aipass" / "twin"
+    local_dir.mkdir(parents=True)
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"email": "@twin", "path": str(local_dir)}]}), encoding="utf-8"
+    )
+    shadow_dir = tmp_path / "projects" / "twin" / "home"
+    shadow_dir.mkdir(parents=True)
+    (tmp_path / "projects" / "twin" / "TWIN_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "TWIN", "email": "@twin", "path": "home"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
+    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+
+    resolved = agent_handler._resolve_branch_path("@twin")
+    assert resolved is not None
+    assert resolved.resolve() == local_dir.resolve()
+
+
 def test_watch_agent_no_active_lock(monkeypatch, tmp_path):
     """No lock file -> agent already idle, returns completed immediately."""
     _build_fake_branch(tmp_path)
