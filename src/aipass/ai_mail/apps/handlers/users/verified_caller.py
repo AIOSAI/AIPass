@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: verified_caller.py
 # Description: Verified-Caller Rail for privilege-bearing decisions
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
 # Modified: 2026-08-12
 # =============================================
@@ -42,7 +42,7 @@ import boundary, not this one.
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -152,6 +152,60 @@ def resolve_wake_sender(claimed: Optional[str]) -> str:
     return resolve_verified_caller() or _normalize(claimed)
 
 
+ADMIN_HOLDER: str = "@devpulse"
+
+
+def verify_admin_caller(
+    key_path: Optional[Path] = None,
+    registry_path: Optional[Path] = None,
+) -> Tuple[bool, str]:
+    """Run the full 5-leg admin-grant check (FPLAN-0401 THE CONTRACT).
+
+    Delegates to @devpulse's reference implementation rather than mirroring it:
+    the contract has one home, so a change to it cannot silently disagree with
+    this lane. The legs are caller identity, registry-resolved cert path, cert
+    content, HMAC-SHA256 signature, and the registry admin flag — all five, or
+    nothing.
+
+    Fail-closed at every edge: if the reference cannot be imported the lane is
+    dark, not open. Nothing here reads or logs key material.
+
+    Args:
+        key_path: Override the signing-key path (tests only — production uses
+            the reference's default, ``~/.aipass/admin_grant.key``).
+        registry_path: Override the registry path (tests only).
+
+    Returns:
+        Tuple[bool, str]: (verified, reason). The reason names the failed leg
+        so a refusal can be read without a debugger.
+    """
+    try:
+        # Cross-branch handler import, authorized by @devpulse in the FPLAN-0401
+        # Phase 4 dispatch: "lazy-import it — one implementation, no drift".
+        # Their modules/ entry point re-exports this same function object, but
+        # importing the handler keeps the dependency tight (no CLI/help layer
+        # pulled in at verification time). Both shapes need a bypass entry;
+        # this is the narrower one. Bypassed: handlers (cross-branch import).
+        from aipass.devpulse.apps.handlers.owner.admin_grant import verify_admin_grant
+    except ImportError as exc:
+        logger.warning("[identity] admin lane dark — reference implementation unavailable: %s", exc)
+        return False, f"admin lane dark: devpulse admin_grant reference unavailable ({exc})"
+
+    kwargs = {}
+    if key_path is not None:
+        kwargs["key_path"] = key_path
+    if registry_path is not None:
+        kwargs["registry_path"] = registry_path
+
+    verified, reason = verify_admin_grant(**kwargs)
+    json_handler.log_operation("verify_admin_caller", {"verified": verified, "reason": reason})
+    if verified:
+        logger.info("[identity] admin grant VERIFIED for %s", ADMIN_HOLDER)
+    else:
+        logger.info("[identity] admin grant not granted: %s", reason)
+    return verified, reason
+
+
 if __name__ == "__main__":
     from aipass.cli.apps.modules import console
 
@@ -163,6 +217,7 @@ if __name__ == "__main__":
     console.print("  - resolve_verified_caller() -> str  [dim](@branch, or empty when unprovable)[/dim]")
     console.print("  - sender_claim_refusal(claimed) -> str | None  [dim](reason, or None if allowed)[/dim]")
     console.print("  - resolve_wake_sender(claimed) -> str  [dim](verified caller, else the claim)[/dim]")
+    console.print("  - verify_admin_caller() -> (bool, reason)  [dim](5-leg admin grant, devpulse reference)[/dim]")
     console.print()
     console.print("[yellow]RESOLUTION ORDER:[/yellow]")
     console.print("  1. AIPASS_CALLER_BRANCH  [dim](drone, from real process ancestry)[/dim]")

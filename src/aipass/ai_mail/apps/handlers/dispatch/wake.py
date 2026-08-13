@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-02
 # Modified: 2026-08-12
 # =============================================
@@ -577,6 +577,7 @@ def wake_branch(
     model: Optional[str] = None,
     *,
     scheduled: bool = False,
+    admin: bool = False,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -597,6 +598,15 @@ def wake_branch(
                refused outright. Non-manager targets are unaffected apart from
                that refusal. Default False leaves every existing caller's
                behaviour exactly as it was.
+        admin: Keyword-only, and an ALREADY-DECIDED verdict — never a request.
+               True means a caller holding the caller env ran the full 5-leg
+               admin-grant check and it passed (FPLAN-0401 THE CONTRACT;
+               dispatch.py owns that call). A manager target then wakes
+               headless through dispatch_monitor like any citizen dispatch.
+               This function cannot verify the grant itself: leg 1 needs
+               AIPASS_CALLER_*, which its in-process callers do not carry.
+               WAKE_BLOCKLIST still refuses — admin raises the stakes, not the
+               fence. Default False = today's manager gate, untouched.
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
@@ -631,14 +641,17 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
-    # Step 2b: Blocklist — the scheduled lane never spawns a blocked target.
+    # Step 2b: Blocklist — no privileged lane ever spawns a blocked target.
     # Checked BEFORE the passport read on purpose: an unreadable or missing
-    # passport must never be the reason @devpulse gets spawned at 5am. The
-    # manual/dispatch paths keep enforcing this in dispatch.py._orchestrate_wake;
-    # this is the same rule at the one entry point a scheduler calls directly.
-    if scheduled and is_wake_blocked(email):
-        status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the scheduled lane")
-        logger.warning("[wake] BLOCKED %s — scheduled wake refused by WAKE_BLOCKLIST", email)
+    # passport must never be the reason @devpulse gets spawned at 5am, and a
+    # verified admin grant is permission to wake OTHERS, never to wake the
+    # blocked seat. The manual/dispatch paths keep enforcing this in
+    # dispatch.py._orchestrate_wake; this is the same rule at the one entry
+    # point a scheduler or an admin lane calls directly.
+    if (scheduled or admin) and is_wake_blocked(email):
+        lane = "scheduled" if scheduled else "admin"
+        status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the {lane} lane")
+        logger.warning("[wake] BLOCKED %s — %s wake refused by WAKE_BLOCKLIST", email, lane)
         return status, False
 
     # Step 3: Manager check — managers are never woken, mail only.
@@ -662,6 +675,10 @@ def wake_branch(
                 status.ok("manager", f"{email} manager gate bypassed — scheduled wake")
                 status.ok("scheduled", "Headless lane — dispatch_monitor pipeline (context pin applies)")
                 logger.info("[wake] %s manager woken headless — scheduled lane", email)
+            elif admin:
+                status.ok("manager", f"{email} manager gate bypassed — verified admin dispatch")
+                status.ok("admin", "Headless lane — dispatch_monitor pipeline (admin grant verified by caller)")
+                logger.info("[wake] %s manager woken headless — admin lane", email)
             elif sender == "@daemon":
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
@@ -912,7 +929,8 @@ if __name__ == "__main__":
         print("Flags:")
         print("  --fresh          Start fresh session (claude -p) instead of resuming (claude -c -p)")
         print("  --auto           Respect autonomous_pause (used by daemon). Manual wake ignores it.")
-        print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse)")
+        print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse).")
+        print("                   Privilege-bearing values must match the verified caller.")
         print("  --model NAME     Model to use: opus (default), sonnet, haiku, or full model ID")
         print()
         print("Output: Step-by-step status of the dispatch pipeline:")
@@ -957,8 +975,20 @@ if __name__ == "__main__":
     branch = args[0]
     message = args[1] if len(args) > 1 else None
 
+    # --sender is a CLI string and lands on the privilege-bearing `sender`
+    # param, so it goes through the same verified-caller rail the routed
+    # commands use (FPLAN-0401). Closed here at @devpulse's request once the
+    # admin lane raised the stakes: the script surface no longer differs from
+    # the drone surface.
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+
+    claim_refusal = sender_claim_refusal(use_sender)
+    if claim_refusal:
+        print(f"❌ Wake refused: {claim_refusal}", file=sys.stderr)
+        sys.exit(2)
+
     dispatch_status, success = wake_branch(
-        branch, message, fresh=use_fresh, auto=use_auto, sender=use_sender, model=use_model
+        branch, message, fresh=use_fresh, auto=use_auto, sender=resolve_wake_sender(use_sender), model=use_model
     )
     print(dispatch_status.format())
     sys.exit(0 if success else 1)

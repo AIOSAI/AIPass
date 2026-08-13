@@ -1598,3 +1598,105 @@ class TestScheduledManagerLane:
         assert len(calls["popen"]) == 2
         assert calls["popen"][0]["cmd"] == calls["popen"][1]["cmd"]
         assert calls["tmux"] == []
+
+
+class TestAdminManagerLane:
+    """The admin lane (FPLAN-0401 Phase 4): a verified admin dispatch wakes a
+    manager-class target headless, like any citizen dispatch (wake.py 2.3.0).
+
+    wake_branch takes `admin` as an already-decided boolean. It cannot verify
+    the grant itself — the 5-leg check needs the caller env, which lives in
+    dispatch.py. Everything below is about what the flag ROUTES, not what
+    earns it (that is test_admin_lane.py).
+    """
+
+    def test_admin_manager_wake_routes_headless_through_monitor(self, tmp_path, monkeypatch):
+        """admin=True on a manager reaches dispatch_monitor, not tmux, not the skip."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@devpulse", admin=True)
+
+        assert ok is True
+        assert calls["tmux"] == []
+        assert len(calls["popen"]) == 1
+        assert str(wake_mod.MONITOR_SCRIPT) in calls["popen"][0]["cmd"]
+
+    def test_admin_lane_records_a_named_status_step(self, tmp_path, monkeypatch):
+        """A caller can see WHICH lane fired, not just that something spawned."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@devpulse", admin=True)
+
+        admin_step = status.find_step("admin")
+        assert admin_step is not None and admin_step[0] == "ok"
+        manager_step = status.find_step("manager")
+        assert manager_step is not None and manager_step[0] == "ok"
+        # The scheduled lane did not fire — the two must stay distinguishable.
+        assert status.find_step("scheduled") is None
+
+    def test_admin_false_leaves_the_manager_gate_exactly_as_it_was(self, tmp_path, monkeypatch):
+        """Default: mail only, wake skipped, nothing spawned."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@devpulse")
+
+        assert ok is True
+        assert calls["popen"] == [] and calls["tmux"] == []
+        manager_step = status.find_step("manager")
+        assert manager_step is not None and manager_step[0] == "info"
+        assert status.find_step("admin") is None
+
+    def test_admin_wake_still_refuses_a_blocklisted_target(self, tmp_path, monkeypatch):
+        """@devpulse stays undispatchable — admin raises the stakes, not the fence."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch, email="@devpulse")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@devpulse", sender="@devpulse", admin=True)
+
+        assert ok is False
+        blocked = status.find_step("blocklist")
+        assert blocked is not None and blocked[0] == "fail"
+        assert "@devpulse" in blocked[2]
+        assert calls["popen"] == [] and calls["tmux"] == []
+
+    def test_admin_non_manager_spawn_is_byte_identical(self, tmp_path, monkeypatch):
+        """Non-manager target: admin=True changes nothing about the spawn."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok_default = wake_branch("@testbranch", custom_message="work", sender="@devpulse")
+        _, ok_admin = wake_branch("@testbranch", custom_message="work", sender="@devpulse", admin=True)
+
+        assert ok_default is True and ok_admin is True
+        assert len(calls["popen"]) == 2
+        assert calls["popen"][0]["cmd"] == calls["popen"][1]["cmd"]
+
+    def test_admin_is_keyword_only_and_defaults_false(self):
+        """No positional path to privilege — every existing call site keeps its meaning."""
+        import inspect
+
+        param = inspect.signature(wake_branch).parameters["admin"]
+        assert param.default is False
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+
+    def test_scheduled_lane_wins_when_both_flags_are_set(self, tmp_path, monkeypatch):
+        """Both route headless; the status names the scheduled lane, so a 5am
+        rotation is never reported as an admin dispatch."""
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", sender="@daemon", scheduled=True, admin=True)
+
+        assert ok is True
+        assert len(calls["popen"]) == 1
+        assert status.find_step("scheduled") is not None
+        assert status.find_step("admin") is None

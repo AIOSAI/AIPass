@@ -11,6 +11,22 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(ai_mail)** — admin dispatch lane, built dark (by @ai_mail, FPLAN-0401
+phase 4, DPLAN-0288). `wake_branch()` gains keyword-only `admin=False`: a
+VERIFIED devpulse dispatch to a manager-class target now routes headless
+through the dispatch-monitor pipeline (350k pin) instead of being mail-only.
+Verification lazy-imports devpulse's `verify_admin_grant` 5-leg reference —
+one implementation, no drift; ImportError or missing key = lane dark = today's
+behavior byte-identical. WAKE_BLOCKLIST now fences BOTH privileged lanes: an
+admin dispatch targeting @devpulse is still refused (tested) — the seat
+asymmetry stands. Scheduled-wins ordering pinned (a 5am rotation never logs as
+admin). The `wake.py __main__ --sender` door closed on the same rail
+(live-proven refusal). Verifier only runs for the grant holder (noise
+control); a raising verifier degrades to non-admin and mail still sends. 25
+tests (lane red-first; wiring mutation-tested and said so), suite 1021 green,
+audit 100% with two documented bypass entries (no compliant cross-branch
+import shape exists — reasoning in bypass.json).
+
 **security(ai_mail)** — sender-spoof holes closed on both doors (by @ai_mail,
 FPLAN-0401 phase 1, DPLAN-0288). The `--from` flag (dispatch-send) and the
 `--sender` flag (wake path — second door self-found by @ai_mail, not in the

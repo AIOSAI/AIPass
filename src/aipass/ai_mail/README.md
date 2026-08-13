@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 996 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1021 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -222,7 +222,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 - PID-based locking prevents concurrent agents per branch (`.dispatch.lock`)
 - Max turns per wake, max dispatches per branch per day
 - `WAKE_BLOCKLIST` protects `@devpulse` from cross-branch manual wakes
-- **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The two exceptions are named below
+- **Manager structural block** — branches with `citizen_class: "manager"` in their passport (e.g. `@devpulse`) are unwakeable on the dispatch and manual paths. Mail delivers, wake skips. The three exceptions (scheduled, admin, @daemon self-wake) are named below
 - **Self-wake guard** — if sender equals target, wake-back is skipped (prevents self-loops)
 - **Chain termination** — wake-back sessions carry an empty sender, so the chain always stops at the original dispatcher
 - `dispatch_monitor.py` strips `AIPASS_CALLER_*` env vars to prevent parent context leaking into agent identity
@@ -257,6 +257,39 @@ status, ok = wake_branch("@devpulse", custom_message=prompt, sender="@daemon", s
   inbox-sweep and `@daemon`'s `run.py` don't pass the param, so they are untouched.
 - **Reading the outcome** — `status.find_step("scheduled")` is present only for the
   headless lane; the interactive spawn names its tmux session in the `spawn` step.
+
+### Admin Lane (`admin=True`)
+
+Patrick's ruling (DPLAN-0288): @devpulse — and only @devpulse — holds an admin
+grant that lets a dispatch wake **manager-class** citizens. `wake_branch` takes a
+keyword-only `admin` flag that is an *already-decided verdict*, never a request:
+
+```python
+status, ok = wake_branch(target, sender=..., admin=is_admin)
+```
+
+- **The check runs in `dispatch.py`, not here.** Leg 1 of the contract needs
+  `AIPASS_CALLER_*`, and `wake_branch`'s in-process callers don't carry it — a
+  `wake_branch` that verified its own caller would be verifying nobody.
+- **Five legs, all or nothing** (FPLAN-0401 THE CONTRACT): verified caller is
+  devpulse · cert path resolved from the *registry* entry, never caller-supplied ·
+  cert content (`owner`, `type`, `privileges.admin`) · HMAC-SHA256 signature over
+  the canonical cert-minus-signature payload · registry `admin: true`.
+  `verified_caller.verify_admin_caller()` delegates to @devpulse's reference
+  implementation rather than mirroring it — one contract, one home, no drift.
+- **Lane dark by default.** The signing key lives at `~/.aipass/admin_grant.key`,
+  outside every repo, and does not exist until the ceremony. No key → leg 4 fails
+  → today's behavior exactly. An import failure of the reference is *also* dark,
+  and a verifier that raises is caught: a privilege path never takes mail down.
+- **`WAKE_BLOCKLIST` still refuses.** Admin raises the stakes, not the fence —
+  @devpulse stays undispatchable even by a verified admin, checked before the
+  passport read alongside the scheduled lane.
+- **Non-holders pay nothing.** The verifier only runs when the rail already says
+  the caller is the grant holder; everyone else's dispatch is byte-identical, with
+  no key read and no file I/O.
+- `status.find_step("admin")` marks the lane; when both flags are set the
+  scheduled lane wins and reports itself, so a 5am rotation is never logged as an
+  admin dispatch.
 
 ### Daemon
 

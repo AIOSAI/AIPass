@@ -547,7 +547,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Capture wake_branch call arguments."""
             wake_calls.append({"branch": branch, "fresh": fresh, "sender": sender, "model": model})
             return (mock_status, True)
@@ -577,7 +577,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "model": model})
             return (mock_status, True)
@@ -607,7 +607,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track sender argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "sender": sender})
             return (mock_status, True)
@@ -657,7 +657,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track custom message argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "msg": msg})
             return (mock_status, True)
@@ -819,7 +819,7 @@ class TestOrchestrateDispatchSend:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track fresh flag passed to wake_branch."""
             wake_calls.append({"branch": branch, "fresh": fresh})
             return (mock_status, True)
@@ -875,7 +875,7 @@ class TestOrchestrateDispatchSend:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch in dispatch send."""
             wake_calls.append({"model": model})
             return (mock_status, True)
@@ -1191,7 +1191,7 @@ class TestSpoofedSenderRefusal:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track the sender that reached wake_branch."""
             wake_calls.append({"sender": sender})
             return (mock_status, True)
@@ -1215,7 +1215,7 @@ class TestSpoofedSenderRefusal:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track the sender that reached wake_branch."""
             wake_calls.append({"sender": sender})
             return (mock_status, True)

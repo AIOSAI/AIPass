@@ -6,6 +6,16 @@
   },
   "bypass": [
     {
+      "file": "apps/handlers/users/verified_caller.py",
+      "standard": "handlers",
+      "reason": "Lazy cross-branch import of devpulse's admin_grant.verify_admin_grant, authorized by @devpulse in the FPLAN-0401 Phase 4 dispatch: the 5-leg admin contract has ONE home so this lane cannot drift from it. Their modules/ entry point re-exports the same function object, but that import trips the handler-imports-modules rule instead — both shapes need a bypass, and the handler import is the narrower dependency (no CLI/help layer at verification time). Import failure is caught and returns lane-dark, so the coupling can never break a dispatch."
+    },
+    {
+      "file": "apps/handlers/users/verified_caller.py",
+      "standard": "encapsulation",
+      "reason": "Same cross-branch import as the handlers entry above — devpulse owns the admin-grant contract (FPLAN-0401 THE CONTRACT), ai_mail consumes it rather than mirroring it."
+    },
+    {
       "file": "apps/modules/email.py",
       "standard": "introspection",
       "reason": "Multi-command module where inbox, sent, contacts work without args by design. Adding no-args gate would break primary mail workflow (drone @ai_mail inbox)."

@@ -282,12 +282,28 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     # --from is an unauthenticated string. It may author the mail, but it must
     # not buy a wake lane: refused BEFORE the send, so a spoof attempt leaves
     # no delivered dispatch email behind claiming to be from someone it isn't.
-    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+    from aipass.ai_mail.apps.handlers.users import verified_caller
 
-    refusal = sender_claim_refusal(from_branch)
+    refusal = verified_caller.sender_claim_refusal(from_branch)
     if refusal:
         error(f"Dispatch to {target} refused: {refusal}")
         return True
+
+    # Admin lane (FPLAN-0401): the 5-leg grant check runs HERE because this is
+    # where the caller env still lives — wake_branch only ever receives the
+    # verdict. The rail pre-check is noise control, not security: only the
+    # grant holder can pass leg 1 anyway, so anyone else skips the file reads
+    # and the lane-dark report they could do nothing about. A verifier that
+    # raises must not take the mail down with it — no grant, dispatch proceeds.
+    is_admin = False
+    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
+        try:
+            is_admin, admin_reason = verified_caller.verify_admin_caller()
+        except Exception as exc:
+            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
+            is_admin, admin_reason = False, f"admin verification error: {exc}"
+        if not is_admin:
+            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
 
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
@@ -370,8 +386,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     dispatch_status, wake_ok = wake_branch(
         target,
         fresh=use_fresh,
-        sender=resolve_wake_sender(user_info.get("email_address", "@ai_mail")),
+        sender=verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")),
         model=use_model,
+        admin=is_admin,
     )
     console.print(dispatch_status.format())
 
