@@ -11,6 +11,16 @@ PyPI version — not the changelog header.
 
 ## [2026-08-12] — v2.7.16: admin grant lane live, cross-project bridge, BAUD product night, telegram blip fix
 
+**fix(trigger tests)** — signature-fragmentation tests pin their own registry
+(by @devpulse in-train, PPLAN-0034). Two collapse tests read the live
+`AIPASS_REGISTRY.json` through `_find_repo_root()` — green on any dev machine,
+red on CI's bare checkout where the untracked registry doesn't exist and name
+collapse silently skips. Went unseen for 8 pushes because nobody watched the
+PR checks between trains. Fix: an autouse fixture registry carrying the corpus
+names, the same pattern the file's registry-lifecycle tests already used.
+Escalation lane code untouched. Proven red→green in a tracked-only
+`git archive` checkout; trigger suite 932 green.
+
 **fix(skills)** — telegram send path stops escalating network blips (by
 @skills, base_bot v1.6.1, FPLAN-0402, error 9353d1ae). `send_message`
 exhaustion is now classified with the same `_is_network_error()` the poll

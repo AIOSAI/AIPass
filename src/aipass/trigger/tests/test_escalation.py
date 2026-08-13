@@ -349,6 +349,22 @@ class TestSignatureFragmentation:
     on real state, not imagined — see the module comment above.
     """
 
+    @pytest.fixture(autouse=True)
+    def pinned_registry(self, lane, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Every citizen the corpus names, pinned to a fixture registry.
+
+        AIPASS_REGISTRY.json is runtime state, not tracked source — a bare CI
+        checkout has none, name collapse silently skips, and the collapse
+        assertions fork while the same tests pass on any dev machine where
+        _find_repo_root() walks up into the live tree. The world a test needs
+        must be the world it builds.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        names = ("SEEDGO", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
+        registry.write_text(json.dumps({"branches": [{"name": n} for n in names]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+
     def test_the_pinned_prax_pair_is_one_signature(self, lane) -> None:
         """The exact pair @devpulse reported. Both variants, one signature."""
         first = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_A)
