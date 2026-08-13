@@ -108,7 +108,15 @@ def handle_update(args: list[str]) -> int:
         console.print("  [green]--trace[/green]           Enable verbose logging")
         return 1
 
-    from aipass.spawn.apps.modules.core import validate_class, get_available_classes
+    from aipass.spawn.apps.modules.core import validate_class, get_available_classes, refuse_forbidden_class
+
+    # A forbidden class refuses by name before it can be read as a branch
+    # target or reach the update engine (DPLAN-0288).
+    for arg in args:
+        refusal = refuse_forbidden_class(arg.lstrip("@"))
+        if refusal:
+            error(refusal)
+            return 1
 
     apply = "--apply" in args
     dry_run = not apply

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create.py
 # Description: Email File Creation Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-07
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -123,6 +123,46 @@ def create_email_file(
     return email_file
 
 
+def mark_sent_record_refused(email_file: Path, reason: str) -> bool:
+    """Restamp a sent record as ``refused`` after delivery was rejected.
+
+    The record is written before delivery is attempted (delivery needs the
+    loaded email_data), so a refused send left a file reading ``status: sent``
+    behind. A cross-project sender read that as proof of delivery and had no
+    way to learn the fence had turned the message away.
+
+    The record is restamped, never deleted: the attempt is real evidence, and
+    deleting it would leave a sender who saw an error with nothing to cite.
+
+    Args:
+        email_file: Path to the sent record written by create_email_file.
+        reason: The delivery error that caused the refusal.
+
+    Returns:
+        True if the record was restamped, False if it could not be rewritten.
+    """
+    try:
+        with open(email_file, "r", encoding="utf-8") as f:
+            email_data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("[create] mark_sent_record_refused(%s) could not read record: %s", email_file, e)
+        return False
+
+    email_data["status"] = "refused"
+    email_data["refused_reason"] = reason
+    email_data["refused_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with open(email_file, "w", encoding="utf-8") as f:
+            json.dump(email_data, f, indent=2)
+    except OSError as e:
+        logger.warning("[create] mark_sent_record_refused(%s) could not write record: %s", email_file, e)
+        return False
+
+    logger.info("[create] sent record %s marked refused: %s", email_file.name, reason)
+    return True
+
+
 def _trigger_sent_purge(mailbox_path: Path) -> None:
     """
     Trigger auto-purge of sent folder if threshold exceeded.
@@ -171,6 +211,7 @@ if __name__ == "__main__":
     c.print("FUNCTIONS PROVIDED:")
     c.print("  - create_email_file(to_branch, subject, message, user_info) -> Path")
     c.print("  - load_email_file(email_file) -> Optional[Dict]")
+    c.print("  - mark_sent_record_refused(email_file, reason) -> bool")
     c.print()
     c.print("HANDLER CHARACTERISTICS:")
     c.print("  ✓ Independent - no module dependencies")

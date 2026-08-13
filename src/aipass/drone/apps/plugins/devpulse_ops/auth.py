@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-08-11
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -145,8 +145,10 @@ def _resolve_caller() -> Caller:
 
     # WARNING, not ERROR: the gate failing closed on a non-branch CWD is designed
     # behaviour, not a fault. Logged loud enough to diagnose, quiet enough not to
-    # page anyone (@trigger log-fix 906263c8ff2e).
-    msg = "No .trinity/passport.json found in directory hierarchy — cannot verify caller"
+    # page anyone (@trigger log-fix 906263c8ff2e). The caller's cwd is the one
+    # fact that identifies WHO tripped the gate; trigger's normalizer collapses
+    # it to <path>, so repeat signatures stay unified across callers.
+    msg = f"No .trinity/passport.json found in directory hierarchy (caller cwd: {Path.cwd()}) — cannot verify caller"
     logger.warning(msg)
     raise PermissionError(msg)
 

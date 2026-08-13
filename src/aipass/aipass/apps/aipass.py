@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.4.0
+# Version: 0.4.1
 # Created: 2026-04-16
-# Modified: 2026-08-07
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -187,7 +187,7 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print()
 
     console.print("[yellow]Usage:[/yellow]")
-    console.print("  [green]aipass[/green] [dim]<command>[/dim] [dim][options][/dim]")
+    console.print("  [green]aipass[/green] [dim]<command>[/dim] [dim]\\[options][/dim]")
     console.print("  [green]aipass[/green]                       [dim]Show commands[/dim]")
     console.print("  [green]aipass[/green] [dim]<command>[/dim] [dim]--help[/dim]     [dim]Help for a command[/dim]")
     console.print()
@@ -216,7 +216,7 @@ def print_help(modules: List[Any] | None = None) -> None:
         "  [green]read <branch>[/green]                [dim]View a branch README, rendered in the terminal[/dim]"
     )
     console.print(
-        "  [green]trust[/green] [dim][path][/dim]                [dim]Trust registry — enroll/revoke projects[/dim]"
+        "  [green]trust[/green] [dim]\\[path][/dim]                [dim]Trust registry — enroll/revoke projects[/dim]"
     )
     console.print("  [green]--version[/green]                    [dim]Show version[/dim]")
     console.print()

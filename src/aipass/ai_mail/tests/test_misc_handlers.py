@@ -302,7 +302,7 @@ def _noop_inbox_lock(monkeypatch):
 @pytest.fixture(autouse=True)
 def _silence_delivery_notifications():
     """Prevent desktop notifications during delivery tests."""
-    with patch.object(delivery_mod, "_send_desktop_notification"):
+    with patch.object(delivery_mod, "_emit_notification_event"):
         yield
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.2.1
+# Version: 1.3.1
 # Created: 2026-04-14
-# Modified: 2026-08-08
+# Modified: 2026-08-11
 # =============================================
 
 # Signal choice: ai_mail dispatch lock file polling.
@@ -206,79 +206,6 @@ def _get_jsonl_projects_dir(branch_path: Path) -> Path:
     return Path.home() / ".claude" / "projects" / encoded
 
 
-def _snapshot_jsonl_sizes(projects_dir: Path) -> dict:
-    """Snapshot current sizes of all JSONL files, recursively.
-
-    Recursive because sub-agent transcripts live under ``<session>/subagents/``,
-    not at the top level: a parent waiting on a synchronous sub-agent writes no
-    JSONL of its own while the sub-agent's file grows, so a top-level-only scan
-    misreads that whole span as idle and false-fires STALLED (seen live
-    2026-08-08 on @trigger's digest build). Keys are paths relative to
-    ``projects_dir`` so equal basenames in different session dirs can't collide.
-    """
-    sizes = {}
-    if not projects_dir.exists():
-        return sizes
-    try:
-        for f in projects_dir.rglob("*.jsonl"):
-            try:
-                sizes[str(f.relative_to(projects_dir))] = f.stat().st_size
-            except OSError as exc:
-                logger.info("[watchdog.agent] jsonl snapshot stat failed for %s: %s", f.name, exc)
-    except OSError as exc:
-        logger.info("[watchdog.agent] jsonl snapshot glob failed: %s", exc)
-    return sizes
-
-
-def _has_jsonl_activity(projects_dir: Path, baseline: dict) -> bool:
-    """Return True if any JSONL file grew or a new file appeared since baseline.
-
-    Recursive, keyed by relative path — see ``_snapshot_jsonl_sizes``.
-    """
-    if not projects_dir.exists():
-        return False
-    try:
-        files = list(projects_dir.rglob("*.jsonl"))
-    except OSError as exc:
-        logger.info("[watchdog.agent] jsonl activity glob failed: %s", exc)
-        return False
-    for f in files:
-        try:
-            current_size = f.stat().st_size
-        except OSError as exc:
-            logger.info("[watchdog.agent] jsonl activity stat failed for %s: %s", f.name, exc)
-            continue
-        key = str(f.relative_to(projects_dir))
-        if key not in baseline:
-            return current_size > 0
-        if current_size > baseline[key]:
-            return True
-    return False
-
-
-def _newest_jsonl(projects_dir: Path) -> Path | None:
-    """Return the most-recently-modified .jsonl under projects_dir (recursive), or None."""
-    if not projects_dir.exists():
-        return None
-    try:
-        files = list(projects_dir.rglob("*.jsonl"))
-    except OSError as exc:
-        logger.info("[watchdog.agent] newest jsonl glob failed: %s", exc)
-        return None
-    newest: Path | None = None
-    newest_mtime = -1.0
-    for f in files:
-        try:
-            mtime = f.stat().st_mtime
-        except OSError as exc:
-            logger.info("[watchdog.agent] newest jsonl stat failed for %s: %s", f.name, exc)
-            continue
-        if mtime > newest_mtime:
-            newest_mtime = mtime
-            newest = f
-    return newest
-
-
 def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
     """Non-blank newline-delimited lines from a bounded tail read of ``path``.
     Reads at most ``max_bytes`` from the end so a multi-MB transcript stays
@@ -304,8 +231,8 @@ def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
 _INFLIGHT_SCAN_LIMIT = 25
 
 
-def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
-    """True if the newest JSONL's last MESSAGE event is an assistant message
+def _inflight_from_lines(lines: list[str], source: str = "?") -> bool:
+    """True if the last MESSAGE event in ``lines`` is an assistant message
     dispatching a tool call — an in-flight ``tool_use`` awaiting its result.
 
     While a tool runs (a big Read, a long Bash, a synchronous sub-agent) the
@@ -322,19 +249,15 @@ def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
     assistant + ``tool_use`` → in-flight; any other message (text-only turn, a
     returned ``tool_result``) → not.
 
-    Best-effort: any read/parse/shape surprise degrades to False so the stall
+    Best-effort: any parse/shape surprise degrades to False so the stall
     detector never crashes on a format drift.
     """
-    newest = _newest_jsonl(projects_dir)
-    if newest is None:
-        return False
-    lines = _tail_lines(newest)
     for line in reversed(lines[-_INFLIGHT_SCAN_LIMIT:]):
         try:
             entry = json.loads(line)
         except (json.JSONDecodeError, ValueError) as exc:
             # torn partial write or format drift — keep walking
-            logger.info("[watchdog.agent] skipping unparseable transcript line in %s: %s", newest.name, exc)
+            logger.info("[watchdog.agent] skipping unparseable transcript line in %s: %s", source, exc)
             continue
         if not isinstance(entry, dict):
             continue
@@ -351,6 +274,123 @@ def _last_entry_is_inflight_tool(projects_dir: Path) -> bool:
         if role == "user":
             return False
     return False
+
+
+class TranscriptScanner:
+    """Cached per-tick view of one branch's ``~/.claude/projects/<dir>`` tree.
+
+    The naive loop cost ~152 ms per 5 s tick against a 307-file projects dir —
+    two pathlib rglobs plus a 1 MB tail re-read even when nothing changed —
+    ~3% of a core per watchdog, compounding across concurrent watches
+    (Patrick-caught, todo #126; measured 2026-08-11). The scanner keeps the
+    discovered file list and re-walks it only every ``REFRESH_INTERVAL``
+    seconds (or when a stall is about to be declared — see
+    ``StallTracker.observe``), so a tick is one ``os.stat`` pass. The in-flight
+    tail parse is cached on ``(size, mtime)``: an unchanged file cannot change
+    its last entry, so the 1 MB read happens only when the transcript actually
+    changed — and during the silent spans the stall detector exists for, it
+    doesn't.
+    """
+
+    # Full re-walk cadence. New transcripts (fresh session, fresh sub-agent)
+    # appear rarely and the 300s stall threshold dwarfs this, so a new file is
+    # always discovered long before its absence could matter.
+    REFRESH_INTERVAL = 60.0
+    _VERDICT_CACHE_MAX = 64
+
+    def __init__(self, projects_dir: Path, now: float) -> None:
+        self.projects_dir = projects_dir
+        self._top_dir = str(projects_dir)
+        self._paths: list[str] = []
+        self._last_refresh = now
+        self.sizes: dict[str, int] = {}
+        self.newest: tuple[str, int, float] | None = None
+        self.newest_toplevel: tuple[str, int, float] | None = None
+        self._verdicts: dict[str, tuple[tuple[int, float], bool]] = {}
+        self.refresh(now)
+        self._stat_pass()  # seed sizes: watch start is the baseline, not "everything is new"
+
+    def refresh(self, now: float) -> None:
+        """Re-walk the tree for ``.jsonl`` files (``os.walk`` — pathlib.rglob
+        spent most of the old tick in ``relative_to``/path-object overhead)."""
+        paths: list[str] = []
+        try:
+            for root, _dirs, files in os.walk(self.projects_dir):
+                for name in files:
+                    if name.endswith(".jsonl"):
+                        paths.append(os.path.join(root, name))
+        except OSError as exc:
+            logger.info("[watchdog.agent] scanner walk failed for %s: %s", self.projects_dir, exc)
+        self._paths = paths
+        self._last_refresh = now
+
+    def _stat_pass(self) -> dict:
+        """Stat every known file; update ``sizes``/``newest``; return the previous sizes."""
+        sizes: dict[str, int] = {}
+        newest: tuple[str, int, float] | None = None
+        newest_top: tuple[str, int, float] | None = None
+        vanished = False
+        for path in self._paths:
+            try:
+                st = os.stat(path)
+            except OSError as exc:
+                # rolled/cleaned — deletion is not activity; pruned below, so one log per file
+                logger.info("[watchdog.agent] transcript vanished, dropping from scan: %s (%s)", path, exc)
+                vanished = True
+                continue
+            sizes[path] = st.st_size
+            if newest is None or st.st_mtime > newest[2]:
+                newest = (path, st.st_size, st.st_mtime)
+            if os.path.dirname(path) == self._top_dir and (newest_top is None or st.st_mtime > newest_top[2]):
+                newest_top = (path, st.st_size, st.st_mtime)
+        if vanished:
+            self._paths = list(sizes)
+        self.newest = newest
+        self.newest_toplevel = newest_top
+        prev, self.sizes = self.sizes, sizes
+        return prev
+
+    def tick(self, now: float) -> bool:
+        """One poll tick: True if any known transcript grew or a newly
+        discovered one has content, compared against the sizes seen at the
+        previous tick. Recursive coverage matters: sub-agent transcripts live
+        under ``<session>/subagents/``, and a parent waiting on one writes no
+        JSONL of its own while the nested file grows — a top-level-only scan
+        false-fired STALLED on exactly that (live 2026-08-08, @trigger)."""
+        if now - self._last_refresh >= self.REFRESH_INTERVAL:
+            self.refresh(now)
+        prev = self._stat_pass()
+        return any(size > prev.get(path, 0) for path, size in self.sizes.items())
+
+    def last_entry_inflight(self) -> bool:
+        """In-flight tool_use in the newest transcript OR the newest top-level
+        session transcript.
+
+        Two candidates, not one: a parent blocked on a synchronous sub-agent
+        holds its in-flight ``Agent`` tool_use in the PARENT transcript while
+        the sub-agent's nested file is the newest — and a sub-agent silently
+        composing a long response writes nothing at all. Checking only the
+        newest file false-fires STALLED on exactly that span (todo #126).
+        """
+        checked: set[str] = set()
+        for candidate in (self.newest, self.newest_toplevel):
+            if candidate is None or candidate[0] in checked:
+                continue
+            checked.add(candidate[0])
+            if self._cached_verdict(*candidate):
+                return True
+        return False
+
+    def _cached_verdict(self, path: str, size: int, mtime: float) -> bool:
+        key = (size, mtime)
+        hit = self._verdicts.get(path)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        verdict = _inflight_from_lines(_tail_lines(Path(path)), source=os.path.basename(path))
+        if len(self._verdicts) >= self._VERDICT_CACHE_MAX:
+            self._verdicts = {p: v for p, v in self._verdicts.items() if p in self.sizes}
+        self._verdicts[path] = (key, verdict)
+        return verdict
 
 
 def _read_lock(lock_file: Path) -> dict | None:
@@ -444,7 +484,9 @@ class StallTracker:
     Liveness signal = new JSONL lines (size growth) OR an in-flight tool call. A
     long single tool call (big Read, long Bash, heavy compute) writes no new JSONL
     lines while it runs but leaves an assistant ``tool_use`` as the last entry, so
-    it counts as activity instead of false-firing STALLED (#634 part 1).
+    it counts as activity instead of false-firing STALLED (#634 part 1). Both
+    signals are read through a ``TranscriptScanner`` so a tick costs one
+    ``os.stat`` pass, not two directory globs and a tail re-read (todo #126).
 
     Actionable signals — stall, long-running tool, resumed — go to stdout via
     ``_stdout_event`` so a Monitor-tool wrapper surfaces them to devpulse live
@@ -462,11 +504,18 @@ class StallTracker:
     # get a mid-flight heads-up instead of waiting on the timeout.
     LONG_TOOL_THRESHOLD = 300.0
 
-    def __init__(self, agent_id: str, jsonl_dir: Path, baseline: dict, now: float, pid: object) -> None:
+    def __init__(
+        self,
+        agent_id: str,
+        jsonl_dir: Path,
+        now: float,
+        pid: object,
+        scanner: TranscriptScanner | None = None,
+    ) -> None:
         self.agent_id = agent_id
         self.jsonl_dir = jsonl_dir
-        self.baseline = baseline
         self.pid = pid
+        self.scanner = scanner if scanner is not None else TranscriptScanner(jsonl_dir, now)
         self.last_activity_at = now
         self.in_flight_since: float | None = None
         self.stall_reported = False
@@ -474,16 +523,26 @@ class StallTracker:
 
     def observe(self, now: float) -> None:
         """Evaluate one poll tick: reset on activity, else report a stall past threshold."""
-        size_grew = _has_jsonl_activity(self.jsonl_dir, self.baseline)
-        inflight = False if size_grew else _last_entry_is_inflight_tool(self.jsonl_dir)
+        size_grew = self.scanner.tick(now)
+        inflight = False if size_grew else self.scanner.last_entry_inflight()
+        if (
+            not size_grew
+            and not inflight
+            and not self.stall_reported
+            and (now - self.last_activity_at) >= self.STALL_THRESHOLD
+        ):
+            # About to declare a stall — force a full re-walk first so a
+            # transcript born since the last refresh (new session, fresh
+            # sub-agent) counts before we cry wolf.
+            self.scanner.refresh(now)
+            size_grew = self.scanner.tick(now)
+            inflight = False if size_grew else self.scanner.last_entry_inflight()
         if size_grew or inflight:
-            self._mark_active(now, size_grew, inflight)
+            self._mark_active(now, inflight)
         elif not self.stall_reported and (now - self.last_activity_at) >= self.STALL_THRESHOLD:
             self._report_stall(now)
 
-    def _mark_active(self, now: float, size_grew: bool, inflight: bool) -> None:
-        if size_grew:
-            self.baseline = _snapshot_jsonl_sizes(self.jsonl_dir)
+    def _mark_active(self, now: float, inflight: bool) -> None:
         self.last_activity_at = now
         if self.stall_reported:
             _stdout_event(f"[watchdog.resumed] {self.agent_id}: JSONL activity resumed — stall cleared")
@@ -546,10 +605,12 @@ def watch_agent(
         agent_id: Branch token like ``@drone`` (or bare ``drone``).
         timeout_seconds: Maximum wait. Default 10 min — catches crashes + silent-finishes
             fast; long agent watches should pass an explicit ``--timeout``.
-        poll_interval: Seconds between checks. Default 5.0 — the per-tick work (lock
-            stat, PID liveness, one-dir JSONL size scan) is cheap, so a tight cadence
-            just burns CPU. 5s keeps completion latency invisible on multi-minute
-            dispatches while the 300s stall threshold has ample resolution.
+        poll_interval: Seconds between checks. Default 5.0 — a tick is a lock
+            stat, a PID liveness check, and one ``os.stat`` pass over the
+            scanner's cached transcript list (~1-2ms; the full re-walk runs
+            every ``TranscriptScanner.REFRESH_INTERVAL``). 5s keeps completion
+            latency invisible on multi-minute dispatches while the 300s stall
+            threshold has ample resolution.
 
     Returns:
         dict with keys: woke, reason, elapsed, agent_state, exit_code, agent_id.
@@ -602,7 +663,7 @@ def watch_agent(
         _stderr(f"[watchdog.agent] {agent_id}: lock present, monitor PID={initial_pid}")
 
         jsonl_dir = _get_jsonl_projects_dir(branch_path)
-        tracker = StallTracker(agent_id, jsonl_dir, _snapshot_jsonl_sizes(jsonl_dir), time.monotonic(), initial_pid)
+        tracker = StallTracker(agent_id, jsonl_dir, time.monotonic(), initial_pid)
 
         while True:
             elapsed = time.monotonic() - started_at

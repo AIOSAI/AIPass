@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: override.py
 # Description: Logger Override System
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-10
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -18,7 +18,7 @@ import sys
 from typing import Optional
 
 # Import from prax config
-from aipass.prax.apps.handlers.config.load import DEFAULT_LOG_LEVEL, get_debug_prints_enabled
+from aipass.prax.apps.handlers.config.load import get_debug_prints_enabled, resolve_log_level
 
 # Import logging setup
 from aipass.prax.apps.handlers.logging.setup import setup_individual_logger
@@ -75,8 +75,9 @@ def enhanced_getLogger(name: Optional[str] = None) -> logging.Logger:
         for handler in individual_logger.handlers:
             original_logger.addHandler(handler)
 
-        # Set appropriate level
-        original_logger.setLevel(DEFAULT_LOG_LEVEL)
+        # Set appropriate level. The handlers copied above carry their own
+        # per-tier levels, so this gate must not be the stricter of the two.
+        original_logger.setLevel(resolve_log_level())
 
         # Prevent propagation to root logger (stops console output)
         original_logger.propagate = False

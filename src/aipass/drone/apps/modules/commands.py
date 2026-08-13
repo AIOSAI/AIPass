@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commands.py
 # Description: Module orchestrator for custom command shortcuts
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-11
 # =============================================
 
 """Module orchestrator for custom command shortcuts.
@@ -162,7 +162,8 @@ def print_introspection() -> None:
     console.print("  [cyan]handlers/command_registry/[/cyan]")
     console.print("    - [cyan]ops.py[/cyan] [dim](add_command, remove_command, update_command, command_exists)[/dim]")
     console.print(
-        "    - [cyan]lookup.py[/cyan] [dim](lookup_command, match_command, list_commands, list_commands_by_branch)[/dim]"
+        "    - [cyan]lookup.py[/cyan] [dim](lookup_command, match_command, list_commands, "
+        "list_commands_by_branch)[/dim]"
     )
     console.print()
 
@@ -180,9 +181,9 @@ def print_help() -> None:
     console.print("commands -- Custom command shortcuts")
     console.print()
     console.print("Commands:")
-    console.print("  add <name> <target> <cmd> [args...] [--desc=...] [--branch=...]")
+    console.print("  add <name> <target> <cmd> \\[args...] [--desc=...] [--branch=...]")
     console.print("  remove <name>                        Remove a custom command")
-    console.print("  list [branch]                        List commands (optionally by branch)")
+    console.print("  list \\[branch]                        List commands (optionally by branch)")
     console.print("  lookup <name>                        Look up a command by name")
 
 

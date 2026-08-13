@@ -208,7 +208,7 @@ drone/
 ├── docs/                          # Public documentation
 ├── docs.local/                    # Investigation reports and policies
 ├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 986 tests across 25 test files
+└── tests/                         # 1002 tests across 25 test files
 ```
 
 ### Routing Flow
@@ -266,6 +266,14 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 
 - Auth is checked once at the top of `git_module.handle_command()` before any handler is called
 - Unauthorized commands return a clear "Access denied" message with the caller's tier
+
+### gh Passthrough Rendering
+
+`issue`, `run`, and `workflow` pass straight through to the `gh` CLI. One exception: `issue view <n>`.
+
+gh's default view is a GraphQL query that requests `repository.issue.projectCards` — a Projects-classic field GitHub now rejects outright. The call returned the deprecation notice and **no issue at all** (exit 1), and `--comments` failed the same way.
+
+`_rewrite_issue_view()` in `git_module.py` renders the same view from pinned `--json` fields plus a `--template`, so the dead field is never requested. `--comments` becomes a requested field rather than a flag (it conflicts with `--json`). Callers who already chose a rendering — `--json`, `--jq`, `--template`, `--web` — keep their own invocation untouched; unrelated flags like `--repo` are preserved. No other issue subcommand is rewritten.
 
 ### Dev Branch Model
 
@@ -370,12 +378,12 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-986 tests across 25 test files, covering all layers:
+1002 tests across 25 test files, covering all layers:
 
 | Area | Files | Tests |
 |------|-------|-------|
 | Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py` | ~128 |
-| Git operations | `test_git_module.py`, `test_system_pr.py`, `test_devpulse_plugins.py`, `test_git_access.py`, `test_tag_handler.py` | ~170 |
+| Git operations | `test_git_module.py`, `test_system_pr.py`, `test_devpulse_plugins.py`, `test_git_access.py`, `test_tag_handler.py` | ~187 |
 | Handlers | `test_executor.py`, `test_registry_handler.py`, `test_discovery.py` | ~99 |
 | Infrastructure | `test_generic_adapter.py`, `test_module_registry.py`, `test_config.py` | ~66 |
 | Features | `test_commands.py`, `test_scan.py`, `test_json_handler.py`, `test_rm.py` | ~181 |
@@ -394,7 +402,7 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ---
 
-**Seedgo:** 99% | **Tests:** 981 pass, 5 skip | **Last Updated:** 2026-08-08
+**Seedgo:** 100% | **Tests:** 1002 pass, 5 skip | **Last Updated:** 2026-08-12
 
 ---
 [← Back to AIPass](../../../README.md)

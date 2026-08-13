@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-04-22
-# Modified: 2026-04-22
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -79,9 +79,18 @@ def _get_branch_info_fn():
 
 COMMAND = "send"
 
+# The only commands this module answers to. It used to ignore `command`
+# entirely and run a send for whatever reached it, so every command an earlier
+# module declined — `dispatch`, and any send another module had already run and
+# reported as failed — was executed here a second time. That is what put two
+# sent records on disk and printed every refusal twice.
+COMMANDS = ("send", "email")
+
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Module discovery entry point — routes to handle_send."""
+    """Module discovery entry point — routes send/email to handle_send."""
+    if command not in COMMANDS:
+        return False
     if not args:
         print_introspection()
         return True
@@ -92,23 +101,33 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 
 def handle_send(args: List[str]) -> bool:
-    """Orchestrate email sending workflow."""
+    """Orchestrate email sending workflow.
+
+    Returns True for "I recognised and ran this command", which is not "it
+    worked" — a refused delivery already reported itself through error(), which
+    sets the process failure flag that main() maps to exit 2. Returning False
+    here sent the router on to the next module, which ran the send again and
+    then printed "Unknown command: email" over a command it had just executed.
+    """
     json_handler.log_operation("send_email_initiated", {"args_count": len(args)})
     parsed = parse_send_args(args)
 
     if parsed["mode"] == "error":
         error(parsed["error"])
         console.print('   Multiple: send @branch1 @branch2 "Subject" "Message"')
-        return False
+        return True
 
     if parsed["mode"] == "interactive":
-        return _send_interactive()
+        # A cancelled or failed interactive send is still a handled command —
+        # returning its bool made "Cancelled" fall through to "Unknown command: email".
+        _send_interactive()
+        return True
 
     recipients = parsed["recipients"]
     from_branch = parsed.get("from_branch")
     if len(recipients) == 1:
         target = resolve_dispatch_target(recipients[0], parsed["auto_execute"], _get_branch_info_fn())
-        return _send_direct(
+        _send_direct(
             recipients[0],
             parsed["subject"],
             parsed["message"],
@@ -117,7 +136,9 @@ def handle_send(args: List[str]) -> bool:
             target,
             parsed["no_memory_save"],
             from_branch=from_branch,
+            upsert_key=parsed.get("upsert_key"),
         )
+        return True
 
     console.print(f"\n[bold]Group send to {len(recipients)} recipients...[/bold]")
     ok = 0
@@ -132,10 +153,11 @@ def handle_send(args: List[str]) -> bool:
             target,
             parsed["no_memory_save"],
             from_branch=from_branch,
+            upsert_key=parsed.get("upsert_key"),
         ):
             ok += 1
     console.print(f"\nGroup send complete: {ok}/{len(recipients)} delivered")
-    return ok > 0
+    return True
 
 
 def _send_interactive() -> bool:
@@ -174,14 +196,25 @@ def _send_direct(
     dispatched_to=None,
     no_memory_save=False,
     from_branch=None,
+    upsert_key=None,
 ) -> bool:
-    """Direct email send - thin wrapper over send handlers."""
+    """Direct email send - thin wrapper over send handlers.
+
+    upsert_key: optional repeat signature. When set, the recipient's open
+    message carrying that key from this sender is rewritten in place with a
+    bumped counter instead of a second message landing next to it.
+    """
     try:
         user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
         if auto_execute:
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 
         if to_branch.lower() in ["all", "@all"]:
+            # Broadcast has no single message to update — refuse rather than
+            # silently dropping the key and stacking N messages per repeat.
+            if upsert_key:
+                error("--upsert-key is not supported for broadcast (@all) sends")
+                return False
             return _send_broadcast(subject, message, user_info, auto_execute, no_memory_save, reply_to, dispatched_to)
 
         success, error_msg = send_to_single(
@@ -199,12 +232,17 @@ def _send_direct(
             _delivery_callback,
             json_handler.log_operation,
             update_central,
+            upsert_key=upsert_key,
         )
 
         if success:
             label = "\\[dispatch: queued for daemon]" if auto_execute else ""
+            if upsert_key:
+                label = f"\\[upsert: {upsert_key}]"
             console.print(f"[green]Email sent to {to_branch} {label}[/green]")
-            if auto_execute:
+            # An upsert send may have landed on an existing message; firing the
+            # dispatch trigger for it would wake work off a repeat signal.
+            if auto_execute and not upsert_key:
                 _fire_dispatch_trigger(to_branch, subject)
             return True
         else:

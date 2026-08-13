@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send.py
 # Description: Email Send Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-08-07
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from typing import Optional, Tuple, List, Dict, Any
 
 from aipass.prax import logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.email.create import mark_sent_record_refused
 
 
 def _log_resolved_sender(user_info: Dict[str, Any], from_branch: Optional[str], strategy: str) -> Dict[str, Any]:
@@ -158,6 +159,12 @@ def send_to_broadcast(
         results.append((branch.get("name", branch["email"]), success, error_msg))
 
     success_count = sum(1 for _, s, _ in results if s)
+    if success_count == 0:
+        # Nothing left the building. The single sent record covers every
+        # recipient, so leaving it stamped "sent" claims a delivery that
+        # happened zero times.
+        first_error = next((err for _, s, err in results if not s and err), "no recipient accepted delivery")
+        mark_sent_record_refused(email_file, first_error)
     log_operation_fn("broadcast_sent", {"recipients": len(branches), "successful": success_count})
 
     # Fire trigger event (best-effort)
@@ -193,9 +200,15 @@ def send_to_single(
     on_delivered_callback,
     log_operation_fn,
     update_central_fn,
+    upsert_key: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Execute single-recipient email send.
+
+    Args:
+        upsert_key: Optional stable signature for a repeating signal. When set,
+            delivery rewrites the open message already carrying this key from
+            this sender instead of stacking a new one. None = today's behavior.
 
     Returns:
         Tuple of (success, error_msg). error_msg is None on success.
@@ -214,11 +227,19 @@ def send_to_single(
         email_data["dispatched_to"] = dispatched_to
     if no_memory_save:
         email_data["no_memory_save"] = True
+    # Carried on email_data rather than as a kwarg: delivery honors both, and
+    # this path takes its delivery function by injection.
+    if upsert_key:
+        email_data["upsert_key"] = upsert_key
 
     success, error_msg = deliver_email_to_branch_fn(to_branch, email_data, on_delivered=on_delivered_callback)
 
     if success:
-        log_operation_fn("email_sent", {"to": to_branch, "subject": subject, "auto_execute": auto_execute})
+        payload = {"to": to_branch, "subject": subject, "auto_execute": auto_execute}
+        # Only present for upsert sends — a plain send logs exactly what it always did
+        if email_data.get("upsert_action"):
+            payload["upsert_action"] = email_data["upsert_action"]
+        log_operation_fn("email_sent", payload)
 
         # Fire trigger event (best-effort)
         try:
@@ -237,6 +258,10 @@ def send_to_single(
 
         return True, None
     else:
+        # The sent record is written before delivery is attempted, so a refused
+        # send has already left a "sent" file on disk. Restamp it — a record the
+        # fence turned away must never read as delivered.
+        mark_sent_record_refused(email_file, error_msg or "delivery refused")
         log_operation_fn("email_failed", {"to": to_branch, "error": error_msg})
         return False, error_msg
 

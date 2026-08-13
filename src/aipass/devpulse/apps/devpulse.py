@@ -104,7 +104,7 @@ def print_help():
     modules = discover_modules()
     console.print("[bold cyan]DEVPULSE[/bold cyan] — Usage")
     console.print()
-    console.print("  drone @devpulse <command> [args...]")
+    console.print("  drone @devpulse <command> \\[args...]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     for module in modules:

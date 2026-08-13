@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diff_handler.py
 # Description: Scoped git diff for branch directories
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-08-11
 # =============================================
 
 """Scoped git diff for branch directories."""
@@ -35,10 +35,11 @@ def get_branch_diff(branch_dir: Path, staged: bool = False) -> dict:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.error("git diff failed: %s", exc)
-        return {"diff": "", "files_changed": 0, "message": f"git diff failed: {exc}"}
+        return {"ok": False, "diff": "", "files_changed": 0, "message": f"git diff failed: {exc}"}
 
     if result.returncode != 0:
         return {
+            "ok": False,
             "diff": "",
             "files_changed": 0,
             "message": f"git diff error: {result.stderr.strip()}",
@@ -77,4 +78,4 @@ def get_branch_diff(branch_dir: Path, staged: bool = False) -> dict:
     )
     logger.info(message)
 
-    return {"diff": filtered_diff, "files_changed": files_changed, "message": message}
+    return {"ok": True, "diff": filtered_diff, "files_changed": files_changed, "message": message}

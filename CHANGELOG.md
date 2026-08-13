@@ -9,6 +9,388 @@ PyPI version — not the changelog header.
 
 ---
 
+## [2026-08-12] — v2.7.16: admin grant lane live, cross-project bridge, BAUD product night, telegram blip fix
+
+**fix(trigger tests)** — signature-fragmentation tests pin their own registry
+(by @devpulse in-train, PPLAN-0034). Two collapse tests read the live
+`AIPASS_REGISTRY.json` through `_find_repo_root()` — green on any dev machine,
+red on CI's bare checkout where the untracked registry doesn't exist and name
+collapse silently skips. Went unseen for 8 pushes because nobody watched the
+PR checks between trains. Fix: an autouse fixture registry carrying the corpus
+names, the same pattern the file's registry-lifecycle tests already used.
+Escalation lane code untouched. Proven red→green in a tracked-only
+`git archive` checkout; trigger suite 932 green.
+
+**fix(skills)** — telegram send path stops escalating network blips (by
+@skills, base_bot v1.6.1, FPLAN-0402, error 9353d1ae). `send_message`
+exhaustion is now classified with the same `_is_network_error()` the poll
+path already used: unreachable host logs WARNING ("sendMessage abandoned...
+Telegram unreachable") instead of a flat ERROR; API rejections and unknown
+faults still log ERROR. Retry budget, backoff timing, and the
+`messages_failed` health counter unchanged, so real outages stay visible.
+Bonus in the same function: HTTPError caught separately with the description
+pulled from the response body — a 400 now names its cause. 7 new tests plus
+a real-stack proof (broken `socket.getaddrinfo` through genuine urllib);
+telegram suite 1090 green, audit 100%, all 5 bots restarted.
+
+**fix(ai_mail)** — cross-project replies deliver back (by @ai_mail, FPLAN-0401
+phase 5b — the gap the live proof caught: the first-ever admin dispatch
+reached @baud, but @baud's reply was refused at the boundary; test suites
+modeled mail going in, nobody modeled the answer coming out). New
+`_is_sanctioned_reply`: a reply crosses the boundary iff it carries an
+`in_reply_to` present in the SENDER'S OWN inbox and is addressed to that
+mail's sender (or its `reply_to` — fields only the original sender could have
+written). Forged ids, redirected recipients, and non-reply outbound all
+refuse with today's wording character for character. Patrick's same-evening
+ruling pinned the model: REPLIES ONLY — projects citizens answer
+conversations the admin opened, never initiate (his own live test from the
+baud seat is the negative proof, caught in the log at 17:54). Ceremony
+happened mid-build; the suite's lane-dark tests were rebuilt to simulate a
+failing grant instead of asserting a dark world, with a stat-only key guard
+(never content). 9 tests red-first + 2 mutation checks, suite 1048 green,
+audit 100%.
+
+**feat(ai_mail)** — cross-project bridge, built dark (by @ai_mail, FPLAN-0401
+phase 5, DPLAN-0288). Verified-admin dispatches can now resolve and deliver
+into `projects/*` trees (@baud et al.): branch resolution gains an admin-only
+sweep of `projects/*/*_REGISTRY.json` that runs LAST (a local branch always
+wins), and `_check_cross_project_boundary` gains a verified-admin exemption
+placed after every existing early-return — same-project mail never touches
+the grant (tested), everyone else's refusal wording unchanged character for
+character. Privilege verdict deliberately NOT cached per process (a cache
+keeps a torn-up grant alive = failing open). Gates mutation-proven (`if
+True:` substitution sent 4 tests red incl. both lane-dark end-to-ends). 18
+tests red-first, suite 1039 green, audit 100%, no new bypasses. One
+pre-existing env-sensitive test fixed and flagged. Vera-Studio (separate
+repo) stays phase 2.
+
+**feat(ai_mail)** — admin dispatch lane, built dark (by @ai_mail, FPLAN-0401
+phase 4, DPLAN-0288). `wake_branch()` gains keyword-only `admin=False`: a
+VERIFIED devpulse dispatch to a manager-class target now routes headless
+through the dispatch-monitor pipeline (350k pin) instead of being mail-only.
+Verification lazy-imports devpulse's `verify_admin_grant` 5-leg reference —
+one implementation, no drift; ImportError or missing key = lane dark = today's
+behavior byte-identical. WAKE_BLOCKLIST now fences BOTH privileged lanes: an
+admin dispatch targeting @devpulse is still refused (tested) — the seat
+asymmetry stands. Scheduled-wins ordering pinned (a 5am rotation never logs as
+admin). The `wake.py __main__ --sender` door closed on the same rail
+(live-proven refusal). Verifier only runs for the grant holder (noise
+control); a raising verifier degrades to non-admin and mail still sends. 25
+tests (lane red-first; wiring mutation-tested and said so), suite 1021 green,
+audit 100% with two documented bypass entries (no compliant cross-branch
+import shape exists — reasoning in bypass.json).
+
+**security(ai_mail)** — sender-spoof holes closed on both doors (by @ai_mail,
+FPLAN-0401 phase 1, DPLAN-0288). The `--from` flag (dispatch-send) and the
+`--sender` flag (wake path — second door self-found by @ai_mail, not in the
+scout report) were unauthenticated strings fed straight into `wake_branch`'s
+privileged `sender` param: any caller could claim `@daemon` and unlock the
+interactive manager wake. New `verified_caller.py` rail resolves the real
+caller from `AIPASS_CALLER_BRANCH` / passport-walk (never bare cwd); a
+privilege-bearing claim the rail can't prove is refused loudly BEFORE the
+send; ordinary `--from` mail identity untouched; the wake sender (and
+wake-back) now always attribute to whoever actually ran the command. 27 tests
+red-first incl. a structural canary that fails if a future sender literal in
+wake.py skips the privileged set. Live-proven refusals (exit 2). Suite 996
+green, audit 100%.
+
+**feat(spawn)** — admin-grant ceremony support + admin never mintable (by
+@spawn, FPLAN-0401 phase 2, DPLAN-0288). `ensure_admin()` mirrors the
+sealed-owner writer: sets `admin:true` on the devpulse registry ENTRY only —
+the seat is a constant, any other name is a named refusal with zero writes;
+CLI `drone @spawn grant-admin` takes no branch argument by design (Patrick's
+one-time ceremony). Success output states the honesty leg: the flag is one of
+five legs, alone it grants nothing. `FORBIDDEN_CLASSES={'admin'}` fenced at
+five doors incl. PRE-parse (create's grammar would otherwise swallow "admin"
+as a target path and never reach a class check — self-found). 28 tests
+red-first, suite 409 green, audit 100%.
+
+**feat(devpulse)** — birth-certificate admin grant tooling (by devpulse,
+FPLAN-0401 phase 3, DPLAN-0288). Patrick's design: the admin privilege rides
+on devpulse's EXISTING birth certificate (SYSTEM-minted 2026-03-07, in
+spawn's never-update list, untracked by git). New `admin_grant` module —
+keygen (`~/.aipass/admin_grant.key`, 0600, outside every repo), mint (signed
+`privileges` block, HMAC-SHA256 over canonical cert), verify (the 5-leg
+contract: verified caller → registry-resolved cert path → content →
+signature → registry flag; every refusal named, missing key = lane dark).
+Ceremony verbs owner-gated. 17 tests incl. the tamper canary (any
+post-signing edit kills the signature), suite 486 green, checklist clean.
+
+**feat(daemon)** — nightly steward rotation shipped dark (by @daemon,
+DPLAN-0287 daemon-to-production). New `rotation` schedule type: one
+fleet-steward job (05:00, sonnet, ships `enabled:false` — flip to go live)
+walks the citizen roster one branch per night with a templated steward prompt
+(inbox → todos → logs → self-audit → APLAN → report); busy target = logged
+miss, pointer advances, no starvation logic. @devpulse never on the roster;
+managers excluded behind `include_managers:false` with a live signature probe
+on wake_branch's `scheduled` param (lane detected: manager wakes go headless +
+pinned the moment the knob flips). Discovery widened to `projects/*` sealed
+registries (five manager seats found and swept — roster unchanged until the
+knob, by design). Runstate prune now persists on no-fire ticks (stale June
+entries finally cleared). 62 new tests (40 rotation), suite 406 green, audit
+100%. First live steward night still unproven — flip is the ceremony.
+
+**feat(ai_mail)** — scheduled-manager headless lane (by @ai_mail, DPLAN-0287
+daemon-to-production). `wake_branch()` gains keyword-only `scheduled=False`:
+daemon-scheduled wakes of manager-class citizens now route headless through
+the dispatch-monitor pipeline (350k pin applies) instead of an unattended,
+unpinned interactive tmux session; WAKE_BLOCKLIST targets are refused in the
+scheduled lane with a named reason (lane-gated, fail-closed). Defaults keep
+every existing path byte-identical — manual manager self-wakes stay
+interactive. 8 tests red-first, suite green, audit 100%. Groundwork for the
+5am steward rotation (@daemon building the rotation primitive in parallel).
+
+**fix(prax)** — live-monitor display crash no longer kills the Telegram relay
+(by @prax, morning trigger-triage dispatch). One tailed log line carrying a
+bracketed path (`[/usr/bin]`) raised an uncaught Rich MarkupError inside
+`_display_worker`, killing the queue's only consumer — the relay hangs off the
+same thread, so Patrick's TG monitor feed went silently dark 2026-08-11 11:29
+while event_queue warned "queue full" every 30s (1144 warnings across rotated
+logs; the flood was the alarm, not the fire). unified_stream 0.2.0 escapes
+every dynamic value before markup (bracketed paths crashed; `[event_queue]`
+prefixes were silently eaten); monitor 0.4.0 guards each render (one undrawable
+line costs one line, failures counted + rate-limited) and relays BEFORE
+rendering so a console failure can never take the feed again. Separate defect
+self-found while proving: the service's `run` argv token was parsed as a branch
+scope once scoping became real (08-11 fix), so a naive restart would have come
+up scoped to nonexistent branch RUN — leading `run` now recognized as the
+subcommand (monitor.py `_standalone_run_args`). Red-first A/B on the real
+stack + headless live injection; 25 new tests through a REAL Rich console
+(shared conftest MagicMock cannot fail this class); suite 1221 green, audit
+100%. The queue-full WARNING stays loud by design — it was the only instrument
+still reporting the outage.
+
+**night-shift 2026-08-12** — @baud's first-day field notes turned into three
+same-night fixes (FPLAN-0400, each owner-dispatched, red-first, live-verified
+from the reporting seat): **fix(hooks)** cross-project file fence shipped
+(GH #733: edit_gate 1.3.0 gains a project layer — a projects/* seat could
+write src/aipass/* unchallenged because both path sides resolved to empty
+branch; upward+sideways now blocked, downward allowed, proven through the
+real bridge from @baud's seat). **fix(ai_mail)** refused sends no longer
+recorded as delivered (sent record was stamped before delivery; refusals now
+restamped with reason, kept as evidence) + the scrambled refusal output was
+a real routing bug (send handler answered for commands it didn't own, so the
+router re-ran failed sends — doubled records included; hard command gate,
+refusals exit 2, outcomes announced instead of intent). **fix(memory)**
+GH #728 normalize guardrail fails-open fixed for real (per-entry number
+validation — crash mode structurally gone; unreadable rows hold their index
+and warn on three channels; numeric-string numbers self-heal on next touch).
+Plus: fleet-wide `autoCompactWindow` 350k stamped (17/17 branches + dispatch
+pin via @ai_mail, m11 phase 4), the fleet rich-markup sweep (29 sites) rides
+this train, and BAUD m11 settings arc closed out (baud repo 5d340b7).
+Issues #733/#728 commented and left open pending independent verify.
+
+**fix(trigger)** — escalation signatures no longer fragment on counts and
+citizen names (by @trigger off a devpulse dispatch; the 2026-08-11 storm
+put 18 digests for ONE logical event in the manager inbox — the state
+table held 148 signatures for it, 30% of the cap). The collapse is local
+to the escalation signature path (registry fingerprints keep their finer
+grain for `errors list`/medic): standalone numbers with optional short
+unit suffix → `<id>` (the suffix rule caught "1237ms" durations — and with
+them a second, unreported 72-signature hooks-gate storm), registered
+citizen names + any `@handle` → `<branch>`. The placeholder deliberately
+matches the registry's `<id>` token — a different token measurably
+re-fragments at the 100 boundary. Measured on live state: prax event
+148→6, hooks storm 72→6, corpus 500→250; the residual 6 are genuine
+source-kind variance (file/log/agent/hook), meaning not values, left
+untouched. Also a test-integrity catch: a MagicMock'd normalizer had one
+test green without ever running the code it named, and two more vacuous
+via numeric distinguishers — all five repaired against the real
+normalizer. 12 new tests incl. the pinned storm pair, canary red-first
+(9/12 red on revert, 3 anti-over-collapse guards correctly green both
+ways), suite 929 green, audit 100%.
+
+**fix(skills/telegram)** — log streamer 400s root-caused and killed (by
+@skills off a devpulse escalation dispatch; 80 lifetime failures since
+08-08). One log line over Telegram's ~4096 cap slipped the batch guard —
+`if batch_len + line_len > MAX and batch:` never flushes an EMPTY batch, so
+an oversized line went out whole; 5/5 correlation between >4000-char router
+lines and 400s within 2-6s, burst window = @seedgo's audit window. The API
+named the offense once asked: probed sendMessage with real credentials —
+"message is too long" confirmed; MarkdownV2 escaping empirically RULED OUT
+(4000 chars of brackets/underscores/stars accepted; no parse_mode on this
+path). log_streamer.py 1.2.0: oversized lines chunk with lossless [i/n]
+markers before batching, empty/whitespace payloads refused pre-network,
+blank lines dropped by stated rule, and the 400 response body is now
+LOGGED with payload size instead of discarded. Live-proven: the actual
+5,167-char offender now delivers as 2 messages; post-restart canary (5,300
+chars + blank + whitespace) produced zero 400s. 10 new tests, telegram
+suite 1083 green, audit 100%.
+
+**feat(seedgo)** — rich_markup, the 44th standard: unescaped `[tokens]` in
+console.print are silently eaten by Rich at render time — correct source,
+100% audits, mangled output (by @seedgo off @prax's dispatch; the rule
+class devpulse swept locally the night before, now fleet-enforced).
+Measured before shipping: 29 real losses across 14 branches, fleet average
+93% but nobody under the 75% threshold, so it registered live without
+turning anyone red. The losses concentrate in apps/<branch>.py --help
+surfaces — the text read by the person with the least context. One
+self-caught false positive fixed pre-fleet (`markup=False` pass-through is
+the correct move, not a violation; both directions pinned). Also ships the
+audit exit artifact @prax asked for (`.seedgo/last_audit.json`, complete
+untruncated violation set, `--artifact/--no-artifact`) and retires the
+"NEVER use logger.debug()" doctrine line — which the grep found was
+contradicting debug_print_content's own advice. 77 new tests (suite 1494
+green), self-audit 100% across all 44.
+
+**chore(prax)** — bypass debt paid with measurements, not guesses (by
+@prax, riding @seedgo's new audit artifact): ran the branch un-bypassed,
+attributed all 76 rules, re-ran with survivors — 45 deleted, 31 remain,
+audit 100%, suite 1132 green. All 45 were waivers that outlived their
+violation; the method is handed to @seedgo in case it becomes a command.
+
+**fix(drone/auth)** — passport-gate denial now names the caller's cwd (by
+@devpulse in @drone's tree — small-fix lane; answers @trigger's x10 repeat
+escalations on captured_auth/captured_git_module). The "cannot verify
+caller" warning carried no CWD or PID, so identifying who kept tripping
+the gate took a cross-log timestamp correlation instead of one grep
+(culprits turned out to be sessions running `drone @git status` from
+passport-less dirs like repo root). Message now embeds `caller cwd:`;
+@trigger's normalizer collapses paths to `<path>` (verified), so repeat
+signatures stay unified across callers and the digest upsert counter keeps
+climbing in place. Live-verified from a passport-less dir; drone suite 985
+green.
+
+**feat(prax)** — SystemLogger.debug(), and the gate that makes it real (by
+@prax, promised follow-through ex-todo #116, morning-wave dispatch).
+debug() alone would have shipped dead: DEFAULT_LOG_LEVEL="INFO" was
+hardcoded at four setLevel sites, and Python's logger-level gate runs
+before any handler's — DirectLogger has carried a debug() since 2026-02-27
+that never emitted a line. The dormant `log_level` config key (declared
+since 2025, loaded, read by nothing) is now read per tier, plus an
+AIPASS_LOG_LEVEL env override; precedence env → tier → INFO, unrecognised
+values warn once and fall through. Logger sits at min() of the two tiers
+so "quiet central, verbose branch-local" actually works (asserted by
+test). Default behaviour unchanged — no config, no env, nothing new in any
+log. Canary-verified both directions + live-probed on the production path;
+every gating test carries an INFO control line (an absent debug marker
+alone proves nothing). 26 new tests, suite 1132 green, audit 100%. Known
+caveat (documented): levels bind at logger creation — long-running
+processes pick up changes on restart. Two fleet rules now contradict
+shipped code ("logger.debug not supported" in @hooks auto_fix +
+@seedgo standards text); @prax dispatched both owners to retire them.
+
+**feat(daemon)** — fleet inbox sweep: unread mail can no longer rot silently
+(by @daemon, FPLAN-0394, morning-wave dispatch; design from devpulse backlog
+ex-todo #119). Daily 09:00 job (own `.daemon/schedule.json`, wake-only →
+haiku wake runs `drone @daemon inbox-sweep`): scans every active branch's
+inbox for `status=='new'` older than 24h and wakes the owners, oldest-first.
+`inbox_scanner.py` is pure detection (no cross-branch imports);
+`inbox_sweep.py` owns wake policy — one wake per branch per sweep, 2s
+stagger, managers skipped and reported (self-enforced: `@daemon`-sender
+wakes bypass ai_mail's manager gate by design, so the sweep checks
+citizen_class + is_wake_blocked itself), capped at 5 wakes/pass with
+deferred branches named, never dropped (`--limit` overrides; also
+`--dry-run`, `--hours N`). First live dry-run found the disease it was
+built for: 8 stale unread across @backup/@drone/@spawn/@seedgo, oldest 62h.
+44 new tests (suite 344 green), audit 100%, 5 dead bypass rules pruned
+same-touch.
+
+**feat(ai_mail)** — culture fence line in dispatch headers (by @ai_mail,
+DPLAN-0276 leftover, morning-wave dispatch). Both header constants
+(DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER) now carry the attribution
+fence after the sync-subagents warning: "Found work in the tree you cannot
+explain? REPORT it — never invent an author." Unexplained changes are
+evidence, stated and attributed to no one — the rule that closed the
+DPLAN-0276 invented-author incident now rides every dispatch a recipient
+reads. header.py 1.2.0; 3 canary-verified tests (fence stripped → red,
+restored → green), including one asserting the fence survives
+prepend_dispatch_header. Suite 924 green, audit 100%. The second DPLAN-0276
+leftover (stale TRUST-BREAK banner commands) turned out to live in @hooks'
+config loader, not @ai_mail — @ai_mail measured it (`drone @hooks trust
+enroll` is not a real verb; the working path is `aipass trust <path>`) and
+emailed @hooks so the one-line fix rides their next touch.
+
+**perf(devpulse)** — watchdog poll loop 142× cheaper (by @devpulse; todo
+#126, night shift FPLAN-0393). Each 5s tick cost 152ms of CPU (~3% of a
+core per armed watchdog, compounding across concurrent watches): two
+pathlib rglobs over the branch's 300-file transcript dir plus a 1MB tail
+re-read even when nothing changed. agent.py 1.3.0 introduces
+TranscriptScanner — full re-walk only every 60s (os.walk), per-tick is one
+os.stat pass over the cached list (1.07ms), and the in-flight tail parse is
+cached on (size, mtime) since an unchanged file cannot change its last
+entry. Also closes a remaining stall false-positive: a parent blocked on a
+sub-agent that is silently composing (newest transcript idle-looking, no
+growth) now counts the parent's own in-flight Agent tool_use — both the
+newest and newest-top-level transcripts are candidates — and the tracker
+forces a fresh re-walk before ever declaring STALLED so a transcript born
+between refreshes suppresses the false alarm. Live-verified: pidstat
+steady-state 1.73% → 0.27% per handler; synthetic-lock watch woke next tick
+on lock removal. 6 new scanner tests; watchdog suite 27, devpulse suite 469
+green. Follow-up after CI's fleet audit caught the rewrite honestly
+(unused_function 98%): the four pre-scanner helpers the loop no longer
+calls were deleted rather than bypassed, their tests ported to the scanner
+and the pure `_inflight_from_lines` (the actual production path), restoring
+the audit to 100%; four dead encapsulation bypass rules pruned in the same
+touch.
+
+**fix(drone/git)** — `drone @git status` and `diff` no longer false-green
+on git failure (by @devpulse in @drone's tree — small-fix lane; backlog
+flag from old todo #102). Both exited 0 unconditionally, and `status --all`
+even overwrote the handler's error message with "0 file(s) changed in repo"
+— a failed git read was indistinguishable from a clean tree to scripts and
+CI. Handlers now stamp `ok` on every return; the module surfaces failures
+as exit 1 with the git error verbatim on stderr, and the `--all` reword
+only applies to success. 4 regression tests (module + handler level); drone
+suite 985 green.
+
+**chore(prep-skill)** — /prep now pins the interrupted thread as step 0 and
+ends every run with a mandatory `Resuming:` line naming what was in flight
+and the next concrete action (Patrick, todo #127: auto-triggered preps were
+flushing the live task — the session wrapped up tidily and then lost the
+thread). Pit stop, not a finish line: if something was in flight, the same
+turn picks it back up; before a /compact the line carries enough for the
+post-compact self to continue without re-asking.
+
+**fix(devpulse)** — the bracket sweep @prax requested, run on devpulse's own
+surfaces (night shift FPLAN-0393): `drone @devpulse --help` was silently
+losing its `[args...]` usage placeholder and `watchdog --help` its optional
+`[command]` — same Rich markup-eating class as the prax fix below. Both
+escaped; devpulse gains its own rendered-output canary suite
+(test_help_markup.py, 7 tests through a REAL Rich console) covering the
+help surfaces plus the watchdog status/cancel `[handle]` prefixes, with a
+control test documenting why `[--timeout SECONDS]` never needed escaping
+(dash-leading tags are not valid Rich markup). Compass/feedback surfaces
+audited clean.
+
+**fix(prax)** — Rich markup no longer eats literal `[bracketed]` text on
+prax's console surfaces (by @prax). Unescaped `[word]` is silently consumed
+as a style tag — `monitor run [branches]` rendered as `monitor run` with no
+error. Escaped in monitor/prax help, logger lifecycle prints, and every
+log-health row's `[branch]` attribution tag. New rendered-output canary
+suite (test_help_markup.py, 9 tests) renders through a REAL Rich console —
+the shared conftest's MagicMock records calls but never renders, so it
+cannot catch this class. README truthed: commons feed mode documented
+(filter <room>/filter clear, --relay), Known Issues now states exactly
+which interactive commands Mission Control dispatches. 14 stale bypass.json
+entries pruned (test-directory false-positives whose checker causes were
+fixed). Suite 1106 green.
+
+**feat(ai_mail/trigger)** — repeat-warning digests collapse into ONE inbox
+message with a climbing counter (by @ai_mail, @trigger; FPLAN-0389, Patrick
+ruling 2026-08-10). ai_mail's delivery layer gains an opt-in `upsert_key`:
+same sender + same key + not-closed updates the existing message in place —
+subject/body refreshed, `updates` counter climbs (inbox row `x4`, view
+header `Updates:`), id and read-state preserved, desktop toast suppressed on
+updates, `auto_execute` forced off in delivery, broadcast+key refused
+loudly. CLI `--upsert-key`. trigger's escalation lane passes
+`escalation:<signature>` threaded explicitly past its `**kwargs` adapter
+(mutation-tested guard); medic/runaway paths byte-identical; upsert outcome
+audited in escalation.jsonl. 56 new tests (ai_mail suite 921, trigger 917),
+seedgo 100% on all touched files, live-proven end to end: created → viewed →
+updated in place, same id, still opened.
+
+**chore(memory/seedgo/prax)** — bypass-hygiene train (by @memory, @seedgo,
+@prax; FPLAN-0382 follow-through). Stale bypass.json entries pruned in
+memory and prax after their underlying causes were fixed; @memory's
+symbolic extractor drops the caller-less `analyze_conversation_llm` v2
+twin its bypass had flagged pending-deletion, with test_symbolic_extras
+reshaped to the surviving surface; @seedgo's inert/audit_display refined
+with new test_bypass and test_coverage_audit coverage. 237 touched-file
+tests green at commit time.
+
+---
+
 ## [2026-08-09] — v2.7.15: scope-aware standards, streamer loop kill, Windows tie data-loss fix, aipass read train
 
 **feat(aipass)** — `aipass read` + version truth + Telegram readiness at

@@ -13,8 +13,12 @@ All network (urllib) calls are mocked.
 Fake log files are created in tmp_path - no real system_logs directory is touched.
 """
 
+import io
 import json
 import threading
+from email.message import Message
+from urllib.error import HTTPError
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -592,3 +596,122 @@ class TestBaseBotIntegration:
         # Should not raise
         bot._cleanup()
         assert bot._log_streamer is None
+
+
+# =============================================
+# 7. PAYLOADS TELEGRAM REJECTS WITH 400
+# =============================================
+
+
+class TestRejectedPayloads:
+    """Regression cover for the HTTP 400 burst on bot_prax_monitor.
+
+    Measured against the live API on 2026-08-11, sendMessage answers 400 with:
+      - 'Bad Request: message is too long'    for text over ~4096 chars
+      - 'Bad Request: message text is empty'  for ''
+      - 'Bad Request: text must be non-empty' for whitespace-only text
+    Brackets, dashes and underscores are NOT an offense on this path — it sends
+    no parse_mode — and a 4000-char line of them was accepted live.
+    """
+
+    def test_single_oversized_line_is_split(self, streamer):
+        """THE root cause: batching splits between lines, so one long line went whole."""
+        # 5,167 chars — the exact length of the drone_router line that preceded
+        # the 12:39:19 rejection.
+        lines = ["2026-08-11 12:39:14 | captured_router | INFO | " + "x" * 5120]
+
+        sent: list[str] = []
+        with patch.object(streamer, "_send_message", side_effect=lambda m: sent.append(m) or True):
+            streamer._send_batched(lines)
+
+        assert len(sent) >= 2, "oversized line was not split"
+        for message in sent:
+            assert len(message) <= TELEGRAM_MAX_LENGTH
+
+    def test_no_payload_ever_exceeds_the_cap(self, streamer):
+        """Whatever the input shape, nothing over the cap may reach the API."""
+        lines = [
+            "short",
+            "y" * 12000,  # far over
+            "also short",
+            "z" * (TELEGRAM_MAX_LENGTH + 1),  # one char over the edge
+        ]
+
+        sent: list[str] = []
+        with patch.object(streamer, "_send_message", side_effect=lambda m: sent.append(m) or True):
+            streamer._send_batched(lines)
+
+        assert sent
+        for message in sent:
+            assert len(message) <= TELEGRAM_MAX_LENGTH
+
+    def test_split_chunks_are_marked_and_lossless(self, streamer):
+        """A split line must stay readable and must not lose characters."""
+        payload = "q" * 9000
+
+        sent: list[str] = []
+        with patch.object(streamer, "_send_message", side_effect=lambda m: sent.append(m) or True):
+            streamer._send_batched([payload])
+
+        joined = "\n".join(sent)
+        assert "[1/" in joined and "[3/3]" in joined
+        recovered = "".join(part.rsplit(" [", 1)[0] for part in joined.split("\n"))
+        assert recovered == payload
+
+    def test_monitor_line_with_brackets_and_underscores_passes_intact(self, streamer):
+        """Devpulse's markdown suspect: this path sets no parse_mode, so it must pass unchanged."""
+        line = (
+            "2026-08-11 12:39:14 | captured_router | INFO | "
+            "Routing @ai_mail [CALLER:SEEDGO] -> snake_case *stars* _under_"
+        )
+
+        sent: list[str] = []
+        with patch.object(streamer, "_send_message", side_effect=lambda m: sent.append(m) or True):
+            streamer._send_batched([line])
+
+        assert sent == [line]
+
+    def test_send_message_refuses_empty_text(self, streamer):
+        """'' is a 400 ('message text is empty') — refuse it before the network."""
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.urlopen") as mock_open:
+            assert streamer._send_message("") is False
+            mock_open.assert_not_called()
+
+    def test_send_message_refuses_whitespace_only_text(self, streamer):
+        """'\\n\\n' is a 400 ('text must be non-empty') — same guard."""
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.urlopen") as mock_open:
+            assert streamer._send_message("\n\n") is False
+            mock_open.assert_not_called()
+
+    def test_blank_lines_are_dropped_by_the_filter(self, streamer):
+        """Blank log lines carry nothing; a batch of only blanks is a rejected payload."""
+        lines = ["", "   ", "2026-08-11 | captured_x | WARNING | real content", ""]
+        assert streamer._filter_lines(lines) == ["2026-08-11 | captured_x | WARNING | real content"]
+
+    def test_batch_of_only_blank_lines_sends_nothing(self, streamer):
+        with patch.object(streamer, "_send_message") as mock_send:
+            streamer._send_batched(streamer._filter_lines(["", "  ", ""]))
+        mock_send.assert_not_called()
+
+    def test_http_error_body_is_logged_not_discarded(self, streamer):
+        """The 400 body names the offense; a bare status line names nothing."""
+        body = json.dumps({"ok": False, "error_code": 400, "description": "Bad Request: message is too long"})
+        err = HTTPError("url", 400, "Bad Request", Message(), io.BytesIO(body.encode()))
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.urlopen", side_effect=err):
+            with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.logger") as mock_logger:
+                assert streamer._send_message("anything") is False
+
+        logged = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "message is too long" in logged
+        assert "400" in logged
+
+    def test_http_error_without_body_still_logs(self, streamer):
+        """An unreadable body must not turn the rejection into a crash or a silence."""
+        err = HTTPError("url", 400, "Bad Request", Message(), io.BytesIO(b"not json"))
+
+        with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.urlopen", side_effect=err):
+            with patch("aipass.skills.lib.telegram.apps.handlers.log_streamer.logger") as mock_logger:
+                assert streamer._send_message("anything") is False
+
+        assert mock_logger.warning.called

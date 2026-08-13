@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2025-11-27
-# Modified: 2026-03-15
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -133,7 +133,7 @@ def print_help() -> None:
     )
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  drone @memory search <query> [options]")
+    console.print("  drone @memory search <query> \\[options]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]search <query>[/cyan]     Search across all memory collections")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: direct.py
 # Description: Direct Logger (Event Pipeline Bypass)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-27
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -32,6 +32,25 @@ Everyone else should use the regular system_logger.
 import inspect
 import logging
 from logging.handlers import RotatingFileHandler as _BaseRotatingFileHandler
+from pathlib import Path
+from typing import Dict, Optional, Tuple
+
+from aipass.prax.apps.handlers.config.load import (
+    get_system_logs_dir,
+    get_module_logs_dir,
+    load_log_config,
+    lines_to_bytes,
+    level_to_int,
+    resolve_log_level,
+)
+from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
+from aipass.prax.apps.handlers.json import json_handler
+
+# Use original stdlib getLogger (not the prax-overridden version).
+# This is intentional: direct.py creates raw stdlib loggers for
+# RotatingFileHandler management. Using prax logger would cause
+# recursion since direct.py IS the pipeline-bypass mechanism.
+from aipass.prax.apps.handlers.logging.override import _original_getLogger as _stdlib_getLogger
 
 logger = logging.getLogger(__name__)
 
@@ -46,25 +65,6 @@ class RotatingFileHandler(_BaseRotatingFileHandler):
         except (PermissionError, OSError) as exc:
             logger.warning("Log rotation skipped (file locked): %s", exc)
 
-
-from pathlib import Path
-from typing import Dict, Optional, Tuple
-
-from aipass.prax.apps.handlers.config.load import (
-    get_system_logs_dir,
-    get_module_logs_dir,
-    DEFAULT_LOG_LEVEL,
-    load_log_config,
-    lines_to_bytes,
-)
-from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
-from aipass.prax.apps.handlers.json import json_handler
-
-# Use original stdlib getLogger (not the prax-overridden version).
-# This is intentional: direct.py creates raw stdlib loggers for
-# RotatingFileHandler management. Using prax logger would cause
-# recursion since direct.py IS the pipeline-bypass mechanism.
-from aipass.prax.apps.handlers.logging.override import _original_getLogger as _stdlib_getLogger
 
 # Cache for direct loggers - keyed by "branch_module"
 _direct_loggers: Dict[str, logging.Logger] = {}
@@ -121,12 +121,18 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
     logger_key = f"direct_{branch_name}_{module_name}"
     # _stdlib_getLogger: raw stdlib logger for file handler management (no prax pipeline)
     logger = _stdlib_getLogger(logger_key)
-    logger.setLevel(DEFAULT_LOG_LEVEL)
     logger.handlers.clear()
     logger.propagate = False  # Critical: no root logger propagation
 
     config = load_log_config()
     formatter = logging.Formatter(config["log_format"], config["date_format"])
+
+    # Same per-tier level model as setup_individual_logger — DirectLogger has
+    # carried a debug() since it was written, but the logger sat at INFO, so
+    # every call to it was discarded before reaching a handler.
+    system_level = resolve_log_level(config["system_logs"].get("log_level"))
+    local_level = resolve_log_level(config["local_logs"].get("log_level"))
+    logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
     target = branch_name if branch_path else "prax"
 
@@ -140,6 +146,7 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
         encoding="utf-8",
     )
     sys_handler.setFormatter(formatter)
+    sys_handler.setLevel(system_level)
     logger.addHandler(sys_handler)
 
     # Handler 2: Module-local log (local debugging)
@@ -152,6 +159,7 @@ def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optio
         encoding="utf-8",
     )
     local_handler.setFormatter(formatter)
+    local_handler.setLevel(local_level)
     logger.addHandler(local_handler)
 
     return logger

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.3.1
+# Version: 0.4.0
 # Created: 2025-11-23
-# Modified: 2026-08-08
+# Modified: 2026-08-12
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -64,6 +64,12 @@ _display_thread: Optional[threading.Thread] = None
 _file_watcher_thread: Optional[threading.Thread] = None
 _log_watcher_thread: Optional[threading.Thread] = None
 _rate_tracker_thread: Optional[threading.Thread] = None
+_active_scope: Optional[Any] = None  # BranchScope for this run — None when unscoped
+
+# Console render failures: counted, and reported at most this often (seconds).
+_RENDER_WARNING_INTERVAL = 30.0
+_render_failures: int = 0
+_last_render_warning: float = 0.0
 
 
 def print_introspection():
@@ -72,10 +78,11 @@ def print_introspection():
     _handlers = [
         ("1. unified_stream.py", "print_event() - Terminal output formatting"),
         ("2. branch_detector.py", "detect_branch_from_path() - Path-to-branch mapping"),
-        ("3. interactive_filter.py", "FilterState, parse_command() - Runtime filtering"),
+        ("3. interactive_filter.py", "parse_command(), get_help_text() - Interactive command parsing"),
         ("4. monitoring_filters.py", "should_monitor(), get_priority() - Event filtering"),
         ("5. event_queue.py", "MonitoringEvent, MonitoringQueue - Event buffering"),
         ("6. module_tracker.py", "ModuleTracker - Module execution tracking"),
+        ("7. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
     ]
     console.print()
     console.print("[bold cyan]PRAX Monitor Module[/bold cyan]")
@@ -87,10 +94,10 @@ def print_introspection():
     console.print("[yellow]Connected Handlers (apps/handlers/monitoring/):[/yellow]")
     for name, desc in _handlers:
         console.print(f"\n  [cyan]{name}[/cyan]\n     [dim]{desc}[/dim]")
-    console.print("\n  [cyan]7. file watcher (threaded)[/cyan]")
+    console.print("\n  [cyan]8. file watcher (threaded)[/cyan]")
     console.print("     [dim]Real-time file change detection using watchdog[/dim]")
     console.print("     [green]STATUS: Active - monitors ECOSYSTEM_ROOT recursively[/green]")
-    console.print("\n  [cyan]8. log monitor (threaded)[/cyan]")
+    console.print("\n  [cyan]9. log monitor (threaded)[/cyan]")
     console.print("     [dim]Log stream processing from SYSTEM_LOGS_DIR[/dim]")
     console.print("     [green]STATUS: Active - watches *.log files for new entries[/green]")
     console.print("\n[dim]Run 'drone @prax monitor --help' for usage[/dim]\n")
@@ -105,7 +112,7 @@ def print_help():
         ("drone @prax monitor run", "Start monitoring all branches"),
         ("drone @prax monitor run all", "Explicit all-branches monitoring"),
         (
-            "drone @prax monitor run [branches]",
+            "drone @prax monitor run \\[branches]",
             "Monitor specific branches (comma-separated)\n    Example: drone @prax monitor run seedgo,cli,flow",
         ),
         (
@@ -129,13 +136,18 @@ def print_help():
     console.print("\n[yellow]Interactive Mode Commands:[/yellow]")
     console.print("  [cyan]help[/cyan]          Show available commands")
     console.print("  [cyan]status[/cyan]        Display current monitoring state")
-    console.print("  [cyan]filter [branches][/cyan]  Adjust branch filter")
     console.print("  [cyan]quit/exit[/cyan]     Stop monitoring")
+    console.print("  [dim]Commons feed mode adds: filter <room> (comma-separated), filter clear[/dim]")
     console.print("\n[yellow]Examples:[/yellow]")
     console.print("\n  [dim]# Monitor all branches[/dim]")
     console.print("  $ drone @prax monitor run")
     console.print("\n  [dim]# Monitor specific branches[/dim]")
-    console.print("  $ drone @prax monitor run seedgo,cli,flow\n")
+    console.print("  $ drone @prax monitor run seedgo,cli,flow")
+    console.print(
+        "\n  [dim]A scope covers each named branch's logs, file changes and CLI sessions,"
+        "\n  plus commands it issued or was targeted by. The scope is set at launch"
+        "\n  (there is no runtime filter command) and the banner names it.[/dim]\n"
+    )
 
 
 # =============================================================================
@@ -202,18 +214,68 @@ def _load_relay_config() -> Optional[dict]:
         return None
 
 
+def _known_branch_names() -> set:
+    """Registry branch names, used only to spot a typo'd scope. Empty on failure."""
+    try:
+        from aipass.prax.apps.handlers.monitoring.branch_detector import get_detector
+
+        return set(get_detector().known_branches)
+    except Exception as e:
+        logger.info("[monitor] Could not read known branches for scope check: %s", e)
+        return set()
+
+
+def _warn_unknown_scope(scope) -> None:
+    """Tell the operator when a scoped name matches no known branch.
+
+    Without this, a misspelled branch produces a live monitor that shows
+    nothing at all and never explains why.
+    """
+    unknown = scope.unknown_names(_known_branch_names())
+    if not unknown:
+        return
+    names = ", ".join(unknown)
+    console.print(
+        f"[yellow]Branch scope: {names} is not a known branch — nothing will be shown for it. "
+        f"Check the spelling, or run without a branch list to see everything.[/yellow]"
+    )
+    logger.warning(
+        f"[monitor] Branch scope requested a name that is not in the branch registry ({names}); "
+        f"the live monitor will show nothing for it. Monitoring continues for the other names. "
+        f"No files were changed."
+    )
+
+
+def _mode_line(scope) -> str:
+    """The one place that describes what this run is showing.
+
+    Banner and `status` share it so a scoped run can never claim 'all
+    branches, no filters' in one surface and the truth in the other.
+    """
+    if scope is not None and scope.is_scoped:
+        return f"Live — scoped to {scope.describe()}, all levels"
+    return "Live — all branches, all levels, no filters"
+
+
 def _run_monitor(args: List[str]) -> bool:
-    """Launch Mission Control live monitoring."""
-    global _event_queue, _module_tracker
+    """Launch Mission Control live monitoring, optionally scoped to branches."""
+    global _event_queue, _module_tracker, _active_scope
     global _display_thread, _file_watcher_thread, _log_watcher_thread, _rate_tracker_thread
+
+    from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
 
     json_handler.log_operation("monitor_started", {"args": args})
     logger.info(f"Starting unified monitoring (args: {args})")
 
+    scope = parse_scope(args)
+    _active_scope = scope if scope.is_scoped else None
+
     # Initialize monitoring subsystems
     _event_queue = MonitoringQueue()
+    _event_queue.set_scope(_active_scope)
     _module_tracker = ModuleTracker()
     _stop_event.clear()
+    _reset_render_failure_state()
 
     # Initialize Telegram relay (--relay flag or env var)
     _relay_enabled = "--relay" in args or is_relay_enabled_by_env()
@@ -229,7 +291,9 @@ def _run_monitor(args: List[str]) -> bool:
     console.print()
     header("PRAX Mission Control - Unified Monitoring")
     console.print()
-    console.print("[green]Live — all branches, all levels, no filters[/green]")
+    console.print(f"[green]{_mode_line(scope)}[/green]")
+    if scope.is_scoped:
+        _warn_unknown_scope(scope)
     if _is_tty:
         console.print("[dim]Type 'help' for commands[/dim]")
     else:
@@ -289,10 +353,8 @@ def _stop_threads():
     logger.info("All monitoring threads stopped")
 
 
-def _render_event(event) -> None:
-    """Render a single monitoring event to the console, and relay to Telegram."""
-    branch_pid = _get_pid_for_branch(event.branch)
-
+def _print_event_to_console(event) -> None:
+    """Write one event to the terminal in the shape its type calls for."""
     if event.event_type == "command":
         caller = getattr(event, "caller", None)
         target = None
@@ -304,14 +366,53 @@ def _render_event(event) -> None:
     elif event.event_type == "hook":
         print_hook_event(event.branch, event.message, event.action)
     else:
-        print_event(event.event_type, event.branch, event.message, event.level, pid=branch_pid)
+        print_event(event.event_type, event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
 
+
+def _render_event(event) -> None:
+    """Send one event to both sinks: the Telegram relay and the console.
+
+    The relay goes first, deliberately. Both sinks used to hang off one code
+    path, so when the console raised on an unrenderable line it also cost the
+    Telegram feed — two failures from one cause. Relaying first means a line the
+    terminal cannot draw still reaches the chat.
+    """
     relay_event(event)
+    _print_event_to_console(event)
+
+
+def _reset_render_failure_state() -> None:
+    """Clear the render-failure counters (called at monitor start)."""
+    global _render_failures, _last_render_warning
+    _render_failures = 0
+    _last_render_warning = 0.0
+
+
+def _report_render_failures(exc: Exception, latest) -> None:
+    """Report events the console could not draw, in plain language.
+
+    Rate-limited on the same reasoning as the queue-full warning: this lands in
+    a log prax itself tails, so per-event logging would turn one broken renderer
+    into a self-feeding firehose.
+    """
+    logger.error(
+        f"[monitor] The live monitor could not draw an event on screen — {type(exc).__name__} "
+        f"(latest: {latest.event_type} from {latest.branch}); {_render_failures} events were "
+        f"skipped from the terminal view since the last report. Monitoring continues and the "
+        f"on-disk logs are complete. This one is a bug."
+    )
 
 
 def _display_worker():
-    """Display thread - pulls events from queue and displays them. No filtering."""
-    global _event_queue
+    """Display thread — pulls events from the queue and displays them. No filtering.
+
+    Every event is rendered inside a guard. This thread is the queue's ONLY
+    consumer: before the guard existed, one unrenderable line (a tailed path
+    containing '[/usr/bin]', 2026-08-11) killed the thread, and the queue then
+    sat full for the life of the process, warning every 30s with nobody left to
+    display anything. One bad event may cost its own line and nothing more.
+    """
+    global _event_queue, _render_failures, _last_render_warning
 
     while not _stop_event.is_set():
         if not _event_queue:
@@ -319,8 +420,23 @@ def _display_worker():
             continue
 
         event = _event_queue.dequeue(timeout=0.1)
-        if event:
+        if event is None:
+            continue
+
+        try:
             _render_event(event)
+        except Exception as exc:
+            # Every failure is recorded at debug (silent unless someone asks for
+            # a verbose run); the ERROR summary below is the operator-facing one
+            # and is rate-limited so a broken renderer cannot flood a log prax
+            # itself tails.
+            logger.debug("[monitor] Event render failed: %s (%s from %s)", exc, event.event_type, event.branch)
+            _render_failures += 1
+            now = time.monotonic()
+            if now - _last_render_warning >= _RENDER_WARNING_INTERVAL:
+                _report_render_failures(exc, event)
+                _render_failures = 0
+                _last_render_warning = now
 
 
 def _get_watch_directories(repo_root: Path) -> list[tuple[Path, bool]]:
@@ -377,6 +493,8 @@ def _emit_watcher_event(level: str, message: str) -> None:
     if not _event_queue:
         return
     priority = 1 if level == "error" else 2
+    # bypass_scope: this is the monitor reporting on itself ("file events
+    # disabled"). A branch scope must not hide the reason the screen is empty.
     _event_queue.enqueue(
         MonitoringEvent(
             priority=priority,
@@ -386,7 +504,8 @@ def _emit_watcher_event(level: str, message: str) -> None:
             level=level,
             timestamp=datetime.now(),
             message=message,
-        )
+        ),
+        bypass_scope=True,
     )
 
 
@@ -623,15 +742,38 @@ def _interactive_loop():
 
 
 def _print_status():
-    """Display current monitoring status"""
-    global _event_queue
+    """Display current monitoring status, including the active branch scope."""
+    global _event_queue, _active_scope
 
     console.print()
     console.print("[bold cyan]Monitoring Status:[/bold cyan]")
-    console.print("  [green]Mode:[/green] Live — all branches, all levels, no filters")
+    console.print(f"  [green]Mode:[/green] {_mode_line(_active_scope)}")
     if _event_queue:
         console.print(f"  [yellow]Queue size:[/yellow] {_event_queue.size()}")
+        # A scoped screen goes quiet on purpose; say how much was held back so
+        # a working filter never reads as a dead monitor.
+        if _active_scope is not None and _active_scope.is_scoped:
+            console.print(f"  [yellow]Hidden by scope:[/yellow] {_event_queue.suppressed_count()} events")
     console.print()
+
+
+def _standalone_run_args(tokens: List[str], passthrough: List[str]) -> List[str]:
+    """Turn `python -m ...monitor [run] [branches] [--flags]` into handle_command args.
+
+    A leading 'run' is the subcommand, not a branch name. Before launch-time
+    scoping existed this did not matter — a stray 'run' was parsed and then
+    ignored — so the systemd unit's `monitor run` worked by accident. Once the
+    scope became real, that same token asked for a branch called 'run' and the
+    service came up watching nothing (caught live 2026-08-12). Flags are passed
+    through rather than rejected, so `run --relay` works without the env var.
+    """
+    tokens = list(tokens)
+    saw_run = bool(tokens) and tokens[0] == "run"
+    if saw_run:
+        tokens.pop(0)
+    if not saw_run and not tokens and not passthrough:
+        return []
+    return ["run", *tokens, *passthrough]
 
 
 # MAIN BLOCK (Standalone execution support)
@@ -646,9 +788,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PRAX Unified Monitoring - Mission Control", add_help=False)
     parser.add_argument("--help", action="store_true", help="Show help message")
     parser.add_argument("--introspect", action="store_true", help="Show module introspection")
-    parser.add_argument("branches", nargs="?", help="Branches to monitor (comma-separated)")
+    parser.add_argument("tokens", nargs="*", help="Optional 'run' subcommand and/or branches (comma-separated)")
 
-    args = parser.parse_args()
+    args, _passthrough = parser.parse_known_args()
 
     # Handle flags
     if args.help:
@@ -659,10 +801,10 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    # Prepare arguments for handle_command
-    _cmd_args = []
-    if args.branches:
-        _cmd_args = [args.branches]
+    # Prepare arguments for handle_command. The branch list is a 'run' argument —
+    # passing it as the subcommand made standalone `monitor.py seedgo` print
+    # "Unknown monitor subcommand" instead of monitoring seedgo.
+    _cmd_args = _standalone_run_args(args.tokens, _passthrough)
 
     # Execute monitor command
     handled = handle_command("monitor", _cmd_args)

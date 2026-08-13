@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-02-02
-# Modified: 2026-02-02
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -76,7 +76,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         args: Command arguments
 
     Returns:
-        True if command handled, False otherwise
+        True if command handled, False otherwise.
+
+        "Handled" means recognised and run — not "it worked". A failed send or
+        wake reports itself through error(), which sets the process failure flag
+        main() maps to exit 2. Returning False for a failure sent the router on
+        to the next module, which re-ran the send and then printed
+        "Unknown command: dispatch" over a dispatch it had just attempted.
     """
     if command != "dispatch":
         return False
@@ -104,7 +110,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     else:
         error(f"Unknown dispatch subcommand: {subcommand}")
         print_help()
-        return False
+        return True
 
 
 def _orchestrate_status() -> bool:
@@ -190,7 +196,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
 
     if not filtered:
         error("Missing branch argument")
-        return False
+        return True
 
     branch_email = filtered[0]
     custom_message = filtered[1] if len(filtered) > 1 else None
@@ -204,19 +210,33 @@ def _orchestrate_wake(args: List[str]) -> bool:
         )
         return True
 
+    # --sender is a CLI string and reaches wake_branch's privilege-bearing
+    # `sender` param, exactly like --from does on the dispatch-send path.
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+
+    refusal = sender_claim_refusal(use_sender)
+    if refusal:
+        error(f"Wake refused: {refusal}")
+        return True
+
     logger.info(f"[dispatch] Manual wake requested for {branch_email}")
     console.print(f"\n⏳ Waking {branch_email}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
     dispatch_status, success = wake_branch(
-        branch_email, custom_message, fresh=use_fresh, sender=use_sender, model=use_model
+        branch_email, custom_message, fresh=use_fresh, sender=resolve_wake_sender(use_sender), model=use_model
     )
 
     # Print step-by-step status
     console.print(dispatch_status.format())
 
-    return success
+    if not success:
+        # The status block shows which step failed but never marks the command
+        # failed, so a dead wake exited 0. Say it once, out loud.
+        error(f"Wake failed for {branch_email} — see the step status above")
+
+    return True
 
 
 def _orchestrate_dispatch_send(args: List[str]) -> bool:
@@ -259,11 +279,41 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     subject = filtered[1]
     body = filtered[2]
 
+    # --from is an unauthenticated string. It may author the mail, but it must
+    # not buy a wake lane: refused BEFORE the send, so a spoof attempt leaves
+    # no delivered dispatch email behind claiming to be from someone it isn't.
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    refusal = verified_caller.sender_claim_refusal(from_branch)
+    if refusal:
+        error(f"Dispatch to {target} refused: {refusal}")
+        return True
+
+    # Admin lane (FPLAN-0401): the 5-leg grant check runs HERE because this is
+    # where the caller env still lives — wake_branch only ever receives the
+    # verdict. The rail pre-check is noise control, not security: only the
+    # grant holder can pass leg 1 anyway, so anyone else skips the file reads
+    # and the lane-dark report they could do nothing about. A verifier that
+    # raises must not take the mail down with it — no grant, dispatch proceeds.
+    is_admin = False
+    if verified_caller.resolve_verified_caller() == verified_caller.ADMIN_HOLDER:
+        try:
+            is_admin, admin_reason = verified_caller.verify_admin_caller()
+        except Exception as exc:
+            logger.warning("[dispatch] admin verification failed unexpectedly: %s", exc)
+            is_admin, admin_reason = False, f"admin verification error: {exc}"
+        if not is_admin:
+            console.print(f"[dim]Admin lane closed: {admin_reason}[/dim]")
+
     logger.info(f"[dispatch] Combined dispatch: send + wake for {target}")
     json_handler.log_operation("dispatch_send_and_wake", {"target": target, "subject": subject, "fresh": use_fresh})
 
     # --- Step 1: Send dispatch email ---
-    console.print(f"\nSending dispatch email to {target}...")
+    # No "Sending..." announcement before the fact. Progress goes to stdout and
+    # failures to stderr, and drone captures each stream whole and replays
+    # stdout first — so a pre-send progress line always surfaced BELOW the
+    # refusal it preceded, reading as "it failed, and then it sent". The send is
+    # sub-second: announce the outcome, not the intent.
 
     from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info, send_to_single
     from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
@@ -308,9 +358,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         )
 
         if not send_ok:
-            error(f"Send failed: {send_error}")
+            error(f"Dispatch to {target} not sent: {send_error}")
             dispatch_send_error(target, subject, send_error or "", deliver_email_to_branch)
-            return False
+            return True
 
         console.print(f"[green]Email sent to {target}[/green]")
 
@@ -323,16 +373,22 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     except Exception as e:
         logger.error(f"[dispatch] Send phase failed: {e}")
-        error(f"Send failed: {e}")
-        return False
+        error(f"Dispatch to {target} not sent: {e}")
+        return True
 
     # --- Step 2: Wake the branch ---
     console.print(f"\nWaking {target}...")
 
     from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
 
+    # The wake is attributed to the VERIFIED caller, not to the mail's author:
+    # --from moves who the email is from, never who the wake came from.
     dispatch_status, wake_ok = wake_branch(
-        target, fresh=use_fresh, sender=user_info.get("email_address", "@ai_mail"), model=use_model
+        target,
+        fresh=use_fresh,
+        sender=verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")),
+        model=use_model,
+        admin=is_admin,
     )
     console.print(dispatch_status.format())
 

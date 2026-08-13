@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -77,7 +77,7 @@ def print_help():
     console.print("  [cyan]drone @api stats[/cyan]")
     console.print("  [cyan]drone @api session[/cyan]")
     console.print("  [cyan]drone @api caller-usage[/cyan] <caller>")
-    console.print("  [cyan]drone @api cleanup[/cyan] [days]")
+    console.print("  [cyan]drone @api cleanup[/cyan] \\[days]")
     console.print()
     console.print("[yellow]ARGUMENTS:[/yellow]")
     console.print("  [cyan]caller[/cyan]  [dim]Caller identifier[/dim]")

@@ -534,3 +534,125 @@ class TestStartupVerifyConnectionRetry:
         assert result == 1
         fail_calls = [c for c in mock_logger.error.call_args_list if "Startup health check FAILED" in str(c)]
         assert len(fail_calls) == 1
+
+
+# =============================================
+# 7. SEND-PATH FAILURE CLASSIFICATION
+# =============================================
+
+
+class TestSendMessageFailureClassification:
+    """The send path must classify exhaustion the way the poll path already does.
+
+    Regression cover for error 9353d1ae: the host has recurring transient DNS
+    blips. poll_updates treats them as WARNING and backs off; send_message
+    escalated the identical condition to ERROR, so each blip raised an incident
+    dispatch. A rejected payload or an unknown fault must still fail loud.
+    """
+
+    def _bot(self, tmp_path, deps):
+        return _make_bot(tmp_path, deps)
+
+    def test_dns_failure_exhaustion_warns_not_errors(self, tmp_path, _patch_base_bot_deps):
+        """The exact error from 9353d1ae: [Errno -2] Name or service not known."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        exc = URLError(OSError("[Errno -2] Name or service not known"))
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            assert bot.send_message(1, "hi") is None
+
+        assert mock_logger.error.call_count == 0, "transient network blip escalated to ERROR"
+        assert any("unreachable" in str(c) for c in mock_logger.warning.call_args_list)
+
+    def test_network_unreachable_exhaustion_warns_not_errors(self, tmp_path, _patch_base_bot_deps):
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        exc = URLError(OSError("[Errno 101] Network is unreachable"))
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            bot.send_message(1, "hi")
+
+        assert mock_logger.error.call_count == 0
+
+    def test_non_network_failure_still_errors(self, tmp_path, _patch_base_bot_deps):
+        """A fault we cannot blame on the network must stay loud."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=RuntimeError("boom")),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            bot.send_message(1, "hi")
+
+        assert any("failed after 3 attempts" in str(c) for c in mock_logger.error.call_args_list)
+
+    def test_api_rejection_still_errors(self, tmp_path, _patch_base_bot_deps):
+        """A 400 is the bot's fault, not the network's — it must not be downgraded."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        body = json.dumps({"ok": False, "error_code": 400, "description": "Bad Request: message is too long"})
+        err = HTTPError("url", 400, "Bad Request", HTTPMessage(), None)
+        err.read = lambda: body.encode()  # type: ignore[method-assign]
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=err),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            bot.send_message(1, "hi")
+
+        assert mock_logger.error.call_count >= 1
+
+    def test_api_rejection_names_the_offense(self, tmp_path, _patch_base_bot_deps):
+        """str(HTTPError) is only a status line; the body says what was wrong."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        body = json.dumps({"ok": False, "error_code": 400, "description": "Bad Request: message is too long"})
+        err = HTTPError("url", 400, "Bad Request", HTTPMessage(), None)
+        err.read = lambda: body.encode()  # type: ignore[method-assign]
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=err),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.logger") as mock_logger,
+        ):
+            bot.send_message(1, "hi")
+
+        logged = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        assert "message is too long" in logged
+
+    def test_retry_count_is_unchanged(self, tmp_path, _patch_base_bot_deps):
+        """Classification only — the retry budget and timing must not move."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        exc = URLError(OSError("[Errno -2] Name or service not known"))
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc) as mock_open,
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep") as mock_sleep,
+        ):
+            bot.send_message(1, "hi")
+
+        assert mock_open.call_count == 3
+        # Other bot threads alive in the suite share this patched time.sleep, so
+        # pin the backoff as a consecutive pair rather than the whole call list.
+        sleeps = [c[0][0] for c in mock_sleep.call_args_list]
+        assert any(sleeps[i : i + 2] == [1.0, 2.0] for i in range(len(sleeps)))
+
+    def test_failure_is_still_counted_in_health(self, tmp_path, _patch_base_bot_deps):
+        """Downgrading the log level must not hide the failure from health stats."""
+        bot = self._bot(tmp_path, _patch_base_bot_deps)
+        exc = URLError(OSError("[Errno -2] Name or service not known"))
+
+        with (
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.urlopen", side_effect=exc),
+            patch("aipass.skills.lib.telegram.apps.handlers.base_bot.time.sleep"),
+        ):
+            bot.send_message(1, "hi")
+
+        assert bot._health.get("messages_failed") == 1

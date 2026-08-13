@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "branch": "@daemon",
+  "jobs": [
+    {
+      "id": "inbox-sweep",
+      "enabled": true,
+      "schedule": { "type": "daily", "time": "09:00" },
+      "wake": { "fresh": true, "model": "haiku" },
+      "prompt": "Run `drone @daemon inbox-sweep` (no other work), report the summary line it prints, then STOP. Do not update memories, do not open plans."
+    },
+    {
+      "id": "fleet-steward",
+      "enabled": false,
+      "schedule": { "type": "rotation", "time": "05:00" },
+      "wake": { "fresh": true, "model": "sonnet" },
+      "config": { "include_managers": false },
+      "prompt": "STEWARD NIGHT for {branch}. The daemon rotation woke you - tonight is your maintenance turn. Stay inside your own branch; mail owners about anything cross-branch; never edit other branches. 1) Inbox to zero. 2) Reconcile your .trinity todos against reality - delete done, rescope stale. 3) Review your logs and dashboard for anomalies. 4) Run your seedgo self-audit. 5) Open or create your branch-audit APLAN via `drone @flow create . 'BRANCH branch audit' aplan` - update Quick Status, Issues Found, What Needs Doing. 6) Small fixes in your own branch only, red-first, tests green. 7) Reply to this dispatch with a steward report: health verdict, what you fixed, what you flagged, APLAN id. Then STOP."
+    }
+  ]
+}

@@ -53,6 +53,7 @@ from aipass.spawn.apps.handlers.class_registry import (
     validate_class as validate_class,
     get_default_class as get_default_class,
     get_available_classes as get_available_classes,
+    refuse_forbidden_class as refuse_forbidden_class,
 )
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -219,6 +220,14 @@ def _spawn_agent(
             - validation_issues: list
             - error: str (only if success=False)
     """
+    # Forbidden values refuse before any filesystem work — "admin" is a
+    # devpulse-only registry privilege, never a class and never a template
+    # directory (DPLAN-0288). Both doors are checked, including the API.
+    for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
+        refusal = refuse_forbidden_class(candidate)
+        if refusal:
+            return _error(refusal)
+
     target = Path(target_path).resolve()
     if template_dir:
         template = Path(template_dir)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads versioned store to Google Drive
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-17
-# Modified: 2026-06-12
+# Modified: 2026-08-11
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -52,7 +52,7 @@ def print_help():
     """Display help for this module."""
     print_introspection()
     console.print()
-    console.print("Usage: drive_sync <project_root> [options]")
+    console.print("Usage: drive_sync <project_root> \\[options]")
     console.print("  --force       Force re-upload of all files")
     console.print("  --project     Override project name")
     console.print("  --note        Add a note to uploaded files")

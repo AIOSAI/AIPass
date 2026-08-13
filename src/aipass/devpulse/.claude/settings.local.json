@@ -1,13 +1,15 @@
 {
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 350000,
+  "enabledMcpjsonServers": [],
+  "model": "fable",
   "permissions": {
     "allow": [],
+    "ask": [],
     "deny": [
       "Bash(rm -rf*)",
       "Bash(rm -r *)"
-    ],
-    "ask": []
+    ]
   },
-  "enabledMcpjsonServers": [],
-  "autoCompactWindow": 350000,
   "prefersReducedMotion": true
 }

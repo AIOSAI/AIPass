@@ -96,6 +96,23 @@ drone @spawn repair --relocate @branch path --relocate-artifacts --apply  # Move
 drone @spawn repair <project_path> --clean-pollution --apply    # Archive + remove duplicate dirs
 ```
 
+### Grant Admin (ceremony)
+
+The devpulse-only admin privilege (DPLAN-0288). Spawn owns exactly one leg of it:
+the `admin: true` flag on the devpulse registry entry. The flag **grants nothing on
+its own** — the dispatch lane verifies five legs (verified caller, cert path, cert
+content, HMAC signature, this flag).
+
+```bash
+drone @spawn grant-admin                                       # Write admin:true on the devpulse entry
+drone @spawn grant-admin --registry /path/AIPASS_REGISTRY.json # Explicit registry
+```
+
+There is no branch argument: the seat is a constant. `admin` is also permanently
+refused as a citizen class or template value — `create`, `update` and `sync` all
+say no by name. Admin is never minted from a template; only Patrick's ceremony
+grants it.
+
 ### Introspection
 
 ```bash
@@ -133,7 +150,8 @@ spawn/
 │   │   ├── delete.py                    # Delete CLI — archive + deregister
 │   │   ├── sync_registry.py             # Registry repair CLI
 │   │   ├── sync_templates.py            # Template sync CLI
-│   │   └── regenerate_registry.py       # Template registry regeneration CLI
+│   │   ├── regenerate_registry.py       # Template registry regeneration CLI
+│   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   └── handlers/
 │       ├── class_registry.py            # Citizen class → template directory mapping
 │       ├── file_ops.py                  # Template copy, path renaming, registry regeneration
@@ -151,7 +169,7 @@ spawn/
 │           └── json_handler.py          # Standard JSON I/O, operation logging, 7 API functions
 ├── templates/
 │   └── aipass_framework/                # Full scaffold template (44 files, 23 dirs)
-├── tests/                               # 14 test files, 297 tests
+├── tests/                               # 19 test files, 403 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation
@@ -195,7 +213,7 @@ spawn/
 
 ## Tests
 
-**347 tests | 0 skipped | 0 failed** across 14 test files:
+**403 tests | 1 skipped | 0 failed** across 18 test files (410 collected — parametrized cases expand):
 
 | File | Focus |
 |------|-------|
@@ -211,9 +229,10 @@ spawn/
 | `test_spawn.py` | Basic CLI routing and help |
 | `test_error_resilience.py` | Error handling and edge cases |
 | `test_check_fix_identity.py` | Owner/identity check and fix (DPLAN-0239 P4) |
+| `test_admin_fence.py` | Admin grant ceremony + permanent admin-class refusal (DPLAN-0288) |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 50 total, 49 tested (98%)
+**Public functions:** 57 total, 57 tested (100%)
 
 ---
 
@@ -236,20 +255,19 @@ spawn/
 
 - `sync-templates` is a no-op — `template_owners.json` has no entries (template IS source of truth, not downstream consumer)
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
-- 4 untested public functions remain (45 total, 41 tested)
 
 ---
 
 ## Metrics
 
-- **Seedgo:** 100% (34/34)
-- **Tests:** 340 passed, 0 skipped, 0 failed
+- **Seedgo:** 100%
+- **Tests:** 409 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
 - **Template registry:** 44 files, 23 dirs (aipass_framework)
 - **Battle test:** 17/17 commands pass (2026-04-22)
 
 ---
 
-*Last Updated: 2026-07-01*
+*Last Updated: 2026-08-12*
 
 [← Back to AIPass](../../../README.md)

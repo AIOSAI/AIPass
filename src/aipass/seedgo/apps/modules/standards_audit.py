@@ -42,6 +42,7 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
 from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
+from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
@@ -129,6 +130,7 @@ def print_introspection() -> None:
     console.print("  [cyan]handlers/audit/[/cyan]")
     console.print("    [dim]- discovery.py (discover_branches, _is_branch_private, check_internal_access)[/dim]")
     console.print("    [dim]- branch_audit.py (audit_branch — per-branch standards scoring)[/dim]")
+    console.print("    [dim]- artifact.py (write_audit_artifact — complete result set to JSON)[/dim]")
     console.print()
     console.print("  [cyan]handlers/config/[/cyan]")
     console.print("    [dim]- bypass_handler.py (load_bypass_rules — .seedgo/bypass.json)[/dim]")
@@ -153,6 +155,32 @@ def print_introspection() -> None:
     console.print("  [green]drone @seedgo audit aipass @flow[/green]      [dim]# Single branch[/dim]")
     console.print("  [green]drone @seedgo audit --help[/green]            [dim]# Full usage guide[/dim]")
     console.print()
+
+
+def _emit_artifact(audit_results: List[dict], artifact_path, pack_name: str, specific_branch: str | None):
+    """Write the complete-violation-set artifact and announce its path.
+
+    The display truncates by design; this file does not. Telling the user where
+    it landed is what makes it discoverable — one dim line, never a banner.
+
+    A write failure is reported loudly and never re-raised: the artifact is a
+    side channel, so a full-disk or bad --artifact path must not swallow the
+    audit the user actually asked for. Returns the Path, or None on failure.
+    """
+    try:
+        written = write_audit_artifact(
+            audit_results, output_path=artifact_path, pack=pack_name, specific_branch=specific_branch
+        )
+    except Exception as e:
+        logger.error("[standards_audit] Audit artifact write failed for %s: %s", artifact_path, e)
+        error(
+            f"Could not write audit artifact: {e}",
+            suggestion="Audit results above are still valid. Check the path is writable, or pass --no-artifact.",
+        )
+        return None
+    console.print(f"[dim]Complete violation set (untruncated): {written}[/dim]")
+    console.print()
+    return written
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -188,14 +216,30 @@ def handle_command(command: str, args: List[str]) -> bool:
     specific_branch = None
     show_bypasses = False
     force_full = False
+    write_artifact = True
+    artifact_path = None
+    expect_artifact_path = False
 
     positional = []
     for arg in args:
+        if expect_artifact_path:
+            artifact_path = arg
+            expect_artifact_path = False
+            continue
         if arg in ["--show-bypasses", "--bypasses", "-b"]:
             show_bypasses = True
             continue
         if arg == "--full":
             force_full = True
+            continue
+        if arg == "--artifact":
+            expect_artifact_path = True
+            continue
+        if arg.startswith("--artifact="):
+            artifact_path = arg.split("=", 1)[1]
+            continue
+        if arg == "--no-artifact":
+            write_artifact = False
             continue
         if arg in ["--help", "-h", "help"]:
             # Pack-specific help (placeholder)
@@ -203,6 +247,13 @@ def handle_command(command: str, args: List[str]) -> bool:
             return True
         if not arg.startswith("-"):
             positional.append(arg)
+
+    if expect_artifact_path:
+        error(
+            "--artifact needs a destination path",
+            suggestion="Usage: drone @seedgo audit aipass --artifact <path>",
+        )
+        return True
 
     if len(positional) >= 1:
         if positional[0].startswith("@"):
@@ -341,6 +392,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     if is_compact:
         print_system_summary(audit_results)
 
+    # Machine-readable complete result set (no display budget)
+    if write_artifact:
+        _emit_artifact(audit_results, artifact_path, pack_name, specific_branch)
+
     # Log completion
     json_handler.log_operation(
         "standards_audit_completed",
@@ -368,6 +423,8 @@ def print_help():
     console.print("  [green]drone @seedgo audit aipass[/green]               [dim]All branches, aipass pack[/dim]")
     console.print("  [green]drone @seedgo audit aipass @flow[/green]         [dim]Single branch[/dim]")
     console.print("  [green]drone @seedgo audit aipass --full[/green]        [dim]Force full re-scan[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --artifact <path>[/green]  [dim]Artifact destination[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --no-artifact[/green]      [dim]Skip the artifact[/dim]")
     console.print("  [green]drone @seedgo audit --help[/green]               [dim]This help message[/dim]")
     console.print()
 
@@ -382,9 +439,18 @@ def print_help():
     console.print("  [green]drone @seedgo audit aipass --full[/green]")
     console.print()
 
+    console.print("  [dim]# Write the complete violation set somewhere else[/dim]")
+    console.print("  [green]drone @seedgo audit aipass --artifact reports/audit.json[/green]")
+    console.print()
+
     console.print("[yellow]REFERENCE:[/yellow]")
     console.print("  Pack name is REQUIRED. Auto-discovers checkers from pack's handler directory.")
     console.print("  Shows per-branch scores, system-wide metrics, and top issues.")
+    console.print()
+    console.print("  Every run also writes .seedgo/last_audit.json — the COMPLETE result set as JSON.")
+    console.print("  The console display truncates (10 files, 3 diagnostics, 5 violations, 60-char")
+    console.print("  messages); the artifact never does. Violations carry branch, standard and a")
+    console.print("  branch-relative file path, so they join straight onto .seedgo/bypass.json rules.")
     console.print()
 
 

@@ -103,6 +103,15 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
 
 Rollover writes safety copies (`rollover_backup_*.json`) into `<branch>/.backup/` — a shared runtime namespace (see `@backup`'s README for all writers).
 
+### Newest-first guardrail (normalize)
+
+`sessions`, `key_learnings`, `todos` and `observations` are newest-first by contract — rollover archives the **tail** as "oldest", so a misordered array is silent memory loss. `normalize_memory_file()` re-sorts them by `number`, and **never fails open silently** (GH #728):
+
+- **Per-entry tolerance.** An entry whose `number` cannot be read as an int keeps its exact index; the readable entries beside it are still ordered among the slots they occupy. One bad row no longer forfeits protection for the whole container.
+- **Loud skip.** Every unreadable row is reported — `result["warnings"]` names the container and the offending indices, a prax `WARNING` is logged, and `normalize_all_memory_files()` returns `files_with_warnings` (also printed by the CLI). Warnings are *not* mutations, so a file with nothing to change is left byte-identical.
+- **Type repair.** A `number` stored as a numeric string (`"171"`) or integral float is coerced to `int`, recorded in `changes`, and persisted — the half-repaired container that used to raise `TypeError` inside `sorted()` now heals itself.
+- A container with **no** numbers at all (the normal `todos` shape) is skipped silently — that is a legitimate shape, not corruption.
+
 ### Subprocess Isolation
 
 All ML operations (fastembed, chromadb) run via subprocess. The main process never imports these libraries. Python interpreter resolved via `_get_memory_python()` (env var `AIPASS_MEMORY_PYTHON` → `memory/.venv/bin/python` → `sys.executable`).
@@ -163,7 +172,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 1046 passed, 0 failures, 0 skips
+- **Tests:** 1057 passed, 0 failures, 0 skips
 - **Seedgo:** 100%
 
 ---
@@ -176,7 +185,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ---
 
-*Last Updated: 2026-08-08*
+*Last Updated: 2026-08-12*
 
 ---
 [← Back to AIPass](../../../README.md)

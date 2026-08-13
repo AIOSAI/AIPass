@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: format.py
 # Description: Email Formatting Handler
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-07
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -101,6 +101,28 @@ def format_email_preview(message: str, max_length: int = 100) -> str:
     return message[:max_length] + "..."
 
 
+def format_update_count(email_data: Dict) -> int:
+    """
+    Read a message's repeat counter for display.
+
+    Upsert messages carry ``updates``: how many times this one slot has been
+    rewritten by the same repeating signal. Returns 0 for ordinary mail and
+    for a first send, so callers can render nothing at all in the common case.
+
+    Args:
+        email_data: Message dict
+
+    Returns:
+        Update count when greater than 1, otherwise 0.
+    """
+    try:
+        count = int(email_data.get("updates", 0))
+    except (TypeError, ValueError):
+        logger.warning("[format] unreadable updates counter on message %s", email_data.get("id", "?"))
+        return 0
+    return count if count > 1 else 0
+
+
 def format_email_header(email_data: Dict) -> str:
     """
     Format email header for display.
@@ -122,8 +144,17 @@ def format_email_header(email_data: Dict) -> str:
         f"From: {sender}",
         f"Date: {escape(str(email_data.get('timestamp', 'Unknown')))}",
         f"Subject: {escape(str(email_data.get('subject', 'No Subject')))}",
-        "=" * 70,
     ]
+
+    # Repeat counter: this one message stands in for N sends of the same
+    # signal, so the count and the last fire time have to be readable here —
+    # without them the reader sees one warning where there were thirty.
+    updates = format_update_count(email_data)
+    if updates:
+        last = email_data.get("last_updated") or email_data.get("timestamp", "Unknown")
+        lines.append(f"Updates: {updates} (last: {escape(str(last))})")
+
+    lines.append("=" * 70)
     return "\n".join(lines)
 
 
@@ -150,12 +181,24 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
         is_new = status == "new" if status else not email_data.get("read", False)
         unread_marker = "📨" if is_new else "📬"
         sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
-        lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {timestamp}")
+        # x3 = this row is one repeating signal that has fired 3 times, not one
+        # event. Without it the listing understates a storm as a single ping.
+        updates = format_update_count(email_data)
+        repeat = f" [yellow]x{updates}[/yellow]" if updates else ""
+        lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {timestamp}{repeat}")
     else:
         recipient = escape(str(email_data.get("to", "Unknown")))
-        lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}")
+        # A sent record whose delivery was refused must not read like every
+        # delivered row next to it — that identical rendering is what let a
+        # cross-project sender take "it's in my sent folder" as proof it arrived.
+        refused = " [red]REFUSED[/red]" if email_data.get("status") == "refused" else ""
+        lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}{refused}")
 
     lines.append(f"   Subject: {escape(str(email_data.get('subject', 'No Subject')))}")
+
+    if email_data.get("status") == "refused":
+        reason = escape(str(email_data.get("refused_reason", "no reason recorded")))
+        lines.append(f"   [red]Not delivered:[/red] {reason}")
 
     # Preview
     message = email_data.get("message", "")
@@ -176,6 +219,7 @@ if __name__ == "__main__":
     console.print()
     console.print("FUNCTIONS PROVIDED:")
     console.print("  - format_email_preview(message, max_length) -> str")
+    console.print("  - format_update_count(email_data) -> int")
     console.print("  - format_email_header(email_data) -> str")
     console.print("  - format_email_list_item(index, email_data, show_unread) -> str")
     console.print()

@@ -58,8 +58,14 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
     escalation._config_cache = (0.0, None)
+    # Reset on the way OUT too: a test that points BRANCH_REGISTRY_FILE at a tmp
+    # registry leaves the compiled pattern behind, and monkeypatch restores the
+    # path but not the cache — the next test would sign against a stale citizen
+    # list that no longer matches any file on disk.
+    escalation._branch_names_cache = (0.0, None)
     yield escalation
     escalation._config_cache = (0.0, None)
+    escalation._branch_names_cache = (0.0, None)
 
 
 @pytest.fixture
@@ -165,6 +171,25 @@ def _fire_warning(lane, times: int = 1, **overrides: Any) -> Any:
     for _ in range(times):
         decision = lane.record_warning(**payload)
     return decision
+
+
+# Messages that are genuinely different CONDITIONS, for tests that need N
+# separate signatures. Deliberately not "warning number {i}": the lane collapses
+# standalone integers so one condition's repeats share a signature, which would
+# make every one of these the SAME signature — turning a prune or limit test
+# green while it exercises a single row.
+DISTINCT_WARNINGS = [
+    "disk is filling up",
+    "memory is filling up",
+    "socket pool exhausted",
+    "cache is cold",
+    "queue is backed up",
+]
+
+
+def _fire_distinct(lane, index: int) -> Any:
+    """Record one occurrence of the *index*-th genuinely distinct warning."""
+    return _fire_warning(lane, times=1, message=DISTINCT_WARNINGS[index])
 
 
 def _freeze_clock(monkeypatch: pytest.MonkeyPatch, lane) -> None:
@@ -274,6 +299,204 @@ class TestComputeSignature:
         signature = lane.compute_signature("ERROR", "flow", "cfg", "connection refused")
         assert len(signature) == 12
         assert all(char in "0123456789abcdef" for char in signature)
+
+
+# The two variants @devpulse pinned from the 2026-08-11 storm: one logical event
+# (prax live-monitor queue full during seedgo's fleet audit) that minted 112
+# separate signatures and mailed 17 digests. They differ by a count and by the
+# citizen named in the tail — nothing else.
+PRAX_QUEUE_A = (
+    "[event_queue] The live monitor display queue is full — 20 events were skipped from the "
+    "terminal monitor view since the last report (latest: log from SEEDGO). Nothing is lost: "
+    "the on-disk logs are complete."
+)
+PRAX_QUEUE_B = (
+    "[event_queue] The live monitor display queue is full — 37 events were skipped from the "
+    "terminal monitor view since the last report (latest: log from PRAX). Nothing is lost: "
+    "the on-disk logs are complete."
+)
+
+
+# The four @devpulse diffed out of their inbox on the evening of 2026-08-11,
+# copied verbatim from the live state file. Same warning family as the pair
+# above, arriving in a costume the first fix was never measured against: the
+# count sits mid-sentence and the source is a slash-compound carrying a citizen
+# name AND a model name. The last two differ ONLY by the count.
+PRAX_QUEUE_LOG_DAEMON = (
+    "[event_queue] The live monitor display queue is full — 5 events were skipped from the "
+    "terminal monitor view since the last report (latest: log from DAEMON). Nothing is lost: "
+    "the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_SEEDGO = (
+    "[event_queue] The live monitor display queue is full — 8 events were skipped from the "
+    "terminal monitor view since the last report (latest: agent from AIPASS/SEEDGO/opus). "
+    "Nothing is lost: the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_FABLE = (
+    "[event_queue] The live monitor display queue is full — 11 events were skipped from the "
+    "terminal monitor view since the last report (latest: agent from AIPASS/DEVPULSE/claude-fable-5). "
+    "Nothing is lost: the on-disk logs are complete."
+)
+PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT = PRAX_QUEUE_AGENT_FABLE.replace("11 events", "10 events")
+
+
+class TestSignatureFragmentation:
+    """One logical event must not mint a signature per repeat.
+
+    The registry normalizer strips what varies between *errors*. Repetition
+    needs more: a message differing only by a count, a duration, or a named
+    citizen is the same condition happening again. Every case here was measured
+    on real state, not imagined — see the module comment above.
+    """
+
+    @pytest.fixture(autouse=True)
+    def pinned_registry(self, lane, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Every citizen the corpus names, pinned to a fixture registry.
+
+        AIPASS_REGISTRY.json is runtime state, not tracked source — a bare CI
+        checkout has none, name collapse silently skips, and the collapse
+        assertions fork while the same tests pass on any dev machine where
+        _find_repo_root() walks up into the live tree. The world a test needs
+        must be the world it builds.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        names = ("SEEDGO", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
+        registry.write_text(json.dumps({"branches": [{"name": n} for n in names]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+
+    def test_the_pinned_prax_pair_is_one_signature(self, lane) -> None:
+        """The exact pair @devpulse reported. Both variants, one signature."""
+        first = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_A)
+        second = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_B)
+        assert first == second
+
+    def test_small_counts_do_not_fork_the_signature(self, lane) -> None:
+        """1-2 digit numbers passed straight through the old 3+ digit rule."""
+        first = lane.compute_signature("WARNING", "prax", "queue", "20 events were skipped")
+        second = lane.compute_signature("WARNING", "prax", "queue", "37 events were skipped")
+        assert first == second
+
+    def test_the_hundred_boundary_does_not_fork_the_signature(self, lane) -> None:
+        """The regression that hides behind a mismatched placeholder.
+
+        The registry pass rewrites 3+ digit numbers to <id> before this lane
+        runs. Collapse the smaller ones to any OTHER token and 99 and 101 stop
+        matching — one condition, two signatures, split on a round number.
+        """
+        small = lane.compute_signature("WARNING", "prax", "queue", "99 events were skipped")
+        large = lane.compute_signature("WARNING", "prax", "queue", "101 events were skipped")
+        assert small == large
+
+    def test_durations_do_not_fork_the_signature(self, lane) -> None:
+        """There is no word boundary inside '1237ms' — 76 real signatures came of it."""
+        first = lane.compute_signature("WARNING", "hooks", "gate", "PreToolUse BLOCKED by pre_edit_gate (1237ms)")
+        second = lane.compute_signature("WARNING", "hooks", "gate", "PreToolUse BLOCKED by pre_edit_gate (2247ms)")
+        assert first == second
+
+    def test_named_citizen_does_not_fork_the_signature(self, lane) -> None:
+        """A branch NAMED in the text is a detail; the OWNING branch is the identity."""
+        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SEEDGO)")
+        second = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from DRONE)")
+        assert first == second
+
+    def test_at_handle_does_not_fork_the_signature(self, lane) -> None:
+        """@handles collapse even for citizens absent from the registry."""
+        first = lane.compute_signature("WARNING", "hooks", "gate", "@vera .trinity/local.json over budget")
+        second = lane.compute_signature("WARNING", "hooks", "gate", "@nobody .trinity/local.json over budget")
+        assert first == second
+
+    def test_the_slash_compound_source_token_is_one_signature(self, lane) -> None:
+        """@devpulse's 2026-08-11 evening counterexample, verbatim from their inbox.
+
+        Four signatures they diffed by hand. The varying tokens are a mid-sentence
+        count (5/8/10/11) and a compound source token that carries an uppercase
+        citizen name AND a model name inside a slash-path shape. Pinned because a
+        counterexample is only answered once; a test answers it forever.
+        """
+        signatures = {
+            lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", message)
+            for message in (PRAX_QUEUE_AGENT_SEEDGO, PRAX_QUEUE_AGENT_FABLE, PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT)
+        }
+        assert len(signatures) == 1
+
+    def test_a_model_name_carrying_a_digit_does_not_fork_the_signature(self, lane) -> None:
+        """'opus' vs 'claude-fable-5' — the trailing digit must not mint a second row."""
+        first = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/SEEDGO/opus")
+        second = lane.compute_signature("WARNING", "prax", "queue", "latest: agent from AIPASS/DEVPULSE/claude-fable-5")
+        assert first == second
+
+    def test_the_source_kind_still_separates_signatures(self, lane) -> None:
+        """The counterpart guard: 'log from' and 'agent from' are different conditions.
+
+        @devpulse ruled the residual source kinds are MEANING, not fragmentation.
+        This pins that ruling so a future widening cannot quietly erase it.
+        """
+        as_log = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_LOG_DAEMON)
+        as_agent = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_AGENT_SEEDGO)
+        assert as_log != as_agent
+
+    def test_owning_branch_still_separates_signatures(self, lane) -> None:
+        """Collapsing names in the TEXT must not collapse the branch field itself."""
+        first = lane.compute_signature("WARNING", "prax", "queue", "queue full (latest: log from SEEDGO)")
+        second = lane.compute_signature("WARNING", "seedgo", "queue", "queue full (latest: log from SEEDGO)")
+        assert first != second
+
+    def test_genuinely_different_conditions_stay_apart(self, lane) -> None:
+        """The guard against over-collapsing: different words, different signatures."""
+        first = lane.compute_signature("ERROR", "flow", "cfg", "connection refused after 5 tries")
+        second = lane.compute_signature("ERROR", "flow", "cfg", "permission denied after 5 tries")
+        assert first != second
+
+    def test_registry_unreadable_still_collapses_numbers(self, lane, monkeypatch, tmp_path) -> None:
+        """Fail soft: no registry means no name collapse, never a dead lane."""
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", tmp_path / "gone.json")
+        lane._branch_names_cache = (0.0, None)
+
+        first = lane.compute_signature("WARNING", "prax", "queue", "20 events were skipped")
+        second = lane.compute_signature("WARNING", "prax", "queue", "37 events were skipped")
+        assert first == second
+
+    def test_registry_names_are_reread_after_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
+        """A newly spawned citizen collapses without restarting the watcher.
+
+        Freshness is time-bounded, not mtime-bounded: on this filesystem two
+        writes moments apart report the same st_mtime AND st_mtime_ns, so an
+        mtime check can tie and never re-read at all. Expiring the stamp is
+        what a watcher crossing the TTL does.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+
+        before = lane.compute_signature("WARNING", "prax", "q", "saw NEWBIE")
+        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}, {"name": "NEWBIE"}]}), encoding="utf-8")
+        lane._branch_names_cache = (0.0, None)  # TTL elapsed
+        after = lane.compute_signature("WARNING", "prax", "q", "saw NEWBIE")
+
+        assert before != after
+        assert after == lane.compute_signature("WARNING", "prax", "q", "saw FLOW")
+
+    def test_names_are_not_reread_inside_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
+        """The cache is real: no file read per log line."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
+        lane._branch_names_cache = (0.0, None)
+        lane.compute_signature("WARNING", "prax", "q", "warm the cache")
+
+        registry.unlink()
+        assert lane._branch_name_pattern() is not None
+
+    def test_missing_registry_is_cached_not_reread(self, lane, monkeypatch, tmp_path) -> None:
+        """A missing registry is an answer worth caching, not IO to repeat forever."""
+        monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", tmp_path / "gone.json")
+        lane._branch_names_cache = (0.0, None)
+
+        assert lane._branch_name_pattern() is None
+        stamped_at, _ = lane._branch_names_cache
+        assert stamped_at > 0
 
 
 # ---------------------------------------------------------------------------
@@ -803,7 +1026,7 @@ class TestPruning:
     def test_least_recently_seen_signatures_are_dropped(self, lane, cfg) -> None:
         """Five signatures into a cap of three keeps the three most recent."""
         cfg["max_signatures"] = 3
-        signatures = [_fire_warning(lane, times=1, message=f"warning number {i}")["signature"] for i in range(5)]
+        signatures = [_fire_distinct(lane, i)["signature"] for i in range(5)]
 
         stored = _read_state(lane)["signatures"]
         assert len(stored) == 3
@@ -814,10 +1037,10 @@ class TestPruning:
     def test_a_refreshed_signature_survives_the_prune(self, lane, cfg) -> None:
         """Re-seeing an old signature makes it recent again, so it is kept."""
         cfg["max_signatures"] = 2
-        oldest = _fire_warning(lane, times=1, message="warning number 0")["signature"]
-        _fire_warning(lane, times=1, message="warning number 1")
-        _fire_warning(lane, times=1, message="warning number 0")
-        _fire_warning(lane, times=1, message="warning number 2")
+        oldest = _fire_distinct(lane, 0)["signature"]
+        _fire_distinct(lane, 1)
+        _fire_distinct(lane, 0)
+        _fire_distinct(lane, 2)
 
         assert oldest in _read_state(lane)["signatures"]
 
@@ -830,11 +1053,11 @@ class TestPruning:
         """
         cfg["max_signatures"] = 3
         _freeze_clock(monkeypatch, lane)
-        first = _fire_warning(lane, times=1, message="warning number 0")["signature"]
-        second = _fire_warning(lane, times=1, message="warning number 1")["signature"]
-        _fire_warning(lane, times=1, message="warning number 2")
-        _fire_warning(lane, times=1, message="warning number 0")
-        _fire_warning(lane, times=1, message="warning number 3")
+        first = _fire_distinct(lane, 0)["signature"]
+        second = _fire_distinct(lane, 1)["signature"]
+        _fire_distinct(lane, 2)
+        _fire_distinct(lane, 0)
+        _fire_distinct(lane, 3)
 
         stored = _read_state(lane)["signatures"]
         assert first in stored, "the re-seen signature is the newest, not the oldest"
@@ -877,10 +1100,10 @@ class TestReporting:
         still leaked through, the first-created would head the list instead.
         """
         _freeze_clock(monkeypatch, lane)
-        _fire_warning(lane, times=1, message="warning number 0")
-        middle = _fire_warning(lane, times=1, message="warning number 1")["signature"]
-        _fire_warning(lane, times=1, message="warning number 2")
-        _fire_warning(lane, times=1, message="warning number 1")
+        _fire_distinct(lane, 0)
+        middle = _fire_distinct(lane, 1)["signature"]
+        _fire_distinct(lane, 2)
+        _fire_distinct(lane, 1)
 
         assert lane.get_signatures()[0]["signature"] == middle
 
@@ -906,7 +1129,7 @@ class TestReporting:
     def test_limit_caps_the_listing(self, lane) -> None:
         """The limit argument bounds what the CLI renders."""
         for index in range(5):
-            _fire_warning(lane, times=1, message=f"warning number {index}")
+            _fire_distinct(lane, index)
 
         assert len(lane.get_signatures(limit=2)) == 2
 

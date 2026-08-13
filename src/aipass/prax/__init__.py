@@ -9,7 +9,10 @@ try:
     from aipass.prax.apps.modules.logger import system_logger as logger
 except Exception:
     # NullLogger fallback — branches must not crash if prax is broken.
-    # Provides no-op info/warning/error so callers keep running.
+    # Provides no-op info/warning/error/debug so callers keep running.
+    # Every method on SystemLogger must exist here too: a branch that adopts
+    # a level the fallback lacks would crash with AttributeError precisely
+    # when prax is already broken.
     import logging as _logging
 
     class NullLogger:
@@ -29,5 +32,8 @@ except Exception:
 
         def error(self, message, *args, **kwargs):
             self._logger.error(message, *args, **kwargs)
+
+        def debug(self, message, *args, **kwargs):
+            self._logger.debug(message, *args, **kwargs)
 
     logger = NullLogger()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: logger.py
 # Description: PRAX Public API
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-15
-# Modified: 2026-03-09
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -135,6 +135,21 @@ class SystemLogger:
         logger = get_system_logger()
         logger.error(message, *args, **kwargs)
 
+    def debug(self, message, *args, **kwargs):
+        """Log debug message to calling module's log file.
+
+        Silent under the default INFO level — nothing reaches a log file
+        until the level is lowered via AIPASS_LOG_LEVEL or the log_level
+        config key. That is the point: use this for the verbose trail you
+        want available on demand but absent from normal operation.
+
+        The level binds when a module's logger is first created, so a
+        long-running process picks up a change on restart, not mid-flight.
+        """
+        self._ensure_watcher()
+        logger = get_system_logger()
+        logger.debug(message, *args, **kwargs)
+
 
 # Export the logger object - this is what other branches import
 system_logger = SystemLogger()
@@ -160,11 +175,11 @@ def initialize_logging_system():
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
 
-    console.print(f"[{MODULE_NAME}] Initializing system-wide logging...")
+    console.print(f"\\[{MODULE_NAME}] Initializing system-wide logging...")
 
     result = run_initialize(MODULE_NAME)
 
-    console.print(f"[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
+    console.print(f"\\[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
 
 
 def shutdown_logging_system():
@@ -180,11 +195,11 @@ def shutdown_logging_system():
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
 
-    console.print(f"[{MODULE_NAME}] Shutting down logging system...")
+    console.print(f"\\[{MODULE_NAME}] Shutting down logging system...")
 
     run_shutdown(MODULE_NAME)
 
-    console.print(f"[{MODULE_NAME}] Shutdown complete")
+    console.print(f"\\[{MODULE_NAME}] Shutdown complete")
 
 
 # =============================================

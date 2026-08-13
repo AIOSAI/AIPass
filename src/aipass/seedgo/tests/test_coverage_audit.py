@@ -424,6 +424,81 @@ class TestRenderTypeErrors:
         assert any("TYPE ERRORS" in c for c in calls)
         assert any("module.py" in c for c in calls)
 
+    def test_type_error_file_cap_announces_itself(self):
+        """A cap that does not announce itself reads as a clean result (@prax, 83190864)."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            _render_type_errors,
+        )
+
+        mock_con = MagicMock()
+        audit_result = {
+            "type_errors": 14,
+            "type_error_files": [{"file": f"m{n}.py", "errors": 1, "diagnostics": []} for n in range(14)],
+            "files_checked": 20,
+        }
+        _render_type_errors(audit_result, mock_con)
+        calls = [str(c) for c in mock_con.print.call_args_list]
+
+        assert any("... and 4 more files" in c for c in calls)
+
+    def test_type_error_diagnostic_cap_announces_itself(self):
+        """Per-file diagnostics are capped at 3 — the remainder must be declared."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            _render_type_errors,
+        )
+
+        mock_con = MagicMock()
+        audit_result = {
+            "type_errors": 5,
+            "type_error_files": [
+                {
+                    "file": "m.py",
+                    "errors": 5,
+                    "diagnostics": [{"line": n, "message": f"err {n}"} for n in range(5)],
+                }
+            ],
+            "files_checked": 1,
+        }
+        _render_type_errors(audit_result, mock_con)
+        calls = [str(c) for c in mock_con.print.call_args_list]
+
+        assert any("... and 2 more in this file" in c for c in calls)
+
+    def test_type_error_message_clip_is_marked(self):
+        """A clipped message must show it was clipped, not read as the whole error."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            _render_type_errors,
+        )
+
+        mock_con = MagicMock()
+        audit_result = {
+            "type_errors": 1,
+            "type_error_files": [{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "x" * 90}]}],
+            "files_checked": 1,
+        }
+        _render_type_errors(audit_result, mock_con)
+        calls = [str(c) for c in mock_con.print.call_args_list]
+
+        assert any("…" in c for c in calls)
+
+    def test_short_type_error_lists_declare_no_cap(self):
+        """Negative direction: a genuinely short list must not claim a remainder."""
+        from aipass.seedgo.apps.handlers.audit.audit_display import (
+            _render_type_errors,
+        )
+
+        mock_con = MagicMock()
+        audit_result = {
+            "type_errors": 1,
+            "type_error_files": [{"file": "m.py", "errors": 1, "diagnostics": [{"line": 1, "message": "short"}]}],
+            "files_checked": 1,
+        }
+        _render_type_errors(audit_result, mock_con)
+        calls = [str(c) for c in mock_con.print.call_args_list]
+
+        assert not any("more" in c for c in calls)
+        assert not any("…" in c for c in calls)
+
     def test_file_zero_errors_skipped(self):
         """File with 0 errors in type_error_files is skipped."""
         from aipass.seedgo.apps.handlers.audit.audit_display import (

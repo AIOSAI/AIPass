@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: symbolic.py
 # Description: Symbolic Memory Module
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -761,7 +761,7 @@ def print_help() -> None:
     header("Symbolic Memory Module - Conversation Analysis")
     console.print()
     console.print("[bold]USAGE:[/bold]")
-    console.print("  drone @memory symbolic <command> [args]")
+    console.print("  drone @memory symbolic <command> \\[args]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]demo[/cyan]               Run demonstration analysis (v1 + v2 mock)")

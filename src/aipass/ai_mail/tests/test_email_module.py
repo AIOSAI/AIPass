@@ -161,7 +161,11 @@ class TestHandleInbox:
         assert any("[1]" in p for p in printed)
 
     def test_inbox_resolve_failure(self, monkeypatch):
-        """When resolve_inbox_target fails, handle_inbox returns False."""
+        """A failed inbox resolve reports the error and stays handled.
+
+        "inbox" was recognised — returning False made the router print
+        "Unknown command: inbox" underneath the real reason.
+        """
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.resolve_inbox_target",
             lambda first_arg, repo_root, get_branch_fn, get_user_fn: (
@@ -178,8 +182,8 @@ class TestHandleInbox:
         from aipass.ai_mail.apps.modules.email import handle_inbox
 
         result = handle_inbox(["@fake"])
-        assert result is False
-        assert any("Unknown" in e for e in errors)
+        assert result is True
+        assert any("Unknown branch: @fake" in e for e in errors)
 
 
 # ===========================================================================
@@ -819,7 +823,7 @@ class TestHandleSend:
         assert any("sent" in p.lower() and "@target" in p for p in printed)
 
     def test_send_error_mode(self, monkeypatch):
-        """Parse error returns False and prints error."""
+        """A parse error prints usage and stays handled (exit 2, not 1)."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.parse_send_args",
             lambda args: {
@@ -839,7 +843,7 @@ class TestHandleSend:
         from aipass.ai_mail.apps.modules.email_send import handle_send
 
         result = handle_send(["bad", "args"])
-        assert result is False
+        assert result is True
         assert any("Usage" in e for e in errors)
 
     def test_send_delivery_failure(self, monkeypatch):
@@ -889,11 +893,11 @@ class TestHandleSend:
         from aipass.ai_mail.apps.modules.email_send import handle_send
 
         result = handle_send(["@target", "Sub", "Msg"])
-        assert result is False
+        assert result is True
         assert any("Branch not found" in e for e in errors)
 
     def test_send_interactive_mode(self, monkeypatch):
-        """Interactive mode is triggered when parse returns mode='interactive'."""
+        """A cancelled interactive send is still a handled command."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.parse_send_args",
             lambda args: {"mode": "interactive"},
@@ -915,7 +919,7 @@ class TestHandleSend:
         from aipass.ai_mail.apps.modules.email_send import handle_send
 
         result = handle_send([])
-        assert result is False
+        assert result is True
         assert any("Cancelled" in p for p in printed)
 
     def test_send_dispatch_fires_trigger(self, monkeypatch):
@@ -1184,7 +1188,7 @@ class TestHandleInboxExtended:
         assert result is True
 
     def test_inbox_generic_exception(self, monkeypatch):
-        """Generic exception is caught and returns False (lines 176-179)."""
+        """A generic exception is caught, reported, and stays handled."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.resolve_inbox_target",
             lambda first_arg, repo_root, get_branch_fn, get_user_fn: (_ for _ in ()).throw(ValueError("corrupt inbox")),
@@ -1201,7 +1205,7 @@ class TestHandleInboxExtended:
         from aipass.ai_mail.apps.modules.email import handle_inbox
 
         result = handle_inbox([])
-        assert result is False
+        assert result is True
         assert any("corrupt inbox" in e for e in errors)
 
 

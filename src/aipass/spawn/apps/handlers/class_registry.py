@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: class_registry.py
 # Description: Citizen class registry — maps class names to template directories
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-07-27
+# Modified: 2026-08-12
 # =============================================
 
 """Citizen class registry for spawn template system.
@@ -21,6 +21,10 @@ it's an identity/behavioral label that ai_mail's wake-block keys on (managers ar
 emailed, never dispatched). It resolves to two different template shapes depending on
 who's wearing it, so it lives in IDENTITY_CITIZEN_CLASSES + resolve_template_class()
 below rather than CITIZEN_CLASSES. See resolve_template_class() for the resolution rule.
+
+"admin" is the opposite case: a value spawn refuses forever. It is a devpulse-only
+registry privilege (DPLAN-0288), not a class and not a template — the hospital never
+issues this one, only Patrick's ceremony does. See FORBIDDEN_CLASSES below.
 """
 
 from pathlib import Path
@@ -55,6 +59,36 @@ IDENTITY_CITIZEN_CLASSES = frozenset(CITIZEN_CLASSES) | {"manager"}
 # The default class when none is specified
 DEFAULT_CLASS = "aipass_framework"
 
+# Values spawn refuses to treat as a class or template — permanently, at every entry
+# point (create, update, sync). Adding one here is a one-way door by design.
+FORBIDDEN_CLASSES = frozenset({"admin"})
+
+_FORBIDDEN_REASON = {
+    "admin": (
+        "'admin' is not a citizen class and never will be — it is a devpulse-only "
+        "registry privilege (DPLAN-0288), granted once by Patrick's ceremony "
+        "(drone @spawn grant-admin), never minted from a template."
+    ),
+}
+
+
+def refuse_forbidden_class(name: str | None) -> str:
+    """Return a named refusal for a permanently forbidden class value, else "".
+
+    Case-insensitive. Truthy return means REFUSE and say this out loud — callers
+    must never fall back to a default class when this fires.
+
+    Args:
+        name: Candidate citizen class / template value from a caller or passport.
+
+    Returns:
+        The refusal reason, or "" when the value is not forbidden.
+    """
+    key = (name or "").strip().lower()
+    if key in FORBIDDEN_CLASSES:
+        return _FORBIDDEN_REASON[key]
+    return ""
+
 
 def get_template_dir(citizen_class: str = DEFAULT_CLASS) -> Path:
     """Return the absolute path to a citizen class template directory.
@@ -66,8 +100,12 @@ def get_template_dir(citizen_class: str = DEFAULT_CLASS) -> Path:
         Path to the template directory.
 
     Raises:
-        ValueError: If the citizen class is not registered.
+        ValueError: If the citizen class is forbidden or not registered.
     """
+    refusal = refuse_forbidden_class(citizen_class)
+    if refusal:
+        raise ValueError(refusal)
+
     if citizen_class not in CITIZEN_CLASSES:
         available = ", ".join(sorted(CITIZEN_CLASSES.keys()))
         raise ValueError(f"Unknown citizen class '{citizen_class}'. Available: {available}")
@@ -104,11 +142,17 @@ def resolve_template_class(identity: dict) -> str:
     aipass_framework, the core-manager shape.
 
     Every other citizen_class must be a real, registered template class — no fallback.
+    A passport claiming a FORBIDDEN class ("admin") is refused by name: privilege is
+    never self-declared, and spawn will not hand it a template either.
 
     Raises:
-        ValueError: citizen_class isn't "manager" and isn't a registered template class.
+        ValueError: citizen_class is forbidden, or isn't "manager" and isn't a
+            registered template class.
     """
     citizen_class = identity.get("citizen_class")
+    refusal = refuse_forbidden_class(citizen_class)
+    if refusal:
+        raise ValueError(refusal)
     if citizen_class == "manager":
         return "project_agent" if identity.get("role") == "project_agent" else "aipass_framework"
     if citizen_class in CITIZEN_CLASSES:

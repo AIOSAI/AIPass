@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -178,7 +178,7 @@ def print_help() -> None:
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @commons <command> [args...][/dim]")
+    console.print("  [dim]drone @commons <command> \\[args...][/dim]")
     console.print("  [dim]drone @commons --help[/dim]")
     console.print()
     console.print("-" * 70)

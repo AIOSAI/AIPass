@@ -747,6 +747,10 @@ class TestEnhancedGetLogger:
         mock_config.get_module_logs_dir = MagicMock()
         mock_config.load_log_config = MagicMock()
         mock_config.lines_to_bytes = MagicMock()
+        # Real resolver — setLevel rejects a MagicMock level.
+        from aipass.prax.apps.handlers.config.load import resolve_log_level
+
+        mock_config.resolve_log_level = resolve_log_level
 
         mock_introspection = MagicMock()
         mock_introspection.get_calling_module = MagicMock(return_value="test_module")
@@ -945,6 +949,14 @@ class TestSetupSystemLogger:
         mock_config.lines_to_bytes = MagicMock(return_value=200000)
         mock_config.get_debug_prints_enabled = MagicMock(return_value=False)
         mock_config.PRAX_JSON_DIR = tmp_path / "prax_json"
+
+        # Level resolution is a pure helper, not the subject of these tests.
+        # Delegate to the real implementation — a MagicMock here returns an
+        # unorderable stand-in that setLevel/min() cannot use.
+        from aipass.prax.apps.handlers.config.load import level_to_int, resolve_log_level
+
+        mock_config.resolve_log_level = resolve_log_level
+        mock_config.level_to_int = level_to_int
 
         mock_introspection = MagicMock()
         mock_introspection.get_calling_module_path = MagicMock(return_value=None)

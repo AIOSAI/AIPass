@@ -1217,6 +1217,38 @@ def test_env_vars_set_correctly(monkeypatch, main_argv):
     assert venv_in_path, f"Expected .venv/{venv_dir} in PATH entries: {path_entries}"
 
 
+def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv):
+    """Dispatched agents get a 350k auto-compact window, model-independent.
+
+    The pin is written AFTER the CLAUDE* strip loop, so a parent's own window
+    never leaks in and the pin is not stripped on its way out.
+    """
+    argv, lock_file, stderr_log = main_argv
+
+    captured_env = {}
+
+    def capture_run(cmd, stdout_log, stderr_fh, cwd, env, branch, **kwargs):
+        captured_env.update(env)
+        return (0, False)
+
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
+    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
+    monkeypatch.setattr(
+        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
+        MagicMock(return_value=Path("/fake/repo")),
+    )
+
+    # Parent carries a different window — the spawn must overwrite it, not inherit it.
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "999999")
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert captured_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "350000"
+
+
 # === Additional tests (added 2026-04-03) ===================================
 
 

@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.2.0
-# Description: Cross-branch and inbox write protection (PreToolUse)
+# Version: 1.3.0
+# Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-08
+# Modified: 2026-08-12
 # =============================================
 
-"""Blocks unsafe edits: inbox writes, daemon confinement, cross-branch writes, diagnostics state."""
+"""Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
 
 import importlib
 import json
@@ -22,6 +22,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / ".diagnostics_state.json"
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
+# A project root is the directory holding a *_REGISTRY.json — the same marker
+# @ai_mail's find_project_root uses (handlers/paths.py). Deliberately identical:
+# the file fence and the mail fence must draw the boundary in the same place, or
+# an agent is refused a send and allowed the equivalent write (GH #733).
+_PROJECT_MARKER = "*_REGISTRY.json"
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
@@ -43,6 +48,76 @@ def _entry_number(entry: dict) -> int | None:
         if isinstance(value, int):
             return value
     return None
+
+
+def _find_project_root(start: Path) -> Path | None:
+    """Return the nearest ancestor of *start* holding a *_REGISTRY.json, or None.
+
+    Mirrors @ai_mail's find_project_root. Returns None rather than raising on an
+    unreadable path — a fence that cannot locate a boundary must not invent one.
+    """
+    try:
+        current = start.resolve()
+    except OSError as exc:
+        logger.info("[HOOKS] edit_gate: project root unresolvable for %s: %s", start, exc)
+        return None
+    for candidate in [current] + list(current.parents):
+        try:
+            if any(candidate.glob(_PROJECT_MARKER)):
+                return candidate
+        except OSError as exc:
+            logger.info("[HOOKS] edit_gate: project marker scan failed at %s: %s", candidate, exc)
+            break
+    return None
+
+
+def _check_project_boundary(cwd: str, target: Path) -> dict | None:
+    """Block a write that crosses out of the caller's project.
+
+    Projects nest inside the host tree (projects/<name>) but are its least-trusted
+    layer. Every fence below this one keys on the src/<package>/<branch> shape,
+    which no project seat has: both sides resolved to an empty branch and the write
+    fell through to allow. GH #733 measured the result — a projects/baud session
+    edited src/aipass/drone unchallenged, while the same agent's mail to @drone was
+    correctly refused.
+
+    Direction matters, so this is not symmetric with the mail fence:
+      - upward (nested project -> host) and sideways (project -> sibling): blocked.
+      - downward (host -> a project it contains): allowed. Trust runs downward, and
+        the host tree carries artifact registries of its own (flow_json/
+        PLAN_REGISTRY.json, .backup snapshots) that would otherwise read as foreign
+        projects to the very branches that own them.
+
+    Returns a block dict, or None to allow.
+    """
+    caller_root = _find_project_root(Path(cwd))
+    if caller_root is None:
+        return None
+    target_root = _find_project_root(target.parent)
+    if target_root is None or target_root == caller_root:
+        return None
+    if caller_root in target_root.parents:
+        return None
+
+    logger.warning(
+        "[HOOKS] edit_gate: cross-project write refused: caller root %s != target root %s (%s)",
+        caller_root,
+        target_root,
+        target,
+    )
+    reason = (
+        f"Cross-project write blocked: project '{caller_root.name}' cannot write into "
+        f"project '{target_root.name}'.\n"
+        f"Target: {target}\n"
+        "A project writes inside itself only — never into its host or a sibling. This is the "
+        "file-layer twin of the mail fence that refuses cross-project sends.\n"
+        'To reach that project: drone @devpulse feedback send "Subject" "Body"'
+    )
+    return {
+        "stdout": json.dumps({"decision": "block", "reason": reason}),
+        "exit_code": 2,
+        "sound": "edit gate",
+    }
 
 
 def _get_package_from_cwd(cwd: str) -> str:
@@ -368,6 +443,13 @@ def handle(hook_data: dict) -> dict:
             return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
 
         cwd = hook_data.get("cwd", "") or os.getcwd()
+
+        # Outermost boundary first: a project seat has no branch identity in the
+        # checks below, so it must be fenced before they can fall through to allow.
+        block = _check_project_boundary(cwd, fp)
+        if block:
+            return block
+
         package = _get_package_from_cwd(cwd)
         cwd_branch = _get_branch(cwd, package)
 

@@ -6,6 +6,16 @@
   },
   "bypass": [
     {
+      "file": "apps/handlers/users/verified_caller.py",
+      "standard": "handlers",
+      "reason": "Lazy cross-branch import of devpulse's admin_grant.verify_admin_grant, authorized by @devpulse in the FPLAN-0401 Phase 4 dispatch: the 5-leg admin contract has ONE home so this lane cannot drift from it. Their modules/ entry point re-exports the same function object, but that import trips the handler-imports-modules rule instead — both shapes need a bypass, and the handler import is the narrower dependency (no CLI/help layer at verification time). Import failure is caught and returns lane-dark, so the coupling can never break a dispatch."
+    },
+    {
+      "file": "apps/handlers/users/verified_caller.py",
+      "standard": "encapsulation",
+      "reason": "Same cross-branch import as the handlers entry above — devpulse owns the admin-grant contract (FPLAN-0401 THE CONTRACT), ai_mail consumes it rather than mirroring it."
+    },
+    {
       "file": "apps/modules/email.py",
       "standard": "introspection",
       "reason": "Multi-command module where inbox, sent, contacts work without args by design. Adding no-args gate would break primary mail workflow (drone @ai_mail inbox)."
@@ -241,106 +251,6 @@
       "reason": "bootstrap_aipass_identities() lazy-imports registry.read.get_all_branches and paths.find_repo_root inside function body to avoid circular imports. Same cross-handler pattern as reply.py."
     },
     {
-      "file": "tests/test_delivery.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_delivery.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise internal functions (_migrate_inbox_format, _is_private_branch_email, _resolve_reply_path). Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_send_identity.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_send_identity.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise internal detection functions. Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_send_identity.py",
-      "standard": "documentation",
-      "reason": "Test helper functions (_load_active_source, fixtures) are private/internal — docstring requirement does not apply to test infrastructure."
-    },
-    {
-      "file": "tests/test_contacts.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_contacts.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise internal functions (_load_contacts, get_contact, register_contact, all_contacts). Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_identity.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_identity.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise create_identity, read_identity. Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_registry_read.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_registry_read.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise internal functions (_derive_email_from_branch_name, get_all_branches, get_branch_by_email, get_caller_project_branches). Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_registry_read.py",
-      "standard": "documentation",
-      "reason": "Test fixture functions (registry_file) are private test infrastructure — docstring requirement does not apply to pytest fixtures."
-    },
-    {
-      "file": "tests/test_wake.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_wake.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to exercise internal functions (_read_json, _check_lock, _check_pid_alive, resolve_branch, DispatchStatus, etc.). Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_wake.py",
-      "standard": "documentation",
-      "reason": "Test helper functions (_fake_open_factory, _raise_process_lookup, repo_root fixture) are private test infrastructure — docstring requirement does not apply to test helpers."
-    },
-    {
-      "file": "tests/test_wake_blocklist.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_wake_blocklist.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import wake handlers directly to verify blocklist behavior. Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_daemon.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_daemon.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import daemon internals directly to verify behavior. Module entry-point-only rule does not apply to tests."
-    },
-    {
-      "file": "tests/test_daemon.py",
-      "standard": "documentation",
-      "reason": "mock_spawn_agent is a nested helper inside test methods, not a public function. AST checker misidentifies it."
-    },
-    {
       "file": "apps/modules/email_send.py",
       "standard": "cli",
       "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module — handle_send is called by email.py's handle_command()."
@@ -349,21 +259,6 @@
       "file": "apps/modules/email_send.py",
       "standard": "modules",
       "reason": "Internal helper extracted from email.py for size compliance. Not a drone-routable command module — no handle_command() needed."
-    },
-    {
-      "file": "tests/test_daemon.py",
-      "standard": "trigger",
-      "reason": "Test cleanup in finally blocks — .unlink() removes temp files created in ~/.claude/projects during _set_session_name tests. Not production file deletion."
-    },
-    {
-      "file": "tests/test_email_module.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
-    },
-    {
-      "file": "tests/test_dispatch_module.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ directory — not subject to 3-layer app structure rule."
     }
   ],
   "notes": {

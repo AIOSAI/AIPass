@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_plan.py
 # Description: PLAN closure module with registry cleanup
-# Version: 3.6.0
+# Version: 3.6.1
 # Created: 2025-11-25
-# Modified: 2025-11-25
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -204,7 +204,7 @@ def print_help():
     console.print("[bold cyan]close_plan[/bold cyan] — Close PLAN files")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  drone @flow close <PLAN-ID> [options]")
+    console.print("  drone @flow close <PLAN-ID> \\[options]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  --all       Close all open plans")

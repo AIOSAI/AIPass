@@ -46,6 +46,7 @@ src/aipass/devpulse/
 ├── apps/
 │   ├── devpulse.py              # Entry point — auto-discovers modules
 │   ├── modules/
+│   │   ├── admin_grant.py       # Birth-cert admin privilege ceremony command routing
 │   │   ├── compass.py           # Rated decision engine (SQLite/FTS5) command routing
 │   │   ├── feedback.py          # Feedback mailbox command routing
 │   │   └── watchdog.py          # Directed wake system command routing
@@ -53,10 +54,11 @@ src/aipass/devpulse/
 │   │   ├── compass/             # Decision store (SQLite/FTS5), rating, query, review
 │   │   ├── feedback/            # Inbox, compose, storage
 │   │   ├── json/                # JSON operation logging (json_handler)
+│   │   ├── owner/               # Owner gate + admin grant (keygen, mint, 5-leg verify)
 │   │   └── watchdog/            # Agent, timer, schedule, registry
 │   └── plugins/                 # Plugin extension point
 ├── devpulse_json/               # JSON handler storage (config, data, logs per module)
-├── tests/                       # 348 tests
+├── tests/                       # 388 tests
 ├── artifacts/                   # Birth certificate, reports
 ├── dropbox/                     # Received files, archived plans, install audit
 ├── docs/                        # Transition notes
@@ -135,6 +137,24 @@ Curated truth-store of rated decisions (`good` / `bad` / `impressive` / `interes
 | `compass rate <id> <rating>` | Re-rate a decision |
 | `compass archive <id>` | Archive a decision |
 | `compass review` | Surface one decision to review |
+
+### Admin grant — birth-cert privilege ceremony (owner-only mint)
+
+Devpulse — and only devpulse — holds an admin privilege that lets it dispatch ANY
+agent, managers included (DPLAN-0288 / FPLAN-0401). The grant is a signed
+`privileges` block on the existing birth certificate (`artifacts/birth_certificate.json`),
+HMAC-SHA256 signed with a key OUTSIDE every repo (`~/.aipass/admin_grant.key`).
+Verification is a 5-leg contract — caller, cert-path-from-registry, content,
+signature, registry flag — all must pass, every refusal named, missing key = lane
+dark. This module is the ceremony tooling and the contract's reference
+implementation; @ai_mail mirrors it on the dispatch lane. The user runs the ceremony.
+
+| Command | What it does |
+|---|---|
+| `admin_grant status` | Ceremony/lane state (key, cert, signature, verify) |
+| `admin_grant verify` | Run the full 5-leg contract check |
+| `admin_grant keygen` | Generate the signing key (owner-only, refuses overwrite) |
+| `admin_grant mint` | Add + sign the admin privilege block (owner-only) |
 
 ## Git Operations
 

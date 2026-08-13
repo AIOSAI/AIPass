@@ -121,7 +121,7 @@ def print_help():
     console.print()
 
     console.print("[bold cyan]Usage:[/bold cyan]")
-    console.print("  [green]drone @prax <command>[/green] [dim][options][/dim]")
+    console.print("  [green]drone @prax <command>[/green] [dim]\\[options][/dim]")
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")

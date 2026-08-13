@@ -37,6 +37,7 @@ Covers imports required by the seedgo test scanner:
 import json
 import sys
 import time
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1618,45 +1619,83 @@ class TestRetrieveFragments:
 
 
 # =============================================================================
-# analyze_conversation_llm (extractor.py)
+# extract_fragments_llm operation logging (extractor.py)
 # =============================================================================
 
 
-class TestAnalyzeConversationLlm:
-    """Tests for extractor.analyze_conversation_llm()."""
+class TestExtractFragmentsLlmLogging:
+    """extract_fragments_llm() logs every real extraction attempt.
 
-    def test_empty_history_returns_empty(self):
-        from aipass.memory.apps.handlers.symbolic.extractor import analyze_conversation_llm
+    The key lookup is stubbed via sys.modules, not setattr: extractor imports
+    get_api_key inside the function body, and attribute patching let a REAL
+    keystore key through to a REAL OpenRouter call (observed: HTTP 401).
+    Both tests also hard-block urlopen so this file can never reach the network.
+    """
 
-        result = analyze_conversation_llm([])
-        assert result["success"] is True
-        assert result["fragments"] == []
-        assert result["message_count"] == 0
+    KEYS_MODULE = "aipass.api.apps.handlers.auth.keys"
 
-    def test_merges_llm_and_regex_results(self, monkeypatch):
+    def _block_network(self, monkeypatch):
+        import urllib.request
+
+        def _never(req, timeout=30):
+            raise AssertionError("test attempted a real network call")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _never)
+
+    def _stub_key(self, monkeypatch, key):
+        stub = types.ModuleType(self.KEYS_MODULE)
+        setattr(stub, "get_api_key", lambda service: key)
+        monkeypatch.setitem(sys.modules, self.KEYS_MODULE, stub)
+
+    def _spy_log(self, monkeypatch):
         from aipass.memory.apps.handlers.symbolic import extractor
 
+        logged = []
         monkeypatch.setattr(
-            extractor,
-            "extract_fragments_llm",
-            lambda history: {
-                "success": True,
-                "fragments": [{"summary": "test frag"}],
-                "chunk_count": 1,
-            },
+            extractor.json_handler,
+            "log_operation",
+            lambda op, data: logged.append((op, data)),
         )
-        monkeypatch.setattr(
-            extractor,
-            "analyze_conversation",
-            lambda history: {
-                "metadata": {"timestamp": "2026-01-01", "total_chars": 100, "total_words": 20, "depth": "deep"},
-                "dimensions": {"technical": ["coding"]},
-                "message_count": 2,
-            },
-        )
+        return extractor, logged
 
-        result = extractor.analyze_conversation_llm([{"role": "user", "content": "hello"}])
+    def test_logs_operation_when_all_chunks_fail(self, monkeypatch):
+        import urllib.error
+        import urllib.request
+
+        extractor, logged = self._spy_log(monkeypatch)
+        self._stub_key(monkeypatch, "sk-test-key")
+
+        def _fail(req, timeout=30):
+            raise urllib.error.URLError("no network in tests")
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fail)
+
+        result = extractor.extract_fragments_llm([{"role": "user", "content": "hello"}])
+
+        assert result["success"] is False
+        assert len(logged) == 1
+        op, data = logged[0]
+        assert op == "symbolic_extract"
+        assert data["success"] is False
+        assert data["chunks_failed"] == 1
+        assert data["chunks_succeeded"] == 0
+
+    def test_no_log_without_api_key(self, monkeypatch):
+        extractor, logged = self._spy_log(monkeypatch)
+        self._block_network(monkeypatch)
+        self._stub_key(monkeypatch, None)
+
+        result = extractor.extract_fragments_llm([{"role": "user", "content": "hello"}])
+
+        assert result["success"] is False
+        assert "No OpenRouter API key" in result["error"]
+        assert logged == []
+
+    def test_no_log_for_empty_history(self, monkeypatch):
+        extractor, logged = self._spy_log(monkeypatch)
+        self._block_network(monkeypatch)
+
+        result = extractor.extract_fragments_llm([])
+
         assert result["success"] is True
-        assert len(result["fragments"]) == 1
-        assert result["metadata"]["depth"] == "deep"
-        assert result["message_count"] == 2
+        assert logged == []

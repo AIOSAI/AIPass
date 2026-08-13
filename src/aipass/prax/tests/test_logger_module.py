@@ -558,6 +558,36 @@ class TestSystemLogger:
         setup = mocks["aipass.prax.apps.handlers.logging.setup"]
         setup.setup_individual_logger.assert_called()
 
+    def test_system_logger_has_debug(self, monkeypatch):
+        """SystemLogger exposes a debug() method."""
+        mod, _mocks = _inject_and_import(monkeypatch)
+
+        assert callable(getattr(mod.system_logger, "debug", None))
+
+    def test_debug_calls_get_system_logger(self, monkeypatch):
+        """SystemLogger.debug() routes through the same per-caller lookup."""
+        mod, mocks = _inject_and_import(monkeypatch)
+
+        mod.SystemLogger._watcher_started = True
+
+        mod.system_logger.debug("detail: %s", "value")
+
+        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
+        setup.setup_individual_logger.assert_called()
+
+    def test_debug_delegates_to_the_debug_level(self, monkeypatch):
+        """The routed logger's debug() is what gets called — not info()."""
+        mod, mocks = _inject_and_import(monkeypatch)
+
+        mod.SystemLogger._watcher_started = True
+        setup = mocks["aipass.prax.apps.handlers.logging.setup"]
+        routed = setup.setup_individual_logger.return_value
+
+        mod.system_logger.debug("detail: %s", "value")
+
+        routed.debug.assert_called_once_with("detail: %s", "value")
+        routed.info.assert_not_called()
+
 
 # =============================================
 # Module constants
@@ -641,3 +671,71 @@ class TestPrintIntrospection:
 
             mock_rich.assert_called_once()
             mock_rich_instance.print.assert_called()
+
+
+# =============================================
+# NullLogger fallback (aipass/prax/__init__.py)
+# =============================================
+
+
+def _load_fallback_logger():
+    """Execute prax/__init__.py with the real logger import forced to fail.
+
+    Returns the NullLogger instance the package falls back to. Runs the real
+    source rather than a re-implementation — the point of the fallback is what
+    ships, not what a test can restate.
+    """
+    init_path = Path(__file__).resolve().parents[1] / "__init__.py"
+    namespace: dict = {"__name__": "aipass.prax._fallback_probe", "__file__": str(init_path)}
+
+    # A sys.modules entry of None makes `from ... import ...` raise ImportError,
+    # which is the branch under test.
+    with patch.dict(sys.modules, {"aipass.prax.apps.modules.logger": None}):
+        exec(compile(init_path.read_text(encoding="utf-8"), str(init_path), "exec"), namespace)
+
+    return namespace["logger"]
+
+
+class TestNullLoggerFallback:
+    """Tests for the NullLogger used when prax's own import chain breaks."""
+
+    def test_falls_back_when_logger_import_fails(self):
+        """A broken prax must still hand callers a usable logger."""
+        fallback = _load_fallback_logger()
+
+        assert type(fallback).__name__ == "NullLogger"
+
+    def test_exposes_every_system_logger_level(self):
+        """Fallback parity: a level SystemLogger has and NullLogger lacks is an
+        AttributeError raised precisely when prax is already broken.
+
+        SystemLogger's methods are read from the shipped source, not imported —
+        conftest replaces the logger module with a mock whose SystemLogger is
+        the MagicMock class itself, which would make this check vacuous.
+        """
+        import ast
+
+        source_path = Path(__file__).resolve().parents[1] / "apps" / "modules" / "logger.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        levels = [
+            item.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and node.name == "SystemLogger"
+            for item in node.body
+            if isinstance(item, ast.FunctionDef) and not item.name.startswith("_")
+        ]
+
+        fallback = _load_fallback_logger()
+
+        assert "debug" in levels, "SystemLogger has no debug() — parity check is vacuous"
+        for level in levels:
+            assert callable(getattr(fallback, level, None)), f"NullLogger is missing {level}()"
+
+    def test_levels_do_not_raise(self):
+        """Every fallback level is safe to call — it must never crash a caller."""
+        fallback = _load_fallback_logger()
+
+        fallback.debug("debug via fallback")
+        fallback.info("info via fallback")
+        fallback.warning("warning via fallback")
+        fallback.error("error via fallback")

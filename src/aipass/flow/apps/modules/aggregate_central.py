@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_central.py
 # Description: Aggregate Central Plans Module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2025-11-30
-# Modified: 2025-11-30
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -127,7 +127,7 @@ def print_help():
     console.print("[bold cyan]aggregate_central[/bold cyan] — Central plans aggregation and self-healing")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  drone @flow aggregate [options]")
+    console.print("  drone @flow aggregate \\[options]")
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  --heal      Auto-close missing plans [dim](default)[/dim]")
@@ -196,7 +196,7 @@ def main():
         sys.exit(0)
 
     if len(sys.argv) < 2:
-        console.print("Usage: drone @flow aggregate [options]")
+        console.print("Usage: drone @flow aggregate \\[options]")
         console.print("Commands:")
         console.print("  aggregate         - Aggregate central plans (with healing)")
         console.print("  aggregate --heal  - Aggregate with explicit healing")

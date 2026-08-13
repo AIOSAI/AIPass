@@ -48,7 +48,7 @@ HELP_TEXT = """\
   watchdog timer stop <name>                    Stop named timer + report elapsed
   watchdog timer list                           List active + historical timers
   watchdog timer report                         Formatted session summary
-  watchdog schedule <time> [command]            Wake at HH:MM or +N, optional cmd
+  watchdog schedule <time> \\[command]            Wake at HH:MM or +N, optional cmd
   watchdog cancel <handle>                      SIGTERM a specific watch + deregister
   watchdog cancel --all                         Kill every active watch
   watchdog list                                 Alias for status

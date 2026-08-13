@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -270,7 +270,7 @@ def print_help():
     console.print("  [cyan]init[/cyan]            [dim]Initialize .env template[/dim]")
     console.print()
     console.print("[yellow]USAGE:[/yellow]")
-    console.print("  [cyan]drone @api[/cyan] <command> [args]")
+    console.print("  [cyan]drone @api[/cyan] <command> \\[args]")
     console.print("  [cyan]drone @api[/cyan] --help")
     console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")

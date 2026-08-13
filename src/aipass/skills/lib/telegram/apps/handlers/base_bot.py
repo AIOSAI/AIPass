@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: base_bot.py
 # Description: BaseBot class for Telegram multi-bot architecture
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-02-24
-# Modified: 2026-08-02
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -207,6 +207,19 @@ def _is_network_error(exc: Exception) -> bool:
         if pattern in reason_str:
             return True
     return False
+
+
+def _http_error_description(exc: HTTPError) -> str:
+    """Pull Telegram's own account of a rejection out of the response body.
+
+    str(HTTPError) is only the status line ("HTTP Error 400: Bad Request"), which
+    names nothing. The body carries the description that says what was wrong.
+    """
+    try:
+        return json.loads(exc.read().decode("utf-8", "ignore")).get("description", "")
+    except (ValueError, OSError) as read_err:
+        logger.warning("Could not read Telegram rejection body: %s", read_err)
+        return ""
 
 
 def _is_routine_read_timeout(exc: Exception) -> bool:
@@ -620,6 +633,8 @@ class BaseBot:
         if parse_mode is not None:
             payload["parse_mode"] = parse_mode
 
+        last_error: Exception | None = None
+
         for attempt in range(3):
             try:
                 data = json.dumps(payload).encode("utf-8")
@@ -635,13 +650,30 @@ class BaseBot:
                         attempt + 1,
                         result.get("description", "unknown"),
                     )
+            except HTTPError as e:
+                last_error = e
+                logger.warning(
+                    "sendMessage rejected (attempt %d, HTTP %s): %s",
+                    attempt + 1,
+                    e.code,
+                    _http_error_description(e) or "no description in response body",
+                )
             except Exception as e:
+                last_error = e
                 logger.warning("sendMessage error (attempt %d): %s", attempt + 1, e)
 
             if attempt < 2:
                 time.sleep(1.0 * (2**attempt))
 
-        logger.error("sendMessage failed after 3 attempts")
+        # An unreachable host is not a bot fault. The poll loop already treats
+        # this exact condition as a WARNING and backs off; the send path used to
+        # escalate it to ERROR, so every transient DNS blip on this machine
+        # raised an incident. Classify the failure instead of collapsing it —
+        # a rejected payload or an unknown fault still fails loud.
+        if last_error is not None and _is_network_error(last_error):
+            logger.warning("sendMessage abandoned after 3 attempts — Telegram unreachable: %s", last_error)
+        else:
+            logger.error("sendMessage failed after 3 attempts")
         self._health["messages_failed"] = self._health.get("messages_failed", 0) + 1
         return None
 

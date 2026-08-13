@@ -204,7 +204,13 @@ class TestHandleCommand:
         assert result is True
 
     def test_dispatch_unknown_subcommand(self, monkeypatch):
-        """Unknown subcommand prints error and returns False."""
+        """Unknown subcommand prints its own error and still returns True.
+
+        "dispatch" WAS recognised — this module owns it and has already said
+        what is wrong with the subcommand. Returning False sent the router on
+        to print "Unknown command: dispatch" underneath, so one mistyped
+        subcommand produced two contradictory errors.
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -213,8 +219,14 @@ class TestHandleCommand:
         from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", ["bogus"])
-        assert result is False
-        assert any("Unknown" in e for e in errors)
+        assert result is True
+        assert any("Unknown dispatch subcommand" in e for e in errors)
+
+    def test_non_dispatch_command_is_declined(self):
+        """A command this module does not own returns False, unhandled."""
+        from aipass.ai_mail.apps.modules.dispatch import handle_command
+
+        assert handle_command("email", ["@target", "Subject", "Body"]) is False
 
 
 # ===========================================================================
@@ -439,8 +451,13 @@ class TestOrchestrateWake:
         result = _orchestrate_wake(["help"])
         assert result is True
 
-    def test_missing_branch_after_flags_returns_false(self, monkeypatch):
-        """Only flags (--fresh) without a branch returns False."""
+    def test_missing_branch_after_flags_reports_and_stays_handled(self, monkeypatch):
+        """Only flags (--fresh) without a branch errors but stays handled.
+
+        error() marks the process failed (exit 2). Returning False here made
+        the router add "Unknown command: dispatch" on top of "Missing branch
+        argument" and exit 1 — unroutable — for a command it had routed.
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -449,7 +466,7 @@ class TestOrchestrateWake:
         from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
         result = _orchestrate_wake(["--fresh"])
-        assert result is False
+        assert result is True
         assert any("Missing" in e for e in errors)
 
     def test_blocked_branch_shows_error(self, monkeypatch):
@@ -494,11 +511,17 @@ class TestOrchestrateWake:
         combined = " ".join(printed)
         assert "WAKE OK" in combined
 
-    def test_failed_wake_returns_false(self, monkeypatch):
-        """Failed wake returns False (wake_branch returns success=False)."""
+    def test_failed_wake_reports_error_and_stays_handled(self, monkeypatch):
+        """A failed wake calls error() and still returns True.
+
+        The step-status block alone never marked the command failed, so a dead
+        wake exited 0 and any script reading the code was told it worked.
+        """
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE FAILED: spawn error"
 
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
@@ -515,7 +538,8 @@ class TestOrchestrateWake:
             from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
             result = _orchestrate_wake(["@branch"])
-        assert result is False
+        assert result is True
+        assert any("Wake failed for @branch" in e for e in errors)
 
     def test_fresh_flag(self, monkeypatch):
         """--fresh flag is passed through to wake_branch."""
@@ -523,7 +547,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Capture wake_branch call arguments."""
             wake_calls.append({"branch": branch, "fresh": fresh, "sender": sender, "model": model})
             return (mock_status, True)
@@ -553,7 +577,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "model": model})
             return (mock_status, True)
@@ -577,13 +601,13 @@ class TestOrchestrateWake:
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "opus"
 
-    def test_sender_flag(self, monkeypatch):
-        """--sender flag is passed through to wake_branch."""
+    def _run_sender_flag(self, monkeypatch) -> list[dict]:
+        """Run `wake @branch --sender @custom` and return the wake_branch calls."""
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track sender argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "sender": sender})
             return (mock_status, True)
@@ -604,8 +628,28 @@ class TestOrchestrateWake:
             from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
             _orchestrate_wake(["--sender", "@custom", "@branch"])
+        return wake_calls
+
+    def test_sender_flag_unverified_caller(self, monkeypatch):
+        """No caller rail: --sender is passed through to wake_branch.
+
+        States its lane explicitly — the rail reads ambient env, so a test that
+        leaves AIPASS_CALLER_BRANCH to chance asserts a different contract
+        depending on how the suite was launched.
+        """
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        wake_calls = self._run_sender_flag(monkeypatch)
         assert len(wake_calls) == 1
         assert wake_calls[0]["sender"] == "@custom"
+
+    def test_sender_flag_loses_to_the_verified_caller(self, monkeypatch):
+        """With a rail, the wake is attributed to who actually ran it."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        wake_calls = self._run_sender_flag(monkeypatch)
+        assert len(wake_calls) == 1
+        assert wake_calls[0]["sender"] == "@seedgo"
 
     def test_custom_message(self, monkeypatch):
         """A custom message after the branch is passed to wake_branch."""
@@ -613,7 +657,7 @@ class TestOrchestrateWake:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track custom message argument passed to wake_branch."""
             wake_calls.append({"branch": branch, "msg": msg})
             return (mock_status, True)
@@ -710,7 +754,12 @@ class TestOrchestrateDispatchSend:
         assert "sent" in combined.lower()
 
     def test_send_failure_calls_dispatch_send_error(self, monkeypatch):
-        """Send failure calls dispatch_send_error and returns False."""
+        """Send failure calls dispatch_send_error and stays handled.
+
+        Returning False here is what made a refused cross-project dispatch run
+        twice: the router moved on to the next module, which sent it again and
+        then printed "Unknown command: dispatch".
+        """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -731,9 +780,14 @@ class TestOrchestrateDispatchSend:
 
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
-        assert result is False
-        assert any("Send failed" in e for e in errors)
+        assert result is True
+        assert any("Dispatch to @target not sent" in e for e in errors)
         assert len(dispatch_error_calls) == 1
+        # The pre-send "Sending dispatch email to ..." announcement is gone.
+        # drone replays stdout before stderr, so a progress line printed before
+        # the send always landed BELOW the refusal — reading as "it failed,
+        # and then it sent".
+        assert not any("Sending dispatch email" in p for p in printed)
 
     def test_send_ok_but_wake_failure_shows_warning(self, monkeypatch):
         """Send succeeds but wake fails -- returns True but shows error."""
@@ -765,7 +819,7 @@ class TestOrchestrateDispatchSend:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track fresh flag passed to wake_branch."""
             wake_calls.append({"branch": branch, "fresh": fresh})
             return (mock_status, True)
@@ -821,7 +875,7 @@ class TestOrchestrateDispatchSend:
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
 
-        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None):
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch in dispatch send."""
             wake_calls.append({"model": model})
             return (mock_status, True)
@@ -893,8 +947,8 @@ class TestOrchestrateDispatchSend:
 
         assert result is True
 
-    def test_send_phase_exception_returns_false(self, monkeypatch):
-        """Exception during send phase returns False."""
+    def test_send_phase_exception_reports_and_stays_handled(self, monkeypatch):
+        """An exception in the send phase errors out but stays handled."""
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -912,8 +966,8 @@ class TestOrchestrateDispatchSend:
 
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
-        assert result is False
-        assert any("Send failed" in e for e in errors)
+        assert result is True
+        assert any("Dispatch to @target not sent: boom" in e for e in errors)
 
 
 # ===========================================================================
@@ -1046,3 +1100,159 @@ class TestWakeBackMessaging:
 
         combined = " ".join(printed)
         assert "Wake-back enabled" not in combined
+
+
+# ===========================================================================
+# Verified-caller rail — spoofed sender refusal (FPLAN-0401 Phase 1)
+# ===========================================================================
+
+
+class TestSpoofedSenderRefusal:
+    """CLI-suppliable identity must never gate a privilege.
+
+    `--from` (dispatch send) and `--sender` (manual wake) both land on
+    wake_branch's `sender`, and `sender == "@daemon"` unlocks the manager wake
+    lane. These prove the claim is checked against the verified caller before
+    it can reach that gate.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_caller_env(self, monkeypatch):
+        """State the caller env per test — an ambient one would decide for it."""
+        monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+    def test_spoofed_daemon_from_flag_never_reaches_wake(self, monkeypatch):
+        """THE canary: --from @daemon out of a non-daemon seat wakes nothing."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        wake = MagicMock()
+        send = MagicMock(return_value=(True, None))
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
+        with patches:
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+
+            result = _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+
+        assert result is True
+        wake.assert_not_called()
+        send.assert_not_called()  # a refused dispatch must not send the email either
+        assert errors, "refusal must be loud on stderr"
+        assert "@daemon" in errors[0] and "@seedgo" in errors[0]
+
+    def test_spoofed_daemon_sender_flag_never_reaches_wake(self, monkeypatch):
+        """Same hole, second door: `dispatch wake @x --sender @daemon`."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        wake = MagicMock()
+        with (
+            patch(f"{_H_WAKE}.is_wake_blocked", return_value=False),
+            patch(f"{_H_WAKE}.wake_branch", wake),
+        ):
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
+
+            result = _orchestrate_wake(["--sender", "@daemon", "@target"])
+
+        assert result is True
+        wake.assert_not_called()
+        assert errors and "@daemon" in errors[0]
+
+    def test_unverifiable_caller_cannot_claim_daemon(self, monkeypatch):
+        """No caller rail at all — the claim is refused, not assumed."""
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        wake = MagicMock()
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake})
+        with patches:
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+
+            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+
+        wake.assert_not_called()
+        assert errors and "unverified" in errors[0].lower()
+
+    def test_real_daemon_seat_still_dispatches_as_daemon(self, monkeypatch):
+        """The rail proves it: @daemon's own seat keeps its lane."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "daemon")
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        wake_calls: list[dict] = []
+        mock_status = MagicMock()
+        mock_status.format.return_value = "OK"
+
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
+            """Track the sender that reached wake_branch."""
+            wake_calls.append({"sender": sender})
+            return (mock_status, True)
+
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=mock_wake)})
+        with patches:
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+
+            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
+
+        assert len(wake_calls) == 1
+        assert wake_calls[0]["sender"] == "@daemon"
+
+    def test_wake_sender_comes_from_the_rail_not_the_from_flag(self, monkeypatch):
+        """A legal --from still moves the mail identity, never the wake identity."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        wake_calls: list[dict] = []
+        mock_status = MagicMock()
+        mock_status.format.return_value = "OK"
+
+        def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
+            """Track the sender that reached wake_branch."""
+            wake_calls.append({"sender": sender})
+            return (mock_status, True)
+
+        resolve = MagicMock(return_value={"email_address": "@spawn"})
+        patches = _send_patches(
+            {
+                f"{_H_WAKE}.wake_branch": MagicMock(side_effect=mock_wake),
+                f"{_H_SEND}.resolve_sender_info": resolve,
+            }
+        )
+        with patches:
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+
+            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
+
+        # The mail is still authored by @spawn...
+        assert resolve.call_args[0][0] == "@spawn"
+        # ...and the wake is attributed to whoever actually ran the command.
+        assert wake_calls[0]["sender"] == "@seedgo"
+
+    def test_non_privileged_from_flag_still_dispatches(self, monkeypatch):
+        """No collateral damage: an ordinary --from send is untouched."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        errors: list[str] = []
+        monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        wake = MagicMock(return_value=(MagicMock(), True))
+        send = MagicMock(return_value=(True, None))
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
+        with patches:
+            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+
+            _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
+
+        send.assert_called_once()
+        wake.assert_called_once()
+        assert errors == []

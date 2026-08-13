@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-06-07
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -114,7 +114,7 @@ def print_help():
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @hooks <command> [args...][/dim]")
+    console.print("  [dim]drone @hooks <command> \\[args...][/dim]")
     console.print("  [dim]drone @hooks --help[/dim]")
     console.print()
     console.print("─" * 70)

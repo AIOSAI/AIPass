@@ -322,7 +322,7 @@ def test_send_reply_multiline_body_preserved(tmp_path):
 # earlier suite in this bug class stayed green because its fixtures used the
 # hardcoded name and so shared the code's assumption.
 
-_PATCH_NOTIFY = "aipass.ai_mail.apps.handlers.email.delivery._send_desktop_notification"
+_PATCH_NOTIFY = "aipass.ai_mail.apps.handlers.email.delivery._emit_notification_event"
 
 
 def _make_external_project(root, project="myproj", branch="vera"):

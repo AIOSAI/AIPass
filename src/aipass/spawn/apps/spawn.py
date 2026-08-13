@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-14
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -30,7 +30,7 @@ def print_help():
     console.print()
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @spawn create [class] <target_path> [options][/dim]")
+    console.print("  [dim]drone @spawn create \\[class] <target_path> \\[options][/dim]")
     console.print("  [dim]drone @spawn update <@branch | class --all> [--apply][/dim]")
     console.print(
         "  [dim]drone @spawn repair <project_path> [--clean-pollution | --relocate @branch <path>] [--apply][/dim]"
@@ -39,7 +39,7 @@ def print_help():
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
     console.print()
-    console.print("  [green]create[/green] [class] <path>         Create a new branch from template")
+    console.print("  [green]create[/green] \\[class] <path>         Create a new branch from template")
     console.print(
         "  [green]update[/green] <@branch>              Update single branch from templates (preview-only by default)"
     )
@@ -58,6 +58,7 @@ def print_help():
     console.print(
         "  [green]repair[/green] --relocate @branch <path> Move branch + update registry (preview; add --apply)"
     )
+    console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
@@ -89,10 +90,23 @@ def print_help():
     console.print()
 
 
+def _class_candidates(args):
+    """Yield every arg that create could read as a class or template value.
+
+    That is the leading positional (``create <class> <path>``) and any
+    ``--template`` value — the two doors a forbidden class could walk in.
+    """
+    if args:
+        yield args[0]
+    for i, arg in enumerate(args):
+        if arg == "--template" and i + 1 < len(args):
+            yield args[i + 1]
+
+
 def handle_create(args):
     """Handle the create command with optional citizen class."""
     from aipass.spawn.apps.modules.core import _spawn_agent as spawn_agent
-    from aipass.spawn.apps.modules.core import validate_class, get_default_class
+    from aipass.spawn.apps.modules.core import validate_class, get_default_class, refuse_forbidden_class
 
     if not args:
         error("target path required", suggestion="drone @spawn create [class] <target_path> [--role ...]")
@@ -102,6 +116,14 @@ def handle_create(args):
     if "--help" in args or "-h" in args:
         print_help()
         return 0
+
+    # Forbidden class/template values refuse here — before argparse turns
+    # "admin" into a target path or a raw template directory (DPLAN-0288).
+    for value in _class_candidates(args):
+        refusal = refuse_forbidden_class(value)
+        if refusal:
+            error(refusal)
+            return 1
 
     # Check if first arg is a citizen class
     citizen_class = get_default_class()
@@ -222,6 +244,7 @@ def print_introspection():
     console.print("    [dim]- sync_templates.py (handle_sync_templates — template synchronization)[/dim]")
     console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
+    console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
     console.print()
@@ -281,6 +304,11 @@ def main():
         from aipass.spawn.apps.modules.repair import handle_repair
 
         return handle_repair(remaining)
+
+    if command == "grant-admin":
+        from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
+
+        return handle_grant_admin(remaining)
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1

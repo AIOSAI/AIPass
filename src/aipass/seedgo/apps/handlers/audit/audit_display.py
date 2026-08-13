@@ -144,12 +144,22 @@ def _render_type_errors(audit_result: dict, console_obj) -> None:
     if type_errors > 0:
         console_obj.print()
         console_obj.print(f"  [bold red]TYPE ERRORS ({type_errors} errors):[/bold red]")
-        for file_result in type_error_files[:10]:  # Top 10 files
-            if file_result.get("errors", 0) > 0:
-                console_obj.print(f"    [red]✗[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
-                for diag in file_result.get("diagnostics", [])[:3]:  # Top 3 per file
-                    msg = diag.get("message", "")[:60]
-                    console_obj.print(f"      [dim]L{diag.get('line', '?')}: {msg}[/dim]")
+        # Every cap here announces itself. A silent cap is indistinguishable from a
+        # short list, so a caller reading this output cannot tell 'clean' from
+        # 'not shown' — which is how a branch measures the display budget and
+        # publishes it as a finding about its own code (@prax, mail 83190864).
+        failing = [f for f in type_error_files if f.get("errors", 0) > 0]
+        for file_result in failing[:10]:
+            console_obj.print(f"    [red]✗[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
+            diagnostics = file_result.get("diagnostics", [])
+            for diag in diagnostics[:3]:
+                msg = diag.get("message", "")
+                clipped = f"{msg[:60]}…" if len(msg) > 60 else msg
+                console_obj.print(f"      [dim]L{diag.get('line', '?')}: {clipped}[/dim]")
+            if len(diagnostics) > 3:
+                console_obj.print(f"      [dim]... and {len(diagnostics) - 3} more in this file[/dim]")
+        if len(failing) > 10:
+            console_obj.print(f"    [dim]... and {len(failing) - 10} more files[/dim]")
     elif files_checked > 0:
         console_obj.print("  [green]✓[/green] No type errors")
 

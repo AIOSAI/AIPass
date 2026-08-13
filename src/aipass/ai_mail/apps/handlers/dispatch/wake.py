@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 2.1.0
+# Version: 2.4.0
 # Created: 2026-03-02
-# Modified: 2026-08-04
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -467,11 +467,18 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
 # ─── Branch Resolution ──────────────────────────────────
 
 
-def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
+def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Path, str]]:
     """Resolve a branch email to its absolute filesystem path.
 
-    Checks the AIPass registry first, then falls back to the caller's
-    project registry via AIPASS_CALLER_CWD for cross-project dispatch.
+    Checks the AIPass registry first, then falls back to the caller's project
+    registry via AIPASS_CALLER_CWD for cross-project dispatch.
+
+    Args:
+        branch_email: Target address, with or without the leading @.
+        admin: Only a VERIFIED admin caller (5 legs, checked by the caller —
+            never claimed here) may see step 3, the projects/* sweep. Left
+            False, this function behaves exactly as it did before phase 5:
+            no widening for anyone unverified.
     """
     email = f"@{branch_email.lstrip('@').lower()}"
 
@@ -502,6 +509,23 @@ def resolve_branch(branch_email: str) -> Optional[Tuple[Path, str]]:
         except Exception as e:
             logger.warning("[wake] resolve_branch caller registry fallback failed: %s", e)
 
+    # Step 3: Hosted projects (verified-admin only — the cross-project bridge).
+    # Runs last so a local branch always wins, and runs at all only when the
+    # caller already proved the grant. Unverified callers never reach here.
+    if admin:
+        try:
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+            project_branches = get_project_tree_branches(_REPO_ROOT)
+            branch_path_str = project_branches.get(email, "")
+            if branch_path_str:
+                branch_path = Path(branch_path_str)
+                if branch_path.exists():
+                    logger.info("[wake] %s resolved via projects/ sweep — admin bridge", email)
+                    return branch_path, email
+        except Exception as e:
+            logger.warning("[wake] resolve_branch projects sweep failed: %s", e)
+
     return None
 
 
@@ -517,11 +541,12 @@ def _spawn_manager_interactive(
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
-    Managers are never headless — they run interactive sessions the user can
-    attach to (same pattern as the manual tmux interactive wake). Used only
-    for @daemon-scheduled self-wakes that passed the manager gate. No dispatch
-    lock or monitor: the occupancy check is the one-instance guard for
-    interactive sessions.
+    The attended path: a session the user can attach to (same pattern as the
+    manual tmux interactive wake). Used only for @daemon self-wakes that passed
+    the manager gate WITHOUT scheduled=True — the scheduled lane goes headless
+    instead (DPLAN-0287). No dispatch lock or monitor here: the occupancy check
+    is the one-instance guard for interactive sessions, which also means no
+    context pin, no bounce email and no lock cleanup.
     """
     if shutil.which("tmux") is None:
         status.fail("tmux", "tmux not found — cannot spawn interactive manager session")
@@ -574,6 +599,9 @@ def wake_branch(
     auto: bool = False,
     sender: str = "@devpulse",
     model: Optional[str] = None,
+    *,
+    scheduled: bool = False,
+    admin: bool = False,
 ) -> Tuple[DispatchStatus, bool]:
     """
     Spawn a Claude agent at the target branch with step-by-step status.
@@ -586,6 +614,23 @@ def wake_branch(
         sender: Return-to-sender for bounce emails
         model: Model shorthand ("sonnet", "opus", "haiku") or full model ID.
                Defaults to opus (Patrick ruling 2026-08-01: agents run opus).
+        scheduled: Keyword-only opt-in for the scheduled lane (DPLAN-0287) —
+               an unattended run fired by a clock, not by a person. A manager
+               target then wakes HEADLESS through dispatch_monitor (which pins
+               CLAUDE_CODE_AUTO_COMPACT_WINDOW) instead of an unattended tmux
+               session nobody is watching, and a WAKE_BLOCKLIST target is
+               refused outright. Non-manager targets are unaffected apart from
+               that refusal. Default False leaves every existing caller's
+               behaviour exactly as it was.
+        admin: Keyword-only, and an ALREADY-DECIDED verdict — never a request.
+               True means a caller holding the caller env ran the full 5-leg
+               admin-grant check and it passed (FPLAN-0401 THE CONTRACT;
+               dispatch.py owns that call). A manager target then wakes
+               headless through dispatch_monitor like any citizen dispatch.
+               This function cannot verify the grant itself: leg 1 needs
+               AIPASS_CALLER_*, which its in-process callers do not carry.
+               WAKE_BLOCKLIST still refuses — admin raises the stakes, not the
+               fence. Default False = today's manager gate, untouched.
 
     Returns:
         Tuple of (DispatchStatus with all steps, overall success bool)
@@ -594,8 +639,10 @@ def wake_branch(
         A manager target returns True having deliberately woken nothing — mail is
         delivered and the wake is skipped by design (see Step 3). Callers that need
         to know whether a process actually started must check
-        status.find_step("manager"): "info" = gate skipped the wake, "ok" = the
-        @daemon self-wake exception applied and the spawn went ahead.
+        status.find_step("manager"): "info" = gate skipped the wake, "ok" = a
+        manager spawn went ahead. Which spawn it was is named separately:
+        status.find_step("scheduled") is present only for the headless lane, and
+        the interactive tmux spawn reports its session in the "spawn" step.
     """
     json_handler.log_operation(
         "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}
@@ -610,7 +657,7 @@ def wake_branch(
         return status, False
 
     # Step 2: Resolve branch
-    result = resolve_branch(branch_email)
+    result = resolve_branch(branch_email, admin=admin)
     if result is None:
         status.fail("resolve", f"Branch not found: {branch_email}")
         return status, False
@@ -618,11 +665,29 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
+    # Step 2b: Blocklist — no privileged lane ever spawns a blocked target.
+    # Checked BEFORE the passport read on purpose: an unreadable or missing
+    # passport must never be the reason @devpulse gets spawned at 5am, and a
+    # verified admin grant is permission to wake OTHERS, never to wake the
+    # blocked seat. The manual/dispatch paths keep enforcing this in
+    # dispatch.py._orchestrate_wake; this is the same rule at the one entry
+    # point a scheduler or an admin lane calls directly.
+    if (scheduled or admin) and is_wake_blocked(email):
+        lane = "scheduled" if scheduled else "admin"
+        status.fail("blocklist", f"{email} is on WAKE_BLOCKLIST — refused in the {lane} lane")
+        logger.warning("[wake] BLOCKED %s — %s wake refused by WAKE_BLOCKLIST", email, lane)
+        return status, False
+
     # Step 3: Manager check — managers are never woken, mail only.
-    # Exception: @daemon scheduler fires. A branch's .daemon/schedule.json is
-    # self-authored (the daemon cannot write another branch's files), so a
-    # daemon-scheduled wake is the manager waking ITSELF — consent is the
-    # schedule's existence. Dispatch/manual wakes remain blocked.
+    # Exceptions, in order:
+    #   scheduled=True  → headless through dispatch_monitor. An unattended 5am
+    #     run must carry the monitor's guarantees (context pin, bounce, lock
+    #     cleanup); a tmux session with no one attached has none of them.
+    #   sender=@daemon  → interactive tmux. A branch's .daemon/schedule.json is
+    #     self-authored (the daemon cannot write another branch's files), so a
+    #     daemon-scheduled wake is the manager waking ITSELF — consent is the
+    #     schedule's existence.
+    # Dispatch/manual wakes remain blocked.
     passport_file = branch_path / ".trinity" / "passport.json"
     manager_scheduled = False  # daemon-scheduled manager wake → interactive tmux spawn
     try:
@@ -630,7 +695,15 @@ def wake_branch(
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
         if citizen_class == "manager":
-            if sender == "@daemon":
+            if scheduled:
+                status.ok("manager", f"{email} manager gate bypassed — scheduled wake")
+                status.ok("scheduled", "Headless lane — dispatch_monitor pipeline (context pin applies)")
+                logger.info("[wake] %s manager woken headless — scheduled lane", email)
+            elif admin:
+                status.ok("manager", f"{email} manager gate bypassed — verified admin dispatch")
+                status.ok("admin", "Headless lane — dispatch_monitor pipeline (admin grant verified by caller)")
+                logger.info("[wake] %s manager woken headless — admin lane", email)
+            elif sender == "@daemon":
                 manager_scheduled = True
                 status.ok("manager", f"{email} manager gate bypassed — daemon-scheduled self-wake")
                 logger.info("[wake] %s manager gate bypassed — @daemon scheduled wake", email)
@@ -673,8 +746,9 @@ def wake_branch(
 
     status.ok("occupancy", "No interactive session")
 
-    # Managers never run headless: a daemon-scheduled manager wake spawns an
-    # interactive tmux session instead of the -p/monitor pipeline below.
+    # A @daemon-sender manager wake spawns an interactive tmux session instead
+    # of the -p/monitor pipeline below. The scheduled lane deliberately does not
+    # set this flag — an unattended run belongs in the monitored pipeline.
     if manager_scheduled:
         return _spawn_manager_interactive(branch_path, email, custom_message or DEFAULT_PROMPT, model, status)
 
@@ -855,14 +929,14 @@ def wake_branch(
             lock_file.unlink(missing_ok=True)
             return status, False
 
-    # Desktop notification
+    # Notification feed event
     notif_body = custom_message[:80] if custom_message else "Manual wake: check inbox"
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"))
+        send_notification(f"@{email.lstrip('@')} waking", notif_body, source=email.lstrip("@"), kind="wake")
     except Exception:
-        logger.info("[wake] Desktop notification unavailable")
+        logger.info("[wake] Notification feed unavailable")
 
     return status, True
 
@@ -879,7 +953,8 @@ if __name__ == "__main__":
         print("Flags:")
         print("  --fresh          Start fresh session (claude -p) instead of resuming (claude -c -p)")
         print("  --auto           Respect autonomous_pause (used by daemon). Manual wake ignores it.")
-        print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse)")
+        print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse).")
+        print("                   Privilege-bearing values must match the verified caller.")
         print("  --model NAME     Model to use: opus (default), sonnet, haiku, or full model ID")
         print()
         print("Output: Step-by-step status of the dispatch pipeline:")
@@ -924,8 +999,20 @@ if __name__ == "__main__":
     branch = args[0]
     message = args[1] if len(args) > 1 else None
 
+    # --sender is a CLI string and lands on the privilege-bearing `sender`
+    # param, so it goes through the same verified-caller rail the routed
+    # commands use (FPLAN-0401). Closed here at @devpulse's request once the
+    # admin lane raised the stakes: the script surface no longer differs from
+    # the drone surface.
+    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
+
+    claim_refusal = sender_claim_refusal(use_sender)
+    if claim_refusal:
+        print(f"❌ Wake refused: {claim_refusal}", file=sys.stderr)
+        sys.exit(2)
+
     dispatch_status, success = wake_branch(
-        branch, message, fresh=use_fresh, auto=use_auto, sender=use_sender, model=use_model
+        branch, message, fresh=use_fresh, auto=use_auto, sender=resolve_wake_sender(use_sender), model=use_model
     )
     print(dispatch_status.format())
     sys.exit(0 if success else 1)

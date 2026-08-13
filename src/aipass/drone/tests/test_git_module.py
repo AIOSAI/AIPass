@@ -35,6 +35,7 @@ from aipass.drone.apps.handlers.git.pr_handler import (
 from aipass.drone.apps.modules.git_module import (
     DRONE_MODULE,
     _detect_branch_dir,
+    _rewrite_issue_view,
     get_help,
     get_introspective,
     handle_command,
@@ -1536,6 +1537,70 @@ class TestScopeFooter:
 
         assert "showing drone scope" not in result["stdout"]
 
+    # ── false-green regression: a git failure must exit non-zero (backlog flag) ──
+
+    _STATUS_ERR = {"ok": False, "files": [], "total": 0, "message": "git status error: fatal: not a git repository"}
+    _DIFF_ERR = {"ok": False, "diff": "", "files_changed": 0, "message": "git diff error: fatal: bad revision"}
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_status_error_exits_nonzero(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed git status exits 1 with the error on stderr — not a clean 0-changes report."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.status_handler.get_branch_status", return_value=dict(self._STATUS_ERR)):
+                result = handle_command("status", [])
+
+        assert result["exit_code"] == 1
+        assert "git status error" in result["stderr"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_status_all_error_not_overwritten(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--all must not reword an error into 'N file(s) changed in repo' (the false-green shape)."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.lock_handler.find_repo_root", return_value=tmp_path):
+                with patch(f"{_GIT_MOD}.status_handler.get_branch_status", return_value=dict(self._STATUS_ERR)):
+                    result = handle_command("status", ["--all"])
+
+        assert result["exit_code"] == 1
+        assert "git status error" in result["stderr"]
+        assert "changed in repo" not in result["stderr"] + result["stdout"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_diff_error_exits_nonzero(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A failed git diff exits 1 with the error on stderr."""
+        monkeypatch.chdir(tmp_path)
+
+        with patch(f"{_GIT_MOD}._detect_branch_dir", return_value=("drone", tmp_path / "src" / "drone")):
+            with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=dict(self._DIFF_ERR)):
+                result = handle_command("diff", [])
+
+        assert result["exit_code"] == 1
+        assert "git diff error" in result["stderr"]
+
+    @patch(_AUTH, return_value="test_branch")
+    def test_handler_ok_flag_set_on_git_failure(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The status handler itself stamps ok=False when git exits non-zero."""
+        import subprocess as _sp
+
+        monkeypatch.chdir(tmp_path)
+        fake = _sp.CompletedProcess(args=["git"], returncode=128, stdout="", stderr="fatal: not a git repository")
+        with patch("aipass.drone.apps.handlers.git.status_handler.subprocess.run", return_value=fake):
+            result = get_branch_status(tmp_path)
+
+        assert result["ok"] is False
+        assert "git status error" in result["message"]
+
 
 # ===========================================================================
 # Merge joint-decision gate (DPLAN-0256)
@@ -1623,3 +1688,83 @@ class TestMergeGate:
         assert result["exit_code"] == 1
         assert "Usage" in result["stderr"]
         mock_merge.assert_not_called()
+
+
+# ===========================================================================
+# issue view — Projects-classic deprecation
+# ===========================================================================
+
+
+class TestIssueViewRewrite:
+    """The default issue view render is rejected by GitHub — pin the fields.
+
+    That GraphQL view requests repository.issue.projectCards, a Projects-classic
+    field the API now refuses outright: the caller gets a deprecation notice and
+    no issue at all. Rendering from explicit --json fields never asks for it.
+    """
+
+    def test_bare_view_pins_json_fields(self) -> None:
+        """A plain view <n> gains --json/--template and keeps the issue number."""
+        rewritten = _rewrite_issue_view(["view", "728"])
+
+        assert rewritten[:2] == ["view", "728"]
+        assert "--json" in rewritten
+        assert "--template" in rewritten
+        fields = rewritten[rewritten.index("--json") + 1]
+        assert "projectCards" not in fields
+        assert "body" in fields.split(",")
+
+    def test_comments_flag_swapped_for_comments_field(self) -> None:
+        """--comments conflicts with --json, so it becomes a requested field."""
+        rewritten = _rewrite_issue_view(["view", "733", "--comments"])
+
+        assert "--comments" not in rewritten
+        assert "comments" in rewritten[rewritten.index("--json") + 1].split(",")
+        assert "{{range .comments}}" in rewritten[rewritten.index("--template") + 1]
+
+    def test_short_comments_flag_also_handled(self) -> None:
+        """-c is the same flag and conflicts identically."""
+        rewritten = _rewrite_issue_view(["view", "733", "-c"])
+
+        assert "-c" not in rewritten
+        assert "comments" in rewritten[rewritten.index("--json") + 1].split(",")
+
+    def test_unrelated_flags_survive(self) -> None:
+        """--repo is not a rendering choice — it must reach the CLI untouched."""
+        rewritten = _rewrite_issue_view(["view", "728", "--repo", "AIOSAI/AIPass"])
+
+        assert rewritten[:4] == ["view", "728", "--repo", "AIOSAI/AIPass"]
+        assert "--json" in rewritten
+
+    @pytest.mark.parametrize("flag", ["--json", "--jq", "-q", "--template", "-t", "--web", "-w"])
+    def test_callers_own_rendering_untouched(self, flag: str) -> None:
+        """A caller who picked a rendering keeps it — ours would conflict."""
+        args = ["view", "728", flag, "x"]
+
+        assert _rewrite_issue_view(args) == args
+
+    @pytest.mark.parametrize("args", [["list"], ["create", "--title", "x"], ["close", "728"], []])
+    def test_other_issue_subcommands_untouched(self, args: list[str]) -> None:
+        """Only view requests projectCards — everything else passes through."""
+        assert _rewrite_issue_view(list(args)) == args
+
+    @patch(_AUTH, return_value="drone")
+    def test_view_never_spawned_bare(self, _mock_auth: MagicMock) -> None:
+        """Canary: the exact command GitHub rejects must never be spawned."""
+        with patch(f"{_GIT_MOD}.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+            handle_command("issue", ["view", "728"])
+
+        spawned = mock_run.call_args[0][0]
+        assert spawned[:3] == ["gh", "issue", "view"]
+        assert spawned != ["gh", "issue", "view", "728"]
+        assert "--json" in spawned
+
+    @patch(_AUTH, return_value="drone")
+    def test_run_subcommand_not_rewritten(self, _mock_auth: MagicMock) -> None:
+        """The rewrite is scoped to issue — run view is a different command."""
+        with patch(f"{_GIT_MOD}.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+            handle_command("run", ["view", "123"])
+
+        assert mock_run.call_args[0][0] == ["gh", "run", "view", "123"]

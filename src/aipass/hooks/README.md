@@ -94,7 +94,7 @@ src/aipass/hooks/
 │   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn
 │   │   │   └── persistent_alert.py # Injects advisory banners from .aipass/alerts.json
 │   │   ├── security/            # Enforcement hooks
-│   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-branch, inbox, diagnostics)
+│   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-project, cross-branch, inbox, diagnostics)
 │   │   │   ├── git_gate.py      #   Enforces git access tiers
 │   │   │   ├── presence_gate.py  #   Single-session gate — blocks duplicate runtimes per branch
 │   │   │   ├── registry_gate.py  #   Seals *_REGISTRY.json — blocks raw writes/edits/deletes, redirects to drone @spawn
@@ -185,6 +185,25 @@ The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to
 
 **Why it's on by default:** Agents reflexively reach for raw git, which causes state chaos in a multi-agent system. The gate redirects to `drone @git` which enforces access tiers (read-only for most branches, write-only for devpulse). External users who don't need multi-agent git orchestration can safely disable it.
 
+## Edit Gate — the project boundary
+
+The `edit_gate` handler (`security/edit_gate.py`) fences writes at two levels. Inside one project it enforces the branch boundary (`hooks` cannot write to `drone`; `devpulse`, `seedgo`, `spawn` are trusted cross-writers). Across projects it enforces the project boundary.
+
+A **project root** is the nearest ancestor directory holding a `*_REGISTRY.json` — the same marker `@ai_mail` uses to refuse cross-project mail. The two fences share a definition on purpose: an agent that is refused a send must not be allowed the equivalent write (GH #733).
+
+The project fence is directional, unlike the mail fence:
+
+| Direction | Example | Verdict |
+|---|---|---|
+| Inside own project | `projects/baud` → `projects/baud/src/...` | allowed |
+| Downward (host → hosted) | `src/aipass/devpulse` → `projects/baud/...` | allowed |
+| Upward (hosted → host) | `projects/baud` → `src/aipass/drone/...` | **blocked** |
+| Sideways (project → sibling) | `projects/baud` → `projects/earmark/...` | **blocked** |
+
+Trust runs downward. Downward writes also have to stay open because the host tree carries artifact registries of its own — `flow/flow_json/PLAN_REGISTRY.json`, `.backup/snapshots/` — which a strict rule would read as foreign projects to the very branches that own them.
+
+Where no project root is resolvable on either side, the gate allows the write: a fence that cannot locate a boundary must not invent one.
+
 ## Persistent Alerts
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).
@@ -246,7 +265,7 @@ The @drone broker validates sandbox policy before agent launch. @ai_mail's dispa
 - All branches via hook dispatch — every Claude Code session routes through the engine
 - @ai_mail dispatch_monitor — sandbox_launch + build_policy for agent launch boundary
 
-*Last Updated: 2026-07-15*
+*Last Updated: 2026-08-12*
 
 ---
 

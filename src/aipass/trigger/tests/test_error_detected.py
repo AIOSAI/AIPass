@@ -31,6 +31,7 @@ from aipass.trigger.apps.config import trail_logger
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock config, json_handler, error_registry, and wake_branch before import."""
     from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
+    from aipass.trigger.apps.handlers.error_registry import normalize_message
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
@@ -56,6 +57,11 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     mock_registry.circuit_breaker_record_error = MagicMock()
     mock_registry.should_dispatch = MagicMock(return_value=True)
     mock_registry.record_dispatch = MagicMock()
+    # The REAL normalizer, not a MagicMock. Escalation signatures are computed off
+    # this function, and a mock returns the same object for every input — so every
+    # message would normalize identically and any "these two share one signature"
+    # assertion below would pass without the normalizer ever running.
+    mock_registry.normalize_message = normalize_message
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
 
     # Mock wake_branch import chain to prevent real imports
@@ -820,6 +826,7 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     registry.get_dispatch_count.return_value = 0
 
     escalation._config_cache = (0.0, None)
+    escalation._branch_names_cache = (0.0, None)
     return SimpleNamespace(mod=escalation, config=config, digests=digests, medic=medic, registry=registry)
 
 

@@ -24,7 +24,6 @@ that starts threading ``line=`` stops being reported the moment it does.
 
 import ast
 import json
-from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Set, Tuple
@@ -226,14 +225,14 @@ def check_branch_info(branch_path: str) -> list[str]:
         return []
 
     lines = []
-    out_of_scope: Counter = Counter()
+    out_of_scope: Dict[str, list[str]] = {}
     for rule in rules:
         if not isinstance(rule, dict):
             continue
         standard = rule.get("standard") or "all standards"
 
         if out_of_scope_reason(rule):
-            out_of_scope[standard] += 1
+            out_of_scope.setdefault(standard, []).append(rule.get("file", "?"))
             continue
 
         inert = inert_scopes(rule)
@@ -246,16 +245,22 @@ def check_branch_info(branch_path: str) -> list[str]:
             f"and passes no line/name, so this rule is inert. Scope it file-wide or drop it."
         )
 
-    # Out-of-scope rules are counted, not listed: a branch that was absorbing a
-    # mis-scoped standard has dozens of them, and 118 identical lines is a wall,
-    # not a signpost. One line names the standards and the size of the cleanup.
+    # Out-of-scope rules are grouped by standard and NAMED. They were once only
+    # counted, to keep a 118-rule cleanup from becoming a 118-line wall. @prax
+    # showed that trade is backwards: a branch told '9 of your 10 architecture
+    # rules are dead' cannot find the nine except by re-auditing once per rule,
+    # so the safe move is to delete none -- the opposite of the nudge's purpose.
+    # Grouping keeps it to one line per standard while handing over the
+    # identities, and nothing here is capped: a silent cap would recreate the
+    # same unactionable count one layer down.
     if out_of_scope:
-        breakdown = ", ".join(f"{std} {count}" for std, count in out_of_scope.most_common())
+        total = sum(len(files) for files in out_of_scope.values())
         lines.append(
-            f"{sum(out_of_scope.values())} bypass rules now suppress nothing ({breakdown}) — those "
-            f"standards no longer apply to that kind of file. Safe to delete at your next touch; "
-            f"no score depends on them."
+            f"{total} bypass rules now suppress nothing — those standards no longer apply to that "
+            f"kind of file. Safe to delete at your next touch; no score depends on them:"
         )
+        for standard, files in sorted(out_of_scope.items(), key=lambda item: (-len(item[1]), item[0])):
+            lines.append(f"  {standard} ({len(files)}): {', '.join(sorted(files))}")
 
     if lines:
         json_handler.log_operation(

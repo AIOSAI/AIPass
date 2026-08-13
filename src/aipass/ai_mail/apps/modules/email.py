@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2025-12-02
-# Modified: 2026-08-07
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -118,6 +118,10 @@ FLAGS:
   --dispatch        Mark as dispatch task (adds dispatch header)
   --reply-to        Redirect replies to a different branch
   --no-memory-save  Skip memory update requirement in dispatch header
+  --upsert-key KEY  Repeat signature: rewrite the recipient's open message
+                    carrying KEY (from you) instead of stacking a new one.
+                    Bumps its update counter, keeps its id and read status,
+                    never wakes anything. Closing it re-arms the signature.
 
 NOTE: To send + wake in one step, use: drone @ai_mail dispatch @target "Subject" "Body"
 """
@@ -174,7 +178,7 @@ def handle_inbox(args: List[str]) -> bool:
         ok, info = resolve_inbox_target(first_arg, _REPO_ROOT, get_branch_by_email, _get_user_with_fallback)
         if not ok:
             error(info["error"])
-            return False
+            return True
 
         inbox_file = info["inbox_file"]
         target = info["target_branch"]
@@ -211,7 +215,7 @@ def handle_inbox(args: List[str]) -> bool:
     except Exception as e:
         logger.error(f"[email] Inbox view failed: {e}")
         error(f"Error: {e}")
-        return False
+        return True
 
 
 def handle_view(args: List[str]) -> bool:
@@ -342,7 +346,13 @@ def handle_sent(args: List[str]) -> bool:
         if not sent_folder.exists():
             console.print("No sent messages")
             return True
-        files = sorted(sent_folder.glob("*.json"), reverse=True)[:LIST_LIMIT]
+        # Sort by mtime, not by filename. The folder holds two naming schemes —
+        # create.py writes "<YYYYMMDD_HHMMSS>_<subject>.json", reply.py writes
+        # "<id>.json" — and in a filename sort every hex id outranks every digit,
+        # so a mailbox with 20 replies in it hid all recent sends behind them.
+        # That is the newest-end truncation bug the inbox listing already fixed,
+        # and here it hid the refused records this listing exists to surface.
+        files = sorted(sent_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:LIST_LIMIT]
         if not files:
             console.print("No sent messages")
             return True

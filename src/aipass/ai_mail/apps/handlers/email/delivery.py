@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.0.0
+# Version: 3.3.0
 # Created: 2025-12-02
-# Modified: 2025-12-02
+# Modified: 2026-08-12
 # =============================================
 
 """
@@ -11,6 +11,19 @@ Email Delivery Handler
 
 Handles delivery of emails to branch inboxes.
 Independent handler - no module dependencies.
+
+Upsert delivery (``upsert_key``)
+--------------------------------
+A repeating signal — the same WARNING firing every poll — must occupy ONE
+inbox slot, not one per repeat. Senders that repeat give the send a stable
+``upsert_key``; delivery then rewrites the open message carrying that key
+instead of stacking a new one, bumping an ``updates`` counter so the reader
+can see how many times it fired.
+
+The read status is the whole point: an update NEVER flips a message back to
+new and never wakes anything. A repeat is not a fresh demand for attention —
+it is the same demand, louder in the counter only. Closing the message
+re-arms the signature: the next send starts a fresh message at ``updates: 1``.
 """
 
 import json
@@ -213,12 +226,66 @@ def _resolve_reply_path() -> str:
     return ""
 
 
-def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tuple[bool, str]:
+def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str) -> bool:
+    """True when this outbound mail is a reply to something the recipient sent us.
+
+    The return path (FPLAN-0401 phase 5b). A reply is answering, not initiating:
+    the referenced message sitting in the sender's OWN mailbox is the proof the
+    channel was sanctioned. Initiation across projects stays admin-only.
+
+    Accepts the referenced mail's ``from`` or its ``reply_to`` — reply.py routes
+    to ``reply_to or from``, so an exemption matching only ``from`` would refuse
+    the very replies it exists to allow. Neither field is chosen by the replier;
+    only the original sender could have written them, so this is still the
+    sanctioned channel and not a laundered new recipient.
+
+    Args:
+        email_data: The outbound message. A reply carries ``in_reply_to``.
+        to_branch: Where the outbound message is addressed.
+
+    Returns:
+        True only if the referenced mail exists in the sender's mailbox AND
+        named this recipient. False on anything unproven — fails closed.
+    """
+    in_reply_to = (email_data or {}).get("in_reply_to", "")
+    if not in_reply_to or not to_branch:
+        return False
+
+    caller_inbox = _resolve_reply_path()
+    if not caller_inbox:
+        return False
+
+    try:
+        with open(caller_inbox, "r", encoding="utf-8") as f:
+            messages = json.load(f).get("messages", [])
+    except Exception as exc:
+        logger.warning("[delivery] reply proof unreadable at %s: %s", caller_inbox, exc)
+        return False
+
+    target = str(to_branch).strip().lower()
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("id") != in_reply_to:
+            continue
+        sanctioned = {str(msg.get("from", "")).strip().lower(), str(msg.get("reply_to") or "").strip().lower()}
+        sanctioned.discard("")
+        return target in sanctioned
+
+    logger.warning("[delivery] reply proof not found: no message %s in the sender's mailbox", in_reply_to)
+    return False
+
+
+def _check_cross_project_boundary(
+    recipient_path: Path, sender_email: str, email_data: Optional[Dict] = None, to_branch: str = ""
+) -> Tuple[bool, str]:
     """Refuse mail when sender and recipient are in different projects.
 
     Compares project roots (first *_REGISTRY.json found walking up) for the
     sender (from AIPASS_CALLER_CWD) and recipient (from resolved branch path).
     Same-project and host-to-host mail passes through unchanged.
+
+    A VERIFIED admin caller is exempt — that is the cross-project bridge
+    (FPLAN-0401 phase 5). The exemption is checked LAST, only once a refusal is
+    otherwise certain, so ordinary same-project mail never touches the grant.
 
     Returns:
         (True, error_message) to refuse, (False, "") to allow.
@@ -238,6 +305,22 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
     if sender_root == recipient_root:
         return False, ""
 
+    # Everything below this line is a refusal — so this is where, and the only
+    # place where, an exemption is worth the file reads. Both fail closed.
+    if _is_sanctioned_reply(email_data, to_branch):
+        logger.info("[delivery] cross-project boundary exempted for reply: %s -> %s", sender_email, to_branch)
+        return False, ""
+
+    from aipass.ai_mail.apps.handlers.users import verified_caller
+
+    if verified_caller.is_verified_admin_caller():
+        logger.info(
+            "[delivery] cross-project boundary exempted for verified admin: %s -> %s",
+            sender_root,
+            recipient_root,
+        )
+        return False, ""
+
     sender_name = sender_email or os.environ.get("AIPASS_CALLER_BRANCH", "unknown")
     logger.warning(
         "[delivery] cross-project mail refused: sender root %s != recipient root %s",
@@ -251,13 +334,77 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
     )
 
 
+def _coerce_updates(value) -> int:
+    """Read a stored ``updates`` counter defensively, defaulting to 1.
+
+    The counter lives in a hand-editable JSON file, so a string, None or
+    garbage must not crash a delivery — an unreadable counter restarts at 1
+    rather than taking the message down with it.
+    """
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        logger.warning("[delivery] unreadable updates counter %r — restarting at 1", value)
+        return 1
+    return count if count >= 1 else 1
+
+
+def _find_upsert_target(messages: List[Dict], from_addr: str, upsert_key: str) -> Optional[Dict]:
+    """Find the open message this upsert should rewrite.
+
+    Match rule: same sender AND same upsert_key AND not closed. Messages are
+    newest-first, so the first hit is the most recent open one.
+
+    Args:
+        messages: The inbox's message list.
+        from_addr: Sender address of the incoming mail.
+        upsert_key: Stable signature supplied by the sender.
+
+    Returns:
+        The matching message dict (live reference into *messages*), or None.
+    """
+    for msg in messages:
+        if msg.get("upsert_key") != upsert_key:
+            continue
+        if msg.get("from") != from_addr:
+            continue
+        if msg.get("status") == "closed":
+            continue
+        return msg
+    return None
+
+
+def _apply_upsert_update(existing: Dict, email_data: Dict) -> Dict:
+    """Rewrite *existing* in place with the fresh render and a bumped counter.
+
+    Preserves id, original timestamp and status — an update must never flip a
+    message back to new or unread. auto_execute is forced off: an in-place
+    update never wakes or dispatches anything, whatever the sender asked for.
+
+    Args:
+        existing: The matched message dict, mutated in place.
+        email_data: The incoming email data (fresh subject/body/timestamp).
+
+    Returns:
+        The same dict, for convenience.
+    """
+    existing["subject"] = email_data["subject"]
+    existing["message"] = email_data["message"]
+    existing["last_updated"] = email_data["timestamp"]
+    existing["updates"] = _coerce_updates(existing.get("updates")) + 1
+    existing["auto_execute"] = False
+    return existing
+
+
 def deliver_email_to_branch(
-    to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None
+    to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None, upsert_key: Optional[str] = None
 ) -> Tuple[bool, str]:
     """
     Deliver email to target branch's .ai_mail.local/inbox.json file.
 
-    Appends message to inbox JSON messages array.
+    Appends message to inbox JSON messages array — unless an upsert_key is
+    given and an open message from the same sender already carries it, in
+    which case that message is rewritten in place (see module docstring).
 
     Args:
         to_branch: Target email address (e.g., "@admin")
@@ -268,12 +415,21 @@ def deliver_email_to_branch(
             - subject: Email subject
             - message: Email body
             - timestamp: Email timestamp string
+            - upsert_key: Optional, alternative to the keyword argument
         on_delivered: Optional callback(branch_path, new_count, opened_count, total)
             for post-delivery actions (dashboard updates, central sync, etc.)
+        upsert_key: Optional stable signature for a repeating signal. None
+            (the default) is plain delivery: every send is a new message.
+            Takes precedence over email_data["upsert_key"].
 
     Returns:
         Tuple of (success: bool, error_message: str)
         error_message is empty string if successful
+
+    Note:
+        When an upsert_key is in play, the outcome is reported back through
+        email_data["upsert_action"] = "created" | "updated" so the caller can
+        tell a fresh message from a bumped counter without re-reading the inbox.
     """
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
@@ -307,6 +463,16 @@ def deliver_email_to_branch(
             branches.update(caller_branches)
 
     if to_branch not in branches:
+        # Hosted projects (verified-admin only — the cross-project bridge).
+        # Last resort, and gated: an unverified caller's map never widens.
+        from aipass.ai_mail.apps.handlers.users import verified_caller
+
+        if verified_caller.is_verified_admin_caller():
+            from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+            branches.update(get_project_tree_branches(_REPO_ROOT))
+
+    if to_branch not in branches:
         error_msg = f"Unknown branch email: {to_branch} (available: {len(branches)} branches)"
         return False, error_msg
 
@@ -322,7 +488,9 @@ def deliver_email_to_branch(
         branch_path = (_REPO_ROOT / branch_path).resolve()
 
     # Cross-project boundary: refuse mail when sender and recipient are in different projects
-    refused, refusal_msg = _check_cross_project_boundary(branch_path, sender_email)
+    refused, refusal_msg = _check_cross_project_boundary(
+        branch_path, sender_email, email_data=email_data, to_branch=to_branch
+    )
     if refused:
         return False, refusal_msg
 
@@ -358,33 +526,59 @@ def deliver_email_to_branch(
             # Auto-migrate old inbox format {"inbox": []} -> v2 schema
             inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
 
-            # Create message object (v2 schema: status instead of read)
-            message = {
-                "id": str(uuid.uuid4())[:8],
-                "timestamp": email_data["timestamp"],
-                "from": email_data["from"],
-                "from_name": email_data["from_name"],
-                "subject": email_data["subject"],
-                "message": email_data["message"],
-                "status": "new",
-                "auto_execute": email_data.get("auto_execute", False),
-                "priority": email_data.get("priority", "normal"),
-            }
+            # Upsert: rewrite the open message carrying this key instead of
+            # stacking a second one. No key = plain delivery, unchanged.
+            effective_key = upsert_key if upsert_key is not None else email_data.get("upsert_key")
+            existing = None
+            if effective_key:
+                existing = _find_upsert_target(inbox_data["messages"], email_data["from"], effective_key)
 
-            if email_data.get("reply_to"):
-                message["reply_to"] = email_data["reply_to"]
+            if existing is not None:
+                _apply_upsert_update(existing, email_data)
+                email_data["upsert_action"] = "updated"
+                updated_in_place = True
+                logger.info(
+                    "[delivery] upsert '%s' updated message %s for %s (updates=%s)",
+                    effective_key,
+                    existing.get("id"),
+                    to_branch,
+                    existing.get("updates"),
+                )
+            else:
+                updated_in_place = False
+                # Create message object (v2 schema: status instead of read)
+                message = {
+                    "id": str(uuid.uuid4())[:8],
+                    "timestamp": email_data["timestamp"],
+                    "from": email_data["from"],
+                    "from_name": email_data["from_name"],
+                    "subject": email_data["subject"],
+                    "message": email_data["message"],
+                    "status": "new",
+                    "auto_execute": email_data.get("auto_execute", False),
+                    "priority": email_data.get("priority", "normal"),
+                }
 
-            if email_data.get("dispatched_to"):
-                message["dispatched_to"] = email_data["dispatched_to"]
+                if email_data.get("reply_to"):
+                    message["reply_to"] = email_data["reply_to"]
 
-            # Store reply_path for cross-project replies.
-            # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
-            reply_path = email_data.get("reply_path") or _resolve_reply_path()
-            if reply_path:
-                message["reply_path"] = reply_path
+                if email_data.get("dispatched_to"):
+                    message["dispatched_to"] = email_data["dispatched_to"]
 
-            # Prepend message to inbox (newest first)
-            inbox_data["messages"].insert(0, message)
+                # Store reply_path for cross-project replies.
+                # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
+                reply_path = email_data.get("reply_path") or _resolve_reply_path()
+                if reply_path:
+                    message["reply_path"] = reply_path
+
+                # Carry the key on the message so the NEXT send can find it
+                if effective_key:
+                    message["upsert_key"] = effective_key
+                    message["updates"] = 1
+                    email_data["upsert_action"] = "created"
+
+                # Prepend message to inbox (newest first)
+                inbox_data["messages"].insert(0, message)
 
             from aipass.ai_mail.apps.handlers.email.inbox_cleanup import _sweep_closed
 
@@ -420,8 +614,11 @@ def deliver_email_to_branch(
     if caller_branch and caller_cwd:
         _auto_register_sender(caller_branch, caller_cwd)
 
-    # Send desktop notification for new email
-    _send_desktop_notification(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
+    # Write a feed event for new email. An in-place update is the same signal
+    # repeating, so it stays silent — one feed line per repeat is the stacking
+    # problem again, just in the bell instead of in the inbox.
+    if not updated_in_place:
+        _emit_notification_event(email_data["from"], to_branch, email_data["subject"], email_data.get("message", ""))
 
     # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
@@ -435,10 +632,10 @@ def deliver_email_to_branch(
 
 
 def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str, str]:
-    """Write *email_data* to an inbox.json file and fire a desktop notification.
+    """Write *email_data* to an inbox.json file and fire a notification event.
 
     Single canonical path for direct-path delivery (used by cross-project
-    reply.py to replace the raw-write backdoor).  Always fires notify-send.
+    reply.py to replace the raw-write backdoor).  Always writes to the feed.
 
     Args:
         inbox_file: Absolute path to the target inbox.json.
@@ -493,7 +690,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
         logger.warning("[delivery] deliver_to_inbox_file lock failed %s: %s", inbox_file, exc)
         return False, f"Failed to acquire inbox lock: {exc}", ""
 
-    _send_desktop_notification(
+    _emit_notification_event(
         email_data.get("from", "@unknown"),
         email_data.get("to", str(inbox_file)),
         email_data.get("subject", ""),
@@ -509,12 +706,12 @@ _NOTIFICATION_MAX = 3
 _NOTIFICATION_WINDOW = 30.0  # seconds
 
 
-def _send_desktop_notification(sender: str, recipient: str, subject: str, message: str = "") -> None:
+def _emit_notification_event(sender: str, recipient: str, subject: str, message: str = "") -> None:
     """
-    Send desktop notification for new email using notify-send.
+    Write a "mail" event to the notification feed for new email.
 
-    Rate-limited: max 3 notifications per recipient within 30 seconds.
-    Gracefully handles cases where notify-send is not available.
+    Rate-limited: max 3 events per recipient within 30 seconds.
+    Desktop toasts are retired — this appends to the shared feed BAUD reads.
 
     Args:
         sender: Email sender address (e.g., @devpulse)
@@ -548,10 +745,10 @@ def _send_desktop_notification(sender: str, recipient: str, subject: str, messag
     try:
         from aipass.ai_mail.apps.handlers.notify import send_notification
 
-        send_notification(title, body, source=sender_name)
+        send_notification(title, body, source=sender.replace("@", ""), kind="mail")
         _NOTIFICATION_TIMESTAMPS[recipient].append(now)
     except Exception as e:
-        logger.warning("[delivery] _send_desktop_notification() failed for %s: %s", recipient, e)
+        logger.warning("[delivery] _emit_notification_event() failed for %s: %s", recipient, e)
         return
 
 
@@ -567,7 +764,8 @@ if __name__ == "__main__":
     console.print()
     console.print("FUNCTIONS PROVIDED:")
     console.print("  - get_all_branches() -> List[Dict]")
-    console.print("  - deliver_email_to_branch(to_branch, email_data) -> Tuple[bool, str]")
+    console.print("  - deliver_email_to_branch(to_branch, email_data, on_delivered, upsert_key) -> Tuple\\[bool, str]")
+    console.print("  - deliver_to_inbox_file(inbox_file, email_data) -> Tuple\\[bool, str, str]")
     console.print()
     console.print("HANDLER CHARACTERISTICS:")
     console.print("  - Independent - no module dependencies")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger.py
 # Description: Entry point CLI for drone @trigger — event bus and error registry
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -154,7 +154,7 @@ def print_help(modules: List[Any]):
 
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
-    console.print("  [dim]drone @trigger <command> [args...][/dim]")
+    console.print("  [dim]drone @trigger <command> \\[args...][/dim]")
     console.print("  [dim]drone @trigger --help[/dim]")
     console.print()
     console.print("─" * 70)

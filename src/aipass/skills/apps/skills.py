@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-08
-# Modified: 2026-03-28
+# Modified: 2026-08-11
 # =============================================
 
 import sys
@@ -109,12 +109,12 @@ def print_help():
     console.print("Skills - Capability framework for AI agents")
     console.print()
     console.print("Usage:")
-    console.print("  drone @skills <command> [args]")
+    console.print("  drone @skills <command> \\[args]")
     console.print()
     console.print("Commands:")
     console.print("  list                         Show all discovered skills")
     console.print("  info <name>                  Display SKILL.md contents")
-    console.print("  run <name> [action] [args]   Execute a skill's handler")
+    console.print("  run <name> \\[action] \\[args]   Execute a skill's handler")
     console.print("  create <name>                Scaffold new skill (markdown only)")
     console.print("  create <name> --with-handler Scaffold with handler.py")
     console.print("  create <name> --full         Scaffold with full 3-layer structure")

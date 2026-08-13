@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: load.py
 # Description: Load Logging Configuration Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-07
-# Modified: 2026-08-04
+# Modified: 2026-08-11
 # =============================================
 
 """
@@ -218,9 +218,22 @@ DEFAULT_SYSTEM_LOGS = {"max_lines": 1000, "backup_count": 3, "log_level": "INFO"
 
 DEFAULT_LOCAL_LOGS = {"max_lines": 250, "backup_count": 3, "log_level": "INFO"}
 
+# Level names accepted from config or env. Anything else is a typo, not a
+# level — resolve_log_level() falls back to DEFAULT_LOG_LEVEL and says so
+# rather than silently logging at a level nobody asked for.
+LOG_LEVEL_NAMES = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
+# Process-wide override, checked before the config file. Set it before the
+# process starts (levels bind when a logger is created, not per call).
+LOG_LEVEL_ENV = "AIPASS_LOG_LEVEL"
+
 # Set once per process when the config file is present but missing its
 # system_logs/local_logs sections — see load_log_config().
 _config_schema_warned: bool = False
+
+# Rejected level values already reported. Level resolution runs on every logger
+# init fleet-wide, so a single typo would otherwise warn thousands of times.
+_bad_level_warned: set = set()
 
 # =============================================
 # HANDLER FUNCTIONS
@@ -252,6 +265,70 @@ def lines_to_bytes(num_lines: int, avg_line_length: int = 200) -> int:
         Byte threshold for the rotating handler.
     """
     return num_lines * avg_line_length
+
+
+def resolve_log_level(configured: Any = None) -> Any:
+    """Resolve the effective log level for a handler tier.
+
+    Precedence: ``AIPASS_LOG_LEVEL`` env var, then the tier's ``log_level``
+    config key, then ``DEFAULT_LOG_LEVEL``. The default keeps DEBUG records
+    off every log in the fleet; raising the level is what makes
+    ``logger.debug()`` reach a file.
+
+    Both keys were declared in DEFAULT_SYSTEM_LOGS/DEFAULT_LOCAL_LOGS and
+    loaded by load_log_config() since 2025 but never reached a setLevel call,
+    so a config file asking for DEBUG got INFO (found 2026-08-08). This is the
+    read side of that key.
+
+    Args:
+        configured: Level from the tier's config section. None if absent.
+
+    Returns:
+        A level name accepted by ``Logger.setLevel``, or an int if one was
+        configured directly. Unusable values fall back to DEFAULT_LOG_LEVEL.
+
+    Example:
+        >>> resolve_log_level("debug")
+        'DEBUG'
+    """
+    for candidate, source in ((os.environ.get(LOG_LEVEL_ENV), LOG_LEVEL_ENV), (configured, "config log_level")):
+        if candidate is None or candidate == "":
+            continue
+        if isinstance(candidate, int) and not isinstance(candidate, bool):
+            return candidate
+        name = str(candidate).strip().upper()
+        if name in LOG_LEVEL_NAMES:
+            return name
+        key = (source, str(candidate))
+        if key not in _bad_level_warned:
+            _bad_level_warned.add(key)
+            logger.warning(
+                "[config] %s is not a log level (%s) — using %s. Valid: %s",
+                candidate,
+                source,
+                DEFAULT_LOG_LEVEL,
+                ", ".join(LOG_LEVEL_NAMES),
+            )
+    return DEFAULT_LOG_LEVEL
+
+
+def level_to_int(level: Any) -> int:
+    """Convert a resolved log level to its numeric value for comparison.
+
+    Args:
+        level: Level name or numeric level, as returned by resolve_log_level().
+
+    Returns:
+        The numeric level, or logging.INFO if the value has no numeric form.
+
+    Example:
+        >>> level_to_int("DEBUG")
+        10
+    """
+    if isinstance(level, int) and not isinstance(level, bool):
+        return level
+    numeric = logging.getLevelName(str(level).strip().upper())
+    return numeric if isinstance(numeric, int) else logging.INFO
 
 
 def get_debug_prints_enabled() -> bool:
