@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
 # Modified: 2026-08-12
 # =============================================
@@ -31,6 +31,11 @@ MOD = "aipass.ai_mail.apps.modules.dispatch"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
+
+_REAL_KEY = Path.home() / ".aipass" / "admin_grant.key"
+# Stat only, never content — captured at import, before any test body runs, so
+# the guard below can prove this suite did not write the real ceremony key.
+_REAL_KEY_AT_IMPORT = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
 _REFERENCE = "aipass.devpulse.apps.handlers.owner.admin_grant"
 
 _KEY_HEX = "a" * 64  # 32 bytes, fixture only — never written outside tmp_path
@@ -180,9 +185,16 @@ class TestVerifyAdminCaller:
         assert "lane dark" in reason.lower()
 
     def test_real_key_path_is_not_touched_by_this_suite(self):
-        """Guard: the ceremony key must not be created by a test run."""
-        assert not (Path.home() / ".aipass" / "admin_grant.key").exists(), (
-            "a test created the real signing key — fixtures must stay under tmp_path"
+        """Guard: this suite must never create OR modify the ceremony key.
+
+        Originally this asserted the key did not exist — true until Patrick's
+        ceremony, and false the moment it happened. The durable form compares
+        the key's stat against the value captured at import: fixtures stay
+        under tmp_path either way, and the guard survives the ceremony.
+        """
+        now = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
+        assert now == _REAL_KEY_AT_IMPORT, (
+            "a test created or modified the real signing key — fixtures must stay under tmp_path"
         )
 
 
@@ -334,11 +346,20 @@ class TestDispatchSendAdminWiring:
         assert len(calls) == 1
         assert calls[0]["admin"] is False
 
-    def test_todays_reality_no_key_means_no_admin(self, monkeypatch):
-        """End to end with the REAL verifier pre-ceremony: lane stays shut."""
+    def test_a_failing_grant_means_no_admin(self, monkeypatch):
+        """End to end: when the grant does not verify, the lane stays shut.
+
+        Was pinned to pre-ceremony reality (no key on disk). The key exists now,
+        so this simulates the refusal instead of depending on the world.
+        """
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         calls: list = []
-        with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
+        with _send_patches(
+            {
+                f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls)),
+                f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(False, "lane dark")),
+            }
+        ):
             from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
 
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])

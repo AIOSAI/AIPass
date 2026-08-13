@@ -11,6 +11,23 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(ai_mail)** — cross-project replies deliver back (by @ai_mail, FPLAN-0401
+phase 5b — the gap the live proof caught: the first-ever admin dispatch
+reached @baud, but @baud's reply was refused at the boundary; test suites
+modeled mail going in, nobody modeled the answer coming out). New
+`_is_sanctioned_reply`: a reply crosses the boundary iff it carries an
+`in_reply_to` present in the SENDER'S OWN inbox and is addressed to that
+mail's sender (or its `reply_to` — fields only the original sender could have
+written). Forged ids, redirected recipients, and non-reply outbound all
+refuse with today's wording character for character. Patrick's same-evening
+ruling pinned the model: REPLIES ONLY — projects citizens answer
+conversations the admin opened, never initiate (his own live test from the
+baud seat is the negative proof, caught in the log at 17:54). Ceremony
+happened mid-build; the suite's lane-dark tests were rebuilt to simulate a
+failing grant instead of asserting a dark world, with a stat-only key guard
+(never content). 9 tests red-first + 2 mutation checks, suite 1048 green,
+audit 100%.
+
 **feat(ai_mail)** — cross-project bridge, built dark (by @ai_mail, FPLAN-0401
 phase 5, DPLAN-0288). Verified-admin dispatches can now resolve and deliver
 into `projects/*` trees (@baud et al.): branch resolution gains an admin-only

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2025-12-02
 # Modified: 2026-08-12
 # =============================================
@@ -226,7 +226,57 @@ def _resolve_reply_path() -> str:
     return ""
 
 
-def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tuple[bool, str]:
+def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str) -> bool:
+    """True when this outbound mail is a reply to something the recipient sent us.
+
+    The return path (FPLAN-0401 phase 5b). A reply is answering, not initiating:
+    the referenced message sitting in the sender's OWN mailbox is the proof the
+    channel was sanctioned. Initiation across projects stays admin-only.
+
+    Accepts the referenced mail's ``from`` or its ``reply_to`` — reply.py routes
+    to ``reply_to or from``, so an exemption matching only ``from`` would refuse
+    the very replies it exists to allow. Neither field is chosen by the replier;
+    only the original sender could have written them, so this is still the
+    sanctioned channel and not a laundered new recipient.
+
+    Args:
+        email_data: The outbound message. A reply carries ``in_reply_to``.
+        to_branch: Where the outbound message is addressed.
+
+    Returns:
+        True only if the referenced mail exists in the sender's mailbox AND
+        named this recipient. False on anything unproven — fails closed.
+    """
+    in_reply_to = (email_data or {}).get("in_reply_to", "")
+    if not in_reply_to or not to_branch:
+        return False
+
+    caller_inbox = _resolve_reply_path()
+    if not caller_inbox:
+        return False
+
+    try:
+        with open(caller_inbox, "r", encoding="utf-8") as f:
+            messages = json.load(f).get("messages", [])
+    except Exception as exc:
+        logger.warning("[delivery] reply proof unreadable at %s: %s", caller_inbox, exc)
+        return False
+
+    target = str(to_branch).strip().lower()
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("id") != in_reply_to:
+            continue
+        sanctioned = {str(msg.get("from", "")).strip().lower(), str(msg.get("reply_to") or "").strip().lower()}
+        sanctioned.discard("")
+        return target in sanctioned
+
+    logger.warning("[delivery] reply proof not found: no message %s in the sender's mailbox", in_reply_to)
+    return False
+
+
+def _check_cross_project_boundary(
+    recipient_path: Path, sender_email: str, email_data: Optional[Dict] = None, to_branch: str = ""
+) -> Tuple[bool, str]:
     """Refuse mail when sender and recipient are in different projects.
 
     Compares project roots (first *_REGISTRY.json found walking up) for the
@@ -256,7 +306,11 @@ def _check_cross_project_boundary(recipient_path: Path, sender_email: str) -> Tu
         return False, ""
 
     # Everything below this line is a refusal — so this is where, and the only
-    # place where, the grant is worth reading. Fails closed: no key, no bridge.
+    # place where, an exemption is worth the file reads. Both fail closed.
+    if _is_sanctioned_reply(email_data, to_branch):
+        logger.info("[delivery] cross-project boundary exempted for reply: %s -> %s", sender_email, to_branch)
+        return False, ""
+
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
     if verified_caller.is_verified_admin_caller():
@@ -434,7 +488,9 @@ def deliver_email_to_branch(
         branch_path = (_REPO_ROOT / branch_path).resolve()
 
     # Cross-project boundary: refuse mail when sender and recipient are in different projects
-    refused, refusal_msg = _check_cross_project_boundary(branch_path, sender_email)
+    refused, refusal_msg = _check_cross_project_boundary(
+        branch_path, sender_email, email_data=email_data, to_branch=to_branch
+    )
     if refused:
         return False, refusal_msg
 

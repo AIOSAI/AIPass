@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% | **Tests:** 1039 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% | **Tests:** 1048 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -314,6 +314,30 @@ FPLAN-0401 puts one door in each — openable only with the grant:
   is out of scope — this reads the projects the repo already hosts, and is not a
   multi-root discovery layer.
 
+### Reply Return Path
+
+The bridge opened one-way — admin mail got in, the targets' replies could not get
+out (live proof, 2026-08-12: exempted 17:44, refused 17:46). Phase 5b closes it
+with a second boundary exemption, narrower than the first:
+
+- **A reply is answering, not initiating.** The referenced message sitting in the
+  sender's *own* mailbox is the proof the channel was sanctioned. Initiation
+  across projects stays admin-only and inbound-only.
+- **`_is_sanctioned_reply(email_data, to_branch)`** allows delivery only when the
+  outbound mail carries an `in_reply_to`, that id is present in the sender's
+  mailbox, and the destination matches that message's `from` **or** its
+  `reply_to`. Both are fields only the *original sender* could have written —
+  the replier never picks them, so a new recipient cannot be laundered through a
+  reply. Matching `reply_to` as well is required, not generous: `reply.py` routes
+  to `reply_to or from`, so a `from`-only exemption would refuse the very replies
+  it exists to allow.
+- **Inbox-only lookup, mirroring `reply.py`.** `get_email_by_id()` reads the
+  inbox, and delivery failure returns *before* the auto-close — so during a real
+  reply the original is always still there. Checking anywhere else would accept
+  proof `reply.py` itself would not.
+- **Fails closed everywhere else:** forged or unknown `in_reply_to`, no mailbox,
+  unreadable mailbox, or no `in_reply_to` at all → today's refusal, unchanged.
+
 ### Daemon
 
 The polling daemon (`daemon.py`) watches inboxes for `auto_execute` dispatch emails and spawns agents automatically. It also runs the AIPASS-TEST token protocol: `scan_and_ack_test_emails()` intercepts ping-test messages and auto-replies with "ack" before dispatch processing.
@@ -438,7 +462,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 924 tests across 31 test files
+└── tests/                      # 1034 tests across 35 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping

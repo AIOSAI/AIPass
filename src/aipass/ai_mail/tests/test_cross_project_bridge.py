@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cross_project_bridge.py
-# Description: Tests for the verified-admin cross-project bridge (FPLAN-0401 Phase 5)
-# Version: 1.0.0
+# Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
+# Version: 1.1.0
 # Created: 2026-08-12
 # Modified: 2026-08-12
 # =============================================
@@ -15,8 +15,8 @@ and only a verified-admin one. Everyone else must be byte-identical, so most of
 these tests assert that nothing happened.
 
 The 5-leg verifier itself is devpulse's and is covered in test_admin_lane.py;
-here it is the seam, patched to a verdict. One test uses the REAL verifier to
-prove today's reality: no key, no widening.
+here it is the seam, patched to a verdict. Phase 5b adds the return path: a
+reply is always deliverable to the mail it answers.
 """
 
 import json
@@ -169,26 +169,154 @@ class TestCrossProjectBoundary:
         verifier.assert_not_called()
 
 
-class TestLaneDarkMeansNoWidening:
-    """Today's reality, end to end, with the REAL verifier: no key, no bridge."""
+class TestReplyReturnPath:
+    """The return path: a reply is always deliverable to the mail it answers.
 
-    def test_no_key_means_no_resolution_widening(self, repo, monkeypatch):
-        """Even claiming to be devpulse, an unsigned world resolves nothing new."""
+    The inbound message sitting in the sender's OWN mailbox is the proof the
+    channel was sanctioned — replying is answering, not initiating. Initiation
+    across projects stays admin-only, inbound only.
+    """
+
+    def _boundary(self, recipient: Path, sender_email: str = "@baud", email_data=None, to_branch: str = "@devpulse"):
+        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
+
+        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+
+    @pytest.fixture
+    def baud(self, repo, monkeypatch):
+        """@baud, standing in its own project, holding one mail from @devpulse."""
+        seat = repo / "projects" / "baud"
+        (seat / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+        (seat / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps({"messages": [{"id": "abc123", "from": "@devpulse", "subject": "Admin dispatch"}]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(seat))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "baud")
+        return seat
+
+    def test_reply_to_the_original_sender_is_delivered(self, repo, baud):
+        """The happy path: @baud answers devpulse's admin dispatch, mail lands."""
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+        )
+        assert refused is False
+        assert msg == ""
+
+    def test_forged_in_reply_to_is_refused(self, repo, baud):
+        """An id that is in no mailbox proves nothing."""
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "not-a-real-id", "from": "@baud"},
+        )
+        assert refused is True
+        assert "Cross-project mail refused" in msg
+
+    def test_reply_addressed_elsewhere_is_refused(self, repo, baud):
+        """No laundering a new recipient through a reply."""
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+            to_branch="@someone-else",
+        )
+        assert refused is True
+        assert "Cross-project mail refused" in msg
+
+    def test_non_reply_initiation_still_refused(self, repo, baud):
+        """Initiation stays admin-only inbound — an outbound with no in_reply_to is not a reply."""
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"from": "@baud", "subject": "unsolicited"},
+        )
+        assert refused is True
+        assert "Cross-project mail refused" in msg
+
+    def test_no_email_data_behaves_exactly_as_before(self, repo, baud):
+        """Callers that pass nothing get today's refusal, unchanged."""
+        refused, msg = self._boundary(repo / "src" / "aipass" / "devpulse")
+        assert refused is True
+        assert "Cross-project mail refused" in msg
+
+    def test_original_reply_to_is_an_accepted_destination(self, repo, baud):
+        """reply.py routes to `reply_to or from`; the exemption mirrors that rule.
+
+        The replier never picks this address — only the ORIGINAL sender could
+        have written it — so it is still the sanctioned channel, not laundering.
+        """
+        seat = repo / "projects" / "baud"
+        (seat / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps(
+                {"messages": [{"id": "abc123", "from": "@devpulse", "reply_to": "@flow", "subject": "Admin"}]}
+            ),
+            encoding="utf-8",
+        )
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+            to_branch="@flow",
+        )
+        assert refused is False
+
+    def test_sender_with_no_mailbox_is_refused(self, repo, monkeypatch):
+        """No mailbox, no proof."""
+        seat = repo / "projects" / "earmark"
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(seat))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "earmark")
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            sender_email="@earmark",
+            email_data={"in_reply_to": "abc123", "from": "@earmark"},
+        )
+        assert refused is True
+        assert "Cross-project mail refused" in msg
+
+    def test_unreadable_mailbox_is_refused_not_crashed(self, repo, baud):
+        """A corrupt inbox fails closed."""
+        (baud / ".ai_mail.local" / "inbox.json").write_text("{not json", encoding="utf-8")
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+        )
+        assert refused is True
+
+    def test_same_project_reply_never_reads_a_mailbox(self, repo, baud):
+        """Ordinary same-project replies are untouched — the check is not reached."""
+        refused, _ = self._boundary(
+            repo / "projects" / "baud",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+            to_branch="@baud",
+        )
+        assert refused is False
+
+
+class TestLaneDarkMeansNoWidening:
+    """A dark lane closes both halves, end to end.
+
+    These simulate the grant failing rather than asserting the real world has no
+    key — Patrick's ceremony has since happened, so the key exists and the world
+    answers True. What must stay true is that a FAILING grant widens nothing.
+    """
+
+    def test_a_dark_lane_means_no_resolution_widening(self, repo, monkeypatch):
+        """Even claiming to be devpulse, a failing grant resolves nothing new."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         monkeypatch.setattr(wake_mod, "_REPO_ROOT", repo)
         monkeypatch.setattr(wake_mod, "BRANCH_REGISTRY", repo / "AIPASS_REGISTRY.json")
 
-        assert is_verified_admin_caller() is False
-        assert wake_mod.resolve_branch("@baud", admin=is_verified_admin_caller()) is None
+        with _admin(False):
+            assert is_verified_admin_caller() is False
+            assert wake_mod.resolve_branch("@baud", admin=is_verified_admin_caller()) is None
 
-    def test_no_key_means_the_boundary_still_refuses(self, repo, monkeypatch):
+    def test_a_dark_lane_means_the_boundary_still_refuses(self, repo, monkeypatch):
         """The delivery half of the same reality."""
         from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(repo / "src" / "aipass" / "devpulse"))
 
-        refused, msg = _check_cross_project_boundary(repo / "projects" / "baud", "@devpulse")
+        with _admin(False):
+            refused, msg = _check_cross_project_boundary(repo / "projects" / "baud", "@devpulse")
         assert refused is True
         assert "Cross-project mail refused" in msg
 
