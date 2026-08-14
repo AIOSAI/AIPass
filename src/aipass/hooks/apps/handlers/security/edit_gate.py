@@ -222,14 +222,21 @@ def _is_auto_compact(entry: Any) -> bool:
     return isinstance(entry, dict) and entry.get("status") == "auto-compact"
 
 
-def _warn_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
+def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: int) -> None:
     """Log one operator-facing line for a section over its rollover budget.
 
     Every clause is a claim the code keeps: the count is the number rollover
     itself counts, and @memory's detector marks the file ready at exactly this
     threshold, so the archival named here really does happen.
+
+    INFO, not WARNING (compass #273, Patrick 2026-08-14: severity follows design
+    intent). Over-budget is not wrong behaviour — it is behaviour we chose to
+    have, and the message itself says nothing is lost. As a WARNING this class
+    fed @trigger's escalation lane: 8 signatures, 579 occurrences, 10 of the 62
+    digests the lane has ever sent. The name says "note" so the level is not
+    re-raised to match a verb.
     """
-    logger.warning(
+    logger.info(
         "[HOOKS] edit_gate: @%s .trinity/%s.json — %s has %d entries, %d over the rollover budget of %d. "
         "The @memory rollover hook archives the %d oldest at the next PreCompact; "
         "nothing is lost — recall them with drone @memory search.",
@@ -256,7 +263,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
     if auto_cap is not None:
         snapshots = [e for e in entries if _is_auto_compact(e)]
         if len(snapshots) > auto_cap:
-            _warn_over_budget(branch, file_stem, "sessions (auto-compact snapshots)", len(snapshots), auto_cap)
+            _note_over_budget(branch, file_stem, "sessions (auto-compact snapshots)", len(snapshots), auto_cap)
 
     cap = section_cfg.get("count")
     if cap is not None:
@@ -264,7 +271,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
         # the regular count whether or not auto_compact_cap is configured.
         regular = [e for e in entries if not _is_auto_compact(e)]
         if len(regular) > cap:
-            _warn_over_budget(branch, file_stem, "sessions", len(regular), cap)
+            _note_over_budget(branch, file_stem, "sessions", len(regular), cap)
 
 
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
@@ -289,7 +296,7 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
 
             cap = section_cfg.get("count")
             if cap is not None and len(entries) > cap:
-                _warn_over_budget(branch, file_stem, section_name, len(entries), cap)
+                _note_over_budget(branch, file_stem, section_name, len(entries), cap)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
 

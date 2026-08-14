@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | **YELLOW** |
-| **Last verified** | 2026-08-13 (S146) |
-| **Open items** | 23 (1 security bypass -> DPLAN-0293, 7 parked, 2 escalated, 13 branch-owned) |
-| **Tests** | 1451 pass, 0 fail, 2 skip (1453 collected, 47 files) |
+| **Last verified** | 2026-08-14 (S152) |
+| **Open items** | 21 (1 security bypass -> DPLAN-0293, 3 parked, 2 escalated, 12 branch-owned, 1 @aipass, 2 @memory/@skills) |
+| **Tests** | 1483 pass, 0 fail, 2 skip (1485 collected, 48 files) |
 | **Seedgo** | **100% shielded / 96% unshielded** (44 standards) -- help_flag_safety 84 -> 100, and 100 unshielded too (fixed, not bypassed) |
 | **Bypass entries** | 261 rules / 80 files -- ~77 do real work, 123 inert in both lanes |
 | **CLI score** | Nav 4/5, Output 4/5 (surface works; `verify` contract + help-flag safety fixed, `feedback` still lies) |
@@ -121,6 +121,24 @@ behind for weeks.
   on its first send**, because their prose quoted the bare form. The gate blocks discussion of the
   hole and permits the hole.
 
+#### Found while working, S148 -- other branches' lanes, reported not touched
+
+- [ ] **@memory: `spawn_background()` checks a lock its own child has not taken yet.** The parent only
+  *reads* `_LOCK_PATH`; the child takes it in `run_once()` via `_acquire_lock()`. Between `Popen`
+  returning and the child creating the lock file (~0.5s of interpreter startup) a second
+  `spawn_background()` sees no lock and spawns a second child, which then declines atomically at
+  `_create_lock_file()` (`O_CREAT|O_EXCL`) and exits. **Correctness is safe** -- the child-side lock is
+  the real one and I found a genuine `{"skipped": true, "reason": "another run holds the lock"}` line
+  in their child log proving it works. The cost is one wasted process per racing session, which
+  matters precisely because DPLAN-0294 exists to reduce prompt-lane process pressure.
+  **Honesty about evidence: I did NOT reproduce this.** My three probes ran sequentially and none
+  raced; the decline line in their log predates them and belongs to @memory's own testing. This is a
+  code-path reading, and I say so rather than dress it as a repro.
+- [ ] **My own SessionStart records do not log `source`.** 9 real SessionStart dispatches in the
+  retained window and not one of them can tell you whether it was `startup`, `resume`, `clear` or
+  `compact`, because the JSONL never writes the field. That is why I cannot answer @memory's question
+  from evidence (below) -- and it is a one-line fix in my own logging. Mine to do.
+
 #### ESCALATED -- blocking defect, fix known, not applied
 
 - [ ] **Deleted/renamed errored file deadlocks edit_gate forever.** Reported by @seedgo (mail
@@ -139,6 +157,26 @@ behind for weeks.
   NOT APPLIED: sits inside this morning's edit_gate work already in front of Patrick. Escalated per the
   ruling. Escape for anyone who hits it: recreate the file clean, let re-validation drop the state,
   then remove it.
+  **ROOT-CAUSE SHARPENED S148, with a pyright probe -- this is the recommendation for Patrick's
+  morning queue.** @memory hit the deadlock tonight in exactly the shape my morning fix was supposed
+  to cover, so I checked instead of assuming, and the fix is narrower than I thought.
+  `_CROSS_FILE_SIGNATURES` (`diagnostics_state.py:47-50`) contains exactly two strings:
+  `"is unknown import symbol"` and `"could not be resolved"`. I ran pyright on a scratch red-first file
+  containing all three canonical shapes and captured what it actually emits:
+  | Red-first shape | pyright message | Covered? |
+  |---|---|---|
+  | `from impl import not_yet_written` | `"not_yet_written" is unknown import symbol` | **YES -- allowed** |
+  | `impl.spawn_background()` | `"spawn_background" is not a known attribute of module "impl"` | **NO -- blocks** |
+  | `impl.existing(mode="fast")` | `No parameter named "mode"` | **NO -- blocks** |
+  So the morning fix covers the *import* shape only, and two of the three commonest red-first shapes
+  still deadlock. That is @memory's case and it is a gap, not a regression.
+  **RECOMMENDATION (Patrick-present class, NOT applied tonight -- load-bearing infra):** add
+  `"is not a known attribute of module"` to the signature tuple. It is unambiguously cross-file: a
+  module-level attribute can only be created in the module that lacks it. Treat
+  `"No parameter named"` as a **separate judgment call for Patrick, and I would not ship it silently**
+  -- that error is genuinely two-sided (fix the caller or fix the callee), so allowing it weakens the
+  gate in a way the attribute case does not. Combined with the deleted-file `return []` fix already
+  written, that is two small changes covering the three shapes the fleet actually writes.
   **NEW EVIDENCE (@seedgo, 2026-08-13 evening): it is a CONCURRENCY edge, not just a solo one.** They
   ran five sub-agents through their branch and it blocked **four** mid-build. Three escaped with the
   recreate-clean sequence. The fourth could not: it was blocked by type errors in a file it was
@@ -165,6 +203,18 @@ behind for weeks.
   is replaced for any hook that also exists in the template. The template carries no UserPromptSubmit
   timeouts, so the moment the 90/120 knobs land they are one `init update` from vanishing without a
   log line. Either the template gets stamped too, or this regresses invisibly.
+- [ ] **NOT MINE -- @aipass: `aipass init update` re-enrolls only when its merge happens to rewrite
+  `hooks.json`.** Found S147 while fixing the TRUST BREAK banner, which used to offer this command as
+  the remedy. `bootstrap.py:555-560` gates `_enroll_project(target)` behind
+  `if existing_hooks != merged_hooks`. So for a hand-edit the template does not touch -- exactly the
+  shape that breaks the hash -- the union-merge is a no-op, nothing is written, **and nothing is
+  enrolled**, so the project stays dark and the command reports success. When it *does* enroll, it does
+  so by overwriting the change that caused the break. Either way it is the wrong instruction for a
+  trust break, which is why I removed it from the banner rather than reword it. Static code-path fact,
+  read not run -- I did not execute `init update` against a scratch project, so the runtime confirmation
+  is owed. The same command is still offered by `never_enrolled_banner()` (`loader.py:192`), where it
+  is *usually* right and fails only for a project already template-current; left alone deliberately --
+  different condition, outside the two riders. Mail to @aipass, not a fix from me.
 - [ ] **`aipass doctor` is blind to timeout drift.** `doctor.py:420-423` compares `command` and
   `matcher` only. It will report 27 hooks wired and PASS with every timeout missing, and
   `doctor --fix` does nothing. This is why the `auto_process` regression below survived two weeks with
@@ -193,6 +243,15 @@ behind for weeks.
 #### Tests that pin defects (rule E)
 
 - [ ] `tests/test_git_gate.py:267` -- pins the git_gate absolute-path bypass (see above).
+- [x] ~~`tests/test_trust_registry.py:444` -- asserts `"trust enroll"` is in the banner~~ **FIXED S147**
+  with the banner itself; it now asserts the real remedy including the project path.
+- [x] ~~`tests/test_auto_fix.py:370` -- pins the `logger_debug` rule~~ **MY CLAIM WAS WRONG, S147.**
+  Re-read on the way to retiring the rule: those three tests exercise the generic `_check_line_pattern`
+  helper and pass the pattern in as a literal argument, so they never asserted the rule existed and
+  they stayed green after the delete. They *do* still use `logger.debug(` as the sample string, which
+  is residue worth a future sweep, but that is a naming smell and not a test pinning a defect. Rule-E
+  count for this branch drops from 5 to 4. Correcting my own audit rather than leaving the number to
+  look thorough.
 - [ ] `tests/test_trust_registry.py:382-383 test_no_session_id_never_dedups_but_still_returns_banner`
   -- asserts the one-time-per-session trust nudge fires twice running when `session_id` is empty.
   `loader.py:163-172` states the intent as "a single nudge, not a persistent nag" and the banner text
@@ -273,9 +332,13 @@ behind for weeks.
   That is 33.5% of all hooks WARNING traffic, and @trigger measures 11 of 14 escalation digests in 24h
   as originating from these logs. Zero information is lost by dropping to INFO -- `engine.py:397-405`
   already writes the same event structured into `engine.jsonl`. PARKED (one line). Measured, untouched.
-- [ ] The other 98 WARNINGs in 24h are edit_gate `.trinity` rollover advisories about **other**
+- [x] ~~The other 98 WARNINGs in 24h are edit_gate `.trinity` rollover advisories about **other**
   branches: @ai_mail 15, @daemon 12, @trigger 9, @flow/@drone/@seedgo 6 each. Advisory, never blocking,
-  but they are the bulk of the escalation lane's raw volume.
+  but they are the bulk of the escalation lane's raw volume.~~ **RESOLVED S149 by compass #273** --
+  this is the class that just moved to INFO. The audit measured the volume and called it "the bulk of
+  the escalation lane's raw volume" without questioning the *level*; @trigger asked the better
+  question (why is a by-design event a warning at all) and Patrick ruled on intent. Worth keeping
+  visible: I had the number and still framed it as a volume problem.
 - [ ] **`bridges/claude.py:56-60` has no test at all.** It is the actual block-delivery path -- the
   code parked item 5 accuses. Item 5 does not reproduce, so the accused line is innocent AND untested,
   which is worse than either alone.
@@ -292,8 +355,132 @@ behind for weeks.
   **Zero rules point at a file that no longer exists**, so nothing here is deletable on the only safe
   test. Recorded, not pruned.
 
+### The UserPromptSubmit sweep (DPLAN-0294 phase 2, S148 -- INVESTIGATION, nothing relocated)
+
+Patrick's rule (compass #272): a UPS hook belongs foreground **only if its stdout feeds the prompt**.
+Verdict below is measured, not read off the category folder -- `stdout_len` and `elapsed_ms` come from
+this branch's own `engine.jsonl` over the retained window (383 UPS dispatches; median total 679ms,
+p95 7873ms, max 17404ms, against the new 90s ceiling).
+
+| # | Handler | Runs w/ stdout | Max stdout | Median ms | Verdict |
+|---|---------|---------------|-----------|-----------|---------|
+| 1 | `identity_injector` | **30/30** | 2513 B | 13.0 | INJECTOR -- stays |
+| 2 | `temporal` | **19/19** | 42 B | 12.1 | INJECTOR -- stays |
+| 3 | `branch_prompt` | 6/29 | 8932 B | 3303.6 | INJECTOR (cadence-gated) -- stays |
+| 4 | `navmap` | 6/29 | 8162 B | 3461.2 | INJECTOR (cadence-gated) -- stays |
+| 5 | `tier0_kernel` | 6/29 | 2472 B | 3787.6 | INJECTOR (cadence-gated) -- stays |
+| 6 | `email_notification` | 4/29 | 130 B | 3284.2 | INJECTOR -- stays |
+| 7 | `context_gauge` | 2/19 | 193 B | 18.0 | INJECTOR -- stays |
+| 8 | `compass_recall` | 2/18 | 605 B | **4364.6** | INJECTOR -- stays, **flagged** |
+| 9 | `persistent_alert` | 0/19 | 0 B | 14.7 | INJECTOR by code (no alerts in window) -- stays |
+| 10 | `feedback_pulse` | disabled | -- | -- | INJECTOR when enabled -- stays |
+| 11 | `presence_gate` | 0/18 | 0 B | 3842.3 | **GATE -- stays, non-negotiable** |
+| 12 | `auto_process` | 0/19 | 0 B | 12.3 | WORKER -- **relocated tonight (item 1b)** |
+| 13 | `user_message_relay` | **0/18** | 0 B | 4013.4 | **WORKER -- strongest relocation candidate** |
+
+- [ ] **`user_message_relay` (@skills, not mine) is the clearest case in the sweep.** Every return
+  path in the file yields `"stdout": ""` -- I read all of them -- and 18/18 live runs agree. It
+  contributes **nothing** to the prompt, ever. What it does instead is a blocking HTTPS POST to
+  `api.telegram.org` with `timeout=10` (`user_message_relay.py:119`) on the critical path of every
+  prompt in a TG-configured branch. Median 4013ms, max 11976ms. It is also the only UPS handler whose
+  latency is owned by a third party: if Telegram is slow, every prompt waits. Relocation candidate #1.
+  Not mine to move -- goes to @skills as a plan.
+- [ ] **`presence_gate` side-work: the premise does not reproduce.** The dispatch asked me to look
+  hard at it. There is nothing to find: `handle()` only reads (`cc_sessions.find_occupant` over
+  `~/.claude/sessions/*.json`, `presence._resolve_session_pid` over `/proc`), `_write_presence` exists
+  but is reached only from `claim`/`release`/`refresh`, none of which the UPS path calls, and
+  `handle_stop` is a documented no-op. It must stay foreground regardless -- its stdout on the block
+  path *is* the `{"decision":"block"}` payload, and a gate you can relocate is a gate you have
+  removed. Clean.
+- [ ] **`compass_recall` is the injector to watch.** It does inject (2/18, max 605 B) so it stays under
+  the rule, but it has the highest median of all 13 (4364.6ms), imports @memory's governance and
+  @devpulse's compass at call time, writes cadence state, and calls `mark_surfaced()` into
+  @devpulse's store. It is the only injector whose read cost is not bounded by construction. If phase
+  3 wants a second candidate after `user_message_relay`, this is where to look -- as a split (recall
+  foreground, bookkeeping deferred), not a move.
+- [ ] **The timing column has an unexplained split and I am not going to pretend otherwise.** Seven
+  handlers sit at 3.3-4.4s median and five at 12-18ms, with no obvious code reason -- `identity_injector`
+  (13.0ms) and `tier0_kernel` (3787.6ms) both do essentially one file read. `elapsed_ms` covers the
+  handler's own `importlib.import_module` plus the call (`engine.py:95-140`), which explains *some*
+  spread but not this shape. Reported as measured; **nobody should plan capacity on these numbers
+  until the split is explained.** The `stdout_len` column, which is what the verdicts actually rest on,
+  does not depend on it.
+
 ### Resolved
 
+- [x] **The over-budget class leaves the escalation lane -- WARNING to INFO** (S149 -- @devpulse
+  dispatch c3e1af67, @trigger's diagnosis, **compass #273**: severity follows design intent;
+  red-first). `edit_gate.py:225` `_warn_over_budget` -> **`_note_over_budget`**, and its
+  `logger.warning` at `:232` -> `logger.info`. Three call sites (`:266`, `:274`, `:299`) are one class,
+  so one change covers all three. Message text untouched, per spec -- the level is a field, not prose.
+  Patrick's reasoning, which is the whole point: *"It is not a warning. It is not wrong behavior. It is
+  behavior that we chose to have."* The message already says nothing is lost, because @memory's
+  rollover archives the overflow at the next PreCompact. Scale: this one by-design class held 8
+  signatures, 579 occurrences, and **10 of the 62 digests the escalation lane has ever sent -- 16%**.
+  The rename matters as much as the level: a function called `_warn_*` that logs INFO is an invitation
+  for the next reader to "fix" the level to match the verb, so a test asserts `_warn_over_budget` is
+  **gone**, not merely that a new name exists.
+  5 tests, 4 red first. Three cover the three call sites separately -- one class, but a fix that missed
+  a site would still have left a third of the lane. The fifth is the guard that makes this surgical
+  rather than a mute: **the over-limit *entry* advisory (`:181`) must stay at WARNING**, because that
+  one names a cap the author has to act on and nothing archives it for them. If someone ever quiets
+  this file wholesale, that test fails.
+  **Live-proven in the exact stream @trigger reads.** Drove the real `handle()` with a real payload:
+  `LEVEL=INFO`, message identical, `exit_code 0` (advisory, never blocked), nothing written to disk.
+  The branch's own prax log now carries both sides of the change in one file -- 5 historical WARNING
+  lines and the new INFO line, same text. No provider wire needed.
+  **A finding on the way past, not fixed:** the *blocking* trinity path (`:175-179`) returns its block
+  dict without logging anything at all. My first draft of the guard test asserted a block logs at
+  WARNING; it does not, so I rewrote the test rather than keep an assertion that happened to pass for
+  the wrong reason. The block is still recorded -- by the engine (`engine.py:396`), which is the
+  existing "successful blocks log at WARNING" item above -- so nothing is lost, but the emitter itself
+  is silent on its loudest outcome and quietest on its most routine one. Worth a look when that item
+  is picked up.
+- [x] **DPLAN-0294 phase 1b -- `auto_process` leaves the prompt lane** (S148 -- @devpulse dispatch
+  8bb1bab7, @memory's spec, red-first). `handle()` now calls `spawn_background()` instead of
+  `auto_process()`: the child is detached and the hook returns immediately. Session guard kept exactly
+  as-is, now meaning **kicked-once, not ran-once** -- a refusal (a live run already holds the lock)
+  marks the guard too, because the work is happening; only a failed kick stays retryable. Sound is
+  action-gated to a real spawn, so a refusal stays silent, per the branch convention. The old
+  pool/rollover counters are gone at hook time -- the child reports them to
+  `memory_json/auto_process_log.json` -- and a test asserts the hook no longer invents them.
+  24 tests in the file (8 red first). **Live-proven three ways, not just unit-proven:**
+  `handle()` returned in **0.7102s / 0.7326s / 0.7595s** on three real invocations; `pgrep` confirmed
+  the detached child (pid 89285) still running *after* the handler returned; @memory's own log
+  timestamps its work at 00:04:42.887 -> 00:04:47.524, i.e. 4.6s of rollover that used to sit on the
+  prompt. Refusal path proven live too, with a held lock: no child spawned, no sound, reason logged,
+  0.6992s. Both registered events (UserPromptSubmit and PreCompact) take the same path -- asserted,
+  because one handler serves both and fixing only the prompt lane would have looked identical in the
+  suite. Timeouts untouched, as instructed. No provider wire needed.
+- [x] **Rider 1 -- `auto_fix` logger_debug rule retired** (S147 -- @devpulse dispatch 882e6339,
+  Patrick approved post-park, red-first). Deleted `auto_fix.py:30-33`. The premise died on 2026-08-11
+  when @prax shipped `SystemLogger.debug()`; @seedgo had already retired the contradicting doctrine in
+  `5d87fcc8`, so the rule was disagreeing with prax's code, prax's README and seedgo's standards at
+  once, 33 fires in 13 minutes. 4 new tests: the key is gone from `PYTHON_PATTERNS`, no rule targets
+  `logger.debug` at all, `_check_patterns` on a file that calls it returns `[]`, and -- the one that
+  matters most -- **the premise itself is asserted** (`callable(system_logger.debug)`), so if prax ever
+  removes it the suite says so instead of the rule quietly becoming right again. 3 of the 4 proven red
+  first. No provider wire needed.
+- [x] **Rider 2 -- TRUST BREAK banner now names a command that exists** (S147 -- same dispatch,
+  red-first; strikes parked item 3). `loader.py:132` said `drone @hooks trust enroll`: no `trust` verb
+  exists on @hooks, and `aipass trust` has no `enroll` subcommand -- wrong twice, in the one message a
+  human sees while every hook in the project is dark. **I read that exact banner during my own outage
+  three hours earlier**, which is why it was worth doing properly rather than minimally. Now
+  `Fix (re-enroll): aipass trust {project_dir}` -- same wording and same path-bearing shape as
+  `config_unavailable_reason()`, so the two paths for one condition can no longer drift. Rendered live
+  to confirm the path interpolates. 2 new tests: one asserts neither dead command appears, one asserts
+  the two code paths name the *same* remedy. Both red first, plus the existing `:444` flipped.
+  **I also dropped the `(or: aipass init update)` alternative rather than keeping it** -- see the
+  @aipass finding below; it is not a reliable remedy for this condition.
+- [x] **Parked item 7 (timeout both-sides) -- APPLIED by @devpulse** (2026-08-13 22:10, commit
+  `3da11942`). All four layers in one breath with the re-enroll, zero dark window: `.aipass/hooks.json`
+  byte-identical to my patch, `~/.claude/settings.json` and `.claude/provider_manifest.json` stamped
+  (12x90 + `auto_process` 120), and **the template trap closed** -- `.aipass/project_hooks.json` got 5
+  UPS handlers stamped at 90 so `init update` cannot silently wipe the live values. My 3 config-pinning
+  tests landed as `tests/test_live_config_timeouts.py`. Devpulse proved `aipass trust` worked from
+  their seat on the *unchanged* config before editing -- my outage report bought that step.
+  Follow-up open as **DPLAN-0294**: relocate `auto_process` off the prompt lane entirely (Patrick's
+  ruling, compass #272), which is the design fix behind the ceiling fix.
 - [x] **README wiring claims corrected -- three stale sentences, not the two the DPLAN cited** (S146 --
   @devpulse dispatch 565fbf11, DPLAN-0285 item 1; strikes parked item 4). The plan names README lines
   51 and 127; both had moved, and a third was wrong and uncited. Now at **58, 64, 139**. Line 64 was
@@ -385,7 +572,9 @@ behind for weeks.
   jump the parked queue: it is the only item that fails permissively and silently.
 - [ ] **Deleted-file edit_gate deadlock** -- one-line fix ready, awaiting the word (it sits inside the
   edit_gate work already in front of Patrick).
-- [ ] **Apply the timeout pair as ONE operation** (S146 handover): `git apply
+- [x] **DONE 2026-08-13 22:10, commit `3da11942`** -- all four layers plus the re-enroll, zero dark
+  window, template trap closed. Original handover spec kept below for the record.
+- [ ] ~~**Apply the timeout pair as ONE operation** (S146 handover): `git apply
   /tmp/hooks_timeout_90.patch`, add `"timeout": 90` to twelve `UserPromptSubmit:<name>` entries and
   `"timeout": 120` to `auto_process` in `~/.claude/settings.json` (lines
   209/217/225/233/241/249/257/265/273/281/289/297/305, none currently carry the field), stamp the same
@@ -393,20 +582,22 @@ behind for weeks.
   (`provider_wire.py:72-73` honours a manifest timeout), then **`aipass trust
   /home/patrick/Projects/AIPass`** or the project goes dark. Then add
   `/tmp/live_config_timeout_tests.py`. Devpulse edits both provider files -- I am outside
-  `TRUSTED_HOOK_EDITORS` and the manifest is the only one of the two I own at all.
-- [ ] The 8 parked items below -- items 4 and 5 are now struck; 6 remain live.
+  `TRUSTED_HOOK_EDITORS` and the manifest is the only one of the two I own at all.~~
+- [ ] The 8 parked items below -- items 1, 3, 4, 5 and 7 are now struck; **3 remain live** (2, 6, 8).
+- [ ] **Mail @aipass** about `init update` enrolling only when its merge rewrites hooks.json
+  (`bootstrap.py:555-560`) -- their code, my finding, sent S147.
 
 ### Parked (Patrick's call -- verified and measured this session, untouched)
 
 | # | Item | Reproduces | Measured today |
 |---|------|-----------|----------------|
-| 1 | `auto_fix` logger_debug rule | **yes, premise dead** | prax shipped `debug()` 08-11 in `ba4d06a8`, whose commit message reads "Rule retirement dispatched to @hooks + @seedgo". @seedgo `modules_content.py:74` now teaches the OPPOSITE ("Use `logger.debug()` instead: silent"). Two hooks give contradictory advice on the same line. 33 fires in 13 min. |
+| 1 | `auto_fix` logger_debug rule | **FIXED S147 -- STRIKE IT** | Retired on Patrick's approval (dispatch 882e6339). Premise died 08-11 when prax shipped `debug()` in `ba4d06a8`; @seedgo retired the contradicting doctrine in `5d87fcc8`. 3-line delete + 4 tests, incl. one asserting the premise so it cannot silently become true again. See Resolved. |
 | 2 | `auto_fix` string-literal grep | **yes** | 3 false positives in a live repro. `_check_line_pattern` (`auto_fix.py:109-115`) only suppresses when the pattern is *immediately* adjacent to a quote, so every docstring, help string and error message that names a pattern trips it. `open_no_encoding` (`:129-132`) has no literal guard at all. |
-| 3 | TRUST BREAK banner | **yes** | `loader.py:132` says "Fix: drone @hooks trust enroll". No `trust` verb exists (enumerated every module's HELP_COMMANDS); real path is `aipass trust <path>`, which has no `enroll` subcommand either -- wrong twice. Same file gives THREE different fixes for the same condition (`:92`, `:98`, `:132`, `:192`). Fires when every hook is dark, i.e. when being right matters most. |
+| 3 | TRUST BREAK banner | **FIXED S147 -- STRIKE IT** | Was wrong twice (`drone @hooks trust enroll`: no `trust` verb, no `enroll` subcommand) in the only message shown while every hook is dark -- **I read it myself during S146's outage**. Now `Fix (re-enroll): aipass trust {project_dir}`, matching `config_unavailable_reason()` word for word so the two paths cannot drift. 2 new tests + `:444` flipped. See Resolved. |
 | 4 | README single-entry claim | **FIXED S146 -- STRIKE IT** | Was README:51/:57/:128; unparked by @devpulse dispatch 565fbf11 as DPLAN-0285 item 1 and fixed at lines 58/64/139. Three sentences, not two -- see Resolved. The README's own worked example, `claude.py UserPromptSubmit`, was precisely the entry that does not exist; it now says so out loud. |
 | 5 | Engine block-path stdout/stderr | **NO -- STALE, STRIKE IT** | Claude Code honours `{"decision":"block","reason":...}` on stdout regardless of exit code. Proven twice: bridge subprocess test (exit 2, 430 bytes stdout, 0 bytes stderr, reason intact) and a live `rm_gate` block that caught one of my own audit agents mid-run and delivered the full reason text. The code still does not match the documented stderr contract, so the smell is real -- but nobody should spend a session on the premise that reasons are being lost. |
 | 6 | 13-to-5 handler grouping (perf) | **yes, worse** | Still 13 handlers. Output measured **20,971 bytes** from a @drone seat, ~22.6KB from a @devpulse seat, against the 10,000 cap -- single-dispatch still fails, reproducing DPLAN-0285. Process time now ~44.7s across 13 processes vs DPLAN's ~21 CPU-s. Slowest single hook logged today: 22,771ms. |
-| 7 | Timeout both-sides | **yes -- ROOT-CAUSED S146, fix handed to @devpulse** | Outer is not 30s, it is **ABSENT**: all 13 UserPromptSubmit manifest entries carry no `timeout`, inheriting Claude Code's 60s default, while 11 of 13 sit on the hardcoded inner 30 (`engine.py:322`, `:86`, `:55`). `auto_process` is clamped the other way, inner 120 against outer 60 -- and it is the one that actually times out (measured 78.5, 78.7, 83.1, 86.9, 87.3, 120.4, 120.5s). Both knobs proven live. Target: 90/90 for the twelve fast handlers, **120 outer for auto_process** to restore what was lost 08-01. Not applied here -- editing hooks.json breaks the trust hash. |
+| 7 | Timeout both-sides | **FIXED -- @devpulse applied 22:10, commit `3da11942`. STRIKE IT** | Outer is not 30s, it is **ABSENT**: all 13 UserPromptSubmit manifest entries carry no `timeout`, inheriting Claude Code's 60s default, while 11 of 13 sit on the hardcoded inner 30 (`engine.py:322`, `:86`, `:55`). `auto_process` is clamped the other way, inner 120 against outer 60 -- and it is the one that actually times out (measured 78.5, 78.7, 83.1, 86.9, 87.3, 120.4, 120.5s). Both knobs proven live. Target: 90/90 for the twelve fast handlers, **120 outer for auto_process** to restore what was lost 08-01. Not applied here -- editing hooks.json breaks the trust hash. |
 | 8 | Fleet-wide diagnostics state | **yes** | `diagnostics_state.py:40` resolves to `src/aipass/.diagnostics_state.json` -- one inode for every citizen. No lock, non-atomic `write_text`, and the branch check **fails open** for any path outside `src/<pkg>/<branch>` (`edit_gate.py:527-532`). During this audit it held a `/tmp` scratch file from another agent's session. `auto_fix.py:22` still hardcodes its own copy of the path instead of importing `STATE_FILE`, despite the module docstring saying it exists so writer and reader "cannot drift apart". |
 
 ## Dispatch Log
@@ -421,6 +612,11 @@ behind for weeks.
 | 2026-08-13 | @devpulse 897e0845 -- Patrick's ruling | DPLAN-0293 created, visit-later, no interim mitigation. Nothing to do now; I build it when the design session happens |
 | 2026-08-13 | @seedgo 1dbac150 -- checklist marker + deadlock concurrency evidence | Logged both. Marker migration ready ([FAIL]), NOT applied -- parked |
 | 2026-08-13 | @devpulse dispatch 223f5e3c -- fix round to 100 (help_flag_safety) | DONE -- 84 -> 100, class of 9 not the 2 named, 1450 green, overall 100% |
+| 2026-08-14 | @devpulse c3e1af67 -- night item 4, over-budget WARNING -> INFO (compass #273) | DONE -- `_warn_over_budget` -> `_note_over_budget`, level changed, 3 call sites, text untouched. 5 tests (4 red first) incl. a guard that the over-limit entry class STAYS at WARNING. Live-proven in the prax stream itself: same file now holds 5 old WARNING lines and the new INFO one |
+| 2026-08-14 | @devpulse d370516d -- verify on 1b + sweep | ACCEPTED. Both judgment calls approved (refusal-marks-guard, no-sound-on-refusal). user_message_relay -> Patrick's morning queue as relocation candidate 1; compass_recall split parked; edit-gate recommendation to morning queue verbatim |
+| 2026-08-14 | @devpulse 8bb1bab7 -- night shift DPLAN-0295 items 1b + 2 | DONE -- 1b shipped red-first and live-proven (0.71s return, detached child confirmed by pgrep); item 2 verdict table delivered, 2 workers of 13, nothing relocated. Both FYIs answered with evidence: edit-gate gap root-caused by pyright probe, SessionStart question answered with an explicit "cannot confirm, and here is my own blind spot" |
+| 2026-08-13 | @devpulse 882e6339 -- riders GO (Patrick present): retire logger_debug + fix TRUST BREAK banner | DONE -- both red-first, 6 tests, 1460 green, seedgo 100% on a forced full re-scan. Parked items 1 and 3 struck. Third defect found in @aipass's `init update`, reported not fixed. |
+| 2026-08-13 | @devpulse e52ec095 -- timeout pair APPLIED, all 4 layers, zero dark window | Parked item 7 struck. Template trap closed at their end. DPLAN-0294 opened for the auto_process relocation |
 | 2026-08-13 | @devpulse dispatch 565fbf11 -- DPLAN-0285 items 1+2 + Patrick's BAUD question | Item 1 DONE (3 README sentences). Item 2 PROVEN but handed over as a patch -- applying it broke the trust hash and took all hooks dark for ~8 min; reverted. BAUD answered NO, root cause is an 08-01 config regression. Items 3+4 untouched per ruling. |
 
 ## Relationships
@@ -431,6 +627,33 @@ behind for weeks.
 - **Seedgo:** `drone @seedgo audit aipass @hooks`
 
 ## Notes
+
+**S152 (2026-08-14):** Dispatch 590601bd, Patrick-ruled: *"we need a log for deleted files - if
+something deletes, it should be a record of it."* @drone records the sanctioned lane; my half was the
+leak. `rm_gate` saw every raw `rm` an agent ran and wrote down none of them -- it only ever spoke when
+it blocked, and even then the engine recorded *that* a block happened, never *what* was deleted, into
+a stream (`engine.jsonl`) that retains about eleven minutes.
+
+Now every raw rm this gate sees gets one line, allowed or blocked, at INFO
+(`rm_gate.py:128-140`): timestamp, status, caller branch, cwd, command as the agent wrote it.
+Branch comes from a passport walk (`:104`), not the path -- learning 109, path shape lies. `drone rm`
+and `git rm` are skipped: their deletions belong to someone else's record and double-logging would
+make the fleet's delete count a lie. Zero decisions moved; a 13-case canary pins that.
+
+The part worth keeping: **the first run of my own tests wrote 3597 lines/min into the live deletion
+log and prax fired a CRITICAL runaway before the feature was finished.** 70 tests exercising a
+recorder means 70 real writes into the record the recorder keeps -- to both sinks, branch-local and
+the `system_logs/` aggregate @trigger watches. @devpulse caught it mid-build and steered without
+stopping the work. The fix is an autouse fixture routing the writes to `tmp_path`, plus a guard that
+runs 100 deletions and asserts both live files are byte-identical after. But the fixture fixes one
+handler out of 28 that log; the class question -- how many other suites have been quietly writing
+their own live logs, under the runaway threshold where nobody noticed -- is a new todo.
+
+Judgment @devpulse asked for on the audit lane's own runaway exposure: prax detection is enough. One
+line costs one Bash *tool call* -- a shell loop deleting 10,000 files is still one call and one line.
+The only way to reach 3597/min is a harness calling the hook directly, which is what just happened and
+which prax caught in 60s. A cap in the writer would drop lines exactly during a mass-delete incident,
+which is the one time every line matters.
 
 **S144 (2026-08-13):** Full branch audit under DPLAN-0291, wave 5. Six measurement agents run in
 parallel, everything below verified rather than reasoned.
@@ -521,6 +744,103 @@ aborts. Counting the wrong 302 would have produced a confident, wrong, 2.4x-infl
 That is the same lesson as S144's, arriving a third way: my instruments were clean because they could
 not see far enough back to be dirty. Retention *is* the finding, again.
 
+**S147 (2026-08-13, late night):** @devpulse dispatch 882e6339 -- the two post-park riders, approved
+by Patrick while present. Both applied red-first. 1460 green, ruff clean, seedgo 100% on a **forced
+full re-scan**, not the cache. Nothing committed.
+
+The pairing was accidental and instructive: rider 2 fixed the banner I had personally read three hours
+earlier, at the moment every hook in this project was dark because of my own edit. **A message that
+only ever renders during an outage cannot be reviewed by using the system normally** -- which is why
+it stayed wrong long enough to be parked as a wording nit. It was never a wording nit. It was the only
+instruction available at the worst moment, and it named a command that has never existed.
+
+That is also why I did not stop at the literal ask. The banner offered `aipass init update` as an
+alternative; checking it before preserving it showed `bootstrap.py:555-560` gates enrollment behind
+`if existing_hooks != merged_hooks`, so for a hand-edit the template does not touch -- precisely the
+edit that breaks a hash -- the merge is a no-op, nothing enrolls, and the command reports success on a
+still-dark project. When it does work it works by overwriting the change that caused the break. So I
+removed the alternative rather than reword it, and mailed @aipass rather than touch their file. Two
+things I want on the record about that: it is a **code-path fact I read, not a run I performed**, and
+the sibling `never_enrolled_banner()` still offers the same command, where it is usually right --
+different condition, outside the riders, deliberately untouched.
+
+Rider 1 cost me a correction to my own audit. I had logged `tests/test_auto_fix.py:370` as a test
+pinning the logger_debug rule. Re-reading it on the way to the delete, it does not: those three tests
+pass the pattern into the generic `_check_line_pattern` helper as a literal, so they never asserted the
+rule existed and stayed green afterwards. Rule-E count for this branch is 4, not 5. I would rather
+shrink my own finding than let a number stand because it sounded thorough. The test I care most about
+in that new class is the one asserting `system_logger.debug` is callable -- if prax ever drops it, the
+suite says so, instead of a deleted rule quietly becoming correct again.
+
+Also closed tonight, by @devpulse rather than me: parked item 7. They applied the timeout pair across
+all four layers in one breath with the re-enroll and zero dark window, having first proved
+`aipass trust` worked from their seat on the *unchanged* config. My outage report bought that step,
+which is the most useful thing that came out of breaking it.
+
+**S148 (2026-08-14, night shift):** @devpulse dispatch 8bb1bab7 under DPLAN-0295, Patrick asleep,
+devpulse orchestrating. 1464 green, ruff clean, seedgo 100% on a forced full re-scan. Nothing
+committed.
+
+Item 1b closes the loop that started with Patrick's 21:23 timeout last night. The chain is worth
+writing down whole, because no single step of it would have found the answer: a prompt died at 30s →
+the ceiling had been silently reconciled away on 08-01 → the ceiling was never the real problem, a
+two-minute job on the prompt lane was → @memory built the detachment → tonight it landed on my side.
+The fix that mattered was not the one that was asked for first.
+
+Two measurements I want kept. The handler now returns in **0.71s** having handed off work that
+@memory's own log timestamps at **4.6 seconds** in the child — and that is a quiet night; the same job
+has been measured at 78-120s. And the guard changed meaning without changing code: it now records
+"kicked", not "ran". I made a refusal mark the guard too, because a live run *is* the work happening,
+and made only a failed kick retryable. That distinction is the whole design, so it is two tests rather
+than a comment.
+
+Item 2's verdict rests on `stdout_len`, not on my opinion of what a handler is for. 13 handlers, 2
+workers: `auto_process` (relocated tonight) and `user_message_relay`, which returns `""` on every one
+of its code paths and on all 18 recorded runs while making a 10-second-timeout HTTPS call to Telegram
+on the critical path of every prompt. It is @skills', so it goes to them as a plan, not a patch. The
+dispatch also asked me to look hard at `presence_gate` side-work; there is none, and saying so is
+worth as much as finding some.
+
+I also refused to explain something. Seven handlers sit at 3.3-4.4s median and five at 12-18ms, and I
+cannot account for the split from the code — `identity_injector` at 13ms and `tier0_kernel` at 3788ms
+both do one file read. I reported it as measured and flagged that nobody should plan capacity on it
+yet. The verdicts do not depend on that column, which is why the table is still usable.
+
+Both FYIs turned into evidence rather than opinions. @memory's edit-gate deadlock is the shape my own
+morning fix was supposed to cover, so I ran pyright on a scratch file with all three red-first shapes
+instead of assuming: the import shape is covered, the attribute shape and the parameter shape are not.
+That is a gap, not a regression, and the recommendation splits — one signature I would add
+confidently, one I would not add without Patrick, because it is genuinely two-sided. And on
+SessionStart I could not answer @memory's question, because my own JSONL never logs `source`. The
+useful half of that answer is my own blind spot.
+
+**S149 (2026-08-14, night shift item 4):** @devpulse dispatch c3e1af67 -- the severity reclass Patrick
+ruled tonight as compass #273. 1469 green, ruff clean, seedgo 100% on a forced full re-scan. Nothing
+committed.
+
+This one is small and it corrects something in this very document. Back in S144 I measured the
+escalation lane and wrote that 98 of the WARNINGs in 24h were `.trinity` rollover advisories about
+other branches -- "the bulk of the escalation lane's raw volume". I had the number and I framed it as
+a **volume** problem. @trigger asked the better question: why is a by-design event logged as a warning
+at all? Patrick answered it in one line -- *it is not wrong behavior, it is behavior that we chose to
+have* -- and the fix turned out to be a field, not a filter. 579 occurrences and 16% of every digest
+the lane has ever sent, gone by changing a level. **Having the measurement is not the same as asking
+the right question about it.**
+
+The rename carried as much weight as the level change. A function called `_warn_over_budget` that logs
+INFO is a trap for the next reader, who will helpfully "fix" the level to match the verb. So the test
+asserts the old name is *gone*, not just that a new one exists.
+
+Two things I did not take on faith. The dispatch handed me a spec with file, function and line
+numbers; I checked all of them against my own code before touching anything, and they were right --
+worth saying, because verifying a correct spec costs a minute and trusting a wrong one costs a night.
+And my first draft of the guard test asserted that a blocking trinity violation logs at WARNING. It
+does not: the block path at `:175-179` returns its dict and logs nothing at all. Rather than keep a
+test that would have passed for the wrong reason under a different config, I rewrote the guard around
+something true and more useful -- that the over-limit *entry* advisory stays at WARNING, so this
+reclass can never be widened into a mute of the whole file. The silent block path is now logged above
+as a finding.
+
 ## Listen (TTS-friendly summary)
 
 The hooks branch is healthy on paper and yellow in practice. All one thousand four hundred and five
@@ -606,8 +926,102 @@ Also worth saying: of three hundred and two cancelled hook events, only a hundre
 actually timed out. The rest were Patrick pressing escape. Counting the wrong number would have given
 a confident answer that was more than twice too large.
 
-Last verified 2026-08-13.
+Late at night Patrick approved two small fixes that had been waiting on the parked list. The first
+retired a rule that told everyone logger dot debug was not supported. It has been supported since the
+eleventh of August, and the standards branch had already retired the doctrine behind it, so my hook
+was arguing with three other sources at once. It is gone, and the tests now assert the reason it is
+gone, so if that support is ever removed the suite will say so rather than the old rule quietly
+becoming right again.
+
+The second fixed the trust break message. That is the message shown when every hook in a project is
+switched off. It told you to run a command that has never existed, and it was wrong in two separate
+ways at once. I read that exact message myself three hours earlier, during the outage I caused. A
+message that only ever appears during an outage cannot be checked by using the system normally, which
+is why it sat on the list as a minor wording issue for so long. It was not minor.
+
+While fixing it I checked the alternative command it also offered, and found that command does not
+reliably fix the problem either. It only re-enrols a project when its own merge happens to rewrite the
+file, so for the kind of hand edit that breaks trust in the first place, it does nothing and reports
+success. I removed it from the message and sent the finding to the branch that owns it rather than
+editing their code.
+
+One correction to my own audit. I had recorded a test as pinning the retired rule. Reading it properly
+on the way to deleting the rule, it does not. My count of tests that pin broken behaviour on this
+branch drops from five to four. I would rather shrink my own finding than keep a number because it
+sounded thorough.
+
+On the night shift the memory processor finally moved off the prompt. It used to do its work while
+you waited, which is why your first prompt of a session could die at thirty seconds and lose its
+context. Now the hook starts a detached child and returns in seven tenths of a second. I proved it
+three times on the real thing and watched the child still running afterwards, doing four and a half
+seconds of work that used to be yours to wait for.
+
+I also swept all thirteen hooks that run when you press enter, against Patrick's rule that such a hook
+belongs there only if what it prints goes into the prompt. Eleven of them earn their place. Two do
+not. One is the memory processor, which moved tonight. The other belongs to the skills branch: it
+relays your message to Telegram, prints nothing at all into the prompt, and makes a network call with
+a ten second timeout on the way. Every prompt in a Telegram-configured branch pays for that. It is not
+mine to move, so it goes to them as a plan.
+
+One thing in that table I could not explain, and I said so rather than smooth it over. Seven of the
+hooks take three to four seconds and five take about fifteen milliseconds, and two of them do
+essentially the same single file read. The verdicts do not depend on those numbers, but nobody should
+plan around them until someone works out why.
+
+The memory branch hit the editing deadlock again tonight, in exactly the shape I thought I had fixed
+this morning. So I tested it instead of trusting myself: I wrote the three ways a red-first test
+normally names something that does not exist yet, and ran the type checker on them. My fix covers one
+of the three. The other two still deadlock. That is a gap rather than a regression, and the fix is one
+line for the clear case. There is a second case I deliberately will not fix without Patrick, because
+it could be resolved from either side, and widening the gate on a guess is how a guard stops guarding.
+
+The last item of the night was one word in a log line, and it removed sixteen percent of every alert
+the escalation system has ever sent. When a memory file grows past its budget, my gate said so at
+warning level. But nothing is wrong when that happens. The overflow gets archived automatically at the
+next compaction, and the message says so itself. Patrick ruled that severity should follow intent: it
+is not a warning, it is behaviour we chose to have. So it is now logged as information instead.
+
+What I want to remember is that I had already measured this. Yesterday I counted those advisories and
+called them the bulk of the escalation traffic, and then treated it as a volume problem. The trigger
+branch asked the better question, which was why a deliberate event was a warning in the first place.
+Having the number is not the same as asking the right question about it.
+
+I also renamed the function, because it was called warn-over-budget, and a function named after a
+severity it no longer uses will get its level put back by the next helpful reader. The test now
+insists the old name is gone.
+
+One test of mine was wrong before it was right. I wrote a guard asserting that a real blocking
+violation still logs loudly, and it does not: that path returns its block and logs nothing at all. I
+replaced it with a guard that is both true and more useful, that the other advisory in the same file
+stays at warning level, so this change can never quietly become a mute of everything. The silent block
+path is written down as a finding rather than left as a surprise.
+
+This morning Patrick asked for something simple: if something deletes a file, there should be a record
+of it. The drone branch keeps the record for its own delete command. My gate was the leak. It watched
+every raw remove command an agent ran, and it only ever spoke when it blocked one. Even then, what it
+wrote down was that a block happened, not what was being deleted, and it went into a stream that keeps
+about eleven minutes of history.
+
+So now every raw remove this gate sees gets a line, whether it was allowed or blocked: the time, the
+command exactly as the agent wrote it, the folder it ran in, and which citizen ran it. The citizen
+comes from reading their passport, not from guessing at the shape of the path, because path shapes
+lie and I have been caught by that before. Deletes that go through drone or through git are skipped,
+because those belong to somebody else's record and counting them twice would make the fleet's delete
+count a lie. Nothing new is blocked. A thirteen case check pins every allow and deny decision exactly
+where it was.
+
+The thing worth remembering is what happened while I was building it. My own tests ran the recorder
+seventy times, and every one of those runs wrote a real line into the real deletion log. Prax detected
+three and a half thousand lines a minute and fired a critical runaway alarm on a feature that was not
+even finished. Devpulse saw both halves at once, the feature working and the flood it caused, and
+steered me mid build without telling me to stop. The tests now write to a temporary folder, and there
+is a guard that runs a hundred deletions and insists both live log files come out byte for byte
+identical. But that fixture protects one handler out of twenty eight that log. How many other test
+suites have been quietly writing into live records, just slowly enough that nobody noticed, is now a
+question on my list.
+
+Last verified 2026-08-14.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-13*
+*Updated: 2026-08-14*

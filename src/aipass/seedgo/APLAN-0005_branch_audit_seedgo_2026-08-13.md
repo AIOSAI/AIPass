@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-13 (S86) |
+| **Last verified** | 2026-08-14 (S88) |
 | **Open items** | 12 (0 blocking) |
-| **Tests** | 1648 pass, 0 fail, 0 skip |
+| **Tests** | 1662 pass, 0 fail, 0 skip |
 | **Seedgo** | **100%** (44 standards + diagnostics, 126 files) -- `help_flag_safety` 100%, all 5 own defects fixed + 5 the checker never named |
 | **Seedgo with bypass OFF** | 98% (was 97%) -- `audit aipass @seedgo --no-bypass` |
 | **Bypass entries** | 28 (+1: the `wants_help` predicate vs `json_structure`, measured; a second `naming` bypass was minted and then retired by renaming the file instead) |
@@ -549,10 +549,67 @@ being live defects. Defence in depth, not redundancy.
 If I accept a report that is actually the exemption behaving correctly, I lose the ability to tell
 the two apart -- and so does everyone who reads the record.
 
+### S88 -- the de-score I was praised for removed a surface that had never run
+
+Night-shift dispatch 28225ed5, Patrick-ruled, two deliverables. The standing rule was
+verify-then-build, and the verification overturned my own account of S86.
+
+**`log_structure`'s post-check was dead its entire life.** `check_branch_post(branch_path)` took ONE
+positional parameter in **every commit back to `0095139f`**. `branch_audit.py:451` has always called
+it `check_branch_post(str(branch_path), bypass_rules=bypass_rules)`. Executed both forms to confirm:
+with the kwarg -> `TypeError`, without -> `([{...'score': 50, 'issues': ['Branch has 3 local log(s)
+but 0 system logs ...']}], [50])`. The bare `except Exception` at the old :404 swallowed it into a
+`logger.info` nobody reads.
+
+So the S86 ruling stands -- the check *does* read runtime state, which is true by inspection -- but
+**my account of it was wrong**: that surface never moved anyone's score, because it never ran. I was
+told the de-score was "the bigger fix" and it was a fix to something already inert. Corrected to
+@devpulse before the round record hardened.
+
+**Why the suite never caught it.** `tests/test_incremental_audit.py:226` declares its fixture as
+`check_branch_post(branch_path, bypass_rules=None)` -- the *correct* signature -- and
+`tests/test_coverage_audit.py:1716` uses a `MagicMock`, which accepts any kwarg. Green suite, dead
+feature, for months. The contract test now uses a real function object; a mock can never catch a
+signature mismatch.
+
+**My own brief was wrong and the sub-agent caught it.** I briefed "the ONLY real implementation was
+`log_structure`". `json_structure_check.py:351` has a live one with the *correct* signature, working
+all along -- which is exactly why the lane itself was never suspected. One broken implementation
+hiding behind one working one.
+
+**Deliverable 1 -- shipped.** The post-check lane now surfaces a crash attributably into both
+`all_violations` and `results[...]["checks"]`, at `logger.warning`, naming checker, branch, exception
+type and text, and stating that the score excludes the check. Judgement call: a crashed post-check
+does **not** move the score. The file lane already produced a real measurement; zeroing it would
+discard real work and misattribute a *seedgo checker defect* to the audited branch -- the same
+disease as the runtime-state score. Argument against, recorded: a branch can now read 100% while part
+of its measurement never ran, and a violation line under a green score is scrollable -- which is how
+this survived several releases. Mitigated by rendering the crash line even at a perfect score.
+
+**Deliverable 2 -- shipped as an instrument, with a negative verdict attached.**
+`check_branch_observe(branch_path, bypass_rules=None)` runs on every audit, honours the mail-lane
+artifact exclusion, writes dated readings to `seedgo_json/branch_observe_log.json`, and moves no
+score (pinned: `average` and `log_structure` byte-identical with the lane present and absent; both
+audits re-measured uncached at 100%).
+
+The verdict is that observe readings are **meaningful only as a negative**. `prax` builds the
+`system_logs/` and local handlers in a single call (`direct.py:139-163`), so local-exists implies
+system-exists *by construction*; measured live, **0 of 17 branches can fire**. The reading is only
+reachable if someone deletes `system_logs/` out from under a live branch. The instrument is there to
+answer "has this ever occurred", not to score. **Recommendation after a few days of readings:
+retire the observation, do not flip it to scoring.**
+
+**Unresolved, and not reconciled by invention.** @cli and @devpulse both observed `log_structure` 75
+with the post-check's verbatim message on the evening of 08-13, and 75 is exactly
+`int((50 + 100) / 2)` -- the post-check's own blend formula. That arithmetic is precisely why the
+observation looked like the post-check running. It cannot have been. Reported as unexplained, author
+attributed to nobody.
+
 ## Dispatch Log
 
 | Date | Action | Result |
 |------|--------|--------|
+| 2026-08-14 | Dispatch 28225ed5 (@devpulse) -- night shift item 5 | Swallowing except fixed (crash now attributable, score untouched by design); log_structure revived observe-only, 0 score effect proven on re-measured audits; post-check found DEAD since 0095139f -- S86 de-score account corrected; 1662 tests |
 | 2026-08-13 | Mail 28cce6ae (@devpulse) + 2d282aea (@aipass) | dispatch_*.log excluded from the local-log count (@cli only branch of 17 affected); @aipass's 1-of-13 measured and REFUSED as a false-negative report -- router exemption working as designed; runtime-state sweep queued and flagged pre-proof |
 | 2026-08-13 | Dispatch reply 4c2e258c (@cli) | Both my findings confirmed + fixed by them; they returned 2 checker bugs of mine -- help_flag arm (e) shipped (0/152 fleet impact), log_structure de-scored to the info channel (runtime-state dependence removed). @cli 99% -> 100%. Corrected myself: arm (e) does NOT cover their real file |
 | 2026-08-13 | Mail 029ac3dc (@memory) -- 2 dead_code measurements | Frontier-not-closure shipped red-first; their path-invocation suspicion confirmed as a literal-string accident and queued; my "all vestigial" correction accepted at 5 of 6 |

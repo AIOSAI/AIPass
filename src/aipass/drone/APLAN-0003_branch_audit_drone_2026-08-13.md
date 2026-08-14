@@ -33,11 +33,11 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN (was YELLOW at S50 — the functional bug that held it back is fixed) |
-| **Last verified** | 2026-08-13 (S52) |
-| **Open items** | 5 (0 functional bugs, 2 dead code, 3 housekeeping) |
-| **Tests** | 1070 pass, 0 fail, 5 skip (1075 collected, 26 files) |
+| **Last verified** | 2026-08-14 (S54) |
+| **Open items** | 5 (2 dead code, 3 housekeeping — the queued rm-guard bug shipped at S54) |
+| **Tests** | 1118 pass, 0 fail, 5 skip (1123 collected, 28 files) |
 | **Seedgo** | 100% overall — help_flag_safety 100% (was 9% at 16:47, overall 97%), 45 standards, forced full re-scan, no type errors |
-| **Bypass entries** | 30 (was 48 at S50 — 19 deleted proven dead, +1 for the new help_flags predicate) |
+| **Bypass entries** | 30 (was 48 at S50 — 19 deleted proven dead, +1 for help_flags; S54 wrote one and withdrew it, fixing the code instead) |
 | **CLI score** | cli 100%, cli_flags 100%, cli_ux 100% (no Nav/Output 0-5 scorer exists in seedgo) |
 | **Live command sweep** | 29/29 commands executed at S50, 0 broken; +3 new verbs live-proven at S51 |
 
@@ -76,6 +76,10 @@ Git access is two tiers checked once at the top of `git_module.handle_command()`
 
 ### Resolved
 
+- [x] **`drone rm` sibling-branch guard false-positived on spawn template trees** (reported by @devpulse 2026-08-13, ruled by Patrick 2026-08-14, shipped S54). `_find_branch_root` returned the INNERMOST `.trinity/` ancestor, and @spawn ships a full branch skeleton under `templates/` — so refusals named `aipass_framework`, a template with no mailbox to appeal to. Now walks to the OUTERMOST hit inside the project, matching the mapping @devpulse used on the commit gate (`e934099f`) for the identical mimicry. Fixing it surfaced a second, unreported bug: @spawn could never delete inside its own `templates/`, because a skeleton's name never matches the branch you are standing in. 7 tests, 4 red first. Patrick ruled NO carve-out on the policy half — the guard stays exactly as strict, and build artefacts in another citizen's tree are removed by hand.
+
+- [x] **Subprocess default timeout 30s -> 60s, stamped in every layer** (S53) — Patrick's ruling: two known runners finish around 31s and were tripping the old default. The default lived in THREE places and only one was a named constant: `DEFAULT_TIMEOUT` in `executor.py:24`, plus `execute_command(timeout: int = 30)` at `executor.py:62` and `execute_branch_command(timeout: int = 30)` at `router_handler.py:282` — two signatures agreeing with the constant by coincidence, not by reference. Raising the constant alone would have left every caller relying on a signature default still at 30, which is precisely the failure DPLAN-0285 had just cost the fleet. Both signatures now reference `DEFAULT_TIMEOUT`, so the layers cannot drift apart again. 7 tests, 4 red first; they assert the NUMBER (the pre-existing tests compare against the constant and stay green at any value) and that all three layers agree. `TIMEOUT_OVERRIDES` untouched, and a test pins that a policy lower than the default still wins — resolution order must not quietly become `max(policy, default)` as the default rises.
+- [x] **`--drone-timeout` placement documented from the code, not from assumption** (S53) — the known confusion settled by running it: the flag works ANYWHERE after `@target` (including after the routed command and its arguments) and fails before it with `drone: unknown command '--drone-timeout'`. Both the help table and the README previously showed it in the standalone `drone --drone-timeout <n>` shape, which is the one form that does not work. Fixed in both, with the failing form shown explicitly so nobody has to guess again.
 - [x] **help_flag_safety 9% -> 100%: a help flag anywhere now explains, never executes** (S52) — the new standard (DPLAN-0291 rule E) named all 10 of my modules for the same shape: `handle_command()` gated help at `command` or `args[0]` only, so a flag typed later was invisible and the verb ran. **The teeth were in `rm`**, where every token is a PATH: `drone rm notes.md --help` deleted notes.md and then tried to delete a file literally named `--help`. Fixed with one shared predicate, `wants_help()` in `apps/handlers/help_flags.py`, called inside all ten `handle_command()`s — the gate existed as ten copies of the same two lines, which is exactly how ten modules drifted into one bug (S39: define a rule once). 36 tests, 13 red first, every dispatch target mocked and asserted never called — no live verb fired to prove the trap. Live-proven on a throwaway file: `drone rm canary.txt --help` printed usage and the file survived, while an ordinary `drone rm real.txt` still deletes.
 - [x] **`discovery help <target>` protected from its own fix** (S52) — discovery owns `help` as a genuine subcommand, so a blanket bare-`help` rule would have made `drone @discovery help @seedgo` print discovery's own help instead of seedgo's. `wants_help(..., bare_help=False)` opts it out; dashed forms still catch. Two tests pin both directions. Worth recording because the fix for one bug was one keyword away from causing another.
 - [x] **`prune-temp` wired to owner tier** (S51) — @devpulse ruled owner on the blast-radius argument (deletes merged remote `citizen/*` branches = `delete-branch` class). Now refuses non-owners by naming the tier requirement instead of claiming the command does not exist, and reaches the handler for the owner. Help text moved from the global list to owner. **The instance was the smaller half:** `test_every_registered_command_holds_a_tier` now asserts that every verb in `_COMMANDS` holds a tier, plus a mirror test for tier entries with no registered command. A test naming `prune-temp` would have caught this one verb; the invariant catches the next one.
@@ -123,6 +127,30 @@ Git access is two tiers checked once at the top of `git_module.handle_command()`
 
 ## Notes
 Session notes, discoveries, changes. Stamp each entry: session number + date.
+
+**S54 (2026-08-14):** Two Patrick rulings — the deletion record, and the guard fix it arrived beside.
+
+*The record had to cover the lane nobody named.* The ruling said "if something deletes, there should be a record of it", and the ticket pointed at `drone rm`. But drone has TWO delete lanes — `rm_handler` and the broker daemon, which performs its own `rmtree`/`unlink` for sandboxed callers. Wiring the record only where the ticket pointed would have left a hole exactly the size of the sandboxed lane. Both feed `handlers/deletion_log.py` now. The broker passes its HMAC-authenticated requester in explicitly, because resolving identity from cwd there would record the daemon's own location instead of whoever asked.
+
+*The remaining `unlink` sites are drone's own runtime, not anyone's data* — the broker's socket file (bind and teardown), the git lock release, and json_handler's atomic-write temp cleanup. Listed rather than wired: a record of drone deleting its own socket on startup is noise that makes the real records harder to find.
+
+*Green on the first run is an unproven canary.* All 26 deletion tests passed immediately, which is the same shape as S52's canary that never bit. Two deliberate mutations settled it: dropping the pre-delete measurement failed 5, dropping refusal records failed 6, and each failed for its own stated reason. One identity test survived both — it put a passport inside a directory named after the branch, so path-shape matching answered identically. Rewritten with the names deliberately different.
+
+*Two seedgo findings were right and one was a shape mismatch.* A rotation-check failure passing silently is how a bounded log stops being bounded — real bug, fixed. The third wanted a logger call inside a tree-walk `except`, which on a large directory means one line per file, burying the signal. I wrote the bypass, then found the honest answer instead: DEBUG for which entry, one INFO for the total, `measured: "partial"` in the record so the size is never presented as exact. Bypass withdrawn — 100% with the count unchanged at 30.
+
+*A bug report that contained a second bug.* @devpulse reported the refusal naming `aipass_framework`. Fixing `_find_branch_root` to outermost-wins also revealed that @spawn could never delete inside its own `templates/` — a skeleton's name never matches the branch you are standing in, so every path in there read as somebody else's home. Nobody had reported it.
+
+**S53 (2026-08-14):** Night shift item 7 — a one-number ruling that was really a three-layer one.
+
+*The dispatch's own warning was the whole job.* "If the default appears in more than one layer, stamp every layer in the same breath." It appeared in three, and two of them were signature defaults holding their own literal `30` — agreeing with the constant by coincidence. Stamping three literals would have satisfied the ruling and left the same trap armed, so both signatures now REFERENCE the constant. There is now exactly one place the default can be changed.
+
+*The old tests could not have caught it.* `TestResolveTimeout` compares against `DEFAULT_TIMEOUT` itself, so it stays green at any value — it proves resolution ORDER, not the default. A test that pins a policy has to name the number, or it is only pinning that the code agrees with itself.
+
+*Placement was answered by running it, not reading it.* Three placements tried; the one form both the help text and the README were showing — `drone --drone-timeout 90 @flow list` — is the one that fails. The docs had been demonstrating the broken spelling.
+
+*A bug report whose proposed fix does not fix it.* @devpulse's `drone rm` template report (7f58a8bd) was right that `_find_branch_root` (rm_handler.py:76) names a template skeleton as a citizen — the path has TWO `.trinity` ancestors, `spawn/templates/aipass_framework/` and `spawn/`. But their suggested rule, and the outermost-wins mapping they used on the commit gate, both land on `spawn`, which is a real sibling branch. They stay blocked either way; only the message improves. Split into a misidentification fix (mine, queued) and a policy question I refused to answer alone at 2am inside a guard whose job is refusing deletions: should build artefacts be branch-owned at all. Returned to them with the evidence.
+
+*Fourth bypass drift, same rule.* A three-line help-table edit moved the write sites again. @seedgo confirmed the same evening that my function-scoping finding is a real bug in their checker (unused_function implements `functions`, cli does not, no shared predicate), queued it, and said explicitly: keep lines, do not convert the others. So this stays a manual refresh until their fix lands.
 
 **S52 (2026-08-13):** New standard, 10 modules, one shared fix.
 

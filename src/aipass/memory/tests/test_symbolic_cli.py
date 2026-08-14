@@ -11,6 +11,22 @@
 Covers: from aipass.memory.apps.modules.symbolic import handle_command
 """
 
+# ---------------------------------------------------------------------------
+# PARKED 2026-08-14 — Patrick's ruling. The symbolic fragments tier is disabled
+# (unused; the Agent Memory Atlas review flagged the AUDN deduplicator for acting
+# on an LLM Delete verdict with no record of what was removed). These tests are
+# KEPT, not deleted: they document the feature for revival.
+# Active curated-truth piece: Compass — drone @devpulse compass.
+# Revive: .archive/parked_symbolic_20260814/README.md
+# ---------------------------------------------------------------------------
+import pytest as _parked
+
+_parked.skip(
+    "symbolic fragments tier PARKED 2026-08-14 (Patrick's ruling) — "
+    "active piece is Compass; revive via .archive/parked_symbolic_20260814/README.md",
+    allow_module_level=True,
+)
+
 import json
 import sys
 import time

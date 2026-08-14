@@ -13,6 +13,7 @@ import sys
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -2286,3 +2287,148 @@ class TestProcessLogLineRoutesWarnings:
         watcher._process_log_line(f"{now} | mod | INFO | All good", _BRANCH_LOG_PATH)
 
         fire.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests -- system_logs twins (double-processing, devpulse e9d92ed2)
+# ---------------------------------------------------------------------------
+
+
+def _dual_write_tree(tmp_path, branch: str, module: str):
+    """Build the tree prax actually produces: the same line in two files.
+
+    Returns (branch_log, system_log), both real files under tmp_path.
+    """
+    branch_log = tmp_path / "aipass" / branch / "logs" / f"{module}.log"
+    branch_log.parent.mkdir(parents=True, exist_ok=True)
+    branch_log.touch()
+    system_log = tmp_path / "system_logs" / f"{branch}_{module}.log"
+    system_log.parent.mkdir(parents=True, exist_ok=True)
+    system_log.touch()
+    return branch_log, system_log
+
+
+def _point_at_tree(lw, monkeypatch, tmp_path) -> None:
+    """Aim the watcher's roots at a temp tree and drop the branch-name cache."""
+    monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+    monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+    monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
+
+
+class TestSystemLogTwinIsNotProcessedTwice:
+    """Prax writes every branch line to BOTH the branch's own logs/ dir and
+    system_logs/<branch>_<module>.log, and this watcher schedules both trees.
+    One physical line was therefore counted twice — once attributed by
+    directory, once by a filename guess.
+
+    Live evidence (2026-08-14): escalation signatures 0249c13b4d64 (HOOKS,
+    src/aipass/hooks/logs/edit_gate.log) and 690de8d87cdc (UNKNOWN,
+    system_logs/hooks_edit_gate.log) hold the SAME three sample lines with
+    consecutive sequence numbers 8514/8515 — one reader, two files. Reported
+    by devpulse in e9d92ed2. Measured: 230 of 243 system_logs files are
+    twin-backed.
+    """
+
+    def test_dual_written_system_log_is_skipped(self, monkeypatch, tmp_path):
+        """The system_logs copy is dropped when its branch twin exists."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        _, system_log = _dual_write_tree(tmp_path, "hooks", "edit_gate")
+        watcher = lw.BranchLogWatcher()
+
+        assert watcher._should_process(str(system_log)) is False
+
+    def test_the_branch_copy_is_the_one_kept(self, monkeypatch, tmp_path):
+        """The attributed copy keeps being read — coverage is not lost."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        branch_log, _ = _dual_write_tree(tmp_path, "hooks", "edit_gate")
+        watcher = lw.BranchLogWatcher()
+
+        assert watcher._should_process(str(branch_log)) is True
+
+    def test_system_log_without_a_twin_is_still_watched(self, monkeypatch, tmp_path):
+        """A real system-level log — no branch writes it — stays watched."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        orphan = tmp_path / "system_logs" / "telegram-bot-api.log"
+        orphan.parent.mkdir(parents=True, exist_ok=True)
+        orphan.touch()
+        watcher = lw.BranchLogWatcher()
+
+        assert watcher._should_process(str(orphan)) is True
+
+    def test_multi_word_branch_name_resolves_its_twin(self, monkeypatch, tmp_path):
+        """ai_mail_dispatch_monitor.log resolves to ai_mail, not 'ai'."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        _, system_log = _dual_write_tree(tmp_path, "ai_mail", "dispatch_monitor")
+        watcher = lw.BranchLogWatcher()
+
+        assert watcher._should_process(str(system_log)) is False
+
+    def test_same_name_without_a_real_twin_file_is_not_skipped(self, monkeypatch, tmp_path):
+        """A branch dir alone is not enough — the twin FILE must exist."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        (tmp_path / "aipass" / "hooks" / "logs").mkdir(parents=True)
+        system_log = tmp_path / "system_logs" / "hooks_edit_gate.log"
+        system_log.parent.mkdir(parents=True, exist_ok=True)
+        system_log.touch()
+        watcher = lw.BranchLogWatcher()
+
+        assert watcher._should_process(str(system_log)) is True
+
+    def test_one_line_written_to_both_files_fires_once(self, monkeypatch, tmp_path):
+        """The regression itself: prax's dual write yields ONE event."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        _set_warning_capture(lw, True)
+        branch_log, system_log = _dual_write_tree(tmp_path, "hooks", "edit_gate")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"{now} | captured_edit_gate | WARNING | [HOOKS] edit_gate: todos over limit (11/10)\n"
+        branch_log.write_text(line, encoding="utf-8")
+        system_log.write_text(line, encoding="utf-8")
+
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        watcher = lw.BranchLogWatcher()
+        for path in (branch_log, system_log):
+            watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(path)))
+
+        assert fire.call_count == 1
+        assert fire.call_args.kwargs["branch"] == "HOOKS"
+
+
+class TestSystemLogAttributionComesFromTheLiveTree:
+    """The branch prefixes were a hardcoded list of 11 names while the tree
+    held 17 branches. Every system_logs file belonging to one of the missing
+    six (@hooks, @backup, @commons, @daemon, @skills, @aipass) was attributed
+    to UNKNOWN — the fault was the list, not the log.
+    """
+
+    def test_unlisted_branch_attributes_from_the_tree(self, monkeypatch, tmp_path):
+        """hooks/ exists on disk, so hooks_*.log is HOOKS — never UNKNOWN."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        (tmp_path / "aipass" / "hooks").mkdir(parents=True)
+        path = str(tmp_path / "system_logs" / "hooks_edit_gate.log")
+
+        assert lw._detect_branch_from_path(path) == "HOOKS"
+
+    def test_non_citizen_still_reports_unknown(self, monkeypatch, tmp_path):
+        """UNKNOWN keeps its meaning: nobody in the tree owns this log."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        (tmp_path / "aipass" / "hooks").mkdir(parents=True)
+        path = str(tmp_path / "system_logs" / "marketstand_listings.log")
+
+        assert lw._detect_branch_from_path(path) == "UNKNOWN"
+
+    def test_static_prefixes_are_a_floor_not_a_ceiling(self, monkeypatch, tmp_path):
+        """An unreadable tree falls back to the static list instead of UNKNOWN."""
+        lw = _import_log_watcher()
+        _point_at_tree(lw, monkeypatch, tmp_path)
+        path = str(tmp_path / "system_logs" / "seedgo_audit.log")
+
+        assert lw._detect_branch_from_path(path) == "SEEDGO"

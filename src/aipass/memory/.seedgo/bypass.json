@@ -563,6 +563,11 @@
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure argument-inspection predicate — no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
+    },
+    {
+      "file": "apps/handlers/intake/auto_process.py",
+      "standard": "unused_function",
+      "reason": "spawn_background() has no in-branch caller BY CONTRACT: the caller is @hooks' lifecycle/auto_process.py, which reaches it cross-branch via importlib.import_module('aipass.memory.apps.handlers.intake.auto_process').spawn_background() - the invocation string is in this file's HOOK ENGINE CONTRACT docstring. Measured 2026-08-13 (DPLAN-0295 item 1): grepped the whole repo for the symbol; the only call site is that hook shell, which @memory may not edit. Same class as the pre-existing 'handlers' rule on this file. Re-verify by grepping spawn_background across src/ - if @hooks' half ships and the symbol has an in-branch caller (e.g. a CLI kick), DELETE this rule."
     }
   ],
   "notes": {

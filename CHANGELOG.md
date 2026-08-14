@@ -11,6 +11,62 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(fleet)** — night shift DPLAN-0295: the prompt-lane sweep (Patrick's
+ruling, compass #272 — the agent never waits for the system) plus four ruled
+queue items, all 10 roster items landed. auto_process relocated off the first
+prompt: @memory built a fire-and-forget detached child (single-flight lock in
+the child, live-proven on real rollover work), @hooks swapped the shell —
+handler returns in 0.7s where the lane used to block 78–120s. Full UPS sweep:
+11 injectors legitimate, user_message_relay flagged relocation candidate #1
+(blocking Telegram POST per prompt, zero stdout in 18/18). @prax measured the
+same species in its own hottest path: the FIRST log call in any process costs
+0.60s (watcher start + fleet event that imports ai_mail) on every drone
+command — relocation proposals filed for ruling. Severity reclass per compass
+#273: the 17/15 over-budget class (16% of all escalation mail ever sent)
+reclassed WARNING→INFO at the emitter with a guard pinning the genuinely-loud
+advisory. system_logs double-watching ended — root cause was ONE reader and
+TWO FILES (prax dual-writes; watcher globbed both trees), fixed with twin
+detection + live-tree branch names, UNKNOWN-attribution mystery solved
+(hardcoded 11-name list vs 17 branches). seedgo's log_structure check proven
+NEVER to have run in any commit (signature mismatch swallowed by a bare
+except; mocks accept any kwarg so the suite stayed green) — crashed checkers
+now surface attributably, observe-mode shipped with an honest negative
+verdict. drone subprocess default 30s→60s referenced from one constant across
+all three layers; --drone-timeout placement tested and documented. prax
+Mission Control now resolves projects/* citizens from registries and
+passports (BAUD scopes; misattribution-as-AIPASS and CWD-relative registry
+bugs found and fixed beneath it). Four branches corrected their own published
+diagnoses when evidence arrived — amendment-before-hardening held fleet-wide
+with nobody watching (compass #276). Suites: memory 1011/823, hooks 1469/1483,
+trigger 1029, seedgo 1662, drone 1118, prax 1322 — all green, all audits 100%.
+
+**feat(fleet)** — morning round 2026-08-14: deletion record + fragments park
+(Patrick's rulings). Every deletion now leaves a record: drone rm logs every
+outcome — deletes, refusals, failures, not-found attempts — to
+.ai_central/deletions.jsonl plus a prax INFO line (passport-resolved caller,
+2MB rotation, env override deliberately cannot silence the audit trail;
+first-run-green tests distrusted and proven by mutation), and hooks' rm gate
+records every raw rm it allows or blocks (command as-typed, ~10ms only on the
+rm lane, measured). Bonus fix: the sibling-branch guard resolved ownership by
+INNERMOST .trinity, so template skeletons masqueraded as citizens — @spawn
+could never delete inside its own templates/; outermost-citizen-wins now,
+matching e934099f. The symbolic fragments tier is PARKED, revivable
+(.archive/parked_symbolic_20260814 + numbered revival README): the Agent
+Memory Atlas external review (first code-grounded outside review of AIPass —
+praised surfacing governance as the standout mechanism of its corpus) flagged
+the AUDN Delete verdict as unauditable, and the tier was unused — Compass is
+the active curated-truth piece, and every disable point says so. @memory's
+verification caught that "unwired ≠ unloaded": handlers/__init__ imported the
+whole symbolic package on every live call. Loud stubs answer the entire old
+API with the ruling; 4 legacy suites skip-annotated, live lane proven
+untouched by a real detached rollover run. Surfacing governance confirmed
+LIVE meanwhile — it gates compass recall on every prompt (engine.log entries
+match the injected lessons), with one actionable found: the five governance
+constants are unoverridable without a code change (queued). New CPLAN plan
+type registered in flow (capture_plans): records wearing the plan lifecycle,
+born to close, vectorized on close — CPLAN-0001 captures the Atlas review
+whole. Captured in DPLAN-0295's run log end to end.
+
 **fix(hooks)** — UserPromptSubmit timeout seatbelt, DPLAN-0285 items 1+2
 (Patrick present, live-verified same evening). A timed-out UserPromptSubmit
 hook is cancelled and its context silently discarded — the model quietly loses

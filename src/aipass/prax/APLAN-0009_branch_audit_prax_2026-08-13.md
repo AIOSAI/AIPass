@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN — code and tests are sound; every open item is CLI-surface honesty |
-| **Last verified** | 2026-08-13 (S71) |
-| **Open items** | 5 (2 mine, 1 ruling for @devpulse, 1 fixture sweep, 1 environmental) |
-| **Tests** | 1302 pass, 0 fail, 1 skipped (33 files) |
+| **Last verified** | 2026-08-14 (S72) |
+| **Open items** | 6 (2 mine, 2 rulings for @devpulse, 1 fixture sweep, 1 environmental) |
+| **Tests** | 1322 pass, 0 fail, 1 skipped (34 files) |
 | **Seedgo** | 100% overall — `help_flag_safety` 50 → 100, `architecture` 100 (now a real measurement) |
 | **Bypass entries** | 33 (0 under `tests/`) |
 | **Test map** | 184 public functions, 179 tested (97%) |
@@ -96,6 +96,22 @@ Use checkboxes. Mark resolved items `[x]` + note which session resolved them.
 
 ### Resolved
 
+- [x] **Mission Control was blind to `projects/*` citizens** (S72, night item 9,
+  Patrick-found). `monitor run baud` said "BAUD is not a known branch". prax knew
+  two path shapes — `src/aipass/*` and external Vera-class projects — and the
+  in-repo `projects/<proj>/src/<mod>/<name>` shape was never learned. Fixed by
+  declaration, not path shape: sweep `projects/*/*_REGISTRY.json` after the main
+  registry (first registration wins), plus a `.trinity/passport.json` walk-up for
+  anything still unresolved. known_branches 17 → 22. 20 tests.
+  - Found on the way, worse than the report: BAUD's files were labelled **AIPASS**
+    — the old fallback matched path segments against known branch names, and the
+    repo directory is called `AIPass`. Misattribution beats UNKNOWN for damage:
+    the events appear on the wrong screen *and* are filtered off the right one.
+  - Found on the way, third bug: `_register_branch` resolved relative registry
+    paths against the **process CWD**. 5 of 17 main-registry entries are relative,
+    so launching the monitor from anywhere but the repo root mapped them to
+    `<cwd>/src/aipass/<name>`. Masked because the path-segment fallback caught
+    them anyway. Paths now resolve against their own registry's directory.
 - [x] **A help probe executed the thing it asked about** (S71 — `help_flag_safety`
   50 → 100). All modules gated help at `args[0]` only, and the standalone paths
   screened `--help` but not `-h`, which survives a `--`-prefix filter on its
@@ -149,6 +165,15 @@ Items requiring branch itself to fix.
 ### devpulse to handle
 Items devpulse coordinates or fixes directly.
 
+- [ ] **Ruling on relocating `_ensure_watcher` off the caller's first log line**
+  (night item 3, investigation delivered S72 — report only, no fix made).
+  `logger.py:95` starts a file watcher (**0.287s**) and fires `trigger.fire("startup")`
+  (**0.266s**) on the first `logger.info()` in every process, in front of **0.015s**
+  of actual logging setup. Neither output feeds the caller's next action. Measured,
+  not estimated: one log call costs 0.60s; every drone command pays it once
+  (`drone_router.log` is written on every invocation). Proposed shapes in the
+  dispatch reply — both are one-liners guarded by a flag, and both are @devpulse's
+  call, not mine.
 - [ ] Ruling on `status sync`: refuse-and-redirect to `DASHBOARD.local.json`, or
   finish the TDPLAN-0007 decommission. The engine is intentionally revivable, so
   this is not prax's call alone.

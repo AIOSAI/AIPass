@@ -77,7 +77,12 @@ def start() -> bool:
     if observer:
         logger.info(f"[TRIGGER] Log watcher started, monitoring: {SYSTEM_LOGS_DIR}")
         return True
-    logger.error("[TRIGGER] Failed to start log watcher")
+    # INFO, not ERROR: since Patrick's 2026-08-14 ruling the centralized
+    # observer always declines — branch_log_events owns system_logs. Logging a
+    # chosen behaviour at ERROR would feed my own log watcher an error line on
+    # every service start, mint an escalation signature for it, and mail the
+    # operator about a decision. Compass #273: severity follows design intent.
+    logger.info("[TRIGGER] Centralized observer not started — branch_log_events owns system_logs")
     return False
 
 
@@ -142,7 +147,7 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
-    from aipass.cli.apps.modules import console, success, error
+    from aipass.cli.apps.modules import console, success, warning
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
@@ -170,7 +175,13 @@ def handle_command(command: str, args: list) -> bool:
             success("Log watcher started")
             console.print(f"   Monitoring: {SYSTEM_LOGS_DIR}")
         else:
-            error("Failed to start log watcher")
+            # Not a fault: the centralized observer is withdrawn by ruling, so
+            # saying "failed" would send the reader hunting a broken watcher.
+            warning("Not started — system_logs has one owner")
+            console.print("   Owner: [cyan]branch_log_events[/cyan] — same directory, with branch attribution")
+            console.print(f"   [dim]{SYSTEM_LOGS_DIR}[/dim]")
+            console.print("   [dim]Patrick's ruling 2026-08-14 — double-watching minted duplicate signatures[/dim]")
+            console.print("   [dim]Coverage: drone @trigger branch_log_events status[/dim]")
     elif command == "stop":
         stop()
         success("Log watcher stopped")

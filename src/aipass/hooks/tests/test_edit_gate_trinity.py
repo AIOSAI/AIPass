@@ -11,6 +11,7 @@
 
 import importlib
 import json
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1541,6 +1542,99 @@ class TestTrinityLegacyNumberSchema:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
+
+
+class TestOverBudgetSeverity:
+    """Compass #273 (Patrick, 2026-08-14): severity follows design intent.
+
+    Over-budget is not wrong behaviour, it is behaviour we chose to have — the
+    message itself says nothing is lost, because @memory's rollover archives the
+    overflow at the next PreCompact. Logged as WARNING it entered @trigger's
+    escalation lane: 8 signatures, 579 occurrences, 10 of the 62 digests the lane
+    has ever sent. The level is a field, not prose; the text stays as it is.
+    """
+
+    def _over_budget_records(self, caplog):
+        return [r for r in caplog.records if "over the rollover budget" in r.getMessage()]
+
+    def test_over_budget_logs_at_info_not_warning(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"summary": "s"} for _ in range(21)]})
+
+        with caplog.at_level(logging.INFO):
+            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+                result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert result["exit_code"] == 0
+        records = self._over_budget_records(caplog)
+        assert records, "the operator line must still be emitted — this is a level change, not a mute"
+        assert all(r.levelno == logging.INFO for r in records)
+        assert not [r for r in records if r.levelno >= logging.WARNING]
+
+    def test_auto_compact_snapshot_class_also_logs_at_info(self, tmp_path, caplog):
+        """All three call sites are one class — a fix that misses one keeps 1/3 of the lane."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
+
+        with caplog.at_level(logging.INFO):
+            with patch(
+                "importlib.import_module",
+                side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+            ):
+                handle(_hook_data(file_path, content, cwd=cwd))
+
+        records = self._over_budget_records(caplog)
+        assert records
+        assert all(r.levelno == logging.INFO for r in records)
+
+    def test_generic_section_class_also_logs_at_info(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"observations": [{"note": "n"} for _ in range(16)]})
+
+        with caplog.at_level(logging.INFO):
+            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+                handle(_hook_data(file_path, content, cwd=cwd))
+
+        records = self._over_budget_records(caplog)
+        assert records
+        assert all(r.levelno == logging.INFO for r in records)
+
+    def test_the_emitter_is_not_named_after_the_severity_it_no_longer_uses(self):
+        """The function name is a severity claim in prose: leaving it invites a re-raise."""
+        from aipass.hooks.apps.handlers.security import edit_gate
+
+        assert hasattr(edit_gate, "_note_over_budget")
+        assert not hasattr(edit_gate, "_warn_over_budget")
+
+    def test_the_over_limit_entry_class_stays_at_warning(self, tmp_path, caplog):
+        """Guard on the reclass: ONE class moves, not the file.
+
+        The over-limit entry advisory (edit_gate.py:181) is a different animal —
+        it names a cap the author must act on, and nothing archives it for them.
+        It stays WARNING. If a future edit mutes this file wholesale, this fails.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"summary": "x" * 5000}]})
+
+        with caplog.at_level(logging.INFO):
+            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+                handle(_hook_data(file_path, content, cwd=cwd))
+
+        over_limit = [r for r in caplog.records if "over-limit .trinity entry" in r.getMessage()]
+        assert over_limit
+        assert all(r.levelno == logging.WARNING for r in over_limit)
 
 
 class TestSectionCountGuard:

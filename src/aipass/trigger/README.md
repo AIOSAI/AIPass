@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-14
 
 ## Quick Start
 
@@ -195,7 +195,38 @@ A content mute means "expect error lines from me while I build" — it says noth
 
 Runaway gating decisions are appended to `logs/runaway_suppressed.jsonl` with an `outcome` field (`suppressed` / `delivered`), so suppressed-by-design and delivered-by-bypass are distinguishable. Entries predating that field are all suppressions.
 
-**Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Starts both branch and system watchers, handles SIGTERM/SIGINT for clean shutdown.
+**Persistent log watching** runs as a systemd user service (`trigger-log-watcher.service`). Handles SIGTERM/SIGINT for clean shutdown.
+
+**`system_logs/` has exactly one owner: the branch watcher** (Patrick's ruling,
+2026-08-14). Both watchers used to register the directory.
+`watchers/log_watcher.start_log_watcher()` now declines and returns `None`
+(`SYSTEM_LOGS_OWNER` names the owner in the code); the rest of that module stays live,
+because it is still the reader the startup catch-up scan uses. The ruling ends the
+duplicate, not the watching — the branch watcher globs `system_logs/*.log` alongside the
+per-branch logs and carries the branch mapping, the parsing and the staleness handling.
+`drone @trigger log_events start` says so rather than reporting a failure.
+
+**One line is counted once, even though prax writes it twice.** Every prax call
+lands in *two* files: `src/aipass/<branch>/logs/<module>.log` and
+`system_logs/<branch>_<module>.log`. The branch watcher globs both trees, so a single
+warning became two escalation signatures — and the two disagreed about who wrote it,
+because the branch copy is attributed by the directory it sits in while the
+`system_logs` copy is attributed by guessing at its filename. The reported pair
+(2026-08-14) was `0249c13b4d64` `HOOKS` and `690de8d87cdc` `UNKNOWN`, the same three
+sample lines, consecutive sequence numbers 8514/8515 — one reader, two files, not two
+readers. `_should_process()` now drops a `system_logs` file when
+`_system_log_branch_twin()` finds the branch copy that already covers it: measured
+across the tree, 230 of 243 `system_logs` files are twin-backed and 229 of those twins
+were written within one second of their system copy. The 13 with no twin
+(`telegram-bot-*`, external projects) keep being watched — that is the only reason the
+directory is still read at all.
+
+**Branch attribution comes from the live tree, not a list.** `_known_branch_names()`
+reads the branch directories (60s TTL) instead of trusting a hardcoded roster. The
+roster held 11 names against 17 branches, so every `system_logs` file belonging to
+@hooks, @backup, @commons, @daemon, @skills or @aipass was reported as `UNKNOWN` — the
+fault was the list, not the log. The static list survives as a floor for when the tree
+cannot be read. `UNKNOWN` now means what it says: nobody in the tree owns this log.
 
 ```bash
 systemctl --user status trigger-log-watcher    # Check watcher service
@@ -317,8 +348,8 @@ trigger/
 │       │   ├── pr_status_sync.py   # PR → prax status sync (decommissioned TDPLAN-0007)
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
-│           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 1015 tests across 27 modules
+│           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
+├── tests/                          # 1029 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -375,7 +406,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-1015 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
+1029 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -398,7 +429,7 @@ The largest single deduction is `handlers` on `handlers/escalation.py`: its five
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-14*
 
 ---
 [← Back to AIPass](../../../README.md)

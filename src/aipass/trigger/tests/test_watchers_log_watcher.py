@@ -994,3 +994,55 @@ class TestWatcherInitializePositions:
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert len(watcher.log_positions) == 1
+
+
+# ---------------------------------------------------------------------------
+# system_logs ownership — the branch watcher is the sole owner
+# ---------------------------------------------------------------------------
+
+
+class TestSystemLogsOwnership:
+    """Patrick's ruling (2026-08-14): one owner for system_logs, not two.
+
+    Both watchers used to register the directory, so one condition minted two
+    escalation signatures with different attribution — the branch watcher
+    resolving the owning branch, this watcher reporting UNKNOWN. Measured cost:
+    4 of 14 digests in 24h were the same condition twice.
+    """
+
+    def test_start_declines_even_when_it_could_start(self, tmp_path, monkeypatch):
+        """Watchdog available and the directory present — still declines.
+
+        The two pre-existing None returns are inability. This one is a
+        deliberate refusal, so it has to be proven under conditions where the
+        old code WOULD have started an observer.
+        """
+        wlw = _import_watchers_lw()
+        wlw.WATCHDOG_AVAILABLE = True
+        wlw.SYSTEM_LOGS_DIR = tmp_path
+        (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")
+
+        scheduled = MagicMock()
+        monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock(return_value=scheduled))
+
+        assert wlw.start_log_watcher() is None
+        scheduled.schedule.assert_not_called()
+        scheduled.start.assert_not_called()
+
+    def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
+        """Declining must not park a live observer in module state."""
+        wlw = _import_watchers_lw()
+        wlw.WATCHDOG_AVAILABLE = True
+        wlw.SYSTEM_LOGS_DIR = tmp_path
+        wlw._log_observer = None
+        monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
+
+        wlw.start_log_watcher()
+
+        assert wlw._log_observer is None
+        assert wlw.is_log_watcher_active() is False
+
+    def test_owner_is_named_in_module_state(self):
+        """The ruling is readable from the code, not just from a commit."""
+        wlw = _import_watchers_lw()
+        assert wlw.SYSTEM_LOGS_OWNER == "branch_log_events"

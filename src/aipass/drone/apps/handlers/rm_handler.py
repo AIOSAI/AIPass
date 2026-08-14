@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.prax import logger
+from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
@@ -74,14 +75,34 @@ def get_allowed_roots() -> list[Path]:
 
 
 def _find_branch_root(path: Path, project_root: Path) -> Path | None:
-    """Walk up from *path* looking for .trinity/; return branch dir or None."""
+    """Walk up from *path* to the OUTERMOST .trinity/ ancestor within the project.
+
+    Outermost, not innermost, because a ``.trinity/`` is not proof of a citizen.
+    @spawn ships a complete branch skeleton under ``templates/`` — passport and
+    all — so the innermost hit for
+    ``spawn/templates/aipass_framework/.pytest_cache`` was the skeleton, and the
+    guard refused with "sibling branch aipass_framework/", naming something that
+    is not a citizen and has no mailbox to appeal to. It also locked @spawn out
+    of its own templates: the skeleton's name never matches the branch you are
+    standing in, so every path in there read as somebody else's home.
+
+    Outermost-wins is the same mapping @devpulse used to fix the commit gate
+    (e934099f) when the identical mimicry made it run pytest inside the
+    template. One rule for one bug, not two rules for two symptoms.
+
+    Safe because no ``.trinity/`` exists above a branch: not at the project
+    root, not at ``src/``, not at ``src/aipass/``. The outermost hit inside the
+    project IS the citizen. The walk stops at the project boundary, so a
+    ``.trinity`` outside it can never claim a path inside.
+    """
     root = project_root.resolve()
+    outermost: Path | None = None
     for parent in [path, *path.parents]:
         if not parent.is_relative_to(root):
             break
         if (parent / ".trinity").is_dir():
-            return parent
-    return None
+            outermost = parent
+    return outermost
 
 
 def _detect_current_branch(project_root: Path | None) -> str | None:
@@ -175,8 +196,16 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
 
         exists_on_disk = absolute.exists() or absolute.is_symlink()
         if not exists_on_disk:
-            results.append((path_str, False, f"Path does not exist: {absolute}"))
+            message = f"Path does not exist: {absolute}"
+            results.append((path_str, False, message))
             logger.info("rm: nonexistent path %s", absolute)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_NOT_FOUND,
+                requested=path_str,
+                resolved=absolute,
+                reason=message,
+            )
             continue
 
         resolved = absolute.resolve()
@@ -190,6 +219,13 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 resolved,
                 reason,
             )
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=path_str,
+                resolved=resolved,
+                reason=reason,
+            )
             continue
 
         blocked, carveout_reason = check_carveouts(resolved, project_root)
@@ -201,7 +237,18 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 resolved,
                 carveout_reason,
             )
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=path_str,
+                resolved=resolved,
+                reason=carveout_reason,
+            )
             continue
+
+        # Measured here and not a line later: after rmtree there is nothing
+        # left to ask how big it was.
+        measurement = deletion_log.measure(absolute)
 
         try:
             if absolute.is_symlink():
@@ -210,10 +257,27 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
                 shutil.rmtree(absolute)
             else:
                 absolute.unlink()
-            results.append((path_str, True, f"Deleted: {resolved}"))
+            message = f"Deleted: {resolved}"
+            results.append((path_str, True, message))
             logger.info("rm: deleted %s (resolved %s)", path_str, resolved)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_DELETED,
+                requested=path_str,
+                resolved=resolved,
+                reason=message,
+                measurement=measurement,
+            )
         except Exception as exc:
             results.append((path_str, False, f"Delete failed: {exc}"))
             logger.error("rm: delete failed for %s: %s", path_str, exc)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_RM,
+                outcome=deletion_log.OUTCOME_FAILED,
+                requested=path_str,
+                resolved=resolved,
+                reason=f"Delete failed: {exc}",
+                measurement=measurement,
+            )
 
     return results

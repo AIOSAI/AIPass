@@ -711,6 +711,109 @@ def test_error_path_only_branch_is_not_penalised(tmp_path):
     assert [c["name"] for c in after["checks"]] == [c["name"] for c in before["checks"]]
 
 
+def test_observe_lane_accepts_the_kwarg_the_pipeline_passes(tmp_path):
+    """The exact defect that killed this observation must not recur.
+
+    branch_audit calls the branch-level hooks as
+    hook(str(branch_path), bypass_rules=bypass_rules). The old
+    check_branch_post took one positional argument, so every call raised
+    TypeError into a bare except and the standard silently stopped running.
+    """
+    branch = _branch_with_local_logs(tmp_path, local_logs=3)
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    observe = getattr(log_structure_check, "check_branch_observe")
+    records = observe(str(branch), bypass_rules=[])
+
+    assert isinstance(records, list) and records, "the observe lane reports one reading per branch, always"
+
+
+def test_observe_records_would_be_score_and_when(tmp_path):
+    """The reading carries the score it WOULD have given, and the moment it was taken.
+
+    A count of live .log files is a snapshot of runtime state — undated, it
+    tells a reviewer nothing, because the next audit an hour later can read
+    something else with no code changed.
+    """
+    from datetime import datetime
+
+    branch = _branch_with_local_logs(tmp_path, local_logs=3)
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    observe = getattr(log_structure_check, "check_branch_observe")
+    record = observe(str(branch), bypass_rules=[])[0]
+
+    assert record["standard"] == "log_structure"
+    assert record["branch"] == "mybranch"
+    assert record["local_logs"] == 3
+    assert record["system_logs"] == 0
+    assert record["would_be_score"] == 50, "the old check_branch_post scored exactly this"
+    datetime.fromisoformat(record["observed_at"])
+
+
+def test_observe_reads_100_when_system_logs_are_present(tmp_path):
+    """The healthy reading — same shape, so 'never fired' is provable, not inferred."""
+    branch = _branch_with_local_logs(tmp_path, local_logs=3)
+    (tmp_path / "system_logs" / "mybranch_cli.log").write_text("system", encoding="utf-8")
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    observe = getattr(log_structure_check, "check_branch_observe")
+    record = observe(str(branch))[0]
+
+    assert record["system_logs"] == 1
+    assert record["would_be_score"] == 100
+
+
+def test_observe_excludes_mail_lane_artifacts(tmp_path):
+    """dispatch_*.log is @ai_mail's delivery artifact, not the branch's log.
+
+    Counting them made the audit's own dispatch manufacture the observation:
+    @cli read '3 local logs' on the night it was dispatched and owns none.
+    """
+    branch = _branch_with_local_logs(tmp_path, local_logs=0)
+    (branch / "logs" / "dispatch_20260814.log").write_text("delivery", encoding="utf-8")
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    observe = getattr(log_structure_check, "check_branch_observe")
+    record = observe(str(branch))[0]
+
+    assert record["local_logs"] == 0, "a mail-lane artifact is not a branch log"
+    assert record["would_be_score"] == 100
+
+
+def test_observe_reports_unobservable_branch_without_a_number(tmp_path):
+    """No repo root / no system_logs/ — the old check produced no score, nor does this."""
+    branch = tmp_path / "orphan"
+    (branch / "logs").mkdir(parents=True)
+    (branch / "logs" / "app.log").write_text("log", encoding="utf-8")
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    observe = getattr(log_structure_check, "check_branch_observe")
+    record = observe(str(branch))[0]
+
+    assert record["would_be_score"] is None
+    assert record["observable"] is False
+
+
+def test_observe_honours_a_branch_bypass(tmp_path):
+    """bypass_rules is not decoration — a bypassed branch reads as bypassed."""
+    branch = _branch_with_local_logs(tmp_path, local_logs=3)
+
+    from aipass.seedgo.apps.handlers.aipass_standards import log_structure_check
+
+    rules = [{"file": "mybranch", "standard": "log_structure", "reason": "test"}]
+    observe = getattr(log_structure_check, "check_branch_observe")
+    record = observe(str(branch), bypass_rules=rules)[0]
+
+    assert record["bypassed"] is True
+    assert record["would_be_score"] is None
+
+
 def test_check_branch_info_reports_missing_system_logs(tmp_path):
     """The observation survives -- as an info line, on the channel that carries no score."""
     branch = _branch_with_local_logs(tmp_path, local_logs=3)

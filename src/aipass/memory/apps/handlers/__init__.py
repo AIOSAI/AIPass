@@ -117,6 +117,14 @@ _guard_branch_access()
 # Python 3.10 mock.patch compatibility — subpackages must be importable as
 # attributes for mock._dot_lookup to resolve dotted paths.
 from . import monitor  # noqa: F401, E402
-from . import symbolic  # noqa: F401, E402
+
+# PARKED 2026-08-14 (Patrick's ruling) — the symbolic fragments tier is unused and
+# the Agent Memory Atlas review flagged its AUDN deduplicator for acting on an LLM
+# Delete verdict with no record of what was removed. This line is why the tier was
+# imported on EVERY live call: any `handlers.json` import runs this package first.
+# The curated-truth piece that IS active is Compass — @devpulse, src/aipass/devpulse,
+# SQLite/FTS5, `drone @devpulse compass`. Revival: uncomment, and follow
+# .archive/parked_symbolic_20260814/README.md.
+# from . import symbolic  # noqa: F401, E402
 from . import rollover  # noqa: F401, E402
 from . import schema  # noqa: F401, E402

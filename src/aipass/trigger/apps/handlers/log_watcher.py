@@ -133,8 +133,13 @@ SYSTEM_LOGS_BRANCH_MAP: Dict[str, str] = {
 
 SYSTEM_LOGS_DIR = AIPASS_PKG_ROOT.parent.parent / "system_logs"
 
-# Known branch prefixes that appear in system_logs filenames (<prefix>_<module>.log).
-# Sorted longest-first so longer prefixes match before shorter ones.
+# Branch prefixes that appear in system_logs filenames (<prefix>_<module>.log).
+# This list is a FLOOR, not the answer: the real names come from the live tree
+# (_known_branch_names) because a hardcoded roster silently mints UNKNOWN for
+# every citizen born after it was written. On 2026-08-14 it held 11 names
+# against 17 branches, so @hooks, @backup, @commons, @daemon, @skills and
+# @aipass lost their attribution in system_logs. The list survives only to
+# answer when the tree cannot be read.
 _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
     [
         "ai_mail",
@@ -152,6 +157,11 @@ _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
     key=len,
     reverse=True,
 )
+
+# Branch directory names read from disk, refreshed on a TTL so a newly spawned
+# citizen is attributed within the minute without a listdir per log line.
+_BRANCH_NAMES_TTL_SECONDS = 60.0
+_branch_names_cache: tuple = (0.0, ())
 
 # Event fire callback (set by module, avoids handler importing from modules)
 # Return type is deliberately `object`, not None: Trigger.fire returns an
@@ -340,6 +350,68 @@ def _generate_error_hash(source_module: str, message: str) -> str:
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 
+def _known_branch_names() -> tuple:
+    """
+    Branch names taken from the live tree, longest first.
+
+    Longest-first matters: "ai_mail_delivery" must resolve to ai_mail, never
+    to a shorter branch that happens to share its opening characters.
+
+    Returns:
+        Tuple of branch directory names, plus the static floor list.
+    """
+    global _branch_names_cache
+    cached_at, names = _branch_names_cache
+    now = time.monotonic()
+    if names and (now - cached_at) < _BRANCH_NAMES_TTL_SECONDS:
+        return names
+
+    found = set(_SYSTEM_LOGS_BRANCH_PREFIXES)
+    try:
+        for entry in AIPASS_PKG_ROOT.iterdir():
+            if entry.is_dir() and not entry.name.startswith((".", "_")):
+                found.add(entry.name)
+    except OSError as exc:
+        # Unreadable tree — answer from the floor list rather than going blind.
+        logger.warning("Failed to list branch directories under '%s': %s", AIPASS_PKG_ROOT, exc)
+
+    resolved = tuple(sorted(found, key=len, reverse=True))
+    _branch_names_cache = (now, resolved)
+    return resolved
+
+
+def _system_log_branch_twin(log_path: str) -> Optional[Path]:
+    """
+    Find the branch log holding the same lines as this system_logs file.
+
+    Prax dual-writes: one call lands in src/aipass/<branch>/logs/<module>.log
+    AND in system_logs/<branch>_<module>.log. Measured 2026-08-14 across the
+    whole tree — 230 of 243 system_logs files had a twin, and 229 of those
+    twins were written within one second of their system copy.
+
+    Args:
+        log_path: Full path to a system_logs file
+
+    Returns:
+        Path to the twin branch log, or None when nothing else covers it.
+    """
+    stem = Path(log_path).stem
+    for branch in _known_branch_names():
+        if stem == branch:
+            module = branch
+        elif stem.startswith(branch + "_"):
+            module = stem[len(branch) + 1 :]
+        else:
+            continue
+        twin = AIPASS_PKG_ROOT / branch / "logs" / f"{module}.log"
+        try:
+            if twin.exists():
+                return twin
+        except OSError as exc:
+            logger.warning("Failed to check twin log '%s': %s", twin, exc)
+    return None
+
+
 def _detect_branch_from_path(log_path: str) -> str:
     """
     Detect branch name from log file path.
@@ -364,9 +436,9 @@ def _detect_branch_from_path(log_path: str) -> str:
             # Explicit mapping for known services
             if filename in SYSTEM_LOGS_BRANCH_MAP:
                 return SYSTEM_LOGS_BRANCH_MAP[filename]
-            # Match filename prefix against known branch names (longest-first)
+            # Match filename prefix against live branch names (longest-first)
             name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
-            for prefix in _SYSTEM_LOGS_BRANCH_PREFIXES:
+            for prefix in _known_branch_names():
                 if name_stem.startswith(prefix + "_") or name_stem == prefix:
                     return prefix.upper()
             return "UNKNOWN"
@@ -558,9 +630,15 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         filename = Path(file_path).name
         if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
-        is_branch_log = "/aipass/" in file_path and "/logs/" in file_path
-        is_system_log = "/system_logs/" in file_path
-        return is_branch_log or is_system_log
+        if "/aipass/" in file_path and "/logs/" in file_path:
+            return True
+        if "/system_logs/" not in file_path:
+            return False
+        # Prax writes the same line to the branch's own logs/ dir and to
+        # system_logs/. Reading both counts one event twice, and the copy to
+        # drop is this one: its branch is guessed from the filename, while the
+        # branch copy is attributed by the directory it sits in.
+        return _system_log_branch_twin(file_path) is None
 
     def _read_new_lines(self, file_path: str) -> None:
         """

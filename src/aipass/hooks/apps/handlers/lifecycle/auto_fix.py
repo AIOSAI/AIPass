@@ -27,10 +27,6 @@ PYTHON_PATTERNS = {
         "pattern": ": str = None",
         "message": "Optional param should use 'str | None = None' pattern",
     },
-    "logger_debug": {
-        "pattern": "logger.debug(",
-        "message": "Use logger.info for SystemLogger (logger.debug not supported)",
-    },
     "return_error_msg": {
         "pattern": "return error_msg",
         "message": "Return None for error states, not error_msg string",

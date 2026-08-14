@@ -19,6 +19,11 @@ from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
+# Observe-only readings get their own module log rather than sharing
+# branch_audit's: that log is FIFO-capped and every audit writes to it, so a
+# shared file would evict the observation series the readings exist to build.
+OBSERVE_LOG_MODULE = "branch_observe"
+
 
 def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
     """Auto-discover all *_check.py modules from a pack directory.
@@ -147,6 +152,52 @@ def _collect_branch_info(checkers: Dict[str, Any], branch_path: Path, branch_nam
             continue
         info.extend({"standard": name, "message": str(line)} for line in lines or [])
     return info
+
+
+def _collect_branch_observations(
+    checkers: Dict[str, Any],
+    branch_path: Path,
+    branch_name: str,
+    bypass_rules: list,
+) -> List[Dict[str, Any]]:
+    """Gather observe-only readings from checkers exposing check_branch_observe().
+
+    A third channel, below violations and below info lines: an observation
+    carries a would-be score and is never merged into scores[], never counted
+    in the average, and never turned into a violation. It exists so a
+    de-scored check can keep RUNNING and producing evidence while the ruling
+    on whether it should score again is still open — running it on the
+    scoring lane "just to see" is how a runtime-state reading ends up moving
+    a branch's number.
+
+    Called with bypass_rules by keyword, exactly as the post-check lane calls
+    check_branch_post: an observe hook that does not accept it is a defect,
+    and it now says so in the reading instead of vanishing into a log line.
+
+    Every reading is written to seedgo_json/branch_observe_log.json (its own
+    module log, so audit traffic cannot evict it) — one undated snapshot of
+    runtime state is not evidence; a dated series is.
+    """
+    observations: List[Dict[str, Any]] = []
+    for name, checker in sorted(checkers.items()):
+        if not hasattr(checker, "check_branch_observe"):
+            continue
+        try:
+            readings = checker.check_branch_observe(str(branch_path), bypass_rules=bypass_rules) or []
+        except Exception as e:
+            logger.warning("Observe check %s failed for branch %s: %s", name, branch_name, e)
+            readings = [
+                {
+                    "standard": name,
+                    "branch": branch_name,
+                    "error": f"{type(e).__name__}: {e}",
+                    "would_be_score": None,
+                }
+            ]
+        observations.extend(readings)
+    for reading in observations:
+        json_handler.log_operation("branch_observation", dict(reading), module_name=OBSERVE_LOG_MODULE)
+    return observations
 
 
 def _extract_branch_level_violations(result: dict) -> list:
@@ -401,10 +452,40 @@ def audit_branch(
                 all_violations.setdefault(name, []).extend(pv)
                 if ps:
                     scores[name] = int(sum(ps + [scores[name]]) / (len(ps) + 1))
-            except Exception:
-                logger.info("Post-check %s failed for branch %s", name, branch["name"])
+            except Exception as e:
+                # A post-check that raises did not measure anything, and the
+                # bare except this replaces made that indistinguishable from a
+                # clean pass: log_structure's post-check raised TypeError on
+                # every branch on every run for months, and no audit ever said
+                # so. Same doctrine as the branch-level lane above — the number
+                # arrives with its reason attached — but the score is left
+                # alone on purpose. The file lane already measured this
+                # standard honestly; a crash in a supplementary check is a
+                # defect in the CHECKER, and zeroing the branch for it would
+                # move a number for a reason that has nothing to do with the
+                # branch's code. So the score keeps its measured value and the
+                # output carries, loudly, the fact that it is incomplete.
+                logger.warning("Post-check %s failed for branch %s: %s", name, branch["name"], e)
+                detail = (
+                    f"{name} post-check crashed on branch {branch['name']} "
+                    f"({type(e).__name__}: {e}) — the branch's {name} score of {scores[name]} "
+                    "comes from the file lane only and does NOT include this check"
+                )
+                all_violations.setdefault(name, []).append(
+                    {
+                        "file": f"{name} post-check",
+                        "path": f"{branch_path} ({name} post-check)",
+                        "score": scores[name],
+                        "issues": [detail],
+                        "message": detail,
+                    }
+                )
+                results.setdefault(name, {}).setdefault("checks", []).append(
+                    {"name": "Post-check ran", "passed": False, "message": detail}
+                )
 
     info_lines = _collect_branch_info(checkers, branch_path, branch["name"])
+    observations = _collect_branch_observations(checkers, branch_path, branch["name"], bypass_rules)
 
     json_handler.log_operation("branch_audit_completed", {"branch": branch["name"], "checkers": len(checkers)})
     advisory_standards = [name for name, mod in checkers.items() if getattr(mod, "ADVISORY", False) is True]
@@ -433,6 +514,9 @@ def audit_branch(
         "type_error_files": diag_result.get("results", []),
         "test_map": test_map_result,
         "info_lines": info_lines,
+        # Observe-only: readings with a would-be score attached. Deliberately
+        # NOT folded into scores/average — see _collect_branch_observations.
+        "observations": observations,
     }
     for name in checkers:
         output[f"{name}_violations"] = all_violations.get(name, [])
@@ -503,6 +587,14 @@ def audit_branch_incremental(
         if not (added or changed or deleted):
             output = copy.deepcopy(branch_entry.get("output", {}))
             output["deprecated_patterns"] = _deprecated_patterns(branch_path)
+            # Observations read live runtime state, so a cached one is a
+            # reading of a moment that has already passed, served as if it
+            # were current. Same reason _deprecated_patterns is recomputed
+            # here. Cheap (~50ms incl. checker discovery) and it cannot touch
+            # a score — nothing below re-derives scores or the average.
+            output["observations"] = _collect_branch_observations(
+                discover_checkers(pack_path), branch_path, branch_name, bypass_rules
+            )
             output["_cache_hit"] = True
             return output
 

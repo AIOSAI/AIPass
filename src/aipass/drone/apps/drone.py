@@ -107,7 +107,10 @@ def print_help() -> None:
     table.add_row("list", "List registered custom commands")
     table.add_row("remove <name>", "Remove a custom command")
     table.add_row("rm <path> [<path>...]", "Contained safe-delete (project + tmp)")
-    table.add_row("--drone-timeout <seconds>", "Override subprocess timeout (default 30s)")
+    table.add_row(
+        "@target ... --drone-timeout <n>",
+        "Override subprocess timeout, default 60s (must come AFTER @target)",
+    )
     table.add_row("--help", "Show this help")
     table.add_row("--version", "Show version")
 

@@ -33,11 +33,11 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN |
-| **Last verified** | 2026-08-13 (S136 — dead_code + encapsulation closed, all live) |
-| **Open items** | 4 |
-| **Tests** | 997 pass, 0 fail, 0 skip (1081 → 976 after archiving dead code with its tests, → 997 with the new watch suite) |
-| **Seedgo** | **100%** with bypasses / 97% with the registry emptied |
-| **Bypass entries** | 111 (was 156 — 45 removed; **none added** to reach 100%) |
+| **Last verified** | 2026-08-14 (S139 — symbolic tier parked, audit re-run 99%) |
+| **Open items** | 5 |
+| **Tests** | 823 pass, 0 fail, 4 skipped modules (222 tests parked with the symbolic tier; 1022 test functions on disk) |
+| **Seedgo** | **99%** with bypasses — one dead_code finding left standing on purpose (see open items) |
+| **Bypass entries** | 112 (was 156; 45 removed in S136, **1 added** in S138 for the cross-branch `spawn_background` caller) |
 | **CLI score** | Nav 5/5, Output 5/5 (44 command paths + 18 error paths run live) |
 
 **Why GREEN now:** the two structural findings that held it at YELLOW are closed by
@@ -113,6 +113,33 @@ handlers: `watch` is a module like every other command, and a contract test keep
       against. It will archive out the same way.
 - [ ] **4 digests remain quarantined** — PARKED by Patrick. Not touched, not re-diagnosed.
       Noted here only so the next audit knows they are known.
+- [ ] **`handlers/vector/embedder.py` is orphaned by the symbolic park (S139)** — its only two
+      importers were `symbolic/storage.py` and `symbolic/retriever.py`, both now in
+      `.archive/parked_symbolic_20260814/`. Measured, not assumed: `embed_subprocess.py` (the
+      one the live lane actually runs, by path, from `query_executor`, `plans_processor` and
+      `orchestrator`) is self-contained and imports nothing from the package. So dead_code's
+      1/36 finding is TRUE, and it is the frontier moving again (learning #50).
+      **Deliberately left standing at 99%**: no bypass, because a bypass would assert a caller
+      that does not exist. Disposition is a real decision, not cleanup — park it with the tier
+      (and its 15-test `test_vector.py` suite goes dark with it), or keep it as the generic
+      vector utility for the next consumer. Devpulse/Patrick's call; reported 2026-08-14.
+- [ ] **`seedgo.local` is in a permanent rollover skip loop** — 18/15 `key_learnings`, and all
+      three excess entries are dated *today*, so the DPLAN-0278 `_is_misplaced_entry` guard
+      refuses every candidate: `execute_rollover` reports 1 trigger / 0 processed, forever.
+      **Pre-existing, not caused by S138** — the 23:38 PreCompact run, minutes before the
+      relocation was touched, logged the identical `"Extraction skipped for seedgo.local
+      (18/15 key_learnings): No entries exceed v2 limits"`. Same class as learning #46 and as
+      DPLAN-0290 item 3, which turned `date_guard` off for the *snapshot* lane only; the audit
+      round pushed @seedgo to 18 learnings in one day, which is the write rate that breaks the
+      heuristic on the ordinary lane too. NOT fixed inside dispatch 331f3f62 — it touches the
+      safety valve and wants its own item and Patrick's word. Reported to @devpulse.
+      Second-order: `auto_process()` sets `success: false` on this *correct* refusal, so the
+      lane's success flag is permanently false and cannot report a real failure.
+      **2026-08-14 update: it self-healed at midnight, exactly as predicted.** The excess
+      entries aged from "today" to "yesterday", the guard stopped refusing them, and this
+      morning's live run reported 3 triggers / 3 processed with `seedgo.local` back to OK.
+      The wedge is gone; the *class* is not — any branch writing more than its cap in a single
+      day is wedged until the next date rolls. Still Patrick's ruling to make.
 
 ### Resolved
 
@@ -207,9 +234,12 @@ handlers: `watch` is a module like every other command, and a contract test keep
 | 2026-08-13 | Fleet audit round DPLAN-0291 (wave 5, dispatch deb9ad79) | YELLOW — 1081 green, 99%/96%, 5 open items, 2 live bugs fixed |
 | 2026-08-13 | Dispatch 40e33e8b (@devpulse) — fix round to 100 | **100%** overall, 997 green, ruff clean. dead_code: 3 files archived with 105 tests, no bypass. encapsulation: `watch` → module + handler. Riders: 6 relative imports fixed (same class as the dead `watch`), todo count reported as 1 not 11. |
 | 2026-08-13 | Mails 86a30278 + c0b4988c (@devpulse) | Signed off at the final numbers (1081 / 99-96 / 111 bypasses). The 3 fixes he approved had already landed pre-mail — all re-verified live (help guard, `watch` 17 dirs/34 files, `lint @<unknown>`), suite re-run 1081 green. `push` → Patrick; @seedgo item consolidated with @api's; trigger's 5 `captured_memory` ERRORs (11:08–11:21) closed stale — they were this audit probing the then-dead `watch`. Control-first bypass measurement adopted as the round's reference method. Duplicate APLAN-0012 closed; 0010 stays open. |
+| 2026-08-13 | Dispatch 331f3f62 (@devpulse) — DPLAN-0295 item 1, night shift: `auto_process` off the prompt lane | Shipped, **not committed** (dispatch constraint). Mechanism: fire-and-forget detached child, hook stays the trigger — chosen over a @daemon schedule (a down daemon stops vectorizing *silently*) and over PreCompact-only (a session that never compacts never drains the pool). New `spawn_background()` + `run_once()` + tempdir single-flight lock in `apps/handlers/intake/auto_process.py`; `auto_process()` untouched and still the sync API. 14 tests red-first, **1011 green**, ruff clean, audit re-run **100%** (1 measured bypass added for the cross-branch caller). Live proof, not mocks: parent returned in **738ms** (was 78–120s), the detached child vectorized a real pool drop (1 file / 1 chunk, vectors 10045→10046, pool drained), and a deliberate double-kick proved single-flight — one child worked 2.78s, the other declined with `another run holds the lock`. Hook-shell spec (one line: `module.auto_process()` → `module.spawn_background()`, session guard kept) sent to @hooks via the reply — **their file, not edited here**. Two surprises reported: the `seedgo.local` skip loop above, and the edit gate deadlocking red-first work. |
+
+| 2026-08-14 | Dispatch 69b843f0 (@devpulse) — Patrick's ruling: park the symbolic fragments tier | Shipped, **not committed**. Verified dormant BEFORE disabling: no `.aipass/hooks.json` entry, no caller in rollover/extractor/auto_process/search/verify, and no cross-branch caller. One live thread found and cut — `apps/handlers/__init__.py` imported the package on *every* live call, so an unwired tier was still being loaded. Implementation preserved byte-identical in `.archive/parked_symbolic_20260814/` (7 handler files + the 1602-line module + a README with revival steps). Fail-honest surfaces: `handlers/symbolic/__init__.py` raises `SymbolicTierParked`, `modules/symbolic.py` refuses every subcommand with exit 1 and answers for the whole old API via module `__getattr__`. 34 new tests red-first (31 red → all green); the 4 legacy symbolic test files are **skipped, not deleted**, with the ruling as the skip reason. Suite 823 green + 4 skipped modules; audit 99% (the one finding is the orphaned `embedder.py` above, left standing on purpose). Answer to the report-only question: `should_surface` is **LIVE** — @hooks' `compass_recall` calls it on every `UserPromptSubmit`. |
 
 ## Relationships
-- **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0290 (date_guard, night before), DPLAN-0278 (safety valve)
+- **Related DPLANs:** DPLAN-0295 (prompt-lane relocation), DPLAN-0291 (fleet audit round), DPLAN-0290 (date_guard, night before), DPLAN-0278 (safety valve)
 - **Related FPLANs:** None open
 - **Owner branch:** @memory
 - **Seedgo:** `drone @seedgo audit aipass @memory`

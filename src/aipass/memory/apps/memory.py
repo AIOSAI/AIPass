@@ -123,7 +123,10 @@ def print_help():
     table.add_row("rollover sync-lines", "Update line count metadata")
     table.add_row("rollover push", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
     table.add_row("search <query>", "Semantic search across all branch memories")
-    table.add_row("symbolic <subcommand>", "Symbolic/fragmented memory extraction and search")
+    # PARKED 2026-08-14 (Patrick's ruling) — row kept so the command still explains
+    # itself instead of reading as an unknown command. Active curated-truth piece:
+    # Compass, @devpulse-owned — drone @devpulse compass.
+    table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
     table.add_row("templates <subcommand>", "Living template push, diff, and status")
     table.add_row("pool process", "Process pool files + check/run rollover")
     table.add_row("pool status", "Show pool file count, config, vector stats")
@@ -176,8 +179,9 @@ def print_help():
 
     console.print(
         "Commands: search, rollover \\[run|status|check|sync-lines|push], lint,"
-        " pool \\[process|status], symbolic, templates, verify, watch"
+        " pool \\[process|status], templates, verify, watch"
     )
+    console.print("[dim]Parked: symbolic (2026-08-14) — see drone @devpulse compass[/dim]")
     console.print()
 
 

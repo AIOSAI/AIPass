@@ -279,6 +279,39 @@ def _write_post_check_checker(pack_dir: Path, call_log: Path) -> None:
     )
 
 
+_OBSERVE_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "all_files"
+
+
+def check_module(path, bypass_rules=None):
+    return {"passed": True, "score": 100, "checks": []}
+
+
+def check_branch_observe(branch_path, bypass_rules=None):
+    import pathlib
+
+    log = pathlib.Path(CALL_LOG)
+    taken = len([ln for ln in log.read_text(encoding="utf-8").splitlines() if ln]) if log.exists() else 0
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write("reading\\n")
+    return [{"standard": "observing", "branch": pathlib.Path(branch_path).name, "reading": taken + 1}]
+"""
+
+
+def _write_observe_checker(pack_dir: Path, call_log: Path) -> None:
+    """Write an all_files checker exposing an observe-only branch hook.
+
+    Each reading is numbered, so a replayed one is distinguishable from a
+    fresh one — the whole point of the lane is that it reads runtime state.
+    """
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    escaped = str(call_log).replace("\\", "\\\\")
+    (pack_dir / "observing_check.py").write_text(
+        _OBSERVE_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Equivalence tests -- the DPLAN-0275 acceptance bar
 # ---------------------------------------------------------------------------
@@ -566,6 +599,42 @@ class TestEquivalence:
         assert incremental_result.pop("_cache_hit") is False
         assert incremental_result == full_result
         assert incremental_result["scores"]["postcheck"] == full_result["scores"]["postcheck"]
+
+    def test_cache_hit_takes_a_fresh_observation(self, tmp_path, monkeypatch):
+        """A cached audit still takes a FRESH observe reading, and still scores identically.
+
+        Observe readings are of live runtime state — log files that appear and
+        rotate with nothing edited — so a replayed one is a reading of a
+        moment that has passed, presented as if current. Same reasoning that
+        recomputes _deprecated_patterns on every cache hit. The scores, by
+        contrast, must be exactly the cached ones: an observation is evidence,
+        never a number.
+        """
+        branch_audit, _cache, branch, _path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        observe_log = tmp_path / "observe_calls.log"
+        _write_observe_checker(pack_dir, observe_log)
+        logged: list = []
+        monkeypatch.setattr(
+            branch_audit.json_handler,
+            "log_operation",
+            lambda op, data=None, module_name=None: logged.append((op, data, module_name)) or True,
+        )
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        assert second["_cache_hit"] is True, "the point of this test is the cached path"
+        assert first["observations"][0]["reading"] == 1
+        assert second["observations"][0]["reading"] == 2, "a cache hit must re-read, not replay"
+        assert second["scores"] == first["scores"]
+        assert second["average"] == first["average"]
+        observed_writes = [entry for entry in logged if entry[0] == "branch_observation"]
+        assert len(observed_writes) == 2, "every reading is persisted, including the one taken on a cache hit"
+        assert {entry[2] for entry in observed_writes} == {"branch_observe"}, (
+            "readings go to their own module log — audit traffic would evict them from a shared one"
+        )
 
     def test_entry_point_checker_reruns_when_other_file_changes(self, tmp_path, monkeypatch):
         """Blocker 2 regression: an entry_point-scope checker must re-run

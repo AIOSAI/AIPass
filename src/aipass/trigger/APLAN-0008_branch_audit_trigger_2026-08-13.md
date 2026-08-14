@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-13 (S74) |
-| **Open items** | 12 |
-| **Tests** | 1015 pass, 0 fail (957 → 962 audit → 977 coercion → 1015 help-flag) |
+| **Last verified** | 2026-08-14 (S77) |
+| **Open items** | 12 (2 closed S76/S77, 1 added awaiting @hooks) |
+| **Tests** | 1029 pass, 0 fail (957 → 962 audit → 977 coercion → 1015 help-flag → 1020 sole-owner → 1029 twin) |
 | **Seedgo** | 100% with bypasses / 98% without (44 standards), 0 type errors |
 | **Bypass entries** | 26 — 25 measured live in-audit, +1 for the new help-flag predicate, 0 dead, 0 `tests/*` rules |
 | **Live command sweep** | 37 CLI paths + 14 event types fired, incl. 14 error paths |
@@ -151,11 +151,42 @@ trio filenames. Two log watchers (branch logs, system logs) feed one registry.
   entries** out of the `escalation_log.json` ring buffer per run — so ~40% of that
   operational record is synthetic after every test run, and I ran the suite four times
   during this audit. The `.jsonl` trails are unaffected.
-- [ ] **`system_logs/` still has two owners — now with a measured cost.** Both watchers
-  register it, so one condition mints two signatures with different attribution:
-  `372834fe9656` (HOOKS) and `35ce0d8dae47` (UNKNOWN) carry byte-identical sample
-  lines from the same file. That duplication is **4 of the 14 digests above** —
-  29% of the mail volume is the same condition twice, once anonymously.
+- [x] **RESOLVED S76 — `system_logs/` now has one owner** (Patrick's ruling, 2026-08-14).
+  Both watchers registered it. `start_log_watcher()` now declines and returns None
+  (`watchers/log_watcher.py:436`, owner named at `:40`); everything else in that module
+  stays live, since it is still the reader the catch-up scan uses. The service needed no
+  change — it already treats one watcher declining as fine. Two severity fixes fell out
+  of it in my own code: the decline was logged at ERROR (`modules/log_events.py:80`),
+  which would have fed my own watcher an error line on every service start, and the CLI
+  called it a failure. 5 tests red-first, plus one rewritten that pinned the pre-ruling
+  behaviour.
+  **Correction, S77:** I attributed the HOOKS/UNKNOWN twin signatures to these two
+  watchers. That was wrong, and my probe could not have caught it — a hand-written
+  `system_logs/trigger_probe.log` has no branch-log counterpart, so it tested the
+  observer's absence and nothing else. devpulse (`e9d92ed2`) found the twin still being
+  minted at 00:44-00:46, after the restart. Real cause below.
+- [x] **RESOLVED S77 — one line, written twice by prax, is now counted once**
+  (devpulse `e9d92ed2`). Every prax call lands in BOTH
+  `src/aipass/<branch>/logs/<module>.log` and `system_logs/<branch>_<module>.log`, and
+  the branch watcher globs both trees. One reader, two files — not two readers. Proof it
+  was never two watchers: escalation signatures `0249c13b4d64` (HOOKS, branch path) and
+  `690de8d87cdc` (UNKNOWN, system path) carry the same three sample lines with
+  *consecutive* sequence numbers 8514/8515. `_should_process()` now drops a system_logs
+  file when `_system_log_branch_twin()` finds the branch copy already covering it
+  (`apps/handlers/log_watcher.py:596`). Measured before choosing which copy to drop: 230
+  of 243 system_logs files are twin-backed, 229 of those twins written within 1s of their
+  system copy (the one outlier was a rotation artifact, its `.log.1` matched to the
+  nanosecond). The 13 with no twin — `telegram-bot-*`, marketstand, scratch — keep being
+  watched, which is now the only reason the directory is read at all.
+  Second defect found while measuring: the branch prefixes were a hardcoded list of 11
+  names against 17 branches, so @hooks, @backup, @commons, @daemon, @skills and @aipass
+  were UNKNOWN by construction. `_known_branch_names()` reads the tree on a 60s TTL and
+  the list stays only as a floor for an unreadable tree. 9 tests red-first, both fixes
+  mutation-checked separately (reverting the skip put 3 red incl. `assert 2 == 1`;
+  reverting the attribution put 1 red). Live-proven post-restart: two real prax WARNING
+  lines dual-written to `trigger/logs/unknown_module.log` +
+  `system_logs/trigger_unknown_module.log` produced ONE signature (`bbe941c70f5b`),
+  branch TRIGGER, `total_count 2` — one count per line, attributed to the branch copy.
 - [ ] **`medic.py` is 2 lines under a hard fail and has to be split.** The `modules`
   standard fails at 600 lines; the checker counts one more than `wc -l` (it splits on
   newline, so a trailing newline yields an extra element). The file was at 599 by `wc`
@@ -270,7 +301,12 @@ trio filenames. Two log watchers (branch logs, system logs) feed one registry.
       runs are churning.
 - [ ] **3. Escalation cap policy** at 500/500 — the question changes once 1 and 2 land,
       so measure then decide.
-- [ ] Give `system_logs/` one owner; removes ~29% of digest volume.
+- [x] **Done S76** — `system_logs/` given one owner (Patrick's ruling). Halves the
+      twin signatures; re-measure the digest volume after @hooks' reclass lands.
+- [ ] **Awaiting @hooks** (spec sent via devpulse, not my code): `edit_gate.py:232`
+      `logger.warning` → `logger.info` for the over-budget class. That class alone holds
+      8 signatures / 579 occurrences and has sent **10 of the 62 digests this lane has
+      ever produced** — 16%, all of it chosen behaviour that self-heals.
 
 ### devpulse to handle
 - [x] **Ruled S73: build the suppress verb; `ignore_branches` stays unused.** Their
@@ -311,6 +347,9 @@ trio filenames. Two log watchers (branch logs, system logs) feed one registry.
 | 2026-08-13 | devpulse verified wave 4, closed their half | Ruled: build the suppress verb, not on audit day |
 | 2026-08-13 | `_coerce_value` lossless-round-trip fix (S73) | 977 green, seedgo 100%, live-proven |
 | 2026-08-13 | Fix round to 100: `help_flag_safety` on 6 modules (S74) | 100% / 98%, 1015 green, 12 red first |
+| 2026-08-14 | Night shift item 6: system_logs sole owner (S76) | Built, 1020 green, live-proven attributed |
+| 2026-08-14 | Twin follow-up: prax dual-write counted once (S77) | Built, 1029 green, live-proven 1 signature / 2 lines |
+| 2026-08-14 | Night shift item 4: severity reclass | **Spec sent** — label is emitter-side (@hooks), not mine |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0290 (night shift)

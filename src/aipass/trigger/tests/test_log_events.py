@@ -203,17 +203,26 @@ def test_handle_command_start_success():
     watcher.start_log_watcher.assert_called_once()
 
 
-def test_handle_command_start_failure_prints_error():
-    """handle_command('start', []) prints failure when watcher fails to start."""
+def test_handle_command_start_not_started_is_reported_without_the_error_channel():
+    """handle_command('start', []) explains the ruling instead of erroring.
+
+    Rewritten 2026-08-14. It previously asserted error("Failed to start log
+    watcher"), which pinned the pre-ruling behaviour: with the centralized
+    observer now withdrawn by decision, that assertion would have made the
+    correct implementation look like a regression, and the error() channel
+    would have kept telling operators a decision was a fault.
+    """
     mod = _import_module()
     watcher = _get_log_watcher()
     watcher.start_log_watcher.return_value = None
     result = mod.handle_command("start", [])
     assert result is True
     cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-    assert any("Failed to start" in s for s in err_args), f"Expected failure message in error() args: {err_args}"
+    cli_modules.error.assert_not_called()
+    printed = " ".join(str(c) for c in _get_console().print.call_args_list) + " ".join(
+        str(c) for c in cli_modules.warning.call_args_list
+    )
+    assert "one owner" in printed and "branch_log_events" in printed
 
 
 def test_handle_command_stop():
@@ -391,3 +400,50 @@ def test_help_flag_survives_module_name_routing(monkeypatch):
     assert result is True
     printed.assert_called_once()
     ran.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# system_logs ownership — the CLI must explain, not cry failure
+# ---------------------------------------------------------------------------
+
+
+def test_start_command_names_the_owner_instead_of_reporting_failure():
+    """`log_events start` declining is a ruling, not a fault.
+
+    start_log_watcher() now always returns None because branch_log_events owns
+    system_logs (Patrick, 2026-08-14). Printing "Failed to start log watcher"
+    would read as a broken watcher and send whoever typed it hunting a bug
+    that is a decision.
+    """
+    mod = _import_module()
+    watcher = _get_log_watcher()
+    watcher.start_log_watcher.return_value = None
+
+    result = mod.handle_command("start", [])
+
+    assert result is True
+    cli_modules = sys.modules["aipass.cli.apps.modules"]
+    printed = " ".join(str(c) for c in cli_modules.error.call_args_list) + " ".join(
+        str(c) for c in _get_console().print.call_args_list
+    )
+    assert "branch_log_events" in printed, f"Expected the owner named, got: {printed[:300]}"
+    assert "Failed to start" not in printed, "Declining by ruling must not read as a failure"
+
+
+def test_declining_to_start_is_not_logged_as_an_error():
+    """A chosen behaviour must not enter my own error lane.
+
+    This module's log is read by my branch watcher, which feeds error_detected
+    and the escalation digest. Logging the by-ruling decline at ERROR would
+    mint a signature for a decision on every service start and mail the
+    operator about it (compass #273).
+    """
+    mod = _import_module()
+    watcher = _get_log_watcher()
+    watcher.start_log_watcher.return_value = None
+
+    mod.start()
+
+    logger = sys.modules["aipass.prax.apps.modules.logger"].system_logger
+    logger.error.assert_not_called()
+    assert logger.info.called

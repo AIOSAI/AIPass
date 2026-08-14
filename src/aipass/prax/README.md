@@ -61,6 +61,22 @@ Real-time unified console showing:
 
 Interactive commands inside the monitor: `help`, `status`, `quit`/`exit`.
 
+**Who counts as a branch.** Names and paths come from declarations, never from
+path shape. Three sources, in precedence order: `AIPASS_REGISTRY.json` for
+`src/aipass/*` branches; then a sweep of `projects/*/*_REGISTRY.json` for in-repo
+project citizens (BAUD, EARMARK, MARKETSTAND, AIPASS_SITE, TESTING); then, for
+any file still unresolved, the nearest `.trinity/passport.json` walking up to the
+repo root. A relative registry path is resolved against *its own registry's*
+directory, not the process CWD. First registration wins, so a project cannot
+claim a name AIPass already uses.
+
+That third shape was missing until 2026-08-14: `monitor run baud` answered "BAUD
+is not a known branch", and — worse — BAUD's files were labelled **AIPASS**,
+because the old fallback matched path segments against known names and the repo
+directory is called `AIPass`. Misattribution is worse than UNKNOWN: events land
+on the wrong screen and are filtered off the right one. Same family as the
+watchdog fix (c247fce8) and the statusline passport walk-up.
+
 **Branch scoping.** A comma-separated list (`monitor run seedgo,cli`) restricts the
 display to those branches; bare `run` and `run all` show everything, unchanged. A
 scope covers each named branch's log lines, file changes and CLI sessions —
@@ -302,7 +318,7 @@ prax/
 │       └── watcher/                   # Background system watchers
 ├── prax_json/                         # Auto-created per-module config/data/log files
 ├── templates/                         # Dashboard template schema (DASHBOARD.template.json)
-└── tests/                             # 1303 tests across 33 files
+└── tests/                             # 1323 tests across 34 files
 ```
 
 ### Design Pattern
@@ -331,7 +347,7 @@ drone @prax monitor run
 
 ## Tests
 
-1303 tests across 33 files (1302 pass, 1 skipped), covering all major components:
+1323 tests across 34 files (1322 pass, 1 skipped), covering all major components:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -364,6 +380,7 @@ drone @prax monitor run
 | test_dashboard_merge.py | 36 | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
 | test_help_markup.py | 12 | Rendered console output (real Rich console), help covers every routable command |
 | test_help_flag_safety.py | 29 | Help flags in any position never execute; ownership before help; free-text safety |
+| test_project_citizens.py | 20 | projects/* registry sweep, passport resolution, collision precedence, CWD-independent paths |
 | test_log_health.py | 7 | Snapshot staleness reporting, rate display, routing |
 | test_status.py | 8 | Status commands |
 | test_sweep.py | 6 | Log sweep |

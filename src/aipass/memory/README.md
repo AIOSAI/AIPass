@@ -32,11 +32,8 @@ drone @memory search "query"               # Semantic search across all branch m
 drone @memory search "query" --branch X    # Filter by branch
 drone @memory search "query" --n 10        # Limit results
 
-drone @memory symbolic demo                # Mock analysis demonstration
-drone @memory symbolic fragments "query"   # Search stored symbolic fragments
-drone @memory symbolic extract <file>      # Extract fragments via LLM (requires API key)
-drone @memory symbolic bootstrap           # Populate fragments from session JSONLs
-drone @memory symbolic hook-test           # Test hook with sample conversation text
+drone @memory symbolic                     # PARKED 2026-08-14 — explains the ruling, then exits 1
+                                           # Curated truth lives in Compass: drone @devpulse compass
 
 drone @memory templates push-templates     # Push template updates to all branches
 drone @memory templates diff-templates     # Show template differences per branch
@@ -66,7 +63,7 @@ memory/
 │   │   ├── pool.py              # Pool vectorization + auto-process
 │   │   ├── rollover.py          # Rollover orchestration, status, sync-lines
 │   │   ├── search.py            # Semantic query routing
-│   │   ├── symbolic.py          # Fragmented memory extraction and search
+│   │   ├── symbolic.py          # PARKED 2026-08-14 — refusal stub (impl in .archive/)
 │   │   ├── templates.py         # Template push, diff, status
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
@@ -81,13 +78,13 @@ memory/
 │       ├── schema/              # normalize.py
 │       ├── search/              # query_executor.py
 │       ├── storage/             # chroma_subprocess.py
-│       ├── symbolic/            # chroma_client, deduplicator, extractor, hook, retriever, storage
+│       ├── symbolic/            # PARKED 2026-08-14 — __init__ raises; impl in .archive/
 │       ├── templates/           # pusher.py, differ.py, spawn_pusher.py
 │       ├── tracking/            # line_counter.py, tab_renderer.py
 │       ├── vector/              # embedder.py, embed_subprocess.py
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 997 tests
+├── tests/                       # 1022 tests — 823 run, 222 parked with the symbolic tier
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -192,7 +189,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 **Depends on:**
 - `prax` — logging via `get_system_logger()`
-- `api` — API key for symbolic extraction (`get_api_key()`)
+- `api` — API key for symbolic extraction (`get_api_key()`) — dormant while the symbolic tier is parked
 - `AIPASS_REGISTRY.json` — branch discovery for rollover scanning
 - External `*_REGISTRY.json` — scanned via `AIPASS_CALLER_CWD`
 

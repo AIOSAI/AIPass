@@ -88,7 +88,8 @@ drone remove <name>              # Remove a custom command shortcut
 
 # Utilities
 drone rm <path> [<path>...]      # Contained safe-delete (project + tmp only)
-drone --drone-timeout <seconds>  # Override subprocess timeout (default 30s)
+drone @flow list --drone-timeout 90   # Override subprocess timeout (default 60s)
+                                      # Must come AFTER @target — anywhere after it works
 drone --version                  # Show version (v1.1.0)
 drone --help                     # Show usage information
 ```
@@ -276,6 +277,28 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 - Unauthorized commands are refused with a message naming the caller, its `citizen_class`, and the tier required
 - **A command in neither tier is unreachable, not merely ungated** — `verify_git_access()` refuses anything it cannot find in a tier as `Unknown git command`, so registering a verb in `_COMMANDS` and wiring it to a handler does not make it callable. `prune-temp` shipped that way and no caller could reach it (found in the APLAN-0003 audit, tier ruled by @devpulse). `test_every_registered_command_holds_a_tier` now asserts the rule rather than the instance
 
+### Subprocess timeouts
+
+Routed commands run with a timeout resolved in this order — **explicit flag > per-command policy > default**:
+
+| Layer | Value | Where |
+|-------|-------|-------|
+| Default | **60s** | `DEFAULT_TIMEOUT` in `apps/handlers/executor.py` |
+| Per-command policy | e.g. `memory process-plans` 120s, `memory rollover` 100s, `flow close` 90s | `TIMEOUT_OVERRIDES` in the same file |
+| Explicit | whatever you pass | `--drone-timeout <n>` |
+
+The default was raised 30 → 60 on 2026-08-13 (Patrick's ruling): two known runners finish around 31s and were tripping the old default. A per-command policy is a decision, not a floor — it wins even if it is *lower* than the default.
+
+The signature defaults of `execute_command()` and `execute_branch_command()` reference `DEFAULT_TIMEOUT` rather than restating the number, so the layers cannot silently disagree. `tests/test_executor.py::TestDefaultTimeoutValue` pins the number itself and asserts all three layers agree.
+
+**Where `--drone-timeout` goes:** anywhere **after** the `@target`, including after the routed command and its arguments. It is stripped from the argument list before routing, so the target branch never sees it.
+
+```bash
+drone @flow list --drone-timeout 90     # ✅ after the command
+drone @flow --drone-timeout 90 list     # ✅ between target and command
+drone --drone-timeout 90 @flow list     # ❌ before the target — drone: unknown command '--drone-timeout'
+```
+
 ### Help flags — explain, never execute
 
 A help flag **anywhere** in a command means explain, never execute (DPLAN-0291 rule E). Every module's `handle_command()` calls `wants_help()` from `apps/handlers/help_flags.py` before dispatching:
@@ -294,6 +317,42 @@ Why it mattered: the old gate read only `command` or `args[0]`, so `drone rm not
 `show` sits at global tier because reading history is not a write. It is deliberately **not** scoped to the caller's branch directory the way `status`, `diff` and `log` are: those scope for convenience, hiding other branches' noise, whereas scoping `show` would refuse the case it exists for — one citizen auditing another's past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
 Both the ref and the optional path are refused before any argv is built if git would read them as a flag (empty or leading `-`), the same guard the tag lanes use.
+
+### Deleting — every delete leaves a record
+
+`drone rm` is the fleet's only sanctioned delete path (raw recursive `rm` is gate-blocked), which makes it the choke point where the record belongs. Patrick's ruling: *"if something deletes, there should be a record of it."*
+
+Two channels, written by `handlers/deletion_log.py`:
+
+| Channel | Where | What it is for |
+|---|---|---|
+| JSONL store | `<project>/.ai_central/deletions.jsonl` | machine-readable, findable months later |
+| prax line | normal logs, **INFO** | flows through observability without knowing this file exists |
+
+The prax line is emitted **first**. If the store write fails it is reported at ERROR and the delete still proceeds — losing the log must not turn into losing the delete, and the event has already reached the logs either way.
+
+A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed), `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`.
+
+Four things worth knowing:
+
+ - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the guard just said that tree is off-limits, so nothing goes and reads inside it.
+ - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than paying an unbounded walk.
+ - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
+ - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
+
+Both of drone's delete lanes feed it: `rm` (`handlers/rm_handler.py`) and `broker` (`handlers/broker/daemon.py`, which deletes on behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading its own cwd). The broker's protocol audit log is unchanged — that records requests and error codes; this records deletions.
+
+`AIPASS_DELETION_LOG` relocates the store (tests, containers). It cannot silence the prax line.
+
+Bounded at 2 MB with one rotation, because a delete log that grows forever becomes the runaway log the monitoring lane exists to catch.
+
+### Sibling-branch guard — outermost `.trinity` wins
+
+The guard refuses deletes inside another citizen's tree, and it finds the owning citizen by walking up for `.trinity/`. It takes the **outermost** hit within the project, not the innermost, because `.trinity/` is not proof of a citizen: @spawn ships a complete branch skeleton under `templates/`, passport and all.
+
+Innermost-wins produced two bugs from one mimicry — refusals named `aipass_framework`, which is a template with no mailbox to appeal to, and @spawn was locked out of its own `templates/` because a skeleton's name never matches the branch you are standing in. Same mimicry sent the commit gate running pytest inside the template; outermost-citizen-wins is the mapping that fixed it there (`e934099f`), applied here.
+
+Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the project boundary.
 
 ### Tag lanes — AIPass vs an external repo
 
@@ -424,16 +483,18 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-1075 tests collected across 26 test files (1070 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-13:
+1123 tests collected across 28 test files (1118 pass, 5 skip), covering all layers. Counts below are pytest-collected, verified 2026-08-14:
 
 | Area | Files | Tests |
 |------|-------|-------|
 | Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 183 |
 | Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 335 |
-| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 118 |
+| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 125 |
+| Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 77 |
-| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 178 |
-| Broker | `test_broker.py` | 55 |
+| Features | `test_json_handler.py`, `test_rm.py`, `test_commands.py`, `test_scan.py` | 185 |
+| Deletion record | `test_deletion_log.py` | 26 |
+| Broker | `test_broker.py` | 60 |
 | Standards | `test_cli_routing.py`, `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py` | 93 |
 | Help-flag safety | `test_help_flag_safety.py` | 36 |
 
@@ -452,7 +513,7 @@ Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1070 pass, 5 skip | **Last Updated:** 2026-08-13
+**Seedgo:** 100% | **Tests:** 1118 pass, 5 skip | **Last Updated:** 2026-08-14
 
 ---
 [← Back to AIPass](../../../README.md)
