@@ -97,6 +97,14 @@ src/aipass/*/apps/integrations/**
 !src/aipass/spawn/templates/aipass_framework/.spawn/**
 !src/aipass/spawn/templates/aipass_framework/.claude/
 !src/aipass/spawn/templates/aipass_framework/.claude/**
+
+# Memory fragments park exception (Patrick 2026-08-14: parked revivable, so the
+# archived copy must ship — fresh clones can't revive from one machine's disk).
+# Selective: only the park is tracked, the rest of memory/.archive stays local.
+!src/aipass/memory/.archive/
+src/aipass/memory/.archive/*
+!src/aipass/memory/.archive/parked_symbolic_20260814/
+!src/aipass/memory/.archive/parked_symbolic_20260814/**
 !src/aipass/spawn/templates/aipass_framework/*_json/
 !src/aipass/spawn/templates/aipass_framework/*_json/**
 !src/aipass/spawn/templates/aipass_framework/logs/
