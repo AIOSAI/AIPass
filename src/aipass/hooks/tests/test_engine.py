@@ -1297,6 +1297,31 @@ class TestDispatchHandlerTimeout:
             dispatch("UserPromptSubmit", "{}", config)
         mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=30)
 
+    def test_inner_timeout_above_30_reaches_the_join(self, mock_logger):
+        """A hooks.json value >30 must survive to worker.join, not be clamped.
+
+        The 30s stopgap raise is worthless if anything downstream caps it — DPLAN-0285's
+        "both knobs or it is theatre". This pins the inner half.
+        """
+        config = {
+            "hooks_enabled": True,
+            "UserPromptSubmit": {
+                "slow_handler": {
+                    "enabled": True,
+                    "handler": "aipass.hooks.apps.handlers.fake.handle",
+                    "matcher": "",
+                    "timeout": 90,
+                }
+            },
+        }
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "ok", "stderr": "", "elapsed_ms": 5}
+            dispatch("UserPromptSubmit", "{}", config)
+        mock_run.assert_called_once_with("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=90)
+
     def test_timeout_logs_speaks_and_lets_dispatch_continue(self, mock_logger):
         config = {
             "hooks_enabled": True,

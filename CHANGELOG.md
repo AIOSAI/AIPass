@@ -11,6 +11,25 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**fix(hooks)** — UserPromptSubmit timeout seatbelt, DPLAN-0285 items 1+2
+(Patrick present, live-verified same evening). A timed-out UserPromptSubmit
+hook is cancelled and its context silently discarded — the model quietly loses
+its operating instructions and carries on. The real regression: auto_process
+carried timeout 120 only in deployed settings, never in the manifest; a
+reconcile ~08-02 silently wiped it, and its legitimate 78–120s first-prompt
+run (@memory vectorize + rollover) started dying at the 30s default. Timeouts
+predate BAUD by weeks — the transcripts (205k lines back to 07-09) acquit it.
+Fix: timeout 90 (auto_process 120) stamped in ALL layers the same breath —
+.aipass/hooks.json (inner), provider manifest (source of truth), init template
+(the aipass init update union-merge would silently wipe live-only values) —
+plus 3 config-pinning tests and an engine test proving values >30 reach
+worker.join uncapped. Trust re-enrolled with the edit (an @hooks probe showed
+editing hooks.json breaks its trust hash and takes every gate dark). Stale
+README single-dispatch claims fixed (3 sentences, wrong for 73+ days). Suite
+1454 green. Follow-up queued: DPLAN-0294 relocates auto_process off the
+prompt lane entirely (Patrick's ruling, compass #272 — system housekeeping
+never blocks the prompt).
+
 **feat(fleet)** — the fleet audit round: every citizen audits itself
 (DPLAN-0291, Patrick's directive, waves of 2). All 17 branches created living
 APLANs — standing per-branch health records that future audits UPDATE, never

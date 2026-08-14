@@ -6,27 +6,32 @@
     "identity_injector": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.identity.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "email_notification": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.notification.email.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "branch_prompt": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.branch_loader.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "tier0_kernel": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.tier0_kernel.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     },
     "navmap": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.prompt.navmap.handle",
-      "matcher": ""
+      "matcher": "",
+      "timeout": 90
     }
   },
 

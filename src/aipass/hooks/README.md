@@ -55,13 +55,21 @@ drone @hooks --help              # Full help reference
 
 Hooks operate on two tiers:
 
-**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Each event type has one bridge entry that fans out to all handlers for that event. Provider settings cannot be changed by branches — only setup tooling manages them.
+**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists because merging handler output into a single blob buries prompt injection past Claude Code's inline preview — see S167 below. Provider settings cannot be changed by branches — only setup tooling manages them.
 
 **Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. Edit `enabled` flags to turn hooks on/off per project. Use `drone @hooks status` to view current config.
 
 **Why provider-only wiring?** Claude Code does not fire `PreToolUse`/`PostToolUse` hooks from project-level settings — only from user-level settings (DPLAN-0160 platform limitation). So all hook entries live in provider settings, and per-project control happens through `.aipass/hooks.json`.
 
-**Deploying new handlers:** Registering a handler in `.aipass/hooks.json` is necessary but not sufficient. Each event type also needs a matching bridge command entry in `~/.claude/settings.json` — this is human-gated (agents cannot edit provider settings). After building a new handler, email @devpulse to wire the settings.json entry. Without it, the engine never receives the event and the handler never fires.
+**Deploying new handlers:** whether `.aipass/hooks.json` alone is enough depends on which shape the event uses.
+
+| New handler on | Provider change needed |
+|---|---|
+| PreToolUse, PostToolUse, SubagentStop, Stop, Notification | **None** — the fan-out entry already dispatches it |
+| UserPromptSubmit, SessionStart | **One** new entry: `claude.py <Event>:<hook_name>` |
+| PreCompact | **Two** new entries — one `matcher: manual`, one `matcher: auto` |
+
+Provider settings are human-gated (`git_gate.py` `TRUSTED_HOOK_EDITORS`), so when an entry is needed, email @devpulse to wire it. Without it the engine never receives the event and the handler never fires — and the suite cannot see the gap, so verify with firing evidence in `engine.jsonl`.
 
 **Keeping the manifest and live settings in sync:** `.claude/provider_manifest.json` (repo root, self-editable by @hooks) is the source of truth; `~/.claude/settings.json` is the live copy Claude Code actually reads, and only `aipass doctor --fix` (or a trusted editor like @devpulse) can write it. Editing the manifest does NOT apply live — this sync step has silently lapsed before (DPLAN-0278: live drifted a full matcher behind for weeks). Run `aipass doctor` after any manifest edit to see the drift, then ask @devpulse to apply it (or run `aipass doctor --fix` if you're a trusted editor).
 
@@ -136,7 +144,7 @@ src/aipass/hooks/
 
 ## How It Works
 
-1. Provider settings have one bridge entry per event type (e.g., `claude.py UserPromptSubmit`)
+1. Provider settings invoke the bridge one of two ways: `claude.py <Event>` (one fan-out entry, all enabled handlers — tool events) or `claude.py <Event>:<hook_name>` (one entry per handler — UserPromptSubmit, PreCompact, SessionStart). There is no bare `claude.py UserPromptSubmit` entry; it is 13 named ones.
 2. Bridge normalizes stdin, loads project config via `loader.find_project_config()`
 3. Bridge calls `engine.dispatch(event_type, stdin_data, config)`
 4. Engine runs matching hooks sequentially, logs each to JSONL

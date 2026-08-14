@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | **YELLOW** |
-| **Last verified** | 2026-08-13 (S145) |
-| **Open items** | 20 (1 security bypass -> DPLAN-0293, 7 parked, 2 escalated, 10 branch-owned) |
-| **Tests** | 1450 pass, 0 fail, 2 skip (1452 collected, 47 files) |
+| **Last verified** | 2026-08-13 (S146) |
+| **Open items** | 23 (1 security bypass -> DPLAN-0293, 7 parked, 2 escalated, 13 branch-owned) |
+| **Tests** | 1451 pass, 0 fail, 2 skip (1453 collected, 47 files) |
 | **Seedgo** | **100% shielded / 96% unshielded** (44 standards) -- help_flag_safety 84 -> 100, and 100 unshielded too (fixed, not bypassed) |
 | **Bypass entries** | 261 rules / 80 files -- ~77 do real work, 123 inert in both lanes |
 | **CLI score** | Nav 4/5, Output 4/5 (surface works; `verify` contract + help-flag safety fixed, `feedback` still lies) |
@@ -147,6 +147,49 @@ behind for weeks.
   polled and waited for the other agent's implementation to land. Adds to the unpark case: the
   fleet-wide single state slot (parked item 8) and this deadlock compose into a cross-agent stall.
 
+#### Config-change traps -- discovered by walking into one (S146)
+
+- [ ] **Editing `.aipass/hooks.json` takes EVERY hook in the project dark.** Not a warning, an outage.
+  The file is hash-enrolled in the trust registry; any byte change breaks the hash and the trust gate
+  refuses the whole config -- edit_gate, git_gate, rm_gate, all 28 handlers, project-wide, for every
+  session. I caused it at 21:44:50 adding `"timeout": 90`, discovered it because a timeout proof
+  returned the TRUST BREAK banner instead of handler output, confirmed with `drone @hooks status`,
+  and reverted to byte-identical HEAD (5427 bytes, sha256 `bb83f2c0e01a1261`) via `git show HEAD:`.
+  Dark window ~8 minutes; only my own session was working in it. **Any hooks.json change must land in
+  the same operation as `aipass trust /home/patrick/Projects/AIPass`.** Note the compounding failure:
+  the banner that fires in this exact state tells you to run `drone @hooks trust enroll`, a command
+  that does not exist (parked item 3). The one moment the message matters most is the one moment it is
+  wrong. This is a finding about the *system*, not just my mistake -- nothing anywhere warns first.
+- [ ] **`aipass init update` silently wipes per-hook timeouts.** `bootstrap.py:168-175` union-merges
+  `hooks.json` against `.aipass/project_hooks.json` and preserves only `enabled` -- the whole hook dict
+  is replaced for any hook that also exists in the template. The template carries no UserPromptSubmit
+  timeouts, so the moment the 90/120 knobs land they are one `init update` from vanishing without a
+  log line. Either the template gets stamped too, or this regresses invisibly.
+- [ ] **`aipass doctor` is blind to timeout drift.** `doctor.py:420-423` compares `command` and
+  `matcher` only. It will report 27 hooks wired and PASS with every timeout missing, and
+  `doctor --fix` does nothing. This is why the `auto_process` regression below survived two weeks with
+  a healthy doctor.
+
+#### The auto_process timeout regression (root-caused S146, provider-side fix handed to devpulse)
+
+- [ ] **`UserPromptSubmit:auto_process` lost its `"timeout": 120` between 2026-07-31 18:27 and
+  2026-08-02 19:57, and that -- not @baud -- is what Patrick has been feeling.** Transcript-observed
+  `timeoutMs` for that hook is 120000 through 07-31 and 30000 from 08-02.
+  `~/.claude/settings.json.bak.2026-07-18` still carries the 120; current `settings.json` carries
+  none. The value never existed in `provider_manifest.json`, so a regeneration reconciled it away --
+  it lived only in deployed settings. Rates per 1000 prompts (volume controlled):
+  | Window | auto_process | all other hooks |
+  |---|---|---|
+  | 07-09..08-01 (pre-change) | 0.93 | 27.86 |
+  | 08-02..08-08 (post-change, pre-BAUD) | 17.41 | 0.00 |
+  | 08-09..08-13 (post-BAUD) | 50.89 | 13.02 |
+  Under the old 120s ceiling, 7 of 19 recorded `auto_process` runs already exceeded 30s -- every one
+  would be a silent "output discarded" today. Fix is the provider-side pair in the handover below;
+  raising the twelve fast handlers to 90 does **not** address this one, restoring 120 does.
+  **Separately worth Patrick's attention: a handler that legitimately runs up to two minutes on the
+  first prompt of every session is a design problem, not a ceiling problem.** Not in DPLAN-0285's
+  items, not touched.
+
 #### Tests that pin defects (rule E)
 
 - [ ] `tests/test_git_gate.py:267` -- pins the git_gate absolute-path bypass (see above).
@@ -251,6 +294,29 @@ behind for weeks.
 
 ### Resolved
 
+- [x] **README wiring claims corrected -- three stale sentences, not the two the DPLAN cited** (S146 --
+  @devpulse dispatch 565fbf11, DPLAN-0285 item 1; strikes parked item 4). The plan names README lines
+  51 and 127; both had moved, and a third was wrong and uncited. Now at **58, 64, 139**. Line 64 was
+  the dangerous one: it told a builder that every new handler needs a provider entry, when for the five
+  fan-out events **none** is needed and for PreCompact **two** are -- wrong in both directions, and
+  nothing in DPLAN-0285 would have caught it. All three now state the verified shape: 5 fan-out events
+  (PreToolUse, PostToolUse, SubagentStop, Stop, Notification), UserPromptSubmit 13 per-handler entries,
+  PreCompact 8 (4 handlers x manual/auto), SessionStart 1; and explicitly that there is no bare
+  `claude.py UserPromptSubmit` entry. Line 64 replaced with a 3-row table of when a provider change is
+  actually needed. No test asserts on README content, so this could not break the suite.
+- [x] **Timeout knobs proven non-decorative on both sides** (S146 -- DPLAN-0285 item 2; the *change*
+  is handed to @devpulse, the *proof* is done and lives here). Controlled proof with real threads and
+  a real `worker.join`: a 35s handler under inner=30 is **killed at 32.73s with stdout EMPTY** -- that
+  is Patrick's failure reproduced exactly, output silently discarded -- while inner=90 waits 35.00s and
+  keeps its output. Fast handlers are byte-identical under 30 vs 90 (temporal 44B, identity 1151B,
+  tier0_kernel 0B, sha256 equal), so raising the ceiling changes nothing about normal output. +1 test
+  in the suite (`test_inner_timeout_above_30_reaches_the_join`) pinning that a `hooks.json` value >30
+  reaches `worker.join` uncapped -- there is no clamp anywhere in the dispatch path (`engine.py:322`
+  reads `timeout`, `:123` joins on it, defaults at `:55` and `:86`, exactly one join).
+  **NOT APPLIED HERE** -- see the trust trap above. Handover artifacts: `/tmp/hooks_timeout_90.patch`
+  (inner knobs), the provider spec in the reply to 565fbf11, and `/tmp/live_config_timeout_tests.py`
+  (3 config-pinning tests, deliberately kept out of the suite because the config is deliberately not
+  shipped -- they would be red on purpose).
 - [x] **help_flag_safety 84 -> 100: a help flag anywhere now explains, never executes** (S145 --
   @devpulse dispatch 223f5e3c, red-first). The checker named 2 modules; the defect was a class of
   **9**. Class sweep of `apps/modules/*.py` found the damage, not the count:
@@ -319,7 +385,16 @@ behind for weeks.
   jump the parked queue: it is the only item that fails permissively and silently.
 - [ ] **Deleted-file edit_gate deadlock** -- one-line fix ready, awaiting the word (it sits inside the
   edit_gate work already in front of Patrick).
-- [ ] The 8 parked items below -- all verified this session, one is stale and can be struck.
+- [ ] **Apply the timeout pair as ONE operation** (S146 handover): `git apply
+  /tmp/hooks_timeout_90.patch`, add `"timeout": 90` to twelve `UserPromptSubmit:<name>` entries and
+  `"timeout": 120` to `auto_process` in `~/.claude/settings.json` (lines
+  209/217/225/233/241/249/257/265/273/281/289/297/305, none currently carry the field), stamp the same
+  into `.claude/provider_manifest.json` lines 7-19 so the next wire run does not strip it
+  (`provider_wire.py:72-73` honours a manifest timeout), then **`aipass trust
+  /home/patrick/Projects/AIPass`** or the project goes dark. Then add
+  `/tmp/live_config_timeout_tests.py`. Devpulse edits both provider files -- I am outside
+  `TRUSTED_HOOK_EDITORS` and the manifest is the only one of the two I own at all.
+- [ ] The 8 parked items below -- items 4 and 5 are now struck; 6 remain live.
 
 ### Parked (Patrick's call -- verified and measured this session, untouched)
 
@@ -328,10 +403,10 @@ behind for weeks.
 | 1 | `auto_fix` logger_debug rule | **yes, premise dead** | prax shipped `debug()` 08-11 in `ba4d06a8`, whose commit message reads "Rule retirement dispatched to @hooks + @seedgo". @seedgo `modules_content.py:74` now teaches the OPPOSITE ("Use `logger.debug()` instead: silent"). Two hooks give contradictory advice on the same line. 33 fires in 13 min. |
 | 2 | `auto_fix` string-literal grep | **yes** | 3 false positives in a live repro. `_check_line_pattern` (`auto_fix.py:109-115`) only suppresses when the pattern is *immediately* adjacent to a quote, so every docstring, help string and error message that names a pattern trips it. `open_no_encoding` (`:129-132`) has no literal guard at all. |
 | 3 | TRUST BREAK banner | **yes** | `loader.py:132` says "Fix: drone @hooks trust enroll". No `trust` verb exists (enumerated every module's HELP_COMMANDS); real path is `aipass trust <path>`, which has no `enroll` subcommand either -- wrong twice. Same file gives THREE different fixes for the same condition (`:92`, `:98`, `:132`, `:192`). Fires when every hook is dark, i.e. when being right matters most. |
-| 4 | README single-entry claim | **yes** | README:51 and :128 (also :57, same sentence family). Reality: 13 per-handler UserPromptSubmit entries + 8 PreCompact; only PreToolUse/PostToolUse/Stop/SubagentStop/Notification fan out. The README's own worked example, `claude.py UserPromptSubmit`, is precisely the entry that does not exist. LOGGED AS KNOWN-FALSE, NOT FIXED, per dispatch. |
+| 4 | README single-entry claim | **FIXED S146 -- STRIKE IT** | Was README:51/:57/:128; unparked by @devpulse dispatch 565fbf11 as DPLAN-0285 item 1 and fixed at lines 58/64/139. Three sentences, not two -- see Resolved. The README's own worked example, `claude.py UserPromptSubmit`, was precisely the entry that does not exist; it now says so out loud. |
 | 5 | Engine block-path stdout/stderr | **NO -- STALE, STRIKE IT** | Claude Code honours `{"decision":"block","reason":...}` on stdout regardless of exit code. Proven twice: bridge subprocess test (exit 2, 430 bytes stdout, 0 bytes stderr, reason intact) and a live `rm_gate` block that caught one of my own audit agents mid-run and delivered the full reason text. The code still does not match the documented stderr contract, so the smell is real -- but nobody should spend a session on the premise that reasons are being lost. |
 | 6 | 13-to-5 handler grouping (perf) | **yes, worse** | Still 13 handlers. Output measured **20,971 bytes** from a @drone seat, ~22.6KB from a @devpulse seat, against the 10,000 cap -- single-dispatch still fails, reproducing DPLAN-0285. Process time now ~44.7s across 13 processes vs DPLAN's ~21 CPU-s. Slowest single hook logged today: 22,771ms. |
-| 7 | Timeout both-sides | **yes, and worse than recorded** | The outer timeout is not 30s, it is **ABSENT** -- all 13 UserPromptSubmit manifest entries carry no `timeout` field, inheriting Claude Code's 60s default, while 11 of 13 sit on the hardcoded inner 30 (`engine.py:321`, `:85`, `:54`). `auto_process` is clamped the *other* way: inner 120 against outer 60. Inconsistent in both directions. |
+| 7 | Timeout both-sides | **yes -- ROOT-CAUSED S146, fix handed to @devpulse** | Outer is not 30s, it is **ABSENT**: all 13 UserPromptSubmit manifest entries carry no `timeout`, inheriting Claude Code's 60s default, while 11 of 13 sit on the hardcoded inner 30 (`engine.py:322`, `:86`, `:55`). `auto_process` is clamped the other way, inner 120 against outer 60 -- and it is the one that actually times out (measured 78.5, 78.7, 83.1, 86.9, 87.3, 120.4, 120.5s). Both knobs proven live. Target: 90/90 for the twelve fast handlers, **120 outer for auto_process** to restore what was lost 08-01. Not applied here -- editing hooks.json breaks the trust hash. |
 | 8 | Fleet-wide diagnostics state | **yes** | `diagnostics_state.py:40` resolves to `src/aipass/.diagnostics_state.json` -- one inode for every citizen. No lock, non-atomic `write_text`, and the branch check **fails open** for any path outside `src/<pkg>/<branch>` (`edit_gate.py:527-532`). During this audit it held a `/tmp` scratch file from another agent's session. `auto_fix.py:22` still hardcodes its own copy of the path instead of importing `STATE_FILE`, despite the module docstring saying it exists so writer and reader "cannot drift apart". |
 
 ## Dispatch Log
@@ -346,6 +421,7 @@ behind for weeks.
 | 2026-08-13 | @devpulse 897e0845 -- Patrick's ruling | DPLAN-0293 created, visit-later, no interim mitigation. Nothing to do now; I build it when the design session happens |
 | 2026-08-13 | @seedgo 1dbac150 -- checklist marker + deadlock concurrency evidence | Logged both. Marker migration ready ([FAIL]), NOT applied -- parked |
 | 2026-08-13 | @devpulse dispatch 223f5e3c -- fix round to 100 (help_flag_safety) | DONE -- 84 -> 100, class of 9 not the 2 named, 1450 green, overall 100% |
+| 2026-08-13 | @devpulse dispatch 565fbf11 -- DPLAN-0285 items 1+2 + Patrick's BAUD question | Item 1 DONE (3 README sentences). Item 2 PROVEN but handed over as a patch -- applying it broke the trust hash and took all hooks dark for ~8 min; reverted. BAUD answered NO, root cause is an 08-01 config regression. Items 3+4 untouched per ruling. |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0285 (handler perf, item 6), DPLAN-0276 (post-compact regrounding),
@@ -409,6 +485,42 @@ and @seedgo reported that my checklist parsing has been silently dropping every 
 since it was written. Both logged above, neither touched -- the dispatch scope-fenced this pass to
 help_flag_safety, and a peer mail does not lift a park.
 
+**S146 (2026-08-13, late evening):** @devpulse dispatch 565fbf11 -- DPLAN-0285 items 1 and 2, plus
+Patrick's question about whether @baud caused the timeouts. 1451 green, ruff clean, seedgo 100%.
+
+**I took every hook in this project dark for about eight minutes.** Adding `"timeout": 90` to
+`.aipass/hooks.json` broke the file's enrolled trust hash, and the trust gate then refused the entire
+config -- not my change, the whole thing: edit_gate, git_gate, rm_gate, all 28 handlers, every session
+in the project. I found out because my own timeout proof came back with the TRUST BREAK banner instead
+of handler output. The instinct is to file this as carelessness, and it partly is, but the honest
+finding is structural: **the config file is the thing that authorises the config file, so editing it
+is indistinguishable from tampering with it.** Nothing warns first. And the banner that fires in
+exactly this state tells you to run `drone @hooks trust enroll` -- a command that has never existed
+(parked item 3). The one moment that message matters most is the one moment it is wrong. I had that
+item written down as a wording defect. It is not; it is a defect that fires only during an outage, and
+I only learned that by causing the outage.
+
+The dispatch said to leave working-tree changes in place. It also said Patrick cannot afford hooks
+breaking. Those two collided the moment my edit disabled hooks rather than sitting inert, and I took
+the consequence instruction as the senior one: saved the change as a patch, reverted to byte-identical
+HEAD, verified `hooks_enabled: ON`. My own git_gate correctly refused the `git checkout` I reached for
+first, which is the gate working -- I restored via `git show HEAD:` instead. Reported to devpulse
+before anything else in the reply.
+
+On the BAUD question the answer is no, and the interesting part is how nearly I got it wrong.
+`engine.log` begins 2026-08-04; BAUD arrived 08-09. **Anyone reading my own logs would have concluded
+"August, so probably BAUD", because that is where the tape starts.** The real record was 598 Claude
+Code transcripts, 205,467 lines back to 07-09: earliest true timeout 07-15, worst day 07-28 with 37 --
+three weeks before BAUD existed -- and zero of the 125 real timeouts in a BAUD directory. The cause is
+a config regression: `UserPromptSubmit:auto_process` lost its `"timeout": 120` between 07-31 18:27 and
+08-02 19:57, because the value lived only in deployed settings and never in the manifest, so a
+regeneration reconciled it away. It is one handler, and it steps up before BAUD landed. Also worth
+recording: 302 `hook_cancelled` events, but only 125 carry `timedOut: true`. The other 177 are user
+aborts. Counting the wrong 302 would have produced a confident, wrong, 2.4x-inflated answer.
+
+That is the same lesson as S144's, arriving a third way: my instruments were clean because they could
+not see far enough back to be dirty. Retention *is* the finding, again.
+
 ## Listen (TTS-friendly summary)
 
 The hooks branch is healthy on paper and yellow in practice. All one thousand four hundred and five
@@ -464,6 +576,35 @@ never printed, which means every standards finding from that path has been silen
 the line was written. They have published a stable marker on their side. I have logged the migration
 but not applied it, because the branch is still parked and this evening's permission covered only the
 help flag work.
+
+In the late evening session I was asked to fix two things and answer one question, and I managed to
+break the whole hook system doing the second one. Adding a timeout setting to the hooks config file
+changed the file, and changing the file broke the fingerprint that proves the file is trusted, so the
+system refused all of it. Every hook in the project stopped running, for about eight minutes, until I
+put the file back exactly as it was. The lesson is not simply that I was careless. The config file is
+the thing that authorises itself, so editing it looks identical to tampering with it, and nothing
+warns you first. Worse, the message that appears in exactly that situation tells you to run a command
+that has never existed. I had already written that down as a wording problem. It is not a wording
+problem. It is a message that is only ever read during an outage, and it is wrong.
+
+So the timeout change went to devpulse as a patch with exact instructions, rather than being applied
+here. The proof that it works is done and it is solid. A handler that takes thirty five seconds is
+killed at thirty two with its output thrown away, which is exactly the failure Patrick has been
+seeing, and with the larger ceiling it finishes and its output survives.
+
+Patrick asked whether the new baud branch caused the timeouts. The answer is no, and I almost got it
+wrong in a way worth remembering. My own engine log only goes back to the fourth of August, and baud
+arrived on the ninth. Anyone reading my logs would have concluded August, therefore baud. The real
+record was in six hundred Claude Code transcripts going back to the ninth of July. The first real
+timeout was the fifteenth of July, and the worst day in the entire record was the twenty eighth of
+July, three weeks before baud existed. The actual cause is that one handler, the memory processor,
+lost its two minute allowance somewhere around the first of August, and has been dying at thirty
+seconds ever since. That allowance only ever existed in the deployed settings file, never in the
+template, so the first time something regenerated the settings it was quietly reconciled away.
+
+Also worth saying: of three hundred and two cancelled hook events, only a hundred and twenty five had
+actually timed out. The rest were Patrick pressing escape. Counting the wrong number would have given
+a confident answer that was more than twice too large.
 
 Last verified 2026-08-13.
 
