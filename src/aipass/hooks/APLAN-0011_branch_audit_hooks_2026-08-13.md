@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | **YELLOW** |
-| **Last verified** | 2026-08-14 (S152) |
+| **Last verified** | 2026-08-14 (S153) |
 | **Open items** | 21 (1 security bypass -> DPLAN-0293, 3 parked, 2 escalated, 12 branch-owned, 1 @aipass, 2 @memory/@skills) |
-| **Tests** | 1483 pass, 0 fail, 2 skip (1485 collected, 48 files) |
+| **Tests** | 1490 pass, 0 fail, 2 skip (1492 collected, 48 files) |
 | **Seedgo** | **100% shielded / 96% unshielded** (44 standards) -- help_flag_safety 84 -> 100, and 100 unshielded too (fixed, not bypassed) |
 | **Bypass entries** | 261 rules / 80 files -- ~77 do real work, 123 inert in both lanes |
 | **CLI score** | Nav 4/5, Output 4/5 (surface works; `verify` contract + help-flag safety fixed, `feedback` still lies) |
@@ -628,6 +628,35 @@ p95 7873ms, max 17404ms, against the new 90s ceiling).
 
 ## Notes
 
+**S153 (2026-08-14):** Dispatch c361b355 asked me to reclass a WARNING to INFO under my own compass
+#273 precedent, and invited a reasoned no. The answer is a reasoned no, because the volume was never
+a severity problem.
+
+`telegram_response.py:167` fired 117 times in the current log. The reclass case rested on those being
+the normal outcome of notification-driven turns. They are not. **All 117 carry the identical
+`start_line=10409`, all from one session (`ec388200`), across ten hours** -- while the other live
+session that day delivered 97 messages and logged zero of them. 117 = 39 events x 3, because the line
+sits inside a retry loop; each event also produced the outer WARNING at `:576`. One event, logged
+four times.
+
+Root cause: the cursor was 7820 lines past the end of a 2589-line transcript. `_advance_pending`
+records the cursor as a line count, and a transcript can shrink under it (compaction rewrites the
+file). Every later slice was empty, so no user message was ever found and the pending file retried
+forever. **`extract_mirror_turn` already clamped this exact case at `:316-323`; `extract_assistant_response`
+never did** -- the fix was five functions away in the same file, applied to one of two extractors.
+
+Shipped: `_window_from_cursor()` (`:180-201`), now shared by both extractors, so the clamp cannot
+drift apart again. Live-replayed against the real stuck transcript at the real cursor: old code
+returns None, new code extracts 1724 chars and logs one WARNING naming both numbers. Also split the
+benign twin off the loud one -- an empty window because the cursor sits exactly at the end means
+nothing new since the last delivery, and that now returns quietly at INFO instead of borrowing the
+stuck case's WARNING.
+
+The severity that prompted the dispatch stays WARNING, with a guard test pinning it: after clamping,
+a `-1` means the transcript genuinely has no user message, and that line is the only evidence a
+Telegram reply was dropped. The sibling at `:173` stays INFO and fired 0 times in the same window --
+the asymmetry @devpulse read as an authorship accident is doing real work.
+
 **S152 (2026-08-14):** Dispatch 590601bd, Patrick-ruled: *"we need a log for deleted files - if
 something deletes, it should be a record of it."* @drone records the sanctioned lane; my half was the
 leak. `rm_gate` saw every raw `rm` an agent ran and wrote down none of them -- it only ever spoke when
@@ -1019,6 +1048,31 @@ is a guard that runs a hundred deletions and insists both live log files come ou
 identical. But that fixture protects one handler out of twenty eight that log. How many other test
 suites have been quietly writing into live records, just slowly enough that nobody noticed, is now a
 question on my list.
+
+The last task of the morning was a request to quieten a warning, and the answer was no, with a reason.
+Devpulse had spotted a message in my telegram handler that fires whenever it cannot find a user
+message in the transcript, a hundred and seventeen times in the current log, and read it as normal
+behaviour for a session driven by notifications rather than by a person typing. That is a sensible
+read, and it is what my own precedent from last night would suggest. They also wrote that a reasoned
+no would be a fine answer, which is why I measured it instead of just agreeing.
+
+Every single one of those hundred and seventeen lines came from the same session, with the same
+number in it, over ten hours. The other session running that day delivered ninety seven messages and
+produced none of them. So it was not a class of normal events at all. It was one conversation stuck,
+retried on every stop event, all night.
+
+The cause was a bookmark pointing past the end of a book. The handler remembers how far it has read
+by counting lines, and a transcript can get rewritten shorter underneath it when the session is
+compacted. Once the bookmark is past the end, every read comes back empty, no user message is ever
+found, and the message waiting to be delivered is retried forever. The striking part is that the fix
+already existed in the same file, five functions away: the mirror delivery path checks for exactly
+this and clamps back. The normal delivery path never did. Both now share one piece of code, so they
+cannot drift apart again.
+
+I replayed the real stuck transcript through the old and new code to be sure: old returns nothing,
+new recovers seventeen hundred characters of a reply that was never delivered. The warning itself
+stays loud, with a test that pins it, because after the fix it can only mean something genuinely
+broke. Quietening it would have hidden a ten hour outage instead of a noisy log.
 
 Last verified 2026-08-14.
 

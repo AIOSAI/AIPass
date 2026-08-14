@@ -11,6 +11,28 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(host)** — DPLAN-0300 Stage 0: the host API lands (@api, FPLAN-0411).
+The fleet's first phone-ready surface: loopback-only FastAPI behind
+sha256-hashed bearer tokens (compare_digest, read|operate scopes, file-edit
+revocation effective next request). `/v1/feed` reads notifications.jsonl
+through a ts cursor clamped both ends with an explicit gap flag and
+at-least-once boundary delivery; `/v1/files` + `/v1/diff` take branch NAMES
+never paths (512KB cap refuses rather than trims, diff goes through drone
+@git); `/v1/fleet` + `/v1/rooms` consume `baud --snapshot` so "which agents
+are alive" has exactly one implementation — binary resolution prefers the
+deployed release build over any PATH copy, and SNAPSHOT_READY survives as an
+operational kill switch (closed = 503 with a reason, never a synthesized
+fleet). 713 tests, live-verified on a running server including post-revoke
+401 and the exit-1 envelope path. pyproject grows the `[host]` extra
+(fastapi, uvicorn). Riding along: @ai_mail's fleet→project refusal now tells
+the truth (replies-only by ruling DPLAN-0288 — the outer wall said "Unknown
+branch" and sent @api hunting a phantom; wall stays shut, test pins it shut,
+1083 green), the morning riders (hooks TG relay cursor clamp, @memory vector
+embedder parked to .archive, skills TG start/kill control-verb fixes), and
+README/APLAN truth-ups. Patrick live-verified the whole chain same day:
+dev-window click-through, release rebuild, his own --snapshot run, /v1/fleet
+200 on real data.
+
 **feat(fleet)** — night shift DPLAN-0295: the prompt-lane sweep (Patrick's
 ruling, compass #272 — the agent never waits for the system) plus four ruled
 queue items, all 10 roster items landed. auto_process relocated off the first

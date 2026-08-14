@@ -141,7 +141,7 @@ result = report_error(
 
 | Event | Handler | Trigger | Action |
 |-------|---------|---------|--------|
-| `startup` | `startup.py` | Branch session starts | Error catch-up scan across log files, memory rollover check |
+| `startup` | `startup.py` | First prax log call in **any** process (`prax/apps/modules/logger.py:116`) | Error catch-up scan over `system_logs/` — that is the whole handler (`startup.py:369-377`). It does **not** check memory rollover; this table claimed it did until 2026-08-14 |
 | `error_detected` | `error_detected.py` | Error registered via log watcher or `report_error()` | Full 8-gate Medic dispatch — emails fix-it to affected branch + `wake_branch()` |
 | `error_logged` | `error_logged.py` | System log error (fallback path) | Monitor-only: logs the event, no dispatch |
 | `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |

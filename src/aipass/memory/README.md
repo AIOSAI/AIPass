@@ -81,10 +81,10 @@ memory/
 │       ├── symbolic/            # PARKED 2026-08-14 — __init__ raises; impl in .archive/
 │       ├── templates/           # pusher.py, differ.py, spawn_pusher.py
 │       ├── tracking/            # line_counter.py, tab_renderer.py
-│       ├── vector/              # embedder.py, embed_subprocess.py
+│       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1022 tests — 823 run, 222 parked with the symbolic tier
+├── tests/                       # 1022 tests — 810 run, 237 parked with the symbolic tier
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```

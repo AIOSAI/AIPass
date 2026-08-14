@@ -33,10 +33,10 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN |
-| **Last verified** | 2026-08-14 (S139 — symbolic tier parked, audit re-run 99%) |
-| **Open items** | 5 |
-| **Tests** | 823 pass, 0 fail, 4 skipped modules (222 tests parked with the symbolic tier; 1022 test functions on disk) |
-| **Seedgo** | **99%** with bypasses — one dead_code finding left standing on purpose (see open items) |
+| **Last verified** | 2026-08-14 (S140 — embedder parked per ruling, audit back to 100%) |
+| **Open items** | 4 |
+| **Tests** | 810 pass, 0 fail, 5 skipped modules (237 tests parked with the symbolic tier; 1022 test functions on disk) |
+| **Seedgo** | **100%** with bypasses — the dead_code finding closed by parking, not by bypass |
 | **Bypass entries** | 112 (was 156; 45 removed in S136, **1 added** in S138 for the cross-branch `spawn_background` caller) |
 | **CLI score** | Nav 5/5, Output 5/5 (44 command paths + 18 error paths run live) |
 
@@ -113,7 +113,14 @@ handlers: `watch` is a module like every other command, and a contract test keep
       against. It will archive out the same way.
 - [ ] **4 digests remain quarantined** — PARKED by Patrick. Not touched, not re-diagnosed.
       Noted here only so the next audit knows they are known.
-- [ ] **`handlers/vector/embedder.py` is orphaned by the symbolic park (S139)** — its only two
+- [x] **RESOLVED 2026-08-14 (S140) — `handlers/vector/embedder.py` parked with the tier.**
+      @devpulse ruled: park it, no live caller exists, keeping a generic utility for a consumer
+      that does not exist is the disease the symbolic ruling cured. Moved to
+      `.archive/parked_symbolic_20260814/handlers_vector/`, its 15 tests skip-annotated with the
+      same ruling text, revival README updated to a 7-step list. Audit back to **100% with no
+      bypass** — the finding was closed by removing the orphan, not by asserting a phantom caller.
+      Patrick can overrule at revival. Original finding below, kept for the record:
+- [ ] ~~**`handlers/vector/embedder.py` is orphaned by the symbolic park (S139)**~~ — its only two
       importers were `symbolic/storage.py` and `symbolic/retriever.py`, both now in
       `.archive/parked_symbolic_20260814/`. Measured, not assumed: `embed_subprocess.py` (the
       one the live lane actually runs, by path, from `query_executor`, `plans_processor` and
@@ -238,8 +245,10 @@ handlers: `watch` is a module like every other command, and a contract test keep
 
 | 2026-08-14 | Dispatch 69b843f0 (@devpulse) — Patrick's ruling: park the symbolic fragments tier | Shipped, **not committed**. Verified dormant BEFORE disabling: no `.aipass/hooks.json` entry, no caller in rollover/extractor/auto_process/search/verify, and no cross-branch caller. One live thread found and cut — `apps/handlers/__init__.py` imported the package on *every* live call, so an unwired tier was still being loaded. Implementation preserved byte-identical in `.archive/parked_symbolic_20260814/` (7 handler files + the 1602-line module + a README with revival steps). Fail-honest surfaces: `handlers/symbolic/__init__.py` raises `SymbolicTierParked`, `modules/symbolic.py` refuses every subcommand with exit 1 and answers for the whole old API via module `__getattr__`. 34 new tests red-first (31 red → all green); the 4 legacy symbolic test files are **skipped, not deleted**, with the ruling as the skip reason. Suite 823 green + 4 skipped modules; audit 99% (the one finding is the orphaned `embedder.py` above, left standing on purpose). Answer to the report-only question: `should_surface` is **LIVE** — @hooks' `compass_recall` calls it on every `UserPromptSubmit`. |
 
+| 2026-08-14 | Mails e1a02dca + 1dd1a5fe + dispatch a75a6144 (@devpulse) — morning round | Park **accepted in full**; his ruling on `embedder.py` executed (parked with the tier, 15 tests skip-annotated, **audit back to 100% with no bypass**). Lock-race FYI confirmed as the intended design and already pinned by two tests I wrote for it — the parent check is advisory, the child's `O_CREAT\|O_EXCL` is authoritative, cost is one wasted spawn per racing pair. **DPLAN-0297 created and filled** (MAP ONLY, per Patrick): surfacing-governance constants configurable + derived. Two corrections to the brief, both from checking rather than transcribing — it is four numbers and one boolean (not five numbers; `cooldown_seconds` was counted twice), and the log sample is **28 days / 273 surfacings**, not 4 days. Headline finding: `should_surface` logs only its accepts, so every refusal reason is computed and thrown away — the data needed to derive the constants is exactly the data not recorded. Measured: cap of 5 reached 3/200 sessions, every accepted score ≥ 0.50 against a 0.30 threshold, **72% of surfacings are cross-session repeats of only 77 distinct decisions**. |
+
 ## Relationships
-- **Related DPLANs:** DPLAN-0295 (prompt-lane relocation), DPLAN-0291 (fleet audit round), DPLAN-0290 (date_guard, night before), DPLAN-0278 (safety valve)
+- **Related DPLANs:** DPLAN-0297 (governance constants, map-only), DPLAN-0295 (prompt-lane relocation), DPLAN-0291 (fleet audit round), DPLAN-0290 (date_guard, night before), DPLAN-0278 (safety valve)
 - **Related FPLANs:** None open
 - **Owner branch:** @memory
 - **Seedgo:** `drone @seedgo audit aipass @memory`

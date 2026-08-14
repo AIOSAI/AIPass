@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-13 (S141) |
+| **Last verified** | 2026-08-14 (S142) |
 | **Open items** | 9 (0 blocking) |
-| **Tests** | 1074 pass, 0 fail, 0 skip (36 test files) |
+| **Tests** | 1083 pass, 0 fail, 0 skip (37 test files) |
 | **Seedgo** | 100% (45 standards, 35 files) |
 | **Seedgo with bypass OFF** | 99% -- 18 violations across 7 standards |
 | **Bypass entries** | 18 (51 -> 17 by measured prune, +1 added with `help_flags.py`) |
@@ -136,6 +136,35 @@ Two things about the layout that are easy to misread:
 
 ### Resolved
 
+- [x] **A walled address was reported as a non-existent one** (S142, symptom found by @api
+  2026-08-14, dispatch 6af8efd5) — `email @baud` from `src/aipass/api` failed with
+  `Unknown branch email: @baud (available: 17 branches)`. **The refusal was correct; the
+  stated reason was false.** @baud is a registered citizen of `projects/baud`
+  (`BAUD_REGISTRY.json`), reachable by @devpulse's admin lane. Cost of the wrong reason:
+  @api spent ~5 minutes hunting an addressing bug that did not exist and left two stray
+  ping mails in @baud's inbox.
+  **@devpulse's hypothesis — a missing `projects/*/*_REGISTRY.json` sweep, the watchdog
+  resolver species (c247fce8) — is disconfirmed.** The sweep is present at
+  `delivery.py:466-472` and deliberately admin-gated; `get_project_tree_branches()` says so
+  in its own docstring. Also note `resolve_branch()` lives in `wake.py` and is called only
+  by `wake.py`, so it was never on this path at all — the mail-scope resolution is a
+  separate ladder. Fleet→project initiation being walled is Patrick's standing ruling
+  (2026-08-12, relayed in 49df25ad): *replies only, initiation stays walled in all
+  directions, no hub-front-door*. It resolved from inside `projects/baud` because step 2,
+  `get_caller_project_branches()`, walks up from `AIPASS_CALLER_CWD` and finds the
+  project's own registry — that step is not admin-gated because it is the caller's own
+  project.
+  **The real defect: mail has two walls in this direction and they disagreed about
+  honesty.** The inner wall (`_check_cross_project_boundary`) already names both projects
+  and says "cross-project mail refused". The outer wall (resolution) said the address does
+  not exist, so anyone who tripped it never learned a policy existed. Fix is
+  `_describe_unresolved_address()` — on the failure path only, it reads the hosted
+  registries to *describe* the wall and returns a string, never touching the branch map.
+  The message now names the project, the count in scope, the ruling and the way through.
+  8 tests, 2 red-first; the load-bearing one asserts explaining the wall does not open it
+  (delivery still fails, no inbox written). Live: exit 2, sent record stamped REFUSED with
+  the reason verbatim, nothing delivered. **No dispatch/wake code touched** — the
+  conservative-while-Patrick-is-offsite condition holds.
 - [x] **A help flag after the first argument was discarded and the command RAN**
   (S141, seedgo `help_flag_safety`, DPLAN-0291 rule E) — all three modules gated help at
   `args[0]` only, scoring 0/100 on the standard and 97% overall. Not a regression: the
@@ -263,6 +292,7 @@ generalised to a branch that carries `tests/*` rules.
 
 | Date | Action | Result |
 |------|--------|--------|
+| 2026-08-14 | Cross-scope addressing symptom (dispatch 6af8efd5, found by @api) | Diagnosed + fixed. Missing-sweep hypothesis DISCONFIRMED — sweep present and admin-gated by design. Real defect was the refusal message denying a real address. 1074 -> 1083 tests, audit 100%, no dispatch/wake code touched |
 | 2026-08-13 | Fix round to 100 (dispatch 9cbc0121) — `help_flag_safety` 0/100 on 3 modules | Fixed. 97% -> **100%**, standard 0 -> **100**. Tests 1053 -> 1074 (8 red-first). New `handlers/cli/help_flags.py` + 1 documented bypass. Live-proven against a nonexistent target; no mail sent, no branch woken |
 | 2026-08-13 | Mail a119ec12 (@devpulse) — dispatch footer CLOSE-YOUR-PLAN vs APLAN convention | Mine, confirmed at `footer.py:27` before building (I had guessed @hooks — wrong, and S129 is why I checked). Reworded, footer 1.2.0, 1 red-first test |
 | 2026-08-13 | Fleet audit round wave 3 (DPLAN-0291, dispatch 5465b3f0) | YELLOW — 1053 tests, seedgo 100% (99% bypass-off), 2 defects fixed and live-proven, 34 bypass rules pruned two-lane, 9 open items |

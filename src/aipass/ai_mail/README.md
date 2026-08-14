@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1075 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1083 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -375,6 +375,41 @@ FPLAN-0401 puts one door in each — openable only with the grant:
   is out of scope — this reads the projects the repo already hosts, and is not a
   multi-root discovery layer.
 
+### Out-of-Scope Addresses Are Explained, Not Denied
+
+An address can fail to resolve for two different reasons, and reporting both as
+"unknown" is a lie in one of them. `@baud` is a registered citizen of `projects/baud`
+that @devpulse reaches through the admin lane; telling a fleet branch it does not exist
+sent @api hunting an addressing bug that did not exist and left two stray pings in
+@baud's inbox (2026-08-14).
+
+```
+Out of scope: @baud is a citizen of hosted project 'baud', not the AIPass fleet
+(17 branches in scope). Fleet-to-project mail is replies-only by ruling
+(DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an
+existing message from @baud, or use the feedback channel.
+```
+
+- **The refusal is unchanged — only the reason is now true.** Fleet→project initiation
+  stays walled for every non-admin caller, exit `2`, sent record stamped `refused`.
+- **`_describe_unresolved_address()` runs on the failure path only**, so a successful
+  send never pays for the registry read.
+- **Explaining the wall must not open it.** The diagnostic returns a *string*; the branch
+  map is never updated from it. A test asserts delivery still fails and no inbox is
+  written — that is the load-bearing test in this fix, not the wording ones.
+- **Exact match**, so `@bau` is still an honest "unknown", not a near-miss guess.
+- A hosted registry that is missing or unreadable falls back to the plain unknown
+  message; a refusal never becomes a crash.
+
+Naming the project is not a disclosure: `projects/` is in the same public repo, and the
+caller can list it. What was secret was the *policy*, which is exactly what a wall should
+say out loud.
+
+**Two walls, and they used to disagree.** Resolution is the outer wall;
+`_check_cross_project_boundary()` is the inner one. The inner wall already named both
+projects and said "cross-project mail refused". Anyone stopped by the outer wall never
+learned a policy existed at all.
+
 ### Reply Return Path
 
 The bridge opened one-way — admin mail got in, the targets' replies could not get
@@ -529,7 +564,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1075 tests across 36 test files
+└── tests/                      # 1083 tests across 37 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -549,6 +584,7 @@ ai_mail/
     ├── test_notify.py          # Notification feed schema, trim, concurrency (23 tests)
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)
+    ├── test_cross_scope_addressing.py # Honest refusal of hosted-project addresses (8 tests)
     └── test_paths.py           # find_repo_root() utility
 ```
 

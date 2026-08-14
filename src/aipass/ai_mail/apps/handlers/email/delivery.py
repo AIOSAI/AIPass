@@ -334,6 +334,71 @@ def _check_cross_project_boundary(
     )
 
 
+def _hosted_project_name(branch_path: str) -> str:
+    """Name the ``projects/<name>`` directory a hosted branch path sits under.
+
+    Args:
+        branch_path: Absolute path to a branch inside the projects tree.
+
+    Returns:
+        The project directory name, or "unknown" if the path sits elsewhere.
+    """
+    try:
+        rel = Path(branch_path).resolve().relative_to((_REPO_ROOT / "projects").resolve())
+        return rel.parts[0]
+    except (ValueError, OSError, IndexError) as exc:
+        # It came out of a projects/*/ registry, so not sitting under projects/
+        # means the registry's paths disagree with its own location.
+        logger.warning("[delivery] hosted branch path %s is not under projects/: %s", branch_path, exc)
+        return "unknown"
+
+
+def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
+    """Explain why an address did not resolve, without widening resolution.
+
+    An address can fail to resolve for two very different reasons, and saying
+    "unknown" for both is a lie in one of them. @baud is a registered citizen of
+    a hosted project; @devpulse reaches it through the admin lane. Telling @api
+    it did not exist sent them debugging an addressing bug that was not there
+    (2026-08-14), when the true answer is a policy: fleet-to-project initiation
+    is walled, replies only (DPLAN-0288).
+
+    This runs ONLY once delivery has already failed, so the extra registry read
+    costs nothing on any successful send. It returns a **string** and nothing
+    else — the caller's branch map is deliberately not updated, because the
+    whole point is to describe the wall, not open it.
+
+    Args:
+        to_branch: The address that failed to resolve.
+        known_count: How many branches were in scope for this caller.
+
+    Returns:
+        A refusal message stating the real reason.
+    """
+    fallback = f"Unknown branch email: {to_branch} (available: {known_count} branches)"
+
+    try:
+        from aipass.ai_mail.apps.handlers.registry.read import get_project_tree_branches
+
+        hosted = get_project_tree_branches(_REPO_ROOT)
+    except Exception as exc:
+        logger.warning("[delivery] could not read hosted project registries to explain refusal: %s", exc)
+        return fallback
+
+    hosted_path = hosted.get(to_branch)
+    if not hosted_path:
+        return fallback
+
+    project = _hosted_project_name(hosted_path)
+    logger.info("[delivery] out-of-scope address refused: %s (hosted project: %s)", to_branch, project)
+    return (
+        f"Out of scope: {to_branch} is a citizen of hosted project '{project}', not the AIPass "
+        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only by "
+        f"ruling (DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an "
+        f"existing message from {to_branch}, or use the feedback channel."
+    )
+
+
 def _coerce_updates(value) -> int:
     """Read a stored ``updates`` counter defensively, defaulting to 1.
 
@@ -473,8 +538,9 @@ def deliver_email_to_branch(
             branches.update(get_project_tree_branches(_REPO_ROOT))
 
     if to_branch not in branches:
-        error_msg = f"Unknown branch email: {to_branch} (available: {len(branches)} branches)"
-        return False, error_msg
+        # Refusal is correct here; the STATED REASON is what was wrong. Explain
+        # the wall instead of denying the address — the map is not widened.
+        return False, _describe_unresolved_address(to_branch, len(branches))
 
     # Private branch inbound blocking: reject delivery to private branches
     # Self-send is allowed (private branch can send to itself)

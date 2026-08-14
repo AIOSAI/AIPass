@@ -166,10 +166,17 @@ class TestRevivable:
             "handlers/retriever.py",
             "handlers/storage.py",
             "modules/symbolic.py",
+            "handlers_vector/embedder.py",
         ],
     )
     def test_implementation_is_preserved(self, relative):
         assert (_ARCHIVE / relative).is_file(), f"missing from the park: {relative}"
+
+    def test_the_orphaned_embedder_left_the_live_tree(self):
+        """Parked with the tier (devpulse's ruling) — its only importers were symbolic's."""
+        vector_dir = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "vector"
+        assert not (vector_dir / "embedder.py").exists()
+        assert (vector_dir / "embed_subprocess.py").is_file(), "the live lane's script must stay"
 
     def test_the_park_documents_its_own_revival(self):
         readme = _ARCHIVE / "README.md"

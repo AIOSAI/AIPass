@@ -76,7 +76,13 @@ the swallowed exit code below was a real, scriptable defect and not cosmetic.
 - [ ] **README is 4 months stale** (Last Updated 2026-04-07). Every command it documents does run — no lies — but it predates the telegram skill's growth and documents no exit-code contract.
 - [ ] **Bare `drone @skills` prints help, not the introspection self-map** the kernel describes. `print_introspection()` is only reachable via `handle_command(None)`, which the CLI never passes. Not changed unilaterally: it is a user-facing convention call.
 
+- [ ] **`user_message_relay` blocks the prompt path for nothing** (raised by @hooks 2026-08-14, measured: 0 stdout on 18/18 runs). Verified independently in my own file: no `print(`/`sys.stdout` anywhere, so it cannot inject — yet it is registered as a UserPromptSubmit *injector* and does `urlopen(..., timeout=10)` at line 119. If Telegram is slow, every prompt in a TG branch waits before the model sees anything, and a hook that dies just injects nothing, so nobody would notice. Fix shape agreed: keep the dedupe decision in the parent, move the send to a detached child (@memory's `auto_process.py:140` is the reference; no lock needed since the parent decides before sending). **Mapped in full at S103 as DPLAN-0299** (dispatch 74a136dd, MAP ONLY — no code touched). That map adds two things the brief lacked: line 209 returns `"sound": "user message relay"`, a real foreground contribution that is success-gated, and the dedupe hash is success-gated too — so a detached child converts both semantics. Build blocked on Patrick's ruling on the sound. Not built yet — needs its own FPLAN.
+
 ### Resolved
+
+- [x] **Bare `/start` spawned an interactive ghost in @aipass's home** (S103 — root-caused by @aipass's APLAN-0018, fixed here). `branch_arg or "aipass"` meant the `/start` every Telegram client sends on opening a chat defaulted to @aipass, then spawned `claude -c || claude` detached and interactive in that branch's directory. The ghost tripped wake.py's occupancy gate, so @aipass's real headless wake was REFUSED — 6 measured occurrences 07-29 to 08-11, which Patrick had been killing by hand. Bare `/start` now spawns nothing and answers with usage; `/start <branch>` unchanged.
+- [x] **Bare `/kill` would have killed @aipass's session** (S103) — same `or "aipass"` default one line below, not in the brief. A destructive verb must never pick its own target. Bare `/kill` now refuses. Found by reading the neighbouring line, confirmed by a test whose captured log showed a real `kill-session -t aipass-aipass`.
+- [x] **Three more tests pinning broken behaviour** (S103, rule D — brings this branch's tally to 4). `test_start_default_branch_is_aipass` and `test_kill_default_branch_is_aipass` asserted the bug as the contract. `test_start_wakes_on_aipass_branch_name` was about *routing* but asserted it on a bare `("start", "")`, so it only passed because of the default — renamed intent preserved, explicit branch supplied, plus a new test that bare /start still routes but spawns nothing.
 
 - [x] **Every failure exited 0** (S102 — `main()` discarded `handle_command()`'s bool; now `sys.exit(0 if ok else 1)`). Verified live through drone: `info nosuchskill`/`validate nosuchskill`/`bogusverb` → 1, `list` → 0. 6 subprocess tests pin it. Attribution checked first: drone's `executor.py` propagates `returncode`, so the swallowed code was mine, not the router's.
 - [x] **Rule E: `run <skill> --help` dispatched `--help` as an ACTION** (S102). `branch_health`/`inbox_check` treat an unknown action as a *branch name*, so it answered "Branch '--help' not found". Read-only, no external effect. Now routes to skill info; 3 tests, one asserting real actions still dispatch.
@@ -94,10 +100,10 @@ the swallowed exit code below was a real, scriptable defect and not cosmetic.
 ### devpulse to handle
 - [ ] Rule the bare `drone @skills` convention: help (today) or introspection self-map (kernel).
 - [ ] Carry to @seedgo: audit walk scope (`files_checked: 14` vs 101), the checker-scope disagreement, and that the "suppresses nothing" advisory misreports 6 of 7 measurable rules here.
-- [ ] Commit the tree: `apps/skills.py`, `tests/test_cli_routing.py`, `.seedgo/bypass.json` (this session) plus the pre-existing WIP below.
+- [ ] Commit the tree — as of S103 wrap the skills scope shows 3 modified: `APLAN-0016` (this doc), `lib/telegram/apps/handlers/base_bot.py` (v1.6.1 — S101 backoff classification + S103 `/start`+`/kill` default removal) and `lib/telegram/tests/test_control_verbs.py` (S103), plus one untracked new file, `DPLAN-0299_*.md`. S102's `apps/skills.py` / `test_cli_routing.py` / `.seedgo/bypass.json` and S100's `log_streamer.py` / `test_log_streamer.py` / `test_network_backoff.py` are already committed — verified, no longer pending.
 
 ### Tracked elsewhere
-- [ ] Uncommitted WIP left in place per brief: `lib/telegram/apps/handlers/base_bot.py` v1.6.1 + `lib/telegram/tests/test_network_backoff.py` (error 9353d1ae fix, S101) and `log_streamer.py` v1.2.0 + `test_log_streamer.py` (FPLAN-0395, S100). All accounted for — nothing unexplained in the tree.
+- [x] Prior-session WIP reconciled at S103 wrap: everything from S100/S102 is committed. Only base_bot.py + test_control_verbs.py remain uncommitted, both from S103. Nothing unexplained in the tree.
 
 ## Dispatch Log
 

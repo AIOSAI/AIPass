@@ -62,6 +62,13 @@ drive = [
 bluesky = [
     "atproto>=0.0.69",
 ]
+# Host API (FPLAN-0411) — the Stage 0 server for the BAUD phone face.
+# Optional: @api guards these imports and fails with install instructions,
+# so a machine that never serves the phone lane needs none of them.
+host = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 seedgo = []
 dev = [
     "pytest>=9.0.3",

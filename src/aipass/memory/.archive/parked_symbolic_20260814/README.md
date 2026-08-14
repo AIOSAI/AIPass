@@ -36,10 +36,19 @@ two when reviving.
 ## What is in here
 
 ```
-handlers/   chroma_client.py  deduplicator.py  extractor.py  hook.py  retriever.py
-            storage.py  __init__.py          <- the original package init
-modules/    symbolic.py                      <- the original 1602-line CLI module
+handlers/         chroma_client.py  deduplicator.py  extractor.py  hook.py  retriever.py
+                  storage.py  __init__.py    <- the original package init
+modules/          symbolic.py                <- the original 1602-line CLI module
+handlers_vector/  embedder.py                <- added 2026-08-14 (see below)
 ```
+
+**Why `embedder.py` is in here.** Parking the tier orphaned `apps/handlers/vector/embedder.py`:
+its only two importers were `symbolic/storage.py` and `symbolic/retriever.py`. Measured before
+believing it — the live lane runs `vector/embed_subprocess.py` *by path* (from `query_executor`,
+`plans_processor` and `orchestrator`), and that script is self-contained, importing nothing from
+the package. @devpulse's ruling, 2026-08-14: park it with the tier rather than keep a generic
+utility for a consumer that does not exist. Patrick can overrule at revival. Its 15 tests in
+`tests/test_vector.py` are skip-annotated, not deleted.
 
 Left in place in the live tree on purpose:
 
@@ -55,11 +64,13 @@ Left in place in the live tree on purpose:
 1. `mv .archive/parked_symbolic_20260814/handlers/*.py apps/handlers/symbolic/`
    (the original `__init__.py` is in there and replaces the raising stub)
 2. `mv .archive/parked_symbolic_20260814/modules/symbolic.py apps/modules/symbolic.py`
-3. Uncomment `from . import symbolic` in `apps/handlers/__init__.py` (~line 128)
-4. Remove the module-level `pytest.skip(...)` at the top of `tests/test_symbolic.py`,
-   `test_symbolic_cli.py`, `test_symbolic_extras.py`, `test_symbolic_module.py`
-5. Delete `tests/test_symbolic_parked.py` — it pins the park, and the park would be over
-6. Fix the Atlas finding before it goes live again: an AUDN `Delete` verdict must write what
+3. `mv .archive/parked_symbolic_20260814/handlers_vector/embedder.py apps/handlers/vector/`
+4. Uncomment `from . import symbolic` in `apps/handlers/__init__.py` (~line 128)
+5. Remove the module-level `pytest.skip(...)` at the top of `tests/test_symbolic.py`,
+   `test_symbolic_cli.py`, `test_symbolic_extras.py`, `test_symbolic_module.py`,
+   `test_vector.py`
+6. Delete `tests/test_symbolic_parked.py` — it pins the park, and the park would be over
+7. Fix the Atlas finding before it goes live again: an AUDN `Delete` verdict must write what
    it removed, why, and when — or it must not delete.
 
-Step 6 is not optional housekeeping. It is the reason this is parked rather than running.
+Step 7 is not optional housekeeping. It is the reason this is parked rather than running.

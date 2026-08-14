@@ -1863,8 +1863,22 @@ class BaseBot:
         only — plain messages still require an existing live session. One
         session per branch (compass #106 occupancy doctrine): never spawns
         a second if aipass-<branch> is already running.
+
+        A BARE /start spawns nothing. Telegram sends /start with no argument
+        whenever a client opens the chat, so it is a greeting, not a command —
+        it used to default to @aipass and start an interactive session in that
+        branch's home, whose ghost then blocked @aipass's real headless wake.
         """
-        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        branch = branch_arg.strip().lstrip("@").lower()
+        if not branch:
+            self.send_message(
+                chat_id,
+                "Usage: /start <branch> — wakes that branch's terminal agent.\n"
+                "Opening this chat does not start anything on its own.\n"
+                "Use /status to see which sessions are running.",
+            )
+            logger.info("Control /start: bare greeting, no branch named — nothing spawned")
+            return
         session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
 
         try:
@@ -1905,8 +1919,17 @@ class BaseBot:
         self.send_message(chat_id, f"woke {branch}")
 
     def _handle_control_kill(self, chat_id: int, branch_arg: str) -> None:
-        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling)."""
-        branch = branch_arg.strip().lstrip("@").lower() or "aipass"
+        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling).
+
+        A destructive verb never picks its own target: a bare /kill shared the
+        same `or "aipass"` default as /start and would have killed @aipass's
+        live session.
+        """
+        branch = branch_arg.strip().lstrip("@").lower()
+        if not branch:
+            self.send_message(chat_id, "Usage: /kill <branch> — name the branch to kill. Nothing killed.")
+            logger.info("Control /kill: no branch named — refused, nothing killed")
+            return
         session_name = f"{CONTROL_SESSION_PREFIX}{branch}"
 
         try:
