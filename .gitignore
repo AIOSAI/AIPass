@@ -110,6 +110,8 @@ src/aipass/*/apps/integrations/**
 !src/aipass/spawn/templates/aipass_framework/docs.local/
 !src/aipass/spawn/templates/aipass_framework/docs.local/**
 !src/aipass/spawn/templates/aipass_framework/DASHBOARD.local.json
+!src/aipass/spawn/templates/project_agent/.spawn/
+!src/aipass/spawn/templates/project_agent/.spawn/**
 
 # Commons artifacts subsystem — real source code (craft/trade/capsule), NOT a
 # runtime dir. Collides with the blanket `artifacts/` ignore (line 49); *.py-only
