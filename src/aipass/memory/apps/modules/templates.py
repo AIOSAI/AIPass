@@ -37,6 +37,7 @@ from rich import box
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -105,8 +106,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_introspection()
             return True
 
-        # --help / -h / help -> full help
-        if args[0] in ("--help", "-h", "help"):
+        # A help flag ANYWHERE wins — asking about `push-templates` must never push.
+        # No templates subcommand takes free text, so a bare `help` counts too.
+        if wants_help(args, allow_bare_word=True):
             print_help()
             return True
 

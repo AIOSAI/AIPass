@@ -533,3 +533,84 @@ class TestEnsureProjectHasOwnerFirstAgentFallback:
         beta = next(b for b in data["branches"] if b["name"] == "beta")
         assert alpha.get("owner") is True
         assert beta.get("owner") is not True
+
+
+class TestIsProtectedLayers:
+    """is_protected() protection layers (APLAN-0007 audit).
+
+    Layer 2 (``owner: true``) is unreachable in the live fleet: devpulse is the
+    only entry carrying the flag and it short-circuits on the layer-1 floor, so
+    the branch can only be exercised against a synthetic registry.
+    """
+
+    @staticmethod
+    def _registry(tmp_path, name, owner):
+        reg = tmp_path / "AIPASS_REGISTRY.json"
+        reg.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-08-13", "total_branches": 1},
+                    "branches": [
+                        {
+                            "name": name,
+                            "path": f"src/{name}",
+                            "email": f"@{name}",
+                            "status": "active",
+                            "profile": "library",
+                            "description": "test",
+                            "created": "2026-08-13",
+                            "last_active": "2026-08-13",
+                            "owner": owner,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return reg
+
+    def test_floor_branches_are_protected(self):
+        """Layer 1: the hardcoded floor refuses without touching the registry."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        for name in ("spawn", "devpulse", "drone"):
+            protected, reason = is_protected(name)
+            assert protected is True
+            assert "infrastructure" in reason
+
+    def test_registry_owner_flag_protects(self, tmp_path):
+        """Layer 2: a non-floor branch with owner:true is refused as registry owner."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        reg = self._registry(tmp_path, "baud", owner=True)
+        protected, reason = is_protected("baud", branch_dir=tmp_path / "nonexistent", registry_path=reg)
+        assert protected is True
+        assert reason == "registry owner"
+
+    def test_active_passport_protects(self, tmp_path):
+        """Layer 3: no owner flag, but a registered passport still refuses."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        reg = self._registry(tmp_path, "baud", owner=False)
+        branch = tmp_path / "baud"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"registered": True}}), encoding="utf-8"
+        )
+        protected, reason = is_protected("baud", branch_dir=branch, registry_path=reg)
+        assert protected is True
+        assert reason == "active citizen"
+
+    def test_unregistered_branch_is_not_protected(self, tmp_path):
+        """All three layers miss: an unregistered passport is deletable."""
+        from aipass.spawn.apps.handlers.registry import is_protected
+
+        reg = self._registry(tmp_path, "baud", owner=False)
+        branch = tmp_path / "baud"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"registered": False}}), encoding="utf-8"
+        )
+        protected, reason = is_protected("baud", branch_dir=branch, registry_path=reg)
+        assert protected is False
+        assert reason == ""

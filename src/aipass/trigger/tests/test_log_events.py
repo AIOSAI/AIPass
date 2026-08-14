@@ -350,3 +350,44 @@ def test_print_help_outputs_commands():
     assert "start" in output
     assert "stop" in output
     assert "status" in output
+
+
+# ---------------------------------------------------------------------------
+# help_flag_safety canary — a help flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+def test_help_flag_past_position_zero_does_not_run_the_verb(monkeypatch):
+    """A flag one position later must not let the subcommand run.
+
+    Read-only `status` is the probe; it is mocked, so a missing gate shows up
+    as a call that should never have happened rather than as real work.
+    """
+    mod = _import_module()
+
+    ran = MagicMock()
+    monkeypatch.setattr(mod, "status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(mod, "print_help", printed)
+
+    result = mod.handle_command("status", ["extra", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()
+
+
+def test_help_flag_survives_module_name_routing(monkeypatch):
+    """`log_events status extra -h` — flag survives the route hop."""
+    mod = _import_module()
+
+    ran = MagicMock()
+    monkeypatch.setattr(mod, "status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(mod, "print_help", printed)
+
+    result = mod.handle_command("log_events", ["status", "extra", "-h"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()

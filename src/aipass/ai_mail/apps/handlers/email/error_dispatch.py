@@ -54,7 +54,12 @@ def build_error_report(to_branch: str, subject: str, error_msg: str) -> Dict[str
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "auto_execute": False,
         "priority": "normal",
-        "reply_to": "@devpulse",
+        # reply.py routes a reply to `reply_to or from`, so this field decides where
+        # an answer to this report lands. It named @devpulse while the message read
+        # From: ai_mail, so @drone's reply went to the dispatcher instead of to the
+        # mailbox that raised the error. A reply addressed to a system mailbox has to
+        # reach that system mailbox; the failing sender stays evidence in the body.
+        "reply_to": "@ai_mail",
     }
 
 

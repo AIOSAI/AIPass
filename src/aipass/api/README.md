@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (38/38 at 100%) | **Tests:** 515 pass | **Functions:** 84 public (84 tested)
-**Last Updated:** 2026-06-24
+**Seedgo:** 100% (44/44 at 100%; 99% with all bypasses disabled) | **Tests:** 532 pass | **Functions:** 84 public (84 tested)
+**Last Updated:** 2026-08-13
 
 ---
 
@@ -79,7 +79,7 @@ api/
 │   │   ├── bridge.py                  # Generic contract registry (register/resolve)
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   └── registry.py               # Driver auto-discovery (load_drivers)
-│   ├── handlers/                      # Business logic (7 packages, 15 files)
+│   ├── handlers/                      # Business logic (8 packages, 17 files)
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
@@ -89,7 +89,7 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 515 tests across 28 files
+└── tests/                             # 532 tests across 31 files
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -144,13 +144,15 @@ Private drivers in `apps/integrations/{project}/driver.py` (gitignored) register
 
 ## Known Issues
 
+- Error paths exit `0` — a failed command (missing arg, no key, no data) reports success to the shell, so `drone @api validate && ...` proceeds on failure. Unknown commands correctly exit `1`. See APLAN-0013.
 - Google auth libraries are optional deps — commands fail with install instructions if missing
-- `openai`/Google auth ModuleNotFoundError despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed
-- Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`)
+- Backup branch credential migration pending (`~/.aipass/` → `~/.secrets/aipass/`; legacy dir still present)
 - No rate limiting on OpenRouter calls (S117 finding)
+
+**Troubleshooting:** `openai`/Google auth `ModuleNotFoundError` despite a working venv → the `[llm]`/`[drive]` extras were added after the venv was last built; re-run `setup.sh` (installs `.[dev,memory,llm,drive]`) to resync, no code fix needed. Both import cleanly as of 2026-08-13.
 
 ---
 
-*Last Updated: 2026-06-24*
+*Last Updated: 2026-08-13*
 
 [← Back to AIPass](../../../README.md)

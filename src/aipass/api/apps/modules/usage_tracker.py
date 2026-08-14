@@ -116,8 +116,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["track", "stats", "session", "caller-usage", "cleanup"]:
             return False
 
-        # Help gate
-        if args and args[0] in ("--help", "-h", "help"):
+        # Help gate — a help flag ANYWHERE means "explain", never "execute".
+        # api.py's guard only inspects the first arg after the command, so
+        # `cleanup 30 --help` arrives here with args[0] == "30"; parsing that
+        # as a retention window ran a real, data-deleting cleanup.
+        # Bare "help" is only a flag in first position, so it stays usable as
+        # a caller name in `track <id> help`.
+        if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 

@@ -22,6 +22,7 @@ from aipass.drone.apps.handlers.scanning.formatters import (
     format_scan_results,
 )
 from aipass.drone.apps.modules.resolver import resolve_branch
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = [
     "handle_command",
@@ -51,7 +52,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
 

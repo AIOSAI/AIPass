@@ -135,11 +135,27 @@ class TestPrintIntrospection:
 
 
 class TestHandleCommand:
-    """Verifies that handle_command always returns False."""
+    """Verifies that handle_command always returns False and stays silent."""
 
     def test_returns_false_no_args(self) -> None:
         """Empty args list returns False."""
         assert handle_command("bridge", []) is False
+
+    def test_silent_no_args(self, capsys: object) -> None:
+        """Bridge owns no commands — a no-arg command must not print its banner.
+
+        Bridge is discovered before the module that owns the command, so any
+        output here leaks into every no-arg command's output.
+        """
+        handle_command("get-key", [])
+
+        assert capsys.readouterr().out == ""  # type: ignore[union-attr]
+
+    def test_silent_help_flag(self, capsys: object) -> None:
+        """A --help probe for another module's command must not print bridge's banner."""
+        handle_command("get-key", ["--help"])
+
+        assert capsys.readouterr().out == ""  # type: ignore[union-attr]
 
     def test_returns_false_help_flag(self) -> None:
         """--help arg returns False."""

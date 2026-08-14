@@ -110,8 +110,13 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["test", "call", "models", "status"]:
             return False
 
-        # Help gate
-        if args and args[0] in ("--help", "-h", "help"):
+        # Help gate — a help flag ANYWHERE means "explain", never "execute".
+        # Modules are also reachable via __main__, which bypasses the router's
+        # normalisation, so the whole-sequence check is needed here too:
+        # `models --all --help` and `call "..." --help` otherwise reached the
+        # API-calling paths. Bare "help" stays a flag only in first position, so
+        # a prompt containing the word "help" is still sent as content.
+        if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 

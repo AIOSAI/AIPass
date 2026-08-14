@@ -287,3 +287,65 @@ class TestPrintFunctions:
 
         print_help()
         assert mock_console.print.called
+
+
+class TestTrailingHelpDoesNotDispatch:
+    """A help flag must never dispatch a contract.
+
+    api.py's entry guard only inspects the first arg after the command, so
+    `integrations call publish_devto --help` reaches handle_command with
+    args[0] == "call". Dispatching there runs a live publishing driver from
+    what the user typed as a help probe.
+    """
+
+    @patch(f"{_IM}.print_help", new_callable=MagicMock)
+    @patch(f"{_IM}._run_call", new_callable=MagicMock)
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    def test_call_with_trailing_help_does_not_run_contract(
+        self,
+        _mock_loaded: MagicMock,
+        mock_call: MagicMock,
+        mock_help: MagicMock,
+    ) -> None:
+        """`integrations call <contract> --help` prints help, dispatches nothing."""
+        from aipass.api.apps.modules.integrations_manager import handle_command
+
+        assert handle_command("integrations", ["call", "publish_devto", "--help"]) is True
+
+        mock_call.assert_not_called()
+        mock_help.assert_called_once()
+
+    @patch(f"{_IM}.print_help", new_callable=MagicMock)
+    @patch(f"{_IM}._run_list", new_callable=MagicMock)
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    def test_list_with_trailing_help_shows_help(
+        self,
+        _mock_loaded: MagicMock,
+        mock_list: MagicMock,
+        mock_help: MagicMock,
+    ) -> None:
+        """`integrations list --help` prints help instead of listing."""
+        from aipass.api.apps.modules.integrations_manager import handle_command
+
+        assert handle_command("integrations", ["list", "--help"]) is True
+
+        mock_list.assert_not_called()
+        mock_help.assert_called_once()
+
+    @patch(f"{_IM}.print_help", new_callable=MagicMock)
+    @patch(f"{_IM}._run_call", new_callable=MagicMock)
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    def test_contract_args_named_help_still_dispatch(
+        self,
+        _mock_loaded: MagicMock,
+        mock_call: MagicMock,
+        mock_help: MagicMock,
+    ) -> None:
+        """A bare `help` is a contract argument, not a flag."""
+        from aipass.api.apps.modules.integrations_manager import handle_command
+
+        with pytest.raises(SystemExit):
+            handle_command("integrations", ["call", "publish_devto", "help"])
+
+        mock_call.assert_called_once_with("publish_devto", ["help"])
+        mock_help.assert_not_called()

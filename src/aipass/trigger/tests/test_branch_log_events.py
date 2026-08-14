@@ -438,3 +438,45 @@ def test_handle_command_status_prints_all_fields():
     assert "Watchdog available:" in output
     assert "Seen error hashes:" in output
     assert "AIPASS root:" in output
+
+
+# ---------------------------------------------------------------------------
+# help_flag_safety canary — a help flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+def test_help_flag_past_position_zero_does_not_run_the_verb(monkeypatch):
+    """A flag one position later must not let the subcommand run.
+
+    Probed with the read-only `status` verb deliberately: if the gate is
+    missing, the canary reads state instead of starting or resetting a
+    watcher. status() is mocked, so the assertion is that it is never reached.
+    """
+    mod = _import_module()
+
+    ran = MagicMock()
+    monkeypatch.setattr(mod, "status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(mod, "print_help", printed)
+
+    result = mod.handle_command("status", ["extra", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()
+
+
+def test_help_flag_survives_module_name_routing(monkeypatch):
+    """`branch_log_events status extra -h` — flag survives the route hop."""
+    mod = _import_module()
+
+    ran = MagicMock()
+    monkeypatch.setattr(mod, "status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(mod, "print_help", printed)
+
+    result = mod.handle_command("branch_log_events", ["status", "extra", "-h"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()

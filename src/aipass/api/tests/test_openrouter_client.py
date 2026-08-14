@@ -23,6 +23,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.modules.openrouter_client import handle_command
 from aipass.api.apps.modules.openrouter_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
 
 
@@ -749,3 +750,39 @@ def test_create_client_returns_none_on_exception(mock_openai_cls):
     result = create_client("FAKE-sk-or-key")
 
     assert result is None
+
+
+class TestTrailingHelpDoesNotExecute:
+    """A help flag must explain the command, never run it.
+
+    Gating on args[0] only let `models --all --help` and `call "..." --help`
+    reach the API-calling paths. Reported by @seedgo via help_flag_safety.
+    """
+
+    def test_models_with_flag_and_trailing_help_shows_help(self):
+        """`models --all --help` prints help instead of hitting the API."""
+        with patch(f"{_MOD}.print_help") as mock_help, patch(f"{_MOD}.list_models") as mock_models:
+            assert handle_command("models", ["--all", "--help"]) is True
+
+        mock_models.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_call_with_prompt_and_trailing_help_shows_help(self):
+        """`call "prompt" --help` prints help instead of spending a real API call."""
+        with patch(f"{_MOD}.print_help") as mock_help, patch(f"{_MOD}.make_call") as mock_call:
+            assert handle_command("call", ["explain this", "--help"]) is True
+
+        mock_call.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_prompt_text_containing_help_word_still_executes(self):
+        """A bare `help` inside a prompt is content, not a flag."""
+        with (
+            patch(f"{_MOD}.print_help") as mock_help,
+            patch(f"{_MOD}.make_call") as mock_call,
+            patch(f"{_MOD}.json_handler"),
+        ):
+            assert handle_command("call", ["how do I get help", "--model", "x"]) is True
+
+        mock_call.assert_called_once_with(["how do I get help", "--model", "x"])
+        mock_help.assert_not_called()

@@ -14,6 +14,7 @@ Handles sender resolution, email creation, and delivery orchestration.
 Independent handler - no module or display dependencies.
 """
 
+import sys
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -276,6 +277,15 @@ def collect_interactive_input(branches: List[Dict[str, Any]]) -> Optional[Dict[s
     Returns:
         Dict with 'to', 'subject', 'message' keys, or None if cancelled.
     """
+    # Nobody is at the keyboard, so no prompt below can ever be answered. Under
+    # drone the routed subprocess inherits an open-but-silent stdin pipe: input()
+    # does not raise EOFError, it blocks until the 30s routing timeout kills the
+    # command. Refuse up front instead — "no input yet" and "no input ever" are
+    # indistinguishable once we are already waiting on the first read.
+    if not sys.stdin.isatty():
+        logger.warning("[send] interactive send needs a terminal — no TTY on stdin")
+        return None
+
     try:
         selection = input(f"\nPick (1-{len(branches) + 1}): ").strip()
         idx = int(selection) - 1

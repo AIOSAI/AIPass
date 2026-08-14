@@ -36,6 +36,7 @@ from aipass.backup.apps.handlers.state.changelog import append_changelog
 from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.modules.display import (
     build_progress_bar,
+    refuse_missing_root,
     show_backups_now,
     show_last_backups,
     show_result_summary,
@@ -73,10 +74,13 @@ def run_versioned(
     """
     start = time.time()
 
+    # create_backup_dir returns None for a non-directory — stop there rather
+    # than let the store builder mkdir a tree the project doesn't have.
+    if create_backup_dir(project_root) is None:
+        return refuse_missing_root("versioned", project_root, show_panels)
+
     if show_panels:
         show_last_backups()
-
-    create_backup_dir(project_root)
 
     if pre_scanned is not None:
         filtered = pre_scanned
@@ -151,7 +155,12 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # Screen the WHOLE sequence, not just args[0]. This module has a
+    # standalone __main__ entry that never reaches the router's help
+    # normalisation, so a trailing flag used to fall through and run the
+    # verb for real. Bare "help" stays first-position-only: later
+    # positions are user values (filenames), not flags.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
 

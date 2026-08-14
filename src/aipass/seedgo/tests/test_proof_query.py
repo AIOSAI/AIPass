@@ -187,3 +187,46 @@ def test_discover_proof_content_finds_content_files(tmp_path):
     result = _discover_proof_content(tmp_path)
     assert "triplet" in result
     assert "not_a_content" not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests — help-flag safety (help_flag_safety: a flag ANYWHERE explains)
+# ---------------------------------------------------------------------------
+
+
+def test_help_after_the_pack_name_does_not_query(monkeypatch, tmp_path):
+    """`drone @seedgo proof_query aipass_proof --help` looked up a proof named '--help'."""
+    from aipass.seedgo.apps.modules import proof_query
+
+    monkeypatch.setattr(proof_query, "_discover_proof_packs", MagicMock(return_value={"aipass_proof": tmp_path}))
+    show = MagicMock()
+    monkeypatch.setattr(proof_query, "_show_proof_content", show)
+    monkeypatch.setattr(proof_query, "_list_pack_proofs", MagicMock())
+    shown = MagicMock()
+    monkeypatch.setattr(proof_query, "print_help", shown)
+
+    assert proof_query.handle_command("proof_query", ["aipass_proof", "--help"]) is True
+    assert show.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_proof_query_still_queries_without_a_help_flag(monkeypatch, tmp_path):
+    """The gate must not swallow the real command."""
+    from aipass.seedgo.apps.modules import proof_query
+
+    monkeypatch.setattr(proof_query, "_discover_proof_packs", MagicMock(return_value={"aipass_proof": tmp_path}))
+    show = MagicMock()
+    monkeypatch.setattr(proof_query, "_show_proof_content", show)
+    monkeypatch.setattr(proof_query, "print_help", MagicMock())
+
+    assert proof_query.handle_command("proof_query", ["aipass_proof", "triplet"]) is True
+    assert show.call_count == 1
+
+
+def test_proof_query_does_not_answer_for_another_command(monkeypatch):
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import proof_query
+
+    monkeypatch.setattr(proof_query, "print_help", MagicMock())
+
+    assert proof_query.handle_command("standards_query", ["--help"]) is False

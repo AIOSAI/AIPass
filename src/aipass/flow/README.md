@@ -4,7 +4,7 @@
 
 **Purpose:** Unified plan lifecycle management for AIPass. Creates, tracks, closes, and archives numbered work plans across multiple plan types via a filesystem-driven template registry.
 **Module:** `aipass.flow`
-**Version:** 2.2.2
+**Version:** 2.2.1
 **Created:** 2025-11-15
 **Last Updated:** 2026-08-13
 
@@ -18,7 +18,9 @@ Flow is AIPass's plan management system. Every branch uses flow to create, track
 - Create numbered plans from type-specific templates
 - Close plans with foreground archival and vector intake verification
 - List and filter plans across all registered types
-- Restore closed plans from backups
+- Reopen closed plans whose file is still at its registered location
+  (recovery from the `.backup/processed_plans/` archive exists but is only
+  reached when the plan is absent from the registry entirely — see Known Issues)
 - Manage plan types via filesystem-driven template registry
 - Aggregate plans across branches for central reporting
 - Self-heal registries (orphan detection, auto-close missing files, auto-register new template dirs)
@@ -75,6 +77,12 @@ drone @flow --help                              # Full help
 drone @flow --version                           # Version string
 ```
 
+**Use the short verb.** Only the short form executes (`list`, `close`, `create`,
+`restore`, `registry`, `aggregate`, `templates`). The module's full name
+(`list_plans`, `close_plan`, …) resolves for `--help` but is rejected by the
+dispatcher — `post`/`post_close_runner` is the sole module accepting both. The
+`--help` screen currently claims otherwise; see Known Issues.
+
 ---
 
 ## Architecture
@@ -87,7 +95,7 @@ flow/
 │   │   ├── create_plan.py       # Plan creation with template support
 │   │   ├── close_plan.py        # Closure with foreground archival + vector verify
 │   │   ├── list_plans.py        # Plan listing and filtering
-│   │   ├── restore_plan.py      # Plan recovery from backups
+│   │   ├── restore_plan.py      # Reopen closed plans (+ backup recovery path)
 │   │   ├── registry_monitor.py  # Registry scanning and auto-healing
 │   │   ├── aggregate_central.py # Cross-branch plan aggregation
 │   │   ├── post_close_runner.py # Background post-processing with lock management
@@ -100,9 +108,10 @@ flow/
 │       ├── mbank/               # Memory archival and plan processing
 │       ├── runner/              # Lock file operations for background processes
 │       ├── json/                # Auto-creating JSON handler
-│       ├── summary/             # Plan summarization (vestigial)
-│       ├── config/              # Configuration loading
-│       └── events/              # Event handling stubs
+│       ├── json_templates/      # Seed JSON payloads for the auto-creating handler
+│       ├── summary/             # EMPTY — only generate.py(disabled) remains
+│       ├── config/              # EMPTY — package marker only, no code
+│       └── events/              # EMPTY — package marker only, no code
 ├── templates/                   # Plan type plugins (data, not code)
 │   ├── flow_plans/              # FPLAN templates (default, master)
 │   ├── dev_plans/               # DPLAN templates (default)
@@ -111,8 +120,8 @@ flow/
 │   ├── audit_plans/             # APLAN templates (default)
 │   └── playbook_plans/          # PPLAN templates (SOPs: merge, weekly_update, …)
 ├── flow_json/                   # Per-type registries + template_registry.json
-├── tests/                       # 787 tests, 22 test files
-└── .archive/                    # Archived legacy code
+├── tests/                       # 784 tests across 24 files
+└── .archive/                    # Archived legacy code + orphaned registries
 ```
 
 ### Design Principles
@@ -145,6 +154,12 @@ Plans follow the naming convention `{PREFIX}-{NNNN}_topic_slug_YYYY-MM-DD.md` wh
 - Template registry auto-prunes orphaned types (directory deleted → entry + plan registry JSON removed)
 - Plan registries auto-close entries for missing files
 - New template directories auto-register on next command
+
+Auto-prune only fires while the type is **still registered** and its directory
+has gone missing. `unregister <dir>` deliberately leaves the plan registry JSON
+in place (see `remove_type()`), so unregistering *and then* deleting the
+directory slips past the prune and strands a `<shorthand>_registry.json`
+forever. `flow_json/pbplan_registry.json` is one such orphan.
 
 ### Ignored Folders
 
@@ -233,17 +248,31 @@ without interpretation.
 
 ## Quality
 
-- **Seedgo:** 100%
-- **Tests:** 787 passed, 88/88 public functions tested (100%)
-- **Source files:** 40 tracked by seedgo
-- **Last audit:** 2026-08-13
-- **Battle test:** 16/16 commands pass via drone CLI (2026-04-22)
+- **Seedgo:** 100% (44 standards, 42 files, no type errors)
+- **Tests:** 784 tests in 24 files — 788 cases collected after parametrisation, 787 pass / 1 skip. 88/88 public functions tested (100%)
+- **Source files:** 42 tracked by seedgo
+- **Bypass rules:** 58 (74 before the 2026-08-13 audit — 15 dead + 1 false-reason removed)
+- **Last audit:** 2026-08-13 (APLAN-0004, full live command sweep)
 
 ### Known Issues
+- **`restore` cannot reach the backup archive on the normal close path.** Close
+  *moves* the file to `.backup/processed_plans/`; `restore` then fails step 5
+  ("file not found at registered location") because backup recovery is only
+  attempted when the plan is missing from the registry entirely. Verified live
+  on FPLAN-0408. Every normally-closed plan is affected.
+- **`--help` advertises full module names that the dispatcher rejects.** It
+  prints "Commands can be called by short name or full name", but 7 of 8
+  modules match only their short verb. It also lists `template`, which no
+  module accepts — the working verb is `templates`, absent from that list.
+- **`registry status` counts only FPLAN.** It reports the default registry's
+  totals under a system-wide label (354/1 where the true figures across all
+  types are 705/27), because `get_status_impl` calls a bare `load_registry()`.
+- `flow_json/PLAN_REGISTRY.json` is legacy — zero readers anywhere in the tree
+- `flow_json/pbplan_registry.json` is an orphaned type registry (see Auto-healing)
 - Registry scan fires trigger events that are never handled (by design — foreground close handles everything)
 - Dashboard push warns on some closes
-- `mbank/process.py` at 669 lines (nearing 700 limit)
-- `close_ops.py` split into `close_ops.py` (647 lines) + `close_helpers.py` (260 lines)
+- `mbank/process.py` at 718 lines (over the 700 limit)
+- `close_ops.py` split into `close_ops.py` (614 lines) + `close_helpers.py` (257 lines)
 - `push_central.py` comprehensive rewrite (2026-06-02): now pushes all branches' plans, not just flow's — fixed dashboard refresh zeroing other branches' plan counts
 
 ---

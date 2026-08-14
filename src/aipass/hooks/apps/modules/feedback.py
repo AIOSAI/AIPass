@@ -13,6 +13,7 @@
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
@@ -64,7 +65,7 @@ def handle_command(command: str, args: list) -> bool:
 
         sub = args[0]
 
-        if sub in ("--help", "-h", "help"):
+        if wants_help(args):
             CONSOLE.print("[bold cyan]feedback[/bold cyan] — Toggle the periodic feedback pulse")
             CONSOLE.print()
             CONSOLE.print("  drone @hooks feedback        Show current status")

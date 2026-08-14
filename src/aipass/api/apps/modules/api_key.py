@@ -72,8 +72,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         if command not in ["get-key", "validate", "list-providers", "init", "get-secret"]:
             return False
 
-        # Help gate
-        if args and args[0] in ("--help", "-h", "help"):
+        # `validate google` is OAuth2, owned by google_client — google is not in
+        # PROVIDER_DEFAULTS. This module is discovered first, so claiming it here
+        # shadowed the documented command with "No API key found for google".
+        if command == "validate" and args and args[0] == "google":
+            return False
+
+        # Help gate — a help flag ANYWHERE means "explain", never "execute".
+        # Modules are also reachable via __main__, which bypasses the router's
+        # normalisation, so the whole-sequence check is needed here too:
+        # `get-key <provider> --help` otherwise reached get_key() and printed
+        # masked key material. Bare "help" stays a flag only in first position.
+        if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 

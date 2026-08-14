@@ -2,244 +2,44 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-04-16",
-    "description": "Bypass config for @aipass citizen. Modules operational: concierge/init/doctor/handoff/profile/install built and tested. Bypasses cover: binary-invocation introspection pattern (bare aipass <cmd> runs, --info for introspection), thin entry-point router (aipass.py uses bare print, no CLI imports), pure-python bootstrap (bootstrap.py/scaffold_content.py run before AIPass services exist), test-isolation patterns (architecture/encapsulation for tests/ directory), and CLI flag name references (permission_flags in test assertions and handoff platform).",
-    "last_updated": "2026-08-09"
+    "description": "Bypass config for @aipass citizen. Pruned 2026-08-13 (S112, DPLAN-0291 round): 85 rules -> 27. Removed 8 rules whose target file no longer exists and 50 proven inert by CONTROL RUN in BOTH lanes (audit lane: audit_branch with bypass_rules=[]; checklist lane: drone @seedgo checklist per-directory with bypass emptied). 9 further rules the audit lane called dead were LIVE in the checklist lane and were kept - measuring one lane only would have deleted them. Remaining rules cover: binary-invocation introspection (bare aipass <cmd> runs, --info for introspection), thin entry-point router, pure-python bootstrap that runs before AIPass services exist, shared/ helpers checked by the checklist lane, and CLI flag NAME references (permission_flags). Editing this file is @aipass's own call per Patrick's S46 ruling, reaffirmed by @devpulse 2026-08-13.",
+    "last_updated": "2026-08-13"
   },
   "bypass": [
+    {
+      "file": "apps/handlers/help_flag.py",
+      "standard": "json_structure",
+      "reason": "wants_help() is a pure predicate - no I/O, no JSON, no logging - called on EVERY command dispatch before any action runs. Importing json_handler would add a write path and a failure surface to the one function whose whole job is to stop a help probe becoming a write. Measured: the file performs zero JSON operations, so json_handler would be imported solely to satisfy the checker. Fleet-settled shape (DPLAN-0291 help_flag_safety round)."
+    },
     {
       "file": "apps/modules/init_flow.py",
       "standard": "modules",
       "reason": "12-stage init flow requires this many lines; splitting would scatter cohesive stage logic across multiple files and break the resumable-progress contract."
     },
     {
-      "file": "apps/modules/init_flow.py",
-      "standard": "architecture",
-      "reason": "12-stage init flow + scaffold routing + preflight guard. Cohesive unit — splitting breaks the resumable-progress contract. DPLAN-0164 transfer adds routing handlers here intentionally."
-    },
-    {
-      "file": "apps/modules/init_flow.py",
-      "standard": "permission_flags",
-      "reason": "The --dangerously-skip-permissions string is a CLI flag NAME passed verbatim to the user's chosen tool (claude). It is not a code-level permission bypass in this module."
-    },
-    {
-      "file": "apps/handlers/handoff_platform/__init__.py",
-      "standard": "permission_flags",
-      "reason": "The --dangerously-skip-permissions string is a CLI flag NAME appended to the user's chosen tool invocation. It is not a code-level permission bypass in this handler."
-    },
-    {
-      "file": "apps/handlers/handoff_platform/__init__.py",
-      "standard": "cli",
-      "reason": "Session info must print immediately after tmux spawn — returning data to module layer would lose the timing context. User needs attach/kill instructions right when the session starts."
-    },
-    {
-      "file": "apps/aipass.py",
-      "standard": "introspection",
-      "reason": "Entry point router — introspection is in print_introspection() called from main() on no-args/--help. Not a module with handle_command()."
-    },
-    {
       "file": "apps/modules/doctor.py",
       "standard": "modules",
-      "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis — pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
-    },
-    {
-      "file": "tests/test_doctor.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_doctor.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly (system_detector, progress) to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_help_chat.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_profile.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_profile.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import modules directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_init_flow.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_init_flow.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import modules directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
+      "reason": "Doctor reads system files (registry, passport) directly for health-check diagnosis \u2014 pure reads only, no mutations. Using a handler adds indirection without benefit for diagnostic reads."
     },
     {
       "file": "tests/test_init_flow.py",
       "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in handoff_command output. String is in assertion context only — not a permission bypass in this file."
-    },
-    {
-      "file": "tests/test_install.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_install.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import the install module directly to test home resolution, clone, and setup orchestration in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_launcher.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_ping_sweep.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_ping_sweep.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_aipass_main.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_aipass_main.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import the entry point directly to test discover_modules, route_command, and main in isolation."
-    },
-    {
-      "file": "tests/test_handoff_platform.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_handoff_platform.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
+      "reason": "Assertions verify that the CLI flag name appears/absent in handoff_command output. String is in assertion context only \u2014 not a permission bypass in this file."
     },
     {
       "file": "tests/test_handoff_platform.py",
       "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in build_cli_cmd output. String is in assertion context only — not a permission bypass in this file."
-    },
-    {
-      "file": "tests/test_readme_map.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_readme_map.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_handler_guard.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_handler_guard.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handler guard functions directly to test branch-access control in isolation."
-    },
-    {
-      "file": "tests/test_system_detector.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_system_detector.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_json_handler.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_json_handler.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_handoff_module.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_handoff_module.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import modules directly to test them in isolation."
-    },
-    {
-      "file": "tests/test_handoff_module.py",
-      "standard": "permission_flags",
-      "reason": "Assertions verify that the CLI flag name appears/absent in handoff command output. String is in assertion context only — not a permission bypass in this file."
-    },
-    {
-      "file": "tests/test_bootstrap.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_bootstrap.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_structure_scan.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_structure_scan.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_doctor_fix.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_doctor_fix.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import modules directly to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "debug_print",
-      "reason": "The print() on line 159 is inside a generated shell command string (python3 -c), not a bare print call in this module's code."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "help_text",
-      "reason": "The python3 references are in generated shell commands (settings.json hook entries), not in user-facing help text."
+      "reason": "Assertions verify that the CLI flag name appears/absent in build_cli_cmd output. String is in assertion context only \u2014 not a permission bypass in this file."
     },
     {
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "json_structure",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — it must work during initial project setup before any AIPass services exist."
+      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design \u2014 it must work during initial project setup before any AIPass services exist."
     },
     {
       "file": "apps/handlers/init/bootstrap.py",
       "standard": "log_visibility",
-      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design — stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
-    },
-    {
-      "file": "apps/handlers/init/scaffold_content.py",
-      "standard": "json_structure",
-      "reason": "scaffold_content.py is Pure Python only (no module/prax/cli imports) by design — pure string-returning template generators extracted from bootstrap.py. Same constraint as bootstrap.py."
+      "reason": "bootstrap.py is Pure Python only (no module/prax/cli imports) by design \u2014 stdlib getLogger is correct here. prax system_logger requires AIPass to be installed, which hasn't happened at bootstrap time."
     },
     {
       "file": "apps/modules/doctor.py",
@@ -249,32 +49,22 @@
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "introspection",
-      "reason": "Private helper module for doctor.py — not directly invokable, no introspection needed."
+      "reason": "Private helper module for doctor.py \u2014 not directly invokable, no introspection needed."
     },
     {
       "file": "apps/modules/_doctor_wire.py",
       "standard": "introspection",
-      "reason": "Private helper module for doctor.py — not directly invokable, no introspection needed."
+      "reason": "Private helper module for doctor.py \u2014 not directly invokable, no introspection needed."
     },
     {
       "file": "apps/modules/_doctor_fix.py",
       "standard": "naming",
-      "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
+      "reason": "Leading underscore is intentional \u2014 hides from module discovery to pass cli_ux no_internal_modules check."
     },
     {
       "file": "apps/modules/_doctor_wire.py",
       "standard": "naming",
-      "reason": "Leading underscore is intentional — hides from module discovery to pass cli_ux no_internal_modules check."
-    },
-    {
-      "file": "apps/modules/_doctor_fix.py",
-      "standard": "meta",
-      "reason": "Private helper module for doctor.py — meta name matches actual filename _doctor_fix.py."
-    },
-    {
-      "file": "apps/modules/_doctor_wire.py",
-      "standard": "meta",
-      "reason": "Private helper module for doctor.py — meta name matches actual filename _doctor_wire.py."
+      "reason": "Leading underscore is intentional \u2014 hides from module discovery to pass cli_ux no_internal_modules check."
     },
     {
       "file": "apps/modules/handoff.py",
@@ -292,11 +82,6 @@
       "reason": "aipass is binary-invoked: aipass init shows usage; introspection via --info"
     },
     {
-      "file": "apps/modules/profile.py",
-      "standard": "introspection",
-      "reason": "aipass is binary-invoked: aipass profile runs the command; introspection via --info"
-    },
-    {
       "file": "apps/modules/install.py",
       "standard": "introspection",
       "reason": "aipass is binary-invoked: bare 'aipass install' runs the bootstrap; introspection via --info (same pattern as doctor/init_flow/profile)."
@@ -304,82 +89,42 @@
     {
       "file": "apps/modules/install.py",
       "standard": "modules",
-      "reason": "Thin bootstrap orchestrator — preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "test_quality",
-      "reason": "save_json now raises ValueError on invalid structure (aipass.aipass.shared contract, TDPLAN-0006 P2). Tested via pytest.raises — no False return path to test."
-    },
-    {
-      "file": "tests/test_cross_os.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_cross_os.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import the cross_os handler directly to test the parser/filter in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_cross_os.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names (test_filter_win32_gets_win_and_all, test_missing_doc_raises) that are self-documenting. Adding docstrings to every test function adds noise without value."
-    },
-    {
-      "file": "tests/test_sandbox_check.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_sandbox_check.py",
-      "standard": "encapsulation",
-      "reason": "Unit tests must import handlers directly (sandbox_checker, progress) to test them in isolation. Entry-point imports would defeat the purpose of unit testing."
-    },
-    {
-      "file": "tests/test_sandbox_check.py",
-      "standard": "documentation",
-      "reason": "Test methods use descriptive names (test_flag_off_by_default, test_bwrap_functional_live) that are self-documenting. Adding docstrings to 41 test functions adds noise without value."
+      "reason": "Thin bootstrap orchestrator \u2014 preps the target/project dir (mkdir) immediately before shelling out to git clone / setup.sh / aipass init. Pre-subprocess dir prep, not business file ops; a handler adds indirection for 2 mkdir calls in a linear flow (same pattern as init_flow/doctor)."
     },
     {
       "file": "shared/json_handler.py",
       "standard": "architecture",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_handler.py",
       "standard": "log_visibility",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_handler.py",
       "standard": "trigger",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
       "standard": "architecture",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
       "standard": "log_visibility",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
       "standard": "trigger",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/registry_discovery.py",
       "standard": "architecture",
-      "reason": "pre-infra leaf — stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
-    },
-    {
-      "file": "tests/test_shared_bootstrap_safety.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
+      "reason": "pre-infra leaf \u2014 stdlib-only by design, must not import branch dependencies (loads pre-drone for aipass init)"
     },
     {
       "file": "shared/json_ops.py",
@@ -389,43 +134,15 @@
     {
       "file": "apps/modules/trust.py",
       "standard": "encapsulation",
-      "reason": "Imports frozen trust_registry interface (enroll/revoke/is_trusted/read_registry) from @hooks by DPLAN-0244 design. Cross-branch import required — the registry module lives in hooks, consumers live in aipass."
-    },
-    {
-      "file": "apps/modules/trust.py",
-      "standard": "json_structure",
-      "reason": "No JSON file operations — trust.py is a thin CLI wrapper that delegates all JSON I/O to the trust_registry module in @hooks. No json_handler needed."
-    },
-    {
-      "file": "apps/modules/trust.py",
-      "standard": "introspection",
-      "reason": "aipass is binary-invoked: bare 'aipass trust' shows registry table; introspection via --info"
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "encapsulation",
-      "reason": "Imports enroll() from @hooks trust_registry (DPLAN-0244 frozen interface). Cross-branch import required — init must enroll projects in the trust registry after writing hooks.json."
-    },
-    {
-      "file": "apps/handlers/init/bootstrap.py",
-      "standard": "handlers",
-      "reason": "Imports enroll() from @hooks trust_registry by DPLAN-0244 design. Cross-handler import required — bootstrap auto-enrolls projects after hooks.json creation/merge."
-    },
-    {
-      "file": "tests/test_trust.py",
-      "standard": "architecture",
-      "reason": "Test file lives in tests/ by convention — not in apps/. Standard 3-layer structure applies to production code only."
-    },
-    {
-      "file": "tests/test_trust.py",
-      "standard": "encapsulation",
-      "reason": "Tests import trust_registry directly to verify enrollment/revocation in isolation with monkeypatched REGISTRY_PATH."
+      "reason": "Imports frozen trust_registry interface (enroll/revoke/is_trusted/read_registry) from @hooks by DPLAN-0244 design. Cross-branch import required \u2014 the registry module lives in hooks, consumers live in aipass."
     },
     {
       "file": "apps/handlers/provider_wire.py",
       "standard": "unused_function",
-      "functions": ["refresh_provider_hooks"],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
+      "functions": [
+        "refresh_provider_hooks"
+      ],
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) \u2014 a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
     }
   ]
 }

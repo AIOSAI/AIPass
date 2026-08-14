@@ -24,6 +24,7 @@ Covers:
 
 import importlib
 import io
+from pathlib import Path
 
 import pytest
 from rich.console import Console
@@ -146,3 +147,33 @@ class TestLogHealthBranchTag:
         console = Console(file=buffer, width=200, no_color=True, highlight=False, markup=True)
         console.print("  cli_drone.log: 2 KB [cli]")
         assert "[cli]" not in buffer.getvalue()
+
+
+class TestHelpCoversEveryCommand:
+    """Top-level --help must name every command the router can actually reach.
+
+    log-health shipped, worked, and was absent from --help entirely: the only
+    way to discover it was to already know it existed. A help surface that
+    omits a working command is the same defect as one that advertises a dead
+    flag, pointed the other way.
+    """
+
+    def _routable_commands(self):
+        """The module files prax.py will load as command handlers."""
+        modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"
+        return sorted(
+            f.stem.replace("_", "-")
+            for f in modules_dir.glob("*.py")
+            if not f.name.startswith("_") and f.name != "logger.py"
+        )
+
+    def test_help_lists_every_routable_module(self):
+        """Every discovered command module appears in --help."""
+        output = _render("aipass.prax.apps.prax", lambda m: m.print_help())
+
+        missing = [c for c in self._routable_commands() if c not in output]
+        assert not missing, f"commands missing from --help: {missing}"
+
+    def test_discovery_finds_the_modules_we_think_it_does(self):
+        """The guard above is only as good as the list it checks."""
+        assert "log-health" in self._routable_commands()

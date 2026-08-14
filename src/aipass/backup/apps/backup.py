@@ -76,12 +76,12 @@ def print_help() -> None:
     console.print("  [green]all[/green]          Run snapshot then versioned in sequence")
     console.print("  [green]register[/green]     Register a project + scaffold its .backup/")
     console.print("  [green]status[/green]       Show backup info and recent history")
-    console.print("  [green]settings[/green]     View/edit backup settings")
+    console.print("  [green]settings[/green]     [dim]Not implemented — settings UI deferred[/dim]")
     console.print("  [green]drive_sync[/green]   Sync backups to the remote drive")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")
     console.print("  [green]drive_stats[/green]  Drive usage statistics")
     console.print("  [green]share[/green]        Upload a single file to Drive + get a shareable link")
-    console.print("  [green]drive_clear[/green]  Clear backups from the remote drive")
+    console.print("  [green]drive_clear[/green]  Clear the local Drive tracker (remote files untouched)")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -160,7 +160,10 @@ def main():
     command = args[0]
     remaining = args[1:]
 
-    if remaining and remaining[0] in ["--help", "-h"]:
+    # A help flag ANYWHERE after the command is a help request, never a run.
+    # Checking only remaining[0] let 'snapshot <project> --help' fall through
+    # and execute a real backup.
+    if any(arg in ("--help", "-h") for arg in remaining):
         for module in modules:
             if module.handle_command(command, ["--help"]):
                 return 0

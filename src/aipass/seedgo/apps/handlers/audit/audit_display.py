@@ -49,8 +49,8 @@ def print_introspection() -> None:
     console.print()
 
     console.print("[yellow]Public API:[/yellow]")
-    console.print("  [dim]- print_branch_summary(audit_result, system_averages, overall_system_avg)[/dim]")
-    console.print("  [dim]- print_system_summary(audit_results)[/dim]")
+    console.print("  [dim]- print_branch_summary(audit_result, system_averages, overall_system_avg, no_bypass)[/dim]")
+    console.print("  [dim]- print_system_summary(audit_results, no_bypass)[/dim]")
     console.print()
 
     console.print("[yellow]External Dependencies:[/yellow]")
@@ -213,9 +213,17 @@ def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
 
 
 def print_branch_summary(
-    audit_result: Dict, system_averages: Dict[str, int] | None = None, overall_system_avg: int = 0
+    audit_result: Dict,
+    system_averages: Dict[str, int] | None = None,
+    overall_system_avg: int = 0,
+    no_bypass: bool = False,
 ):
-    """Print summary for a single branch - always shows full details (audit = comprehensive)"""
+    """Print summary for a single branch - always shows full details (audit = comprehensive)
+
+    no_bypass tags the branch line and the Overall line, so the label travels
+    with the number. A --no-bypass score copied out of an unlabelled summary is
+    indistinguishable from a branch that just regressed.
+    """
     json_handler.log_operation("audit_display_rendered", {"branch": audit_result["branch"]["name"]})
     branch = audit_result["branch"]
     scores = audit_result["scores"]
@@ -224,8 +232,11 @@ def print_branch_summary(
 
     # Branch header - always show files checked
     cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
+    no_bypass_tag = " [bold yellow][BYPASSES DISABLED][/bold yellow]" if no_bypass else ""
     console.print()
-    console.print(f"[bold cyan]{branch['name']}[/bold cyan] [dim]({files_checked} files checked)[/dim]{cached_tag}")
+    console.print(
+        f"[bold cyan]{branch['name']}[/bold cyan] [dim]({files_checked} files checked)[/dim]{cached_tag}{no_bypass_tag}"
+    )
 
     # Scores in a grid
     score_items = list(scores.items())
@@ -247,6 +258,8 @@ def print_branch_summary(
     # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"
     console.print(f"  [bold]Overall:{' ' * 8} {avg:3}% {overall_icon}[/bold]")
+    if no_bypass:
+        console.print("  [bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — raw score[/dim]")
 
     # Display violation details for any standard with violations
     rendered_standards = set()
@@ -296,8 +309,13 @@ def print_branch_summary(
     _render_deprecated_patterns(audit_result, console)
 
 
-def print_system_summary(audit_results: List[Dict]):
-    """Print system-wide summary with standard averages"""
+def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
+    """Print system-wide summary with standard averages
+
+    no_bypass labels the summary itself, not just the run that produced it —
+    this block is the part that gets copied into a plan or a message, and a
+    fleet average with every rule switched off means something else entirely.
+    """
     total_branches = len(audit_results)
     avg_compliance = int(sum(r["average"] for r in audit_results) / total_branches) if total_branches else 0
 
@@ -312,7 +330,10 @@ def print_system_summary(audit_results: List[Dict]):
 
     console.print()
     console.print("─" * 70)
-    console.print("[bold]SYSTEM SUMMARY:[/bold]")
+    if no_bypass:
+        console.print("[bold]SYSTEM SUMMARY[/bold] — [bold yellow]BYPASSES DISABLED[/bold yellow][bold]:[/bold]")
+    else:
+        console.print("[bold]SYSTEM SUMMARY:[/bold]")
     console.print(f"  Total branches:        {total_branches}")
     console.print(f"  Average compliance:    {avg_compliance}%")
     console.print(f"  Branches ≥90%:         {excellent}")
@@ -324,6 +345,8 @@ def print_system_summary(audit_results: List[Dict]):
         console.print("  Type errors:           0")
     if cache_served:
         console.print(f"  Cache-served:          {cache_served}/{total_branches} branches (unchanged, skipped re-scan)")
+    if no_bypass:
+        console.print("  Bypass rules:          [bold yellow]DISABLED[/bold yellow] [dim](raw, not comparable)[/dim]")
     console.print()
 
     # Calculate standard averages

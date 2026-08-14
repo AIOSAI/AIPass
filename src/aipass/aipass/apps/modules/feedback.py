@@ -21,6 +21,7 @@ from __future__ import annotations
 import subprocess
 
 from aipass.cli.apps.modules import console, error, warning
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -77,7 +78,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != COMMAND:
         return False
 
-    if args and args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         json_handler.log_operation("feedback_help", {"command": command})
         print_help()
         return True

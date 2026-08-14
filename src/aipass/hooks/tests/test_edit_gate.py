@@ -323,6 +323,225 @@ class TestEditGateProjectBoundary:
         assert "inbox.json" in json.loads(result["stdout"])["reason"]
 
 
+@pytest.fixture
+def branch_tree(tmp_path: Path):
+    """A two-file branch plus an isolated diagnostics state file.
+
+    Shaped src/<pkg>/<branch>/... so _get_branch resolves, with no *_REGISTRY.json
+    anywhere so the project fence stays out of the way.
+    """
+    import importlib
+
+    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+    branch = tmp_path / "src" / "aipass" / "seedgo"
+    (branch / "tests").mkdir(parents=True)
+    (branch / "apps" / "modules").mkdir(parents=True)
+
+    red_test = branch / "tests" / "test_track_e.py"
+    red_test.write_text("from aipass.x import _is_live_inbox\n", encoding="utf-8")
+    impl = branch / "apps" / "modules" / "inbox_audit.py"
+    impl.write_text("x = 1\n", encoding="utf-8")
+
+    state_file = tmp_path / ".diagnostics_state.json"
+    with patch.object(ds, "STATE_FILE", state_file):
+        yield {
+            "branch": branch,
+            "red_test": red_test,
+            "impl": impl,
+            "state_file": state_file,
+            "ds": ds,
+            "write_state": lambda errors: state_file.write_text(
+                json.dumps({"file": str(red_test), "errors": errors}), encoding="utf-8"
+            ),
+        }
+
+
+UNKNOWN_SYMBOL = {"line": 1, "message": '"_is_live_inbox" is unknown import symbol'}
+MISSING_IMPORT = {"line": 1, "message": 'Import "aipass.x" could not be resolved'}
+LOCAL_ERROR = {"line": 4, "message": 'Argument of type "str" cannot be assigned to parameter of type "int"'}
+
+
+class TestEditGateDiagnosticsState:
+    """The block must be satisfiable, and must be a live fact rather than a remembered one.
+
+    Reported by @seedgo with a live repro: a red test importing a symbol that does
+    not exist yet is the mandated red-first shape, and the only edit that can clear
+    it is in another file — which is exactly what the gate blocked.
+    """
+
+    def _edit_other_file(self, tree: dict) -> dict:
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        return handle(
+            {
+                "tool_name": "Edit",
+                "cwd": str(tree["branch"]),
+                "tool_input": {"file_path": str(tree["impl"]), "old_string": "x", "new_string": "y"},
+            }
+        )
+
+    def test_cross_file_red_first_is_not_blocked(self, branch_tree: dict):
+        """The deadlock: the resolving edit lives in another file by definition."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[UNKNOWN_SYMBOL]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_unresolved_module_import_is_also_cross_file(self, branch_tree: dict):
+        branch_tree["write_state"]([MISSING_IMPORT])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[MISSING_IMPORT]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_local_error_still_blocks(self, branch_tree: dict):
+        """The gate keeps doing its job for errors the errored file can actually fix."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[LOCAL_ERROR]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+        assert "before editing other files" in json.loads(result["stdout"])["reason"]
+
+    def test_mixed_errors_still_block(self, branch_tree: dict):
+        """Every error must be cross-file; one locally-fixable error keeps the block."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL, LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[UNKNOWN_SYMBOL, LOCAL_ERROR]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+
+    def test_stale_state_is_dropped_when_the_file_is_clean_now(self, branch_tree: dict):
+        """Defect 2: a resolving write the hook never saw left a permanent block."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_stale_state_file_is_cleared_not_just_ignored(self, branch_tree: dict):
+        branch_tree["write_state"]([LOCAL_ERROR])
+        assert branch_tree["state_file"].exists()
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
+            self._edit_other_file(branch_tree)
+        assert not branch_tree["state_file"].exists()
+
+    def test_block_reports_the_revalidated_errors_not_the_recorded_ones(self, branch_tree: dict):
+        """If the file still fails, the reason should quote what is true now."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        fresh = [{"line": 9, "message": "A different error that exists right now"}]
+        with patch.object(branch_tree["ds"], "revalidate", return_value=fresh):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+        assert "A different error that exists right now" in json.loads(result["stdout"])["reason"]
+
+    def test_unverifiable_state_falls_back_to_the_recorded_errors(self, branch_tree: dict):
+        """pyright missing or timed out: keep the old behaviour for local errors."""
+        branch_tree["write_state"]([LOCAL_ERROR])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=None):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
+
+    def test_unverifiable_state_still_clears_the_deadlock(self, branch_tree: dict):
+        """Defect 1 is fixed even when the file cannot be re-checked."""
+        branch_tree["write_state"]([UNKNOWN_SYMBOL])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=None):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_editing_the_errored_file_itself_is_still_allowed(self, branch_tree: dict):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        branch_tree["write_state"]([LOCAL_ERROR])
+        result = handle(
+            {
+                "tool_name": "Edit",
+                "cwd": str(branch_tree["branch"]),
+                "tool_input": {"file_path": str(branch_tree["red_test"]), "old_string": "a", "new_string": "b"},
+            }
+        )
+        assert result["exit_code"] == 0
+
+
+class TestDiagnosticsStateModule:
+    """apps/modules/diagnostics_state.py — one definition of what the state file means."""
+
+    def test_classifies_unknown_import_symbol_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(UNKNOWN_SYMBOL) is True
+
+    def test_classifies_unresolved_import_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(MISSING_IMPORT) is True
+
+    def test_does_not_classify_a_local_type_error_as_cross_file(self):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.is_cross_file_error(LOCAL_ERROR) is False
+
+    def test_all_cross_file_is_false_for_an_empty_list(self):
+        """No errors is not 'all resolvable elsewhere' — callers must not read it as allow."""
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.all_cross_file([]) is False
+
+    def test_revalidate_returns_none_when_pyright_is_unavailable(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", side_effect=FileNotFoundError()):
+            assert ds.revalidate(str(target)) is None
+
+    def test_revalidate_returns_none_on_timeout(self, tmp_path: Path):
+        import subprocess as sp
+
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", side_effect=sp.TimeoutExpired("pyright", 1)):
+            assert ds.revalidate(str(target)) is None
+
+    def test_revalidate_returns_empty_list_for_a_clean_file(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x: int = 1\n", encoding="utf-8")
+        assert ds.revalidate(str(target)) == []
+
+    def test_revalidate_reports_a_real_type_error(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "broken.py"
+        target.write_text('x: int = "not an int"\n', encoding="utf-8")
+        found = ds.revalidate(str(target))
+        assert found and any("int" in e["message"] for e in found)
+
+    def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        assert ds.revalidate(str(tmp_path / "gone.py")) is None
+
+    def test_load_returns_empty_dict_when_there_is_no_state(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
+            assert ds.load() == {}
+
+    def test_load_returns_empty_dict_on_corrupt_state(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        corrupt = tmp_path / "corrupt.json"
+        corrupt.write_text("{not json", encoding="utf-8")
+        with patch.object(ds, "STATE_FILE", corrupt):
+            assert ds.load() == {}
+
+    def test_clear_is_safe_when_the_file_is_already_gone(self, tmp_path: Path):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
+            ds.clear()
+
+
 class TestEditGateExternalProject:
     """Verify edit gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 

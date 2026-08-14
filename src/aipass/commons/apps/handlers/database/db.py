@@ -59,7 +59,7 @@ def _get_db_path() -> Path:
 
     Resolution order:
     1. Walk up from __file__ to find branch root → {branch_root}/commons.db
-    2. AIPASS_ROOT environment variable → {AIPASS_ROOT}/src/commons/commons.db
+    2. AIPASS_ROOT environment variable → {AIPASS_ROOT}/src/aipass/commons/commons.db
     3. Fallback → ~/.aipass/commons.db
 
     Returns:

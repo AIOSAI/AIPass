@@ -36,9 +36,39 @@ def test_build_error_report_basic_structure(monkeypatch):
     assert result["to"] == "@drone"
     assert result["auto_execute"] is False
     assert result["priority"] == "normal"
-    assert result["reply_to"] == "@devpulse"
+    assert result["reply_to"] == "@ai_mail"
     assert "timestamp" in result
     assert len(result["timestamp"]) == 19  # "YYYY-MM-DD HH:MM:SS"
+
+
+def test_build_error_report_reply_lands_on_the_mailbox_in_the_from_line(monkeypatch):
+    """A reply to an error report reaches the sender it names, not a third party.
+
+    reply.py routes a reply to `reply_to or from`, so these two fields together
+    decide where an answer lands. @drone replied to one of these reports and it
+    arrived at @devpulse -- the dispatcher -- while the message read From: ai_mail
+    (reported 2026-08-12, APLAN-0006). Named after the contract, not the value:
+    whatever the From line claims is who must receive the answer.
+    """
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "trigger")
+
+    result = build_error_report("@backup", "Deploy task", "Connection refused")
+
+    assert result["reply_to"] == result["from"]
+
+
+def test_build_error_report_reply_route_ignores_the_failing_sender(monkeypatch):
+    """The caller that failed to send is named in the body, never in the reply route.
+
+    The report is about ai_mail's delivery, so the investigation reply belongs to
+    ai_mail. The original sender stays evidence in the body.
+    """
+    monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
+
+    result = build_error_report("@backup", "Deploy task", "Connection refused")
+
+    assert result["reply_to"] == "@ai_mail"
+    assert "@devpulse" in result["message"]
 
 
 def test_build_error_report_subject_includes_recipient_and_error(monkeypatch):

@@ -187,7 +187,7 @@ def _handle_scan(args, dry_run):
 
 def _print_help():
     """Display repair command help."""
-    warning("Usage: drone @spawn repair <project_path> [options]")
+    console.print("[bold cyan]Usage:[/bold cyan] drone @spawn repair <project_path> \\[options]")
     console.print()
     console.print("  [green]<project_path>[/green]           Path to project root")
     console.print("  [green]--apply[/green]                  Execute changes (default is preview-only)")

@@ -89,3 +89,21 @@ class TestCreateEnvTemplate:
             result = create_env_template(provider="openrouter", target_path=target)
 
         assert result is False
+
+
+class TestDiagnoseKeySuggestsRealCommand:
+    """The no-key diagnosis is the most-seen error text — it must not dead-end.
+
+    It previously told users to run `drone @api setup`, which has never been a
+    command; the real one is `init`.
+    """
+
+    def test_missing_key_message_names_init(self) -> None:
+        """The suggestion points at a command api.py actually routes."""
+        from aipass.api.apps.handlers.auth import keys
+
+        with patch.object(keys, "_read_key_from_secrets", return_value=None):
+            message = keys.diagnose_key("openrouter")
+
+        assert "drone @api init" in message
+        assert "drone @api setup" not in message

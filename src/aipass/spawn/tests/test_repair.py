@@ -204,7 +204,7 @@ class TestMoveBranch:
         from aipass.spawn.apps.handlers.repair_ops import move_branch
 
         _project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
-        result = move_branch("NAV", "/tmp/escape_attempt", registry_path=reg)
+        result = move_branch("NAV", str(tmp_path / "escape_attempt"), registry_path=reg)
         assert result["success"] is False
         assert "outside project root" in result["error"]
 

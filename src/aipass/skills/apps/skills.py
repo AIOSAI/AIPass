@@ -81,6 +81,11 @@ def handle_command(command, args=None):
             return False
         name = args[0]
         action = args[1] if len(args) > 1 else None
+        # `run <skill> --help` must document the skill, not be dispatched as an
+        # action named "--help": handlers that fall through to a default reading
+        # (branch_health, inbox_check) answered with "Branch '--help' not found".
+        if action in ("--help", "-h", "help"):
+            return _cmd_info(name)
         extra_args = _parse_extra_args(args[2:]) if len(args) > 2 else {}
         return _cmd_run(name, action, extra_args)
 
@@ -344,8 +349,14 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     if not args:
-        handle_command("--help")
+        ok = handle_command("--help")
     else:
         command = args[0]
         remaining = args[1:] if len(args) > 1 else []
-        handle_command(command, remaining)
+        ok = handle_command(command, remaining)
+
+    # drone runs a branch command as a subprocess and propagates its return code.
+    # Discarding the result here made every failure — unknown skill, missing
+    # argument, unknown command — exit 0, so `drone @skills validate x && ...`
+    # ran the second half on a failed validate.
+    sys.exit(0 if ok else 1)

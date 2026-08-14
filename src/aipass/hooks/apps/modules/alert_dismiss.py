@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -98,7 +99,7 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("Removes the alert with the given ID from .aipass/alerts.json.")
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         CONSOLE.print("[bold cyan]dismiss[/bold cyan] — Remove an alert")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks dismiss <alert-id>")

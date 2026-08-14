@@ -22,6 +22,7 @@ from typing import List
 # Import console from CLI display module (using our own service!)
 from aipass.cli.apps.modules.display import console as CONSOLE
 from aipass.cli.apps.handlers.json import json_handler
+from aipass.cli.apps.handlers.cli.help_flags import wants_help
 # NOTE: Cannot import prax here — circular import (prax depends on cli)
 # from aipass.prax import logger
 
@@ -102,16 +103,19 @@ def print_help():
 
 def handle_command(command: str, args: List[str]) -> bool:
     """Handle 'templates' and 'demo' commands"""
+    if command not in ("templates", "demo"):
+        return False
+    # help_flag_safety: scan the WHOLE sequence before any doing path — a flag
+    # after a subcommand (`templates demo --help`) must still explain, not run.
+    # command holds our own name, so position 0 comes from args.
+    if wants_help(None, args):
+        print_help()
+        return True
     if command == "demo":
         run_demo()
         return True
-    if command != "templates":
-        return False
     if not args:
         print_introspection()
-        return True
-    if args[0] in ("--help", "-h", "help"):
-        print_help()
         return True
     if args[0] == "demo":
         run_demo()

@@ -3,7 +3,7 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-08-10T00:00:00.000000"
+    "last_updated": "2026-08-13T18:05:00.000000"
   },
   "bypass": [
     {
@@ -154,9 +154,14 @@
       "reason": "Intentional \u2014 status is a leaf command where bare invocation shows system status (the primary user intent), not module introspection. Introspection is available via print_introspection() and __main__."
     },
     {
-      "file": "apps/",
+      "file": "apps/prax.py",
       "standard": "architecture",
-      "reason": "Template files managed by spawn \u2014 prax cannot add/remove template files. Template structure is defined in spawn/templates/builder/ and applied at branch creation time."
+      "reason": "Template files managed by spawn \u2014 prax cannot add/remove them. Template structure is defined in spawn/templates/builder/ and applied at branch creation. Measured 2026-08-13: suppresses exactly one finding, the missing artifacts/birth_certificate.json. Narrowed from file='apps/', which the substring matcher spread over all 74 apps/ files."
+    },
+    {
+      "file": "apps/plugins/",
+      "standard": "architecture",
+      "reason": "Deliberate 4th layer, not a layering breach. apps/plugins/devpulse_dashboard/ holds per-branch dashboard sections (git, session, dispatch) loaded by devpulse, documented in README. The 3-layer check reads them as misplaced. Measured 2026-08-13: 3 files (dispatch_section, git_section, refresh). Split out of the old file='apps/' rule, whose stated reason was about spawn templates and never described these."
     },
     {
       "file": "apps/handlers/monitoring/event_queue.py",
@@ -168,6 +173,11 @@
       "standard": "cli",
       "pattern": "console.print(",
       "reason": "This IS the display handler for the commons live feed (DPLAN-0257). commons_feed.py is a self-contained view \u2014 polling, formatting, and terminal rendering together, same shape as unified_stream.py. console.print() is its designated purpose, not a violation."
+    },
+    {
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure argument-inspection predicate \u2014 no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log prax itself is meant to keep readable. Same rule and same measured reason adopted by @memory, @trigger, @drone and @ai_mail for their help_flags handlers (convention settled 2026-08-13, DPLAN-0291 rule E)."
     }
   ],
   "notes": {

@@ -81,6 +81,34 @@ class TestUpdateCommand:
             result = _update_mod.handle_command("update", [])
         assert result is True
 
+    def test_no_escalation_warning_when_nothing_to_escalate(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A clean digest must not emit a stderr warning.
+
+        The section header was warned unconditionally, so every quiet run printed
+        'ESCALATIONS NEEDED' to stderr and 'None - all clear' to stdout. Anything
+        capturing stderr (cron, logs) read that as a standing alarm.
+        """
+        with (
+            patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
+            patch.object(_update_mod, "load_local", return_value={}),
+            patch.object(_update_mod, "get_escalations", return_value=[]),
+        ):
+            _update_mod.handle_command("update", [])
+        captured = capsys.readouterr()
+        assert "ESCALATIONS NEEDED" not in captured.err, "clean digest must not warn on stderr"
+        assert "all clear" in captured.out, "the escalations section must still render"
+
+    def test_escalation_warning_when_escalations_exist(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A real escalation must still warn on stderr."""
+        with (
+            patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
+            patch.object(_update_mod, "load_local", return_value={}),
+            patch.object(_update_mod, "get_escalations", return_value=[{"from": "@devpulse", "subject": "urgent"}]),
+        ):
+            _update_mod.handle_command("update", [])
+        captured = capsys.readouterr()
+        assert "ESCALATIONS NEEDED" in captured.err, "a real escalation must warn on stderr"
+
 
 # ============================================================================
 # Error cascade tests — single error message, no double-error

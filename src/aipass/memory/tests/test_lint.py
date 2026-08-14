@@ -407,3 +407,102 @@ class TestLintHandlerReadOnly:
 
         assert local_before == local_after, "local.json was modified by lint!"
         assert obs_before == obs_after, "observations.json was modified by lint!"
+
+
+class TestUnknownBranchIsAnError:
+    """A branch that is not in the registry must not report a clean bill of health.
+
+    'lint @nosuchbrnach' used to print a green 'No violations found across
+    @nosuchbrnach (0 scanned)' — a typo read as proof the branch was clean.
+    """
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def test_unknown_branch_calls_error(self) -> None:
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": "/tmp/memory"}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "error") as errored:
+                with patch.object(lint, "run_lint") as scanned:
+                    lint._execute_lint(branch_filter="nosuchbrnach")
+
+        errored.assert_called_once()
+        assert "nosuchbrnach" in str(errored.call_args)
+        scanned.assert_not_called()
+
+    def test_unknown_branch_does_not_report_success(self) -> None:
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": "/tmp/memory"}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "error"):
+                with patch.object(lint, "success") as succeeded:
+                    lint._execute_lint(branch_filter="nosuchbrnach")
+
+        succeeded.assert_not_called()
+
+    def test_known_branch_still_scans(self) -> None:
+        """The guard must not block a real branch."""
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": "/tmp/memory"}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
+                with patch.object(lint, "_display_results"):
+                    lint._execute_lint(branch_filter="memory")
+
+        scanned.assert_called_once()
+
+    def test_known_branch_match_is_case_insensitive(self) -> None:
+        """run_lint matches case-insensitively, so the guard must too."""
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": "/tmp/memory"}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
+                with patch.object(lint, "_display_results"):
+                    lint._execute_lint(branch_filter="MEMORY")
+
+        scanned.assert_called_once()
+
+    def test_no_filter_scans_everything(self) -> None:
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": "/tmp/memory"}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
+                with patch.object(lint, "_display_results"):
+                    lint._execute_lint(branch_filter=None)
+
+        scanned.assert_called_once()
+
+
+class TestLintHelpFlag:
+    """A trailing help flag must print help, never scan."""
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def test_run_help_prints_help(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "print_help") as helped:
+            with patch.object(lint, "_execute_lint") as scanned:
+                assert lint.handle_command("lint", ["run", "--help"]) is True
+        helped.assert_called_once()
+        scanned.assert_not_called()
+
+    def test_branch_help_prints_help(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "print_help") as helped:
+            with patch.object(lint, "_execute_lint") as scanned:
+                assert lint.handle_command("lint", ["@memory", "-h"]) is True
+        helped.assert_called_once()
+        scanned.assert_not_called()
+
+    def test_plain_run_still_scans(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "_execute_lint") as scanned:
+            assert lint.handle_command("lint", ["run"]) is True
+        scanned.assert_called_once()

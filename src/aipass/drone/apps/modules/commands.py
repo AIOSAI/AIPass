@@ -34,6 +34,7 @@ from aipass.drone.apps.handlers.command_registry.formatters import (
     format_command_list,
     format_removal,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = [
     "add",
@@ -70,7 +71,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
 

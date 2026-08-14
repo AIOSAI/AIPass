@@ -1026,6 +1026,130 @@ class TestCheckModuleHelpInterception:
         result = check_module_help_interception(tree, "test.py")
         assert result is None
 
+    def test_imported_help_predicate_passes(self):
+        """A delegated predicate imported from a handler counts as interception."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "from aipass.memory.apps.handlers.cli.help_flags import wants_help\n"
+            "\n"
+            "def handle_command(command, args):\n"
+            "    if wants_help(args, allow_bare_word=True):\n"
+            "        print_help()\n"
+            "        return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_locally_defined_help_predicate_passes(self):
+        """A predicate defined in the same file counts as interception."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "def _is_help_request(args):\n"
+            "    return bool(args)\n"
+            "\n"
+            "def handle_command(command, args):\n"
+            "    if _is_help_request(args):\n"
+            "        print_help()\n"
+            "        return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_non_help_predicate_call_fails(self):
+        """An unrelated predicate call is not mistaken for a help guard."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "def should_process(args):\n"
+            "    return bool(args)\n"
+            "\n"
+            "def handle_command(command, args):\n"
+            "    if should_process(args):\n"
+            "        do_work(args)\n"
+            "    return True\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is False
+        assert "does not intercept" in result["message"]
+
+    def test_helper_substring_name_does_not_pass(self):
+        """'helper' merely contains 'help' -- it is not a help predicate."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "def _has_credential_helper(args):\n"
+            "    return bool(args)\n"
+            "\n"
+            "def handle_command(command, args):\n"
+            "    if _has_credential_helper(args):\n"
+            "        do_work(args)\n"
+            "    return True\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is False
+        assert "does not intercept" in result["message"]
+
+    def test_help_predicate_not_asked_about_args_does_not_pass(self):
+        """A help-named predicate applied to something other than the args is no guard."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "def _contains_help_string(node):\n"
+            "    return bool(node)\n"
+            "\n"
+            "def handle_command(command, args):\n"
+            "    for node in walk(tree):\n"
+            "        if _contains_help_string(node):\n"
+            "            record(node)\n"
+            "    return True\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is False
+        assert "does not intercept" in result["message"]
+
+    def test_unresolved_help_predicate_does_not_pass(self):
+        """A help-named attribute call on an unknown object does not count."""
+        from aipass.seedgo.apps.handlers.aipass_standards.introspection_check import (
+            check_module_help_interception,
+        )
+
+        content = (
+            "def handle_command(command, args):\n"
+            "    if ctx.cli.wants_help(args):\n"
+            "        print_help()\n"
+            "        return True\n"
+            "    return False\n"
+        )
+        tree = ast.parse(content)
+        result = check_module_help_interception(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is False
+        assert "does not intercept" in result["message"]
+
 
 # -- check_introspection_rich_formatting ------------------------------------
 

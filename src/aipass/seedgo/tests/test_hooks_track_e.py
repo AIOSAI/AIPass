@@ -115,6 +115,42 @@ def test_identify_caller_falls_back_to_identity_name(tmp_path):
     assert result == "fallback_branch"
 
 
+def test_handle_command_prints_nothing_for_another_modules_command(capsys):
+    """A module that does not own the command must not write to the display.
+
+    route_command() calls every module's handle_command in discovery order until
+    one returns True, so a module that prints while returning False dumps its
+    output above the module that actually answers. permissions used to print on
+    ANY no-arg or --help command, which is why the trust list appeared over
+    `drone @seedgo standard`.
+    """
+    from aipass.seedgo.apps.modules import permissions
+
+    assert permissions.handle_command("standard", []) is False
+    assert permissions.handle_command("audit", ["--help"]) is False
+    assert capsys.readouterr().out == ""
+
+
+def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys):
+    """`permissions` is a real command: it renders and it is claimed.
+
+    Returning False for its own name is what produced "Unknown command:
+    permissions" followed by the introspection block — the error and the answer
+    for the same input. Asserting on rendered output, not on the return value
+    alone, is what catches the block going missing.
+    """
+    from aipass.seedgo.apps.modules import permissions
+
+    assert permissions.handle_command("permissions", []) is True
+    out = capsys.readouterr().out
+    assert "TRUSTED_CROSS_WRITERS" in out
+    for member in permissions.TRUSTED_CROSS_WRITERS:
+        assert member in out
+
+    assert permissions.handle_command("permissions", ["--help"]) is True
+    assert "TRUSTED_CROSS_WRITERS" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # drone auth.py — no name-based caller list (DPLAN-0281)
 # ---------------------------------------------------------------------------
@@ -163,6 +199,43 @@ def test_inbox_audit_ignores_other_audit_subcommands():
 
     assert handle_command("audit", ["aipass"]) is False
     assert handle_command("audit", ["flow"]) is False
+
+
+def test_inbox_audit_skips_archived_and_backed_up_inboxes(tmp_path):
+    """The sweep audits LIVE mail only — a deleted branch's archived inbox is nobody's to fix.
+
+    Live repo shapes this pins: of 109 paths matching .ai_mail.local/inbox.json,
+    only 25 are live; 84 sit under .backup/ or .archive/ (deleted-branch snapshots
+    and @backup's versioned copies).
+    """
+    from aipass.seedgo.apps.modules.inbox_audit import _is_live_inbox
+
+    live = tmp_path / "flow" / ".ai_mail.local" / "inbox.json"
+    live.parent.mkdir(parents=True)
+    live.write_text("{}", encoding="utf-8")
+    assert _is_live_inbox(live) is True
+
+    for dead_root in (".backup", ".archive"):
+        dead = tmp_path / dead_root / "deleted_branches" / "old" / ".ai_mail.local" / "inbox.json"
+        dead.parent.mkdir(parents=True)
+        dead.write_text("{}", encoding="utf-8")
+        assert _is_live_inbox(dead) is False
+
+
+def test_inbox_audit_skips_a_directory_named_inbox_json(tmp_path):
+    """@backup versions a file into a DIRECTORY of the same name — 47 exist on disk.
+
+    read_text() on one raises IsADirectoryError, which the scanner logged as a
+    warning per path. 44 of the 47 sit under .ai_mail.local/ and so matched the
+    sweep's glob: 44 warnings per run, for a condition no branch can act on. It
+    is not an unreadable inbox, it is not an inbox.
+    """
+    from aipass.seedgo.apps.modules.inbox_audit import _is_live_inbox
+
+    as_dir = tmp_path / "branch" / ".ai_mail.local" / "inbox.json"
+    as_dir.mkdir(parents=True)
+    (as_dir / "inbox.json").write_text("{}", encoding="utf-8")
+    assert _is_live_inbox(as_dir) is False
 
 
 def test_inbox_audit_scan_detects_bad_id(tmp_path):
@@ -259,3 +332,68 @@ def test_deliver_to_inbox_file_writes_message_and_returns_id(tmp_path):
     data = json.loads(inbox.read_text())
     assert len(data["messages"]) == 1
     assert data["messages"][0]["id"] == reply_id
+
+
+# ---------------------------------------------------------------------------
+# Help-flag safety — help_flag_safety: a flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+def test_inbox_ids_help_does_not_run_the_repo_wide_scan():
+    """`drone @seedgo audit inbox-ids --help` walked every inbox in the repo.
+
+    args[0] was "inbox-ids", so the module's help gate never looked at the flag
+    behind it and _run_inbox_id_scan() rglob'd the whole repo root. Asserted
+    against a MOCK of the scan: a test that proves a scan did not run must
+    never run it to find out.
+    """
+    from aipass.seedgo.apps.modules import inbox_audit
+
+    with (
+        patch.object(inbox_audit, "_run_inbox_id_scan") as scan,
+        patch.object(inbox_audit, "print_introspection") as shown,
+    ):
+        assert inbox_audit.handle_command("audit", ["inbox-ids", "--help"]) is True
+
+    assert scan.call_count == 0
+    assert shown.call_count == 1
+
+
+def test_inbox_ids_still_scans_without_a_help_flag():
+    """The gate must not swallow the real subcommand."""
+    from aipass.seedgo.apps.modules import inbox_audit
+
+    with patch.object(inbox_audit, "_run_inbox_id_scan", return_value=0) as scan:
+        assert inbox_audit.handle_command("audit", ["inbox-ids"]) is True
+
+    assert scan.call_count == 1
+
+
+def test_inbox_audit_help_flag_does_not_claim_another_audit_subcommand():
+    """Ownership first: `audit aipass --help` belongs to standards_audit, not here."""
+    from aipass.seedgo.apps.modules import inbox_audit
+
+    with patch.object(inbox_audit, "_run_inbox_id_scan") as scan:
+        assert inbox_audit.handle_command("audit", ["aipass", "--help"]) is False
+
+    assert scan.call_count == 0
+
+
+def test_permissions_help_after_an_argument_explains():
+    """`drone @seedgo permissions list --help` fell through to "Unknown command"."""
+    from aipass.seedgo.apps.modules import permissions
+
+    with patch.object(permissions, "print_introspection") as shown:
+        assert permissions.handle_command("permissions", ["list", "--help"]) is True
+
+    assert shown.call_count == 1
+
+
+def test_permissions_does_not_answer_for_another_command():
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
+    from aipass.seedgo.apps.modules import permissions
+
+    with patch.object(permissions, "print_introspection") as shown:
+        assert permissions.handle_command("checklist", ["--help"]) is False
+
+    assert shown.call_count == 0

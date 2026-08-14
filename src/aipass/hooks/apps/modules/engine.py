@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
 
 CONSOLE = err_console
@@ -481,6 +482,12 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "log":
+        if wants_help(args):
+            CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
+            CONSOLE.print()
+            CONSOLE.print("  drone @hooks log       Tail recent hook activity")
+            return True
+
         lines = tail_log(20)
         if not lines:
             CONSOLE.print("No engine log found")

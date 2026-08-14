@@ -38,14 +38,15 @@ from rich import box
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
 # =============================================================================
 
 # Handler imports
-from ..handlers.monitor import detector
-from ..handlers.rollover.orchestrator import (
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover.orchestrator import (
     execute_rollover as _handler_execute_rollover,
     sync_line_counts as _handler_sync_line_counts,
 )
@@ -97,8 +98,9 @@ def handle_command(command: str, args: List[str]) -> bool:
             print_introspection()
             return True
 
-        # --help / -h / help → full help
-        if args[0] in ("--help", "-h", "help"):
+        # A help flag ANYWHERE wins — asking about `push` must never push.
+        # No rollover subcommand takes free text, so a bare `help` counts too.
+        if wants_help(args, allow_bare_word=True):
             print_help()
             return True
 
@@ -275,7 +277,7 @@ def process_plans_command() -> None:
     console.print()
 
     try:
-        from ..handlers.intake.plans_processor import process_plans
+        from aipass.memory.apps.handlers.intake.plans_processor import process_plans
 
         result = process_plans()
     except Exception as e:
@@ -360,7 +362,7 @@ def sync_line_counts() -> None:
 
 def push_defaults() -> None:
     """Overwrite every per_branch entry in memory.config.json with defaults."""
-    from ..handlers.json import config_loader
+    from aipass.memory.apps.handlers.json import config_loader
 
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Push Defaults[/bold cyan]", border_style="cyan", box=box.ROUNDED))

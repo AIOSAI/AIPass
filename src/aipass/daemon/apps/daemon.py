@@ -231,8 +231,11 @@ def main():
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Subcommand --help guard — intercept before dispatch
-    if remaining_args and remaining_args[0] in ["--help", "-h"]:
+    # Subcommand --help guard — intercept before dispatch.
+    # Scans EVERY remaining arg, not just the first: daemon fires scheduled jobs
+    # and wakes branches, so a help flag that lands after a flag or a stray token
+    # ('inbox-sweep --hours 48 --help') must never fall through and execute.
+    if any(arg in ("--help", "-h") for arg in remaining_args):
         for module in modules:
             if module.handle_command(command, ["--help"]):
                 return 0

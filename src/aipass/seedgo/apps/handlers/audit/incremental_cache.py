@@ -17,8 +17,8 @@ Cache doc shape (single flat file — seedgo_json/audit_cache.json):
     {
         "schema_version": 1,
         "branches": {
-            "<branch_name>": {
-                "stamp": "<checker-pack + bypass/ignore + cache-version fingerprint>",
+            "<branch_name>": {          # "<branch_name>::no-bypass" for a --no-bypass run
+                "stamp": "<checker-pack + bypass/ignore + bypass-state + cache-version fingerprint>",
                 "files": {
                     "<relpath>": {"fp": [mtime_ns, size], "results": {"<checker>": {...}}}
                 },
@@ -152,11 +152,21 @@ def compute_machinery_stamp() -> str:
     return hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest()
 
 
-def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = None) -> str:
-    """Combined invalidation stamp: cache version + checker pack + audit machinery + bypass/ignore rules."""
+def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = None, no_bypass: bool = False) -> str:
+    """Combined invalidation stamp: cache version + checker pack + audit machinery + bypass/ignore rules.
+
+    no_bypass records that the rules were SUPPRESSED for this run (--no-bypass),
+    which nothing else in the stamp can see: compute_bypass_stamp() fingerprints
+    the bypass.json FILE, and that file is byte-identical whether or not its
+    rules were applied. Without it, a normal run and a --no-bypass run over an
+    unchanged tree agree on every input, so whichever runs second is served the
+    other one's score — the honest number published as the normal one, or the
+    bypassed number published as honest.
+    """
     combined = (
         f"{CACHE_VERSION}:{compute_pack_stamp(pack_path, diag_path)}"
         f":{compute_machinery_stamp()}:{compute_bypass_stamp(branch_path)}"
+        f":{'rules-suppressed' if no_bypass else 'rules-applied'}"
     )
     return hashlib.sha1(combined.encode("utf-8")).hexdigest()
 

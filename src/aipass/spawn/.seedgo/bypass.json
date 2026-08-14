@@ -6,124 +6,54 @@
   },
   "bypass": [
     {
-      "file": "apps/spawn.py",
-      "standard": "architecture",
-      "reason": "\"No template for citizen_class 'builder'\" does not reproduce — spawn.py contains no \"builder\" string (verified via grep). builder was renamed to aipass_framework and birthright was retired; DEFAULT_CLASS in class_registry.py is aipass_framework. Stale/cached checker finding predating the rename."
-    },
-    {
       "file": "apps/handlers/json_ops.py",
       "standard": "json_structure",
-      "reason": "Pure utility — deep_merge and backup_json only. No operational side effects to log. Migrations archived."
+      "reason": "Pure utility \u2014 deep_merge and backup_json only. No operational side effects to log. Migrations archived."
     },
     {
       "file": "apps/handlers/class_registry.py",
       "standard": "json_structure",
-      "reason": "Pure data registry — dict lookup only, no operations to log"
+      "reason": "Pure data registry \u2014 dict lookup only, no operations to log"
     },
     {
       "file": "apps/handlers/metadata.py",
       "standard": "json_structure",
-      "reason": "Pure utility — branch name extraction and normalization, no side effects"
+      "reason": "Pure utility \u2014 branch name extraction and normalization, no side effects"
     },
     {
       "file": "apps/handlers/placeholders.py",
       "standard": "json_structure",
-      "reason": "Pure string transformation — placeholder replacement engine, no file I/O"
-    },
-    {
-      "file": "log_structure",
-      "standard": "log_structure",
-      "reason": "Two-tier model managed by Prax — flat logs/ at branch root is correct per PR #63"
+      "reason": "Pure string transformation \u2014 placeholder replacement engine, no file I/O"
     },
     {
       "file": "apps/modules/core.py",
       "standard": "deep_nesting",
-      "reason": "handle_command() depth 7 — complex argument parsing for spawn create with --role/--traits/--purpose/--template/--registry flags. Nested while loop through args array; extraction would obscure control flow."
+      "reason": "handle_command() depth 7 \u2014 complex argument parsing for spawn create with --role/--traits/--purpose/--template/--registry flags. Nested while loop through args array; extraction would obscure control flow."
     },
     {
       "file": "apps/handlers/update_ops.py",
       "standard": "deep_nesting",
-      "reason": "update_branch() depth 4 — 10-step orchestration workflow (resolve, load registry, load meta, reconcile, detect changes, dry-run, execute changes, refresh meta, post-flight, return). Nesting serves workflow structure."
+      "reason": "update_branch() depth 4 \u2014 10-step orchestration workflow (resolve, load registry, load meta, reconcile, detect changes, dry-run, execute changes, refresh meta, post-flight, return). Nesting serves workflow structure."
     },
     {
       "file": "apps/handlers/file_ops.py",
       "standard": "deep_nesting",
-      "reason": "regenerate_template_registry() depth 5 — dual-pass tree scan (directories then files) to build registry with correct IDs. Nesting inherent to algorithm."
+      "reason": "regenerate_template_registry() depth 5 \u2014 dual-pass tree scan (directories then files) to build registry with correct IDs. Nesting inherent to algorithm."
     },
     {
       "file": "apps/handlers/meta_ops.py",
       "standard": "deep_nesting",
-      "reason": "save_branch_meta() depth 5 — atomic file write with try-except-cleanup for temp file pattern. generate_branch_meta() depth 5 — triple-loop adoption path matching (path-first, then hash). Both justified."
-    },
-    {
-      "file": "apps/handlers/sync_templates_ops.py",
-      "standard": "deep_nesting",
-      "reason": "sync_templates() depth 4 — linear workflow loading owners, iterating managed files, checking hashes. Minimal branching, straightforward responsibility."
+      "reason": "save_branch_meta() depth 5 \u2014 atomic file write with try-except-cleanup for temp file pattern. generate_branch_meta() depth 5 \u2014 triple-loop adoption path matching (path-first, then hash). Both justified."
     },
     {
       "file": "apps/handlers/sync_registry_ops.py",
       "standard": "deep_nesting",
-      "reason": "sync_registry() depth 6 — iterates branches, checks passport, loads template registry, generates branch_meta. Nesting inherent to multi-step registry rebuild."
+      "reason": "sync_registry() depth 6 \u2014 iterates branches, checks passport, loads template registry, generates branch_meta. Nesting inherent to multi-step registry rebuild."
     },
     {
       "file": "apps/modules/update.py",
       "standard": "deep_nesting",
-      "reason": "_print_branch_summary() depth 6 — nested formatting of reconciliation results with per-category output. Display logic requires nested iteration."
-    },
-    {
-      "file": "apps/handlers/file_ops.py",
-      "standard": "handlers",
-      "reason": "Imports placeholders.replace_placeholders — file_ops is the copy engine, placeholder replacement is integral to template copying. Architectural coupling."
-    },
-    {
-      "file": "apps/handlers/delete_ops.py",
-      "standard": "handlers",
-      "reason": "Imports registry functions — deletion requires deregistering from AIPASS_REGISTRY.json. Registry is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/update_ops.py",
-      "standard": "handlers",
-      "reason": "Imports meta_ops functions — update needs to load/save branch_meta, compute hashes. Meta is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/sync_registry_ops.py",
-      "standard": "handlers",
-      "reason": "Imports registry functions — sync-registry rebuilds registry entries. Registry is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/meta_ops.py",
-      "standard": "handlers",
-      "reason": "Imports class_registry.get_template_dir — meta needs template dir to load template registry. Class registry is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/placeholders.py",
-      "standard": "handlers",
-      "reason": "Imports registry.find_registry — placeholder resolution needs registry path lookup. Registry is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/passport_ops(disabled).py",
-      "standard": "handlers",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010. File renamed, not deleted."
-    },
-    {
-      "file": "apps/handlers/passport_ops(disabled).py",
-      "standard": "naming",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010. '(disabled)' suffix is the intentional disable-in-place marker so the module is excluded from imports/discovery without deleting history; not a snake_case violation to fix."
-    },
-    {
-      "file": "apps/modules/passport(disabled).py",
-      "standard": "handlers",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010. File renamed, not deleted."
-    },
-    {
-      "file": "apps/modules/passport(disabled).py",
-      "standard": "naming",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010. '(disabled)' suffix is the intentional disable-in-place marker so the module is excluded from imports/discovery without deleting history; not a snake_case violation to fix."
-    },
-    {
-      "file": "apps/modules/passport(disabled).py",
-      "standard": "architecture",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010. No template for citizen_class \"builder\" is expected: builder was renamed to aipass_framework and birthright was retired; this disabled module is dead code kept for history only."
+      "reason": "_print_branch_summary() depth 6 \u2014 nested formatting of reconciliation results with per-category output. Display logic requires nested iteration."
     },
     {
       "file": "apps/handlers/json/json_handler.py",
@@ -131,166 +61,9 @@
       "reason": "Module-level names are function re-exports from aipass.aipass.shared.json_handler.JsonHandler, not constants. Lowercase is correct for callable bindings."
     },
     {
-      "file": "apps/handlers/delete_ops.py",
-      "standard": "naming",
-      "reason": "branch_entry, branch_dir are local variables inside delete_branch(), not module-level constants. Checker false positive on multi-line function scope."
-    },
-    {
-      "file": "apps/handlers/update_ops.py",
-      "standard": "naming",
-      "reason": "dest, source are local variables inside helper functions, not module-level constants. Path objects for template/branch comparison."
-    },
-    {
-      "file": "apps/handlers/passport_ops(disabled).py",
-      "standard": "naming",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010."
-    },
-    {
-      "file": "apps/handlers/delete_ops.py",
-      "standard": "documentation",
-      "reason": "delete_branch() has a docstring at line 45 — checker doesn't recognize it due to multi-line function signature spanning lines 40-44."
-    },
-    {
-      "file": "apps/handlers/passport_ops(disabled).py",
-      "standard": "documentation",
-      "reason": "RETIRED — birthright passport command disabled per TDPLAN-0010."
-    },
-    {
       "file": "apps/handlers/regenerate_registry_ops.py",
       "standard": "json_structure",
-      "reason": "Pure registry generation — walks template, hashes files, builds registry. Uses meta_ops.compute_file_hash and json.dumps directly. Not an operational handler."
-    },
-    {
-      "file": "apps/handlers/regenerate_registry_ops.py",
-      "standard": "handlers",
-      "reason": "Imports meta_ops.compute_file_hash and load_template_registry — registry regeneration needs hash computation and existing registry loading. meta_ops is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/regenerate_registry_ops.py",
-      "standard": "deep_nesting",
-      "reason": "_scan_template_directory() — three-pass ID assignment (hash match, path match, new ID) with nested loops. Algorithm requires this structure for correct ID preservation."
-    },
-    {
-      "file": "apps/handlers/regenerate_registry_ops.py",
-      "standard": "documentation",
-      "reason": "_scan_template_directory() has docstring — multi-line function signature confuses checker."
-    },
-    {
-      "file": "apps/handlers/regenerate_registry_ops.py",
-      "standard": "naming",
-      "reason": "candidate is a local variable inside _scan_template_directory() and _next_id(), not a module-level constant. Used for ID matching during registry rebuild."
-    },
-    {
-      "file": "apps/modules/regenerate_registry.py",
-      "standard": "json_structure",
-      "reason": "Thin CLI layer — delegates all work to regenerate_registry_ops handler. json_handler imported for log_operation only."
-    },
-    {
-      "file": "tests/test_citizen_classes.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_citizen_classes.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "encapsulation",
-      "reason": "Test file — shared fixtures patch handler-owned internals directly (e.g. file_ops.json_handler, json_handler._JSON_DIR) to isolate tests from real I/O. Direct handler import is required for patch.object targeting."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "meta",
-      "reason": "Test file — pytest fixture module, exempt from application-code META header block convention."
-    },
-    {
-      "file": "tests/conftest.py",
-      "standard": "trigger",
-      "lines": [45],
-      "reason": "backup.unlink() removes a temporary AIPASS_REGISTRY.json.test_backup file created and owned entirely within the _protect_registry test fixture (session-scoped teardown). Not a production data deletion — no trigger.fire() needed for test-harness cleanup of its own scratch file."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "tests/test_regenerate_registry_ops.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_regenerate_registry_ops.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly (regenerate_template_registry, _scan_template_directory, _next_id) to test them in isolation. Direct handler import is intentional."
-    },
-    {
-      "file": "tests/test_regenerate_registry_ops.py",
-      "standard": "documentation",
-      "reason": "Test file — pytest test_* functions are self-documenting via descriptive names (see test_lifecycle.py, test_update.py precedent); docstrings not required on individual test cases by this branch's convention."
-    },
-    {
-      "file": "tests/test_cli_routing.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "apps/handlers/repair_ops.py",
-      "standard": "windows_compat",
-      "lines": [92],
-      "reason": "Lock release in update_registry_path(): 'import fcntl' at L92 sits inside 'if lock_fd is not None:' (L91) in the finally block. lock_fd is initialised None at L57 and only assigned under 'if sys.platform != \"win32\"' (L58), so L92 is unreachable on Windows. FPLAN-0382 wave 1: line refreshed 89 -> 92 and reason corrected (the old text described the L59 sys.platform guard, not the L91 lock_fd guard) — verified by lifting the rule and re-running the checker, which named L92 exactly."
-    },
-    {
-      "file": "apps/handlers/repair_ops.py",
-      "standard": "handlers",
-      "reason": "Imports registry functions — repair needs to load/save registry and update branch paths. Registry is a shared data handler."
-    },
-    {
-      "file": "apps/handlers/delete_ops.py",
-      "standard": "handlers",
-      "reason": "Imports ARCHIVE_EXCLUDE from repair_ops — shared constant for copytree ignore patterns. Avoids duplicating the exclude set across handlers."
-    },
-    {
-      "file": "tests/test_repair.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_repair.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "tests/test_lifecycle.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_lifecycle.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "tests/test_update.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_update.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
+      "reason": "Pure registry generation \u2014 walks template, hashes files, builds registry. Uses meta_ops.compute_file_hash and json.dumps directly. Not an operational handler."
     },
     {
       "file": "apps/handlers/meta_ops.py",
@@ -300,27 +73,12 @@
     {
       "file": "apps/modules/core.py",
       "standard": "encapsulation",
-      "reason": "Local import of render_all_meta_tabs from memory.apps.handlers.tracking.tab_renderer — @memory has no module entry point for this API. Cross-branch contract per FPLAN-0286."
+      "reason": "Local import of render_all_meta_tabs from memory.apps.handlers.tracking.tab_renderer \u2014 @memory has no module entry point for this API. Cross-branch contract per FPLAN-0286."
     },
     {
       "file": "apps/handlers/registry.py",
       "standard": "unused_function",
-      "reason": "backfill_owner_and_registry_id() is a migration function for TDPLAN-0012 — called manually to backfill existing registries. is_owner() is part of the frozen interface contract (TDPLAN-0012) — consumed by @ai_mail and @devpulse via direct import."
-    },
-    {
-      "file": "tests/test_owner_resolver.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_owner_resolver.py",
-      "standard": "encapsulation",
-      "reason": "Test file — tests must import handlers directly to test them in isolation. Handler imports inside test methods are intentional."
-    },
-    {
-      "file": "tests/test_owner_resolver.py",
-      "standard": "documentation",
-      "reason": "Test file — pytest test_* functions are self-documenting via descriptive names; docstrings not required on individual test cases."
+      "reason": "backfill_owner_and_registry_id() is a migration function for TDPLAN-0012 \u2014 called manually to backfill existing registries. is_owner() is part of the frozen interface contract (TDPLAN-0012) \u2014 consumed by @ai_mail and @devpulse via direct import."
     }
   ],
   "notes": {

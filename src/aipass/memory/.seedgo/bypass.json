@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-03-24"
+    "last_updated": "2026-08-13"
   },
   "bypass": [
     {
@@ -382,29 +382,9 @@
       "reason": "Memory doesn't use all builder templates — branch has custom structure."
     },
     {
-      "file": "CLAUDE.md",
-      "standard": "architecture",
-      "reason": "Memory branch uses repo-level CLAUDE.md — no branch-specific CLAUDE.md needed."
-    },
-    {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "architecture",
       "reason": "704 lines — watcher coordinates file monitoring, rollover triggers, and health checks. Near 700 threshold but cohesive."
-    },
-    {
-      "file": "handlers/learnings/manager.py",
-      "standard": "dead_code",
-      "reason": "Called dynamically via symbolic extraction pipeline — not statically imported from module layer."
-    },
-    {
-      "file": "handlers/schema/normalize.py",
-      "standard": "dead_code",
-      "reason": "Utility for v1-to-v2 schema migration — invoked on-demand, not wired to main pipeline."
-    },
-    {
-      "file": "handlers/search/vector_search.py",
-      "standard": "dead_code",
-      "reason": "Legacy search handler — query_executor.py is the active path. Retained for direct-import fallback."
     },
     {
       "file": "apps/handlers/learnings/manager.py",
@@ -459,7 +439,9 @@
     {
       "file": "apps/handlers/tracking/tab_renderer.py",
       "standard": "unused_function",
-      "functions": ["render_all_meta_tabs"],
+      "functions": [
+        "render_all_meta_tabs"
+      ],
       "reason": "Cross-branch public API — called by @spawn's _load_meta_tabs() (spawn/apps/modules/core.py:82), whose result feeds build_replacements_dict(meta_tabs=...) at core.py:272 to resolve {{*_META}} placeholders at branch creation. Also called inline by spawn's setup.sh bootstrap_branch(). Verified 2026-08-09."
     },
     {
@@ -578,214 +560,9 @@
       "reason": "extract_fragments_llm() has nested JSON parsing with multiple fallback strategies."
     },
     {
-      "file": "tests/test_vector.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_vector.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_vector.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_vector.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_json_handler.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_json_handler.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_orchestrator_exec.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_orchestrator_exec.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_orchestrator_exec.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-8; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_auto_process.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_lint.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_lint.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_lint.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_entry_limits.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_entry_limits.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_entry_limits.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_changed_entries.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_changed_entries.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_changed_entries.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_config_loader.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_config_loader.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_config_loader.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_tab_renderer.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_tab_renderer.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "documentation",
-      "reason": "Test file — test helper functions (fake_write, _make_v2_data, etc.) don't require docstrings."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_handlers.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_unified_schema.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_unified_schema.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_unified_schema.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_detector.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_detector.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_detector.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-8; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_detector.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
-    },
-    {
-      "file": "tests/test_rollover_pipeline.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by design, not in 3-layer apps/ structure."
-    },
-    {
-      "file": "tests/test_rollover_pipeline.py",
-      "standard": "encapsulation",
-      "reason": "Test file — direct handler imports are correct for unit testing handler internals."
-    },
-    {
-      "file": "tests/test_rollover_pipeline.py",
-      "standard": "meta",
-      "reason": "Test file — META block present at lines 1-7; hook false-positive on test file format."
-    },
-    {
-      "file": "tests/test_rollover_pipeline.py",
-      "standard": "documentation",
-      "reason": "Test file — test functions don't require docstrings."
+      "file": "apps/handlers/cli/help_flags.py",
+      "standard": "json_structure",
+      "reason": "Pure argument-inspection predicate — no I/O, no state, no branch imports by design. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
     }
   ],
   "notes": {

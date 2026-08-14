@@ -36,7 +36,8 @@ Doc shape (schema_version 1)::
 
     {
       "metadata": {schema_version, generated_at, seedgo_version, pack,
-                   scope, branches, branch_count, totals},
+                   scope, target_branch, no_bypass, branches, branch_count,
+                   totals},
       "branches":      [{name, path, average, scores, violation_count, ...}],
       "violations":    [{branch, standard, file, abs_path, score, issues, message}],
       "failed_checks": [{branch, standard, name, message}],
@@ -70,13 +71,37 @@ ARTIFACT_FILE_NAME = "last_audit.json"
 # =============================================================================
 
 
-def default_artifact_path() -> Path:
-    """Default destination: seedgo's own .seedgo/last_audit.json.
+def default_artifact_path(specific_branch: Optional[str] = None, no_bypass: bool = False) -> Path:
+    """Default destination for an audit artifact.
 
     Derived from this file's location, so it follows the checkout wherever it
     lives -- a clone, a container, another OS.
+
+    ``last_audit.json`` means the FLEET and only the fleet. A single-branch run
+    writes ``last_audit_{branch}.json`` instead, because a scoped run used to
+    overwrite the fleet file with a one-branch document (@prax hit this within a
+    minute of the feature landing). The metadata said scope=single-branch, but a
+    consumer reading the file cold measured one branch and concluded the other
+    16 were clean. Separate names mean that consumer gets no file rather than a
+    confident subset.
+
+    A ``--no-bypass`` run gets a ``_no_bypass`` suffix for exactly that reason:
+    same fleet, same tree, deliberately lower numbers. Overwriting the normal
+    artifact with it would hand the next cold reader a confident wrong answer.
+
+    Args:
+        specific_branch: Branch name for a single-branch run, else None.
+        no_bypass: True when the run had every bypass rule switched off.
+
+    Returns:
+        Path to write the artifact to.
     """
-    return _SEEDGO_ROOT / ARTIFACT_DIR_NAME / ARTIFACT_FILE_NAME
+    stem = ARTIFACT_FILE_NAME.removesuffix(".json")
+    if specific_branch:
+        stem = f"{stem}_{specific_branch}"
+    if no_bypass:
+        stem = f"{stem}_no_bypass"
+    return _SEEDGO_ROOT / ARTIFACT_DIR_NAME / f"{stem}.json"
 
 
 def _seedgo_version() -> Optional[str]:
@@ -218,7 +243,10 @@ def _branch_entry(result: Dict[str, Any], violation_count: int) -> Dict[str, Any
 
 
 def build_artifact(
-    audit_results: List[Dict[str, Any]], pack: Optional[str] = None, specific_branch: Optional[str] = None
+    audit_results: List[Dict[str, Any]],
+    pack: Optional[str] = None,
+    specific_branch: Optional[str] = None,
+    no_bypass: bool = False,
 ) -> Dict[str, Any]:
     """Build the complete artifact document from an audit result list.
 
@@ -228,6 +256,9 @@ def build_artifact(
         pack: Checker pack name, recorded in metadata.
         specific_branch: Branch name when the run targeted one branch; None
             means a full-fleet run.
+        no_bypass: True when the run had every bypass rule switched off.
+            Recorded in metadata so a consumer can tell the raw score from the
+            normal one without inspecting the filename.
 
     Returns:
         The artifact doc (JSON-serialisable), uncapped and unclipped.
@@ -256,6 +287,7 @@ def build_artifact(
             "pack": pack,
             "scope": "single-branch" if specific_branch else "full-fleet",
             "target_branch": specific_branch,
+            "no_bypass": no_bypass,
             "branches": [b["name"] for b in branches],
             "branch_count": len(branches),
             "totals": {
@@ -277,6 +309,7 @@ def write_audit_artifact(
     output_path: Optional[Any] = None,
     pack: Optional[str] = None,
     specific_branch: Optional[str] = None,
+    no_bypass: bool = False,
 ) -> Path:
     """Write the complete audit result set to a JSON file. Returns its path.
 
@@ -289,12 +322,14 @@ def write_audit_artifact(
         output_path: Destination override. Defaults to default_artifact_path().
         pack: Checker pack name, recorded in metadata.
         specific_branch: Branch name for a single-branch run, else None.
+        no_bypass: True when the run had every bypass rule switched off — its
+            own filename and its own metadata flag, never the normal one's.
 
     Returns:
         Path the artifact was written to.
     """
-    path = Path(output_path) if output_path else default_artifact_path()
-    document = build_artifact(audit_results, pack=pack, specific_branch=specific_branch)
+    path = Path(output_path) if output_path else default_artifact_path(specific_branch, no_bypass)
+    document = build_artifact(audit_results, pack=pack, specific_branch=specific_branch, no_bypass=no_bypass)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

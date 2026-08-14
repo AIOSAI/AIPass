@@ -132,3 +132,87 @@ class TestDataStructureContracts:
         # Verify config_keys contract
         assert "module_name" in passport["branch_info"]
         assert "branch_name" in passport["branch_info"]
+
+
+# ---------------------------------------------------------------------------
+# Import Contracts
+# ---------------------------------------------------------------------------
+
+
+class TestEntryPointImportContract:
+    """The entry point is executed as a SCRIPT by drone, not imported as a package.
+
+    A relative import there raises 'attempted relative import with no known
+    parent package' at call time, not at import time — so it stays invisible
+    until a user runs the command. 'drone @memory watch' was dead this way.
+    The house rule is absolute 'from aipass.<agent>...' imports everywhere.
+    """
+
+    def _entry_point_source(self) -> str:
+        entry = Path(__file__).resolve().parent.parent / "apps" / "memory.py"
+        assert entry.exists(), f"entry point not found at {entry}"
+        return entry.read_text(encoding="utf-8")
+
+    def test_entry_point_has_no_relative_imports(self) -> None:
+        source = self._entry_point_source()
+        offenders = [
+            f"{num}: {line.strip()}"
+            for num, line in enumerate(source.splitlines(), start=1)
+            if line.strip().startswith("from .")
+        ]
+        assert not offenders, "Relative imports in the entry point script:\n" + "\n".join(offenders)
+
+    def test_entry_point_imports_no_handlers_directly(self) -> None:
+        """The entry point routes to modules; only modules may import handlers.
+
+        `watch` used to be a built-in on the entry point, so its two monitor
+        handler imports sat here — the `encapsulation` standard scored this file
+        66% for it. The command now lives in modules/watch.py like every other.
+        """
+        source = self._entry_point_source()
+        offenders = [
+            f"{num}: {line.strip()}"
+            for num, line in enumerate(source.splitlines(), start=1)
+            if "aipass.memory.apps.handlers" in line and "import" in line
+        ]
+        assert not offenders, "Handler imported directly in the entry point:\n" + "\n".join(offenders)
+
+
+class TestWatchRunnerImportContract:
+    """The watcher's implementation lives in a handler, and imports absolutely."""
+
+    def _watch_runner_source(self) -> str:
+        handler = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "monitor" / "watch_runner.py"
+        assert handler.exists(), f"watch runner not found at {handler}"
+        return handler.read_text(encoding="utf-8")
+
+    def test_runner_imports_watcher_absolutely(self) -> None:
+        source = self._watch_runner_source()
+        assert "from aipass.memory.apps.handlers.monitor.memory_watcher import" in source
+
+    def test_runner_imports_detector_absolutely(self) -> None:
+        source = self._watch_runner_source()
+        assert "from aipass.memory.apps.handlers.monitor.detector import" in source
+
+
+class TestModuleScriptImportContract:
+    """Every file with a __main__ block must survive being run as a script.
+
+    `apps/modules/*.py` all ship one, and a relative import there raises
+    'attempted relative import with no known parent package' the moment anyone
+    runs the file directly — the same defect that left `drone @memory watch`
+    dead. Routing through the entry point hides it, so only this contract and a
+    direct run catch it.
+    """
+
+    def _module_files(self):
+        modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"
+        return sorted(p for p in modules_dir.glob("*.py") if not p.name.startswith("_"))
+
+    def test_modules_have_no_relative_imports(self) -> None:
+        offenders = []
+        for path in self._module_files():
+            for num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                if line.strip().startswith("from .."):
+                    offenders.append(f"{path.name}:{num}: {line.strip()}")
+        assert not offenders, "Relative imports in script-executable modules:\n" + "\n".join(offenders)

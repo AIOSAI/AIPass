@@ -36,12 +36,6 @@
       "pattern": "red_flags|activity|health_data"
     },
     {
-      "file": "apps/handlers/actions/action_processor.py",
-      "standard": "naming",
-      "reason": "False positive: load_registry, is_action_due, update_last_run are function references from try/except import fallback, not constants",
-      "pattern": "load_registry|is_action_due|update_last_run"
-    },
-    {
       "file": "apps/daemon_wakeup.py",
       "standard": "architecture",
       "reason": "Entry point script — lives in apps/ root by design, not a module or handler",
@@ -94,24 +88,6 @@
       "standard": "introspection",
       "reason": "update runs the status digest with no args — that IS its primary function. Showing introspection instead was reported as a dead-end UX bug (DPLAN-0085).",
       "pattern": "no-args gate"
-    },
-    {
-      "file": "apps/plugins/heartbeat.py",
-      "standard": "architecture",
-      "reason": "Scheduler plugin — autodiscovered by plugins/__init__.py discover_plugins(). Lives in apps/plugins/ by design, not a module or handler.",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "apps/plugins/daily_audit.py",
-      "standard": "architecture",
-      "reason": "Scheduler plugin — autodiscovered by plugins/__init__.py discover_plugins(). Lives in apps/plugins/ by design, not a module or handler.",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "apps/plugins/community_rotation.py",
-      "standard": "architecture",
-      "reason": "Scheduler plugin — autodiscovered by plugins/__init__.py discover_plugins(). Lives in apps/plugins/ by design, not a module or handler.",
-      "pattern": "File not in standard 3-layer structure"
     },
     {
       "file": "apps/modules/queue.py",

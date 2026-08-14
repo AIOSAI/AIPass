@@ -20,6 +20,7 @@ from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error
+from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.dispatch.status import load_dispatch_log, check_pid_status, calculate_age
 
@@ -87,7 +88,10 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command != "dispatch":
         return False
 
-    if args and args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence, before anything routes: a trailing --help on a dispatch
+    # would otherwise land in the subcommand slot and SEND the mail and WAKE
+    # the branch it was asked to describe.
+    if wants_help(args):
         print_help()
         return True
 

@@ -5,8 +5,8 @@
 **Purpose:** Cron-triggered task scheduler with plugin system. Routes commands to modules for scheduled tasks, activity reports, action management, and status digests.
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
-**Citizen Class:** builder
-**Last Updated:** 2026-04-07
+**Citizen Class:** aipass_framework
+**Last Updated:** 2026-08-13
 
 ---
 
@@ -28,14 +28,14 @@ drone @daemon install-timer             # Enable systemd 2-min timer
 
 ## Overview
 
-Builder citizen -- full 3-layer architecture with identity and memory. DAEMON serves as the background orchestration branch: it discovers modules at startup, routes CLI commands to them, and provides introspection and help output via Rich console.
+Framework citizen -- full 3-layer architecture with identity and memory. DAEMON serves as the background orchestration branch: it discovers modules at startup, routes CLI commands to them, and provides introspection and help output via Rich console.
 
 ### What I Do
-- Route CLI commands to discovered modules (update, schedule, activity_report, actions)
-- Manage scheduled follow-ups with CRUD operations and due-date processing
+- Route CLI commands to discovered modules (update, run, queue, activity_report, rotation, inbox_sweep)
+- Fire the decentralized scheduler: discover every citizen's `.daemon/schedule.json`, wake due owners
 - Generate activity reports across all branches (24h summary, detailed, per-branch)
-- Run action registry (list, toggle, set reminder/schedule, migrate plugins)
-- Auto-discover and dispatch plugins (community_rotation, daily_audit, heartbeat)
+- Run the fleet inbox sweep — wake branches sitting on mail unread past 24h
+- Run the nightly steward rotation — one citizen a night gets a maintenance turn
 - Detect red flags (code changes without memory updates, stale branches)
 - Produce status digests (inbox, actionable items, escalations)
 
@@ -51,32 +51,36 @@ daemon/
 ├── apps/
 │   ├── daemon.py              # Entry point (CLI) — module discovery + command routing
 │   ├── daemon_wakeup.py       # Wakeup / cron trigger
-│   ├── scheduler_cron.py      # Cron scheduler
+│   ├── .archive/              # scheduler_cron (archived — superseded by run.py)
 │   ├── modules/
 │   │   ├── update.py          # Status digest module — summarizes DAEMON activity
-│   │   ├── schedule.py        # Scheduled follow-ups — fire-and-forget task management
+│   │   ├── run.py             # Scheduler tick — discover .daemon/ jobs, fire due ones
+│   │   ├── queue.py           # Unified job queue view (Rich table / --json)
 │   │   ├── activity_report.py # Branch activity report generator
-│   │   ├── actions.py         # Action registry CLI — list, toggle, info, reminders
 │   │   ├── inbox_sweep.py     # Fleet unread-mail backstop — wakes stale-mail owners
 │   │   ├── rotation.py        # Steward rotation — wake policy + status surface
-│   │   ├── scheduler_ops.py   # Scheduler cron operations facade
-│   │   └── wakeup_ops.py      # Wake-up cron operations facade
+│   │   ├── timer_install.py   # systemd user timer install/uninstall
+│   │   ├── schedule.py        # (retired) prints migration notice only
+│   │   ├── actions.py         # (retired) prints migration notice only
+│   │   ├── wakeup_ops.py      # ORPHANED — imported by nothing, unroutable (see Known Issues)
+│   │   └── .archive/          # scheduler_ops (archived)
 │   ├── handlers/
 │   │   ├── actions/
-│   │   │   └── actions_registry.py   # Action registry implementation
+│   │   │   └── .archive/             # actions_registry, action_processor (archived)
 │   │   ├── json/
 │   │   │   └── json_handler.py       # JSON data operations
 │   │   ├── monitoring/
 │   │   │   ├── activity_collector.py  # Collects branch activity data
 │   │   │   ├── inbox_scanner.py       # Cross-branch stale unread-mail detection
-│   │   │   ├── memory_health.py       # Memory health checks
-│   │   │   └── red_flag_detector.py   # Detects anomalies / red flags
+│   │   │   ├── memory_health.py       # Memory health checks (see Known Issues)
+│   │   │   ├── red_flag_detector.py   # Detects anomalies / red flags
+│   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
 │   │   │   ├── discovery.py           # Citizen + .daemon/ job discovery (both trees)
 │   │   │   ├── rotation.py            # Steward roster, pointer state, prompt rendering
 │   │   │   ├── runstate.py            # last_run/next_run tracking + due-logic
-│   │   │   ├── task_registry.py       # Task registry for scheduled items
-│   │   │   └── .archive/             # assistant_notifier, telegram_notifier (archived)
+│   │   │   ├── telegram_notifier.py   # Fail-soft lifecycle pings via @skills
+│   │   │   └── .archive/             # assistant_notifier, task_registry, plugin_processor
 │   │   ├── telegram/                  # ARCHIVED — moving to skills system
 │   │   │   └── .archive/             # assistant_chat (archived)
 │   │   └── update/
@@ -84,10 +88,9 @@ daemon/
 │   ├── extensions/             # Extension point for additional capabilities
 │   ├── json_templates/         # JSON template definitions
 │   └── plugins/
-│       ├── community_rotation.py      # Community rotation plugin
-│       ├── daily_audit.py             # Daily audit plugin
-│       ├── heartbeat.py               # Heartbeat / liveness plugin
-│       └── .archive/                  # botfather_reminder, devpulse_monitor (archived)
+│       ├── __init__.py                # discover_plugins() — ORPHANED, no live caller
+│       └── .archive/                  # ALL plugins archived: heartbeat, daily_audit,
+│                                      # community_rotation, botfather_reminder, dev_central_monitor
 ├── daemon_json/                # JSON tracking data
 ├── docs/                       # Documentation
 ├── dropbox/                    # Incoming file drops
@@ -144,8 +147,8 @@ drone @daemon <command> --help
 | `schedule` | *(retired)* Fire-and-forget follow-ups — superseded by `.daemon/schedule.json` | Retired |
 | `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` | Operational |
 | `actions` | *(retired)* Action registry — superseded by `.daemon/schedule.json` | Retired |
-| `scheduler_ops` | Scheduler cron operations facade for scheduler_cron.py | Operational |
-| `wakeup_ops` | Wake-up cron operations facade for daemon_wakeup.py | Operational |
+| `scheduler_ops` | *(archived)* Scheduler cron facade — went to `.archive/` with scheduler_cron.py | Archived |
+| `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones | Operational |
 | `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational |
@@ -232,21 +235,42 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Plugins
 
-| Plugin | Target | Schedule | Status |
-|--------|--------|----------|--------|
-| `community_rotation` | @rotating | every 4h | Operational — requires AIPASS_WAKE_SCRIPT env var |
-| `daily_audit` | @seed | daily 04:00 | *(not operational)* — targets @seed (renamed to @seedgo) |
-| `heartbeat` | @vera | every 4h | *(not operational)* — @vera not in branch registry |
+**The plugin system is retired.** All three plugins are in `apps/plugins/.archive/`, and the
+`discover_plugins()` entry point in `apps/plugins/__init__.py` has no live caller — its only
+remaining import is from an archived file. Scheduling is now decentralized: each citizen owns
+`<branch>/.daemon/schedule.json` and the daemon discovers and fires. See **Scheduling Jobs** above.
+
+| Plugin | Target | Status |
+|--------|--------|--------|
+| `community_rotation` | @rotating | Archived — superseded by `rotation` module + `fleet-steward` job |
+| `daily_audit` | @seed | Archived — targeted @seed, renamed to @seedgo years prior |
+| `heartbeat` | @vera | Archived — @vera was never in the branch registry |
 
 ---
 
 ## Known Issues
 
-- `update` command shows empty data (0 sessions, no focus) — data_loader reads from different paths than .trinity/local.json
-- `daily_audit` plugin targets `@seed` which was renamed to `@seedgo`
-- `heartbeat` plugin targets `@vera` which is not registered in the branch registry
-- All plugins require `AIPASS_WAKE_SCRIPT` env var to dispatch — without it, plugins discover but can't execute
-- `drone @daemon activity_report` (underscore) fails — use `activity`, `activity-report`, or `branch-health` instead
+*Verified live 2026-08-13 (APLAN-0015). Items are listed only if reproduced this session.*
+
+- **Memory health is fleet-wide noise.** `memory_health.validate_memory_structure()` requires a
+  `limits` field inside `document_metadata`. The `.trinity` schema (3.0.0) dropped it — caps now
+  live in @memory's `memory.config.json` and surface as `*_meta` lines. Measured: **0 of 17**
+  branches carry the field, so every branch reports WARNING forever, including ones whose memory
+  was updated minutes ago. A genuinely broken `.trinity` is indistinguishable from the noise.
+  The unit tests use a synthetic fixture that *does* have `limits`, so the suite stays green.
+  Fix needs @memory's call on what the current schema's health marker should be.
+- **`update` digest reads empty** (0 messages, 0 sessions, no focus) even with live mail and 30+
+  recorded sessions — `data_loader` reads different paths than `.trinity/local.json`. Long-standing.
+- **`apps/modules/wakeup_ops.py` is orphaned.** Not in the router's module list, so
+  `drone @daemon wakeup-ops` returns "Unknown command"; `daemon_wakeup.py` names it only inside a
+  print string. Its 9 tests are the only thing importing it.
+- **`apps/plugins/discover_plugins()` is orphaned** — its sole caller is an archived file.
+
+### Resolved this session
+
+- ~~`drone @daemon activity_report` (underscore) fails~~ — works; an explicit alias branch handles it.
+- ~~A trailing `--help` could execute the verb~~ — the router now scans every remaining arg, not
+  just the first. `inbox-sweep --hours 48 --help` used to run a real sweep and wake branches.
 
 ---
 
@@ -261,11 +285,11 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ## Test Suite
 
-- **406 tests** across 18 test files
+- **409 tests** across 18 test files
 - 10/10 modules covered, 44/50 public functions tested
-- Seedgo audit: **100%** across all standards
+- Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

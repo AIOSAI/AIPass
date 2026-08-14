@@ -23,6 +23,7 @@ import tempfile
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -275,8 +276,7 @@ def handle_command(command: str, args: list) -> bool:
             print_introspection()
             return True
 
-        sub = args[0]
-        if sub in ("--help", "-h", "help"):
+        if wants_help(args):
             CONSOLE.print("[bold cyan]sandbox[/bold cyan] — Kernel filesystem boundary via srt")
             CONSOLE.print()
             CONSOLE.print("  drone @hooks sandbox    Show sandbox module status")

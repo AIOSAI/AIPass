@@ -121,12 +121,18 @@ class Trigger:
             cls._handlers[event].remove(handler)
 
     @classmethod
-    def _fire_to_handlers(cls, event: str, data: dict) -> None:
-        """Fire a single event to its registered handlers."""
+    def _fire_to_handlers(cls, event: str, data: dict) -> dict:
+        """Fire a single event to its registered handlers.
+
+        Returns a summary of what actually happened: how many handlers were
+        registered, how many completed, how many raised. Handler failures stay
+        isolated — the count is what lets a caller tell isolation from silence.
+        """
         handlers = cls._handlers.get(event, [])
         data = dict(data)  # Copy to avoid mutating caller's dict
         data["fire_event"] = cls.fire
         branch = data.get("branch", "__global__")
+        ran = failed = 0
         for handler in handlers:
             key = (handler, branch)
             if key in cls._disabled_handlers:
@@ -134,7 +140,9 @@ class Trigger:
             try:
                 handler(**data)
                 cls._handler_failures.pop(key, None)  # Reset on success
+                ran += 1
             except Exception as e:
+                failed += 1
                 count = cls._handler_failures.get(key, 0) + 1
                 cls._handler_failures[key] = count
                 if count >= cls._HANDLER_FAILURE_THRESHOLD:
@@ -145,6 +153,8 @@ class Trigger:
                     )
                 else:
                     logger.error(f"[TRIGGER] Handler error for {event}: {e}")
+
+        return {"event": event, "handlers": len(handlers), "ran": ran, "failed": failed}
 
     @classmethod
     def _drain_deferred(cls) -> None:
@@ -164,22 +174,29 @@ class Trigger:
             cls._draining_deferred = False
 
     @classmethod
-    def fire(cls, event: str, **data):
+    def fire(cls, event: str, **data) -> dict:
         """Fire event to all registered handlers
 
         Supports nested event firing via deferred queue - events fired during
         handler execution are queued and processed after current handler completes.
+
+        Returns an execution summary — `{event, handlers, ran, failed}`, or
+        `{event, deferred: True}` for a nested fire that was queued. Handler
+        exceptions never propagate to the caller (isolation is the point of a
+        bus), so the counts are the only way a caller can tell "all handlers
+        completed" from "every handler raised" from "nothing was listening".
+        Callers are free to ignore it; the CLI does not.
         """
         # If already firing, queue this event for later (prevents recursion, enables nesting)
         if cls._firing:
             cls._deferred_queue.append((event, data))
-            return
+            return {"event": event, "deferred": True}
 
         cls._firing = True
         try:
             cls._ensure_initialized()
             cls._ensure_log_watcher()
-            cls._fire_to_handlers(event, data)
+            return cls._fire_to_handlers(event, data)
         finally:
             cls._firing = False
             cls._drain_deferred()
@@ -192,15 +209,30 @@ class Trigger:
 
 
 def _coerce_value(val_str: str) -> int | float | str:
-    """Coerce a string value to int, float, or leave as string."""
-    try:
-        return int(val_str)
-    except ValueError:
-        pass
-    try:
-        return float(val_str)
-    except ValueError:
-        return val_str
+    """Coerce a string value to int, float, or leave as string.
+
+    Typing is by LOSSLESS ROUND TRIP, not by shape: a token is only converted
+    when `str(number) == val_str`. Event data carries identity tokens as well
+    as numbers — `handle_error_detected` annotates `fingerprint`, `error_hash`
+    and `registry_id` as `str` — and an 8-char `uuid4()[:8]` is all digits
+    2.3% of the time, (10/16)**8. A shape test ("it looks like a number")
+    turns `fingerprint=00123456` into int 123456: the type contract breaks and
+    a character of the user's token is deleted on the way through. `int()` is
+    wider than it looks and would also eat `1_0`, `+5` and ` 5`; `float()`
+    reshapes `1.50` and `1e3`. Round-tripping catches all of them at once.
+
+    Reported by @drone (2026-08-13) after the same shape test in their own
+    `view N` index shortcut ate real message IDs — the collision is between
+    the token spaces themselves, so only a lossless check removes the class.
+    """
+    for cast in (int, float):
+        try:
+            number = cast(val_str)
+        except ValueError:
+            continue
+        if str(number) == val_str:
+            return number
+    return val_str
 
 
 def handle_command(command: str, args: list) -> bool:
@@ -220,12 +252,14 @@ def handle_command(command: str, args: list) -> bool:
     """
     from aipass.cli.apps.modules import console, error
 
+    from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+
     # Handle module-name routing (drone @trigger core <subcmd>)
     if command == "core":
         if not args:
             print_introspection()
             return True
-        if args[0] in ["--help", "-h", "help"]:
+        if wants_help(args):
             _print_help(console)
             return True
         return handle_command(args[0], args[1:])
@@ -233,7 +267,11 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["fire", "status", "list"]:
         return False
 
-    if args and args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence help gate, AFTER the ownership check above: claiming a
+    # command this module does not own would hijack every other module's
+    # --help at the entry point. `help` counts only at position 0 — later it
+    # is event payload (`fire evt message=help`).
+    if wants_help(args):
         _print_help(console)
         return True
 
@@ -250,9 +288,20 @@ def handle_command(command: str, args: list) -> bool:
                 data[key] = _coerce_value(val_str)
             else:
                 logger.warning(f"[TRIGGER] Ignoring unparseable arg: {arg}")
-        Trigger.fire(event_name, **data)
-        console.print(f"[green]Fired event:[/green] {event_name}")
-        json_handler.log_operation("event_fired", {"event": event_name})
+        result = Trigger.fire(event_name, **data)
+        ran, failed = result.get("ran", 0), result.get("failed", 0)
+        if failed:
+            console.print(
+                f"[yellow]Fired event:[/yellow] {event_name} — "
+                f"{ran} handler(s) ran, [red]{failed} failed[/red] (see logs/core.log)"
+            )
+        elif not result.get("handlers"):
+            console.print(
+                f"[yellow]Fired event:[/yellow] {event_name} — [dim]no handlers registered, nothing ran[/dim]"
+            )
+        else:
+            console.print(f"[green]Fired event:[/green] {event_name} — {ran} handler(s) ran")
+        json_handler.log_operation("event_fired", {"event": event_name, **result})
         if data:
             for k, v in data.items():
                 console.print(f"  [dim]{k}={v}[/dim]")

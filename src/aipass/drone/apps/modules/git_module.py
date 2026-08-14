@@ -28,6 +28,7 @@ from aipass.drone.apps.handlers.git import (
     sync_handler,
     diff_handler,
     log_handler,
+    show_handler,
     commit_handler,
     checkout_handler,
     dev_pr_handler,
@@ -36,6 +37,7 @@ from aipass.drone.apps.handlers.git import (
     close_pr_handler,
     tag_handler,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "git",
@@ -47,6 +49,7 @@ _COMMANDS = (
     "status",
     "diff",
     "log",
+    "show",
     "lock",
     "branches",
     "issue",
@@ -143,7 +146,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return {"stdout": "", "stderr": "", "exit_code": 0}
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
@@ -175,6 +178,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_diff(args)
     if command == "log":
         return _handle_log(args)
+    if command == "show":
+        return _handle_show(args)
     if command == "lock":
         return _handle_lock()
     if command == "branches":
@@ -573,6 +578,29 @@ def _handle_log(args: list[str]) -> dict:
     }
 
 
+def _handle_show(args: list[str]) -> dict:
+    """Handle the show subcommand (global tier).
+
+    `show <ref>` shows the commit; `show <ref> <path>` reads that file AT the
+    commit. Repo-wide by design — see show_handler for why it is not scoped to
+    the caller's own branch.
+    """
+    if not args:
+        return {
+            "stdout": "",
+            "stderr": "Usage: drone @git show <ref> [path]",
+            "exit_code": 1,
+        }
+
+    ref = args[0]
+    path = args[1] if len(args) > 1 else None
+    result = show_handler.show_object(ref, path)
+
+    if result["success"]:
+        return {"stdout": result["content"], "stderr": "", "exit_code": 0}
+    return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+
 def _handle_commit(args: list[str]) -> dict:
     """Handle the commit subcommand (owner tier)."""
     if not args:
@@ -792,9 +820,9 @@ def get_help(command: str | None = None) -> str:
         "  status                 Show git status for your branch\n"
         "  diff [--staged]        Show git diff for your branch\n"
         "  log [count]            Show recent git log (default: 10)\n"
+        "  show <ref> [path]      Show a commit, or a file's contents at it\n"
         "  lock                   Check lock status\n"
         "  branches               List remote branches\n"
-        "  prune-temp             Delete merged citizen/* temp branches\n"
         "  tag --list             List all tags (newest first)\n"
         "  issue [args]           Passthrough to gh issue\n"
         "  run [args]             Passthrough to gh run\n"
@@ -805,6 +833,7 @@ def get_help(command: str | None = None) -> str:
         "  pr <desc>              Push current branch and create PR to main\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"
         "  delete-branch <name>   Delete a remote branch\n"
+        "  prune-temp             Delete merged citizen/* temp branches\n"
         "  close-pr <number>      Close a PR\n"
         "  merge <PR#> [--confirm]  Merge a PR (gated: y/N prompt or --confirm)\n"
         "  sync [--autostash]     Sync with origin/main (FF on dev)\n"
@@ -821,14 +850,14 @@ def get_introspective() -> str:
         "@git — Tier-based git workflow, dev branch model (v3.0.0)\n"
         "Connected Handlers:\n"
         "  handlers/git/\n"
-        "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py\n"
+        "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
         "    - commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
         "  plugins/devpulse_ops/\n"
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
-        "Tiers: global (status,diff,log,lock,branches,prune-temp,tag --list,issue,run,workflow)"
-        " | owner (pr,commit,checkout,dev-pr,delete-branch,close-pr,sync,unlock,merge,smart-sync,fix,tag)\n"
+        "Tiers: global (status,diff,log,show,lock,branches,tag --list,issue,run,workflow)"
+        " | owner (pr,commit,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,unlock,merge,smart-sync,fix,tag)\n"
     )
 
 

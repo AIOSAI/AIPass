@@ -272,8 +272,13 @@ def main():
     command = args[0]
     remaining = args[1:] if len(args) > 1 else []
 
-    # Subcommand --help guard: intercept before dispatch
-    if remaining and remaining[0] in ("--help", "-h"):
+    # Subcommand --help guard: intercept before dispatch. --help wins from ANY
+    # position, not just the first argument. Inspecting only remaining[0] let a
+    # help probe execute the verb it was asking about: `aipass trust <dir>
+    # --help` enrolled the directory, `aipass init agent --help` created an
+    # agent literally named "--help", and `aipass init update --help` wrote a
+    # scaffold refresh into the cwd. Asking a question must never be an action.
+    if any(a in ("--help", "-h") for a in remaining):
         for module in modules:
             if module.handle_command(command, ["--help"]):
                 return 0

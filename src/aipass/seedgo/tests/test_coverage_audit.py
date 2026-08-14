@@ -965,6 +965,28 @@ class TestPrintBranchSummary:
         )
         print_branch_summary(result)
 
+    def test_no_bypass_label_travels_with_the_branch_score(self):
+        """A --no-bypass summary says so — the score alone reads as a regression."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_branch_summary(self._make_audit_result(), no_bypass=True)
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" in printed
+
+    def test_normal_branch_summary_makes_no_bypass_claim(self):
+        """Control — the label appears only when bypasses really were disabled."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_branch_summary(self._make_audit_result())
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" not in printed
+
 
 class TestPrintSystemSummary:
     """Tests for print_system_summary."""
@@ -1079,6 +1101,28 @@ class TestPrintSystemSummary:
             ),
         ]
         print_system_summary(results)
+
+    def test_no_bypass_label_travels_with_the_fleet_average(self):
+        """The summary block is what gets copied out — it carries the label itself."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_system_summary([self._make_result("a", 95)], no_bypass=True)
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" in printed
+
+    def test_normal_system_summary_makes_no_bypass_claim(self):
+        """Control — a normal fleet summary carries no such label."""
+        from aipass.seedgo.apps.handlers.audit import audit_display
+
+        mock_con = MagicMock()
+        with patch.object(audit_display, "console", mock_con):
+            audit_display.print_system_summary([self._make_result("a", 95)])
+
+        printed = " ".join(str(c) for c in mock_con.print.call_args_list).upper()
+        assert "BYPASSES DISABLED" not in printed
 
 
 # ===========================================================================

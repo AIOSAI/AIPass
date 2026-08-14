@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from aipass.spawn.apps.handlers.regenerate_registry_ops import (
     regenerate_template_registry,
     _scan_template_directory,
@@ -558,8 +560,57 @@ class TestScanTemplateDirectoryOrdering:
         assert dir_paths == sorted(dir_paths)
 
 
+def _shipped_registry_path() -> Path:
+    """Path to the real aipass_framework template registry that spawn ships."""
+    import aipass.spawn
+
+    return Path(aipass.spawn.__file__).parent / "templates" / "aipass_framework" / ".spawn" / ".template_registry.json"
+
+
 class TestHandleRegenerateRegistry:
-    """Tests for handle_regenerate_registry() CLI handler."""
+    """Tests for handle_regenerate_registry() CLI handler.
+
+    These drive the real CLI handler, so every template directory it can reach is
+    redirected into tmp_path. Before the fixture existed the class regenerated the
+    SHIPPED template registry on every run, bumping metadata.last_updated to the
+    current date — invisible for months because the bump is idempotent within a day
+    and template commits legitimately move that field (DPLAN-0291 audit).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_templates(self, tmp_path):
+        """Redirect every class lookup to throwaway copies under tmp_path."""
+        import shutil
+
+        from aipass.spawn.apps.handlers.class_registry import get_available_classes as real_classes
+        from aipass.spawn.apps.handlers.class_registry import get_template_dir as real_template_dir
+
+        sandbox = tmp_path / "templates"
+        sandbox.mkdir()
+        for class_name in real_classes():
+            shutil.copytree(real_template_dir(class_name), sandbox / class_name)
+
+        def fake_template_dir(class_name: str) -> Path:
+            return sandbox / class_name
+
+        with (
+            patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dir", side_effect=fake_template_dir),
+            patch(
+                "aipass.spawn.apps.modules.regenerate_registry.get_available_classes",
+                side_effect=real_classes,
+            ),
+        ):
+            yield
+
+    def test_shipped_template_registry_untouched(self):
+        """Canary: running the CLI handler must not rewrite the registry spawn ships."""
+        shipped = _shipped_registry_path()
+        before = shipped.read_bytes()
+
+        assert handle_regenerate_registry([]) == 0
+        assert handle_regenerate_registry(["--all"]) == 0
+
+        assert shipped.read_bytes() == before
 
     def test_default_regenerates_aipass_framework(self):
         result = handle_regenerate_registry([])

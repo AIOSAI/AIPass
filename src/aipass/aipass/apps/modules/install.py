@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Dict
 
 from aipass.cli.apps.modules import console, error, success, warning
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
@@ -484,7 +485,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != COMMAND:
         return False
 
-    if args and args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         print_help()
         return True
     if args and args[0] in ("--info", "info"):

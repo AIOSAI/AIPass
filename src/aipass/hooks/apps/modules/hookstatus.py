@@ -11,6 +11,7 @@
 """Hook status — read-only view of per-project hook configuration via drone @hooks status."""
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
@@ -90,9 +91,7 @@ def handle_command(command: str, args: list) -> bool:
         _render_status(config)
         return True
 
-    sub = args[0]
-
-    if sub in ("--help", "-h", "help"):
+    if wants_help(args):
         CONSOLE.print("[bold cyan]hookstatus[/bold cyan] — Read-only hook config viewer")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks status           Show current project hook config")

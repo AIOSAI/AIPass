@@ -185,11 +185,13 @@ def _run_subcommand(subcommand: str, args: list) -> bool:
     """
     from aipass.cli.apps.modules import console
 
+    from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+
     if subcommand in ["--help", "-h", "help"] or subcommand not in _SUBCOMMANDS:
         print_help()
         return True
 
-    if args and args[0] in ["--help", "-h", "help"]:
+    if wants_help(args):
         print_help()
         return True
 
@@ -220,6 +222,8 @@ def handle_command(command: str, args: list) -> bool:
     Returns:
         True if command was handled, False otherwise
     """
+    from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+
     if command != "escalation":
         return False
 
@@ -227,8 +231,10 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Intercept help at the entry point, before any subcommand dispatch.
-    if args[0] in ["--help", "-h", "help"]:
+    # Intercept help at the entry point, before any subcommand dispatch —
+    # scanning the WHOLE sequence, so `list warning --help` describes the
+    # lane instead of reporting on it.
+    if wants_help(args):
         print_help()
         return True
 

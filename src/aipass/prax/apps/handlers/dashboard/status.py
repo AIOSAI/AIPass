@@ -157,7 +157,11 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
         new_mail, opened_mail, todo_count = 0, 0, 0
     active_plans = count_active_plans(flow)
 
-    action_required = new_mail > 0 or active_plans > 0
+    # Every counter this function renders in `summary` also raises the flag.
+    # It used to skip todo_count, so a branch with pending todos published
+    # "1 todos" and action_required: False in the same block — @flow measured
+    # the disagreement against their own writer, which does count them.
+    action_required = new_mail > 0 or active_plans > 0 or todo_count > 0
 
     summary_parts = []
     if new_mail > 0:

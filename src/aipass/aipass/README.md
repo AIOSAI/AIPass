@@ -57,7 +57,7 @@ aipass/
 │   │   ├── telegram_readiness.py          # Telegram bot-host readiness checks (doctor)
 │   │   └── ui/                            # Progress bars, menus, banners
 │   └── plugins/
-├── tests/                                 # 977 passing
+├── tests/                                 # 981 passing
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -92,6 +92,7 @@ aipass/
 | `aipass adopt <name> --dry-run` | Preview what adoption would do, writes nothing |
 | `aipass trust [path]` | Show enrolled projects or enroll a project in the trust registry |
 | `aipass revoke <path>` | Remove a project from the trust registry |
+| `aipass trust prune` | Drop registry entries whose project path no longer exists |
 | `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks) |
 | `aipass --version` | Version |
 
@@ -113,7 +114,7 @@ Humans only. Nothing in AIPass depends on this branch.
 
 ## Tests
 
-977 passing — `pytest src/aipass/aipass/tests/`
+981 passing — `pytest src/aipass/aipass/tests/`
 
 ## Known Issues
 
@@ -121,4 +122,4 @@ Humans only. Nothing in AIPass depends on this branch.
 
 ## Last Updated
 
-Last Updated: 2026-08-08
+Last Updated: 2026-08-13

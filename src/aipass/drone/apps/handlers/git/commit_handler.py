@@ -22,12 +22,15 @@ def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | 
     """Find which branch a changed file belongs to by walking up to .trinity/."""
     abs_path = (repo_root / filepath).resolve()
     root = repo_root.resolve()
+    # Templates ship full branch skeletons incl. .trinity/, so nested hits are
+    # template trees, not citizens. Citizens never nest: outermost hit wins.
+    found: tuple[str, Path] | None = None
     for parent in [abs_path.parent, *abs_path.parent.parents]:
         if not parent.is_relative_to(root):
             break
         if (parent / ".trinity").is_dir():
-            return parent.name, parent
-    return None
+            found = (parent.name, parent)
+    return found
 
 
 def _run_test_gate(repo_root: Path) -> dict | None:

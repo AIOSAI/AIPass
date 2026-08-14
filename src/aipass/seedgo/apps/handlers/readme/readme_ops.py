@@ -45,7 +45,7 @@ def _find_registry() -> Path:
     return Path.cwd() / "AIPASS_REGISTRY.json"
 
 
-# Generator lives in same handlers/standards/ directory as this file
+# Generator lives in the same handlers/readme/ directory as this file
 GENERATOR_PATH = Path(__file__).resolve().parent / "readme_generator.py"
 
 # Section display names for output

@@ -9,8 +9,8 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ## What I Do
 
 - Own the hook engine -- receives events from platform bridges, routes to handlers, logs everything
-- Maintain 27 native handlers across 4 categories (prompt, security, lifecycle, notification)
-- Bridge platforms -- thin normalization layer per provider (Claude today, Codex planned)
+- Maintain 28 native handlers across 4 categories (prompt, security, lifecycle, notification)
+- Bridge platforms -- thin normalization layer per provider (Claude + Codex, both shipping)
 - Per-project config -- `.aipass/hooks.json` controls what fires per project
 - Log everything -- prax integration + JSONL diagnostics for every hook execution
 
@@ -25,7 +25,8 @@ HOOKS -- hook infrastructure owner. Single engine dispatches all hooks across pl
 ```
 drone @hooks status              # Show hook config for current project
 drone @hooks log                 # Tail recent hook activity (last 20 JSONL entries)
-drone @hooks test                # Run hook test suite (planned)
+drone @hooks test                # Run the portable hook test runner
+drone @hooks verify              # Provider <-> project wiring check (non-zero on ERROR)
 drone @hooks --help              # Full help reference
 drone @hooks --version           # Version info
 ```
@@ -40,7 +41,7 @@ apps/
   handlers/
     bridges/
       claude.py            # Claude Code bridge (provider settings entry point)
-      codex.py              #   Codex bridge (planned)
+      codex.py              #   Codex bridge (shipped, wired in .codex/hooks.json)
     prompt/                # Prompt injection hooks (UserPromptSubmit)
       branch_loader.py     #   Injects aipass_local_prompt.md
       tier0_kernel.py      #   Injects tier0 kernel prompt (every turn)
@@ -65,20 +66,22 @@ apps/
       compact.py           #   Pre-compact memory archival
       rollover.py          #   Pre-compact memory rollover
       pre_compact_prep.py  #   Pre-compact snapshot stamp (context/dispatch/plans)
+      post_compact_regrounding.py # Mid-turn re-ground backstop (PostToolUse)
       session_start.py     #   SessionStart cadence reset
+      session_boot.py      #   Boot wrapper (main() CLI, not a hook -- no handle())
     notification/          # Alert hooks
-      announce.py          #   Inbox banner on prompt
-      email.py             #   Email notification
+      announce.py          #   Announcement tone on Notification events
+      email.py             #   Inbox check on prompt (unread mail banner)
       stop_sound.py        #   Sound on session stop
       tool_sound.py        #   Sound on tool use
       telegram_response.py #   Telegram reply delivery on Stop
-  config/
-    loader.py              # hooks.json discovery + validation, config-independent trust checks
-    trust_registry.py      # Trusted-project registry (enroll/revoke/hash checks)
-    diagnostics.py         # JSONL diagnostics config
+    config/                # NOTE: under handlers/, not apps/ -- apps/config/ is an empty package
+      loader.py            #   hooks.json discovery + validation, config-independent trust checks
+      trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
+      diagnostics.py       #   JSONL diagnostics config
 logs/
-  engine.jsonl             # JSONL diagnostics (every hook execution)
-tests/                     # 46 test files, 1370 tests
+  engine.jsonl             # JSONL diagnostics -- 2 generations @ ~500KB = ~11 MINUTES of retention
+tests/                     # 46 test files, 1407 tests
 ```
 
 ## Handler Categories
@@ -87,7 +90,7 @@ tests/                     # 46 test files, 1370 tests
 |----------|-------|----------|
 | prompt | 9 | branch_loader, tier0_kernel, navmap, identity, compass_recall, feedback_pulse, context_gauge, temporal, persistent_alert |
 | security | 6 | presence_gate, edit_gate, git_gate, rm_gate, registry_gate, subagent_gate |
-| lifecycle | 7 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, session_start |
+| lifecycle | 8 | auto_fix, auto_watchdog, auto_process, compact, rollover, pre_compact_prep, post_compact_regrounding, session_start |
 | notification | 5 | announce, email, stop_sound, tool_sound, telegram_response |
 
 ## How It Works

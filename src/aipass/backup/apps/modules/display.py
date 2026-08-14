@@ -42,6 +42,26 @@ def print_introspection():
     console.print("  Not a command module — used by snapshot/versioned/all")
 
 
+def refuse_missing_root(mode: str, project_root: str, show_panels: bool = True) -> BackupResult:
+    """Build the refusal result for a project root that is not a directory.
+
+    Shared by snapshot/versioned/all: create_backup_dir refuses a non-directory
+    by returning None, and every caller must stop there rather than let the
+    rest of the pipeline mkdir the tree it was told not to touch.
+    """
+    message = f"Project path is not a directory: {project_root}"
+    logger.error(f"[backup] {mode} refused — {message}")
+    if show_panels:
+        error(message)
+    json_handler.log_operation(
+        f"{mode}_refused",
+        {"project_root": project_root, "reason": "not a directory"},
+    )
+    result = BackupResult(mode=mode, project_root=project_root)
+    result.add_error(message, is_critical=True)
+    return result
+
+
 def print_help():
     """Display help for this module."""
     print_introspection()
@@ -172,13 +192,25 @@ def show_drive_result(result: dict) -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Not a command module — always returns False."""
+    """Handle only the module's own name. Returns True if handled.
+
+    Display is a rendering helper, not a backup verb, so it answers to
+    'display' alone. The missing ownership guard was the bug: discovery order
+    put this module first, so a no-args gate that ignored the command name
+    swallowed EVERY unknown command and printed this introspection instead of
+    the unknown-command error.
+    """
+    if command != MODULE_NAME:
+        return False
+
     if not args:
         print_introspection()
         return True
+
     if args[0] in ("--help", "-h", "help"):
         print_introspection()
         return True
+
     return False
 
 

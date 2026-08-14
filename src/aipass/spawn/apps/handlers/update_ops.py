@@ -40,6 +40,11 @@ _NEVER_UPDATE_FILES = frozenset(
         "DASHBOARD.local.json",
         "artifacts/birth_certificate.json",
         ".seedgo/bypass.json",
+        # Scaffold smoke test — ships at create, never re-added. The .py skip below
+        # only covers files that already exist, so a branch that deleted it would
+        # otherwise get it back on every update. Once a branch has a real suite the
+        # scaffold test can only skip, so it cannot inform (@seedgo, DPLAN-0291).
+        "tests/test_scaffold.py",
     }
 )
 _SKIP_TRACKING = frozenset(

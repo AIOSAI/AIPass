@@ -203,6 +203,22 @@ class TestDeadCodeCheck:
         assert result["score"] >= 75
         assert result["standard"] == "DEAD_CODE"
 
+    def test_dead_code_finding_tells_the_owner_to_re_run(self, mock_json, tmp_path: Path) -> None:
+        """The finding reports the frontier, not the closure — say so in the message.
+
+        @memory archived one named file, re-ran the audit, and a NEW file appeared:
+        its only referencer had just been removed. 95 -> 100 took two rounds, not
+        one. An owner who fixes once and stops leaves the tail behind.
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(branch / "apps" / "modules" / "orphan.py", "def unused():\n    return True\n")
+        _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
+
+        result = dead_code_check_branch(str(branch))
+
+        message = " ".join(c["message"] for c in result["checks"])
+        assert "re-run" in message.lower()
+
     def test_dead_code_violation_caught(self, mock_json, tmp_path: Path) -> None:
         """Branch with unreferenced modules is detected."""
         branch = _make_branch(tmp_path)

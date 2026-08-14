@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.router_handler import (
     resolve_caller_identity,
 )
 from .resolver import list_branches, resolve_branch
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 logger = system_logger
 
@@ -45,7 +46,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
     json_handler.log_operation("handle_command", {"module": "router", "command": command})

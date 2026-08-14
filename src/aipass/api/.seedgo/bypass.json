@@ -2,73 +2,18 @@
   "metadata": {
     "version": "1.0.0",
     "created": "2026-03-07T22:43:23.516578",
-    "description": "Standards bypass configuration for this branch"
+    "description": "Standards bypass configuration for this branch \u2014 pruned 2026-08-13 (APLAN-0013): only rules proven to suppress a real finding in the audit OR checklist lane are kept"
   },
   "bypass": [
     {
-      "file": "apps/modules/usage_tracker.py",
-      "standard": "deep_nesting",
-      "reason": "handle_command() depth 4 — standard command dispatcher pattern, depth is horizontal if/elif not vertical nesting"
-    },
-    {
-      "file": "apps/handlers/usage/tracking.py",
-      "standard": "deep_nesting",
-      "reason": "track_usage() depth 4 — clean linear logic, depth from defensive try-except"
-    },
-    {
       "file": "apps/handlers/google/retry.py",
       "standard": "deep_nesting",
-      "reason": "api_call_with_retry() depth 5 — standard retry-with-backoff pattern, nesting is inherent to retry loops"
-    },
-    {
-      "file": "apps/handlers/openrouter/caller.py",
-      "standard": "deep_nesting",
-      "reason": "3 functions: get_caller_info() depth 5 (stack inspection), get_json_folder_path() depth 5 (caller pattern matching), detect_caller_category() depth 4 (path-to-category mapping) — all inherent complexity"
-    },
-    {
-      "file": "apps/handlers/openrouter/client.py",
-      "standard": "deep_nesting",
-      "reason": "make_api_request() depth 4 — standard retry pattern with error handling"
+      "reason": "api_call_with_retry() depth 5 \u2014 standard retry-with-backoff pattern, nesting is inherent to retry loops"
     },
     {
       "file": "apps/handlers/auth/keys.py",
       "standard": "deep_nesting",
-      "reason": "_read_key_from_secrets() depth 5 — file read with validation guards"
-    },
-    {
-      "file": "apps/handlers/openrouter/client.py",
-      "standard": "handlers",
-      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for API key retrieval before making requests"
-    },
-    {
-      "file": "apps/handlers/usage/tracking.py",
-      "standard": "handlers",
-      "reason": "Imports get_api_key from auth/keys — same-branch handler cross-package import needed for usage tracking with API key context"
-    },
-    {
-      "file": "apps/handlers/config/provider.py",
-      "standard": "handlers",
-      "reason": "Imports load_json/save_json from json/json_handler — same-branch handler cross-package import for config file operations"
-    },
-    {
-      "file": "apps/modules/google_client.py",
-      "standard": "documentation",
-      "reason": "False positive — get_google_service() has full Google-style docstring but multi-line signature (6 lines) exceeds checker's 5-line lookahead window"
-    },
-    {
-      "file": "apps/handlers/json/json_handler.py",
-      "standard": "naming",
-      "reason": "json_handler.py is the system-wide default handler — standard name used across all 15 branches, cannot be renamed without breaking all imports"
-    },
-    {
-      "file": "apps/handlers/google/auth.py",
-      "standard": "naming",
-      "reason": "False positive — effective_scopes is a local variable inside load_credentials() and run_oauth_flow(), not a module-level constant"
-    },
-    {
-      "file": "apps/handlers/google/retry.py",
-      "standard": "naming",
-      "reason": "False positive — wait is a local variable inside api_call_with_retry() loop body, not a module-level constant"
+      "reason": "_read_key_from_secrets() depth 5 \u2014 file read with validation guards"
     },
     {
       "file": "apps/modules/google_client.py",
@@ -78,167 +23,42 @@
     {
       "file": "apps/modules/openrouter_client.py",
       "standard": "modules",
-      "reason": "make_call() is a CLI orchestrator — parses args then delegates to client.get_response(). All business logic lives in handlers/openrouter/client.py."
-    },
-    {
-      "file": "apps/integrations/testcontract/driver.py",
-      "standard": "architecture",
-      "reason": "Integration drivers live in apps/integrations/{project}/driver.py — gitignored private space intentionally outside the 3-layer structure. Loaded via importlib, not standard package import. See DPLAN-0133."
-    },
-    {
-      "file": "tests/test_integrations.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_api_key.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_critical_paths.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_api_entry.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "apps/integrations/broken_driver/driver.py",
-      "standard": "architecture",
-      "reason": "Integration driver test fixture in gitignored apps/integrations/ — intentionally outside 3-layer structure per DPLAN-0133 architecture. Loaded via importlib.util.spec_from_file_location, not standard package import."
-    },
-    {
-      "file": "apps/integrations/stress_test/driver.py",
-      "standard": "architecture",
-      "reason": "Integration driver test fixture in gitignored apps/integrations/ — intentionally outside 3-layer structure per DPLAN-0133 architecture. Loaded via importlib.util.spec_from_file_location, not standard package import."
-    },
-    {
-      "file": "apps/integrations/no_register/driver.py",
-      "standard": "architecture",
-      "reason": "Integration driver test fixture in gitignored apps/integrations/ — intentionally outside 3-layer structure per DPLAN-0133 architecture. Loaded via importlib.util.spec_from_file_location, not standard package import."
+      "reason": "make_call() is a CLI orchestrator \u2014 parses args then delegates to client.get_response(). All business logic lives in handlers/openrouter/client.py."
     },
     {
       "file": "apps/modules/integrations_manager.py",
       "standard": "unused_function",
-      "reason": "fetch_contracts() and call_contract() are test API hooks called from tests/test_integrations.py. The unused_function checker excludes test dirs from its search corpus, so these appear unused despite being actively called. Encapsulation standard requires tests to go through modules, not import handlers directly — these functions serve that purpose."
+      "reason": "fetch_contracts() and call_contract() are test API hooks called from tests/test_integrations.py. The unused_function checker excludes test dirs from its search corpus, so these appear unused despite being actively called. Encapsulation standard requires tests to go through modules, not import handlers directly \u2014 these functions serve that purpose."
     },
     {
       "file": "apps/modules/api_key.py",
       "standard": "unused_function",
-      "reason": "fetch_api_key() and fetch_validate_key() are module-level wrappers called from tests/test_critical_paths.py. The unused_function checker excludes test dirs from its search corpus. Encapsulation standard requires tests to go through modules — these functions serve that purpose (DPLAN-0155)."
+      "reason": "fetch_api_key() and fetch_validate_key() are module-level wrappers called from tests/test_critical_paths.py. The unused_function checker excludes test dirs from its search corpus. Encapsulation standard requires tests to go through modules \u2014 these functions serve that purpose (DPLAN-0155)."
     },
     {
-      "file": "apps/modules/api_key.py",
+      "file": "apps/modules/bridge.py",
+      "standard": "introspection",
+      "reason": "Utility module \u2014 owns no drone commands (handle_command always returns False). The no-args gate assumes the module owns the command it is handed; here it fired for EVERY no-arg command in the branch, prepending this module's banner to other modules' output. Removed 2026-08-13 (APLAN-0013), proven live. Introspection stays reachable via __main__."
+    },
+    {
+      "file": "apps/modules/registry.py",
+      "standard": "introspection",
+      "reason": "Utility module \u2014 owns no drone commands (handle_command always returns False). The no-args gate assumes the module owns the command it is handed; here it fired for EVERY no-arg command in the branch, prepending this module's banner to other modules' output. Removed 2026-08-13 (APLAN-0013), proven live. Introspection stays reachable via __main__."
+    },
+    {
+      "file": "apps/modules/secrets.py",
+      "standard": "introspection",
+      "reason": "Utility module \u2014 owns no drone commands (handle_command always returns False). The no-args gate assumes the module owns the command it is handed; here it fired for EVERY no-arg command in the branch, prepending this module's banner to other modules' output. Removed 2026-08-13 (APLAN-0013), proven live. Introspection stays reachable via __main__."
+    },
+    {
+      "file": "apps/modules/bridge.py",
       "standard": "cli",
-      "reason": "get_secret_cmd() --list uses console.print() for slug names (identifiers, not secrets). Machine consumers use the in-process module aipass.api.apps.modules.secrets.get_secret; CLI never prints raw values (DPLAN-0211)."
+      "reason": "Utility module \u2014 owns no drone commands, so there is no --help of its own to answer. Intercepting --help here answered help probes aimed at other modules' commands. See the introspection bypass for the same file (APLAN-0013)."
     },
     {
-      "file": "tests/test_aggregation.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_aggregation.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_cleanup.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_cleanup.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_registry.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_handler_guard.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_handler_guard.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly via importlib for unit testing the cross-branch guard."
-    },
-    {
-      "file": "tests/test_models_handler.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_models_handler.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_env_handler.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_env_handler.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_retry_handler.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_retry_handler.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_bridge_module.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_caller_detection.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_caller_detection.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_service_factory_handler.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_service_factory_handler.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
-    },
-    {
-      "file": "tests/test_integrations_manager.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_secrets.py",
-      "standard": "architecture",
-      "reason": "Test file — lives in tests/ by convention, not in the 3-layer app structure. Test files are exempt from layer architecture standard."
-    },
-    {
-      "file": "tests/test_secrets.py",
-      "standard": "encapsulation",
-      "reason": "Test file — imports handler functions directly for unit testing. Tests need direct access to verify handler behavior."
+      "file": "apps/modules/registry.py",
+      "standard": "cli",
+      "reason": "Utility module \u2014 owns no drone commands, so there is no --help of its own to answer. Intercepting --help here answered help probes aimed at other modules' commands. See the introspection bypass for the same file (APLAN-0013)."
     }
   ],
   "notes": {

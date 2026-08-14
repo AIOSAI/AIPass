@@ -11,6 +11,30 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(fleet)** — the fleet audit round: every citizen audits itself
+(DPLAN-0291, Patrick's directive, waves of 2). All 17 branches created living
+APLANs — standing per-branch health records that future audits UPDATE, never
+recreate — and ran full self-audits: live command probes, full suites, seedgo,
+README truth pass, bypass-registry measurement (control-first: pull the rule,
+audit, restore — cli 21→8, drone 48→29, flow 74→58, ai_mail 51→17 accumulated
+fiction cleared). Six branches had tests PINNING broken behaviour, found only
+by running the real path. Round closed with the full-fleet proof: 17/17
+branches at 100%, all 45 standards at 100%, 0 type errors.
+
+**fix(fleet)** — a help flag anywhere must explain, never execute (DPLAN-0291
+rule E, all 17 branches). Fleet-wide idiom gated help at args[0] only, so
+`verb sub --help` EXECUTED the verb: live detonations included @memory's
+rollover push running a 17-branch reset, @backup running a real snapshot, and
+@drone's `rm notes.md --help` deleting the file. Every branch fixed red-first
+with a whole-sequence wants_help predicate inside its own handle_command
+(after the ownership check — routers try modules in turn), bare word `help`
+position-0 only, opt-outs pinned for genuine help verbs. @seedgo encoded it
+the same day as the help_flag_safety standard (AST-based), recalibrated three
+times on fleet evidence: router exemption removed (standalone `__main__`
+paths), value-slot-only trigger widened (flow/hooks false negatives), and
+log_structure DE-SCORED after it proved to read live runtime state — a score
+that moves on its own is worse than a wrong one.
+
 **feat(drone)** — the tag verb learns external repos (by @drone, FPLAN-0403,
 DPLAN-0290 night shift). Two lanes chosen by the repo the command runs in:
 external seats (projects/*) tag their own repo's current HEAD and push to

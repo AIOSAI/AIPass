@@ -564,3 +564,106 @@ class TestGetValidationRulesAuthKeys:
         for provider in ["openrouter", "openai", "anthropic", "generic", "nonexistent"]:
             rules = api_key.get_validation_rules(provider)
             assert isinstance(rules, dict)
+
+
+class TestGoogleValidateFallsThrough:
+    """`validate google` belongs to google_client, not the generic key validator.
+
+    api_key is discovered before google_client, so claiming this command made
+    the documented "Validate Google OAuth2 credentials" behaviour unreachable:
+    it reported "No API key found for google" instead. google is an OAuth2
+    provider, not one of PROVIDER_DEFAULTS (openrouter, openai).
+    """
+
+    def test_validate_google_not_claimed(self):
+        """api_key declines `validate google` so routing continues."""
+        with patch(PATCH_CONSOLE), patch("aipass.api.apps.modules.api_key.validate_key") as mock_validate:
+            assert api_key.handle_command("validate", ["google"]) is False
+
+        mock_validate.assert_not_called()
+
+    def test_validate_real_provider_still_claimed(self):
+        """Non-google providers still route to the generic validator."""
+        with (
+            patch(PATCH_CONSOLE),
+            patch("aipass.api.apps.modules.api_key.validate_key") as mock_validate,
+            patch("aipass.api.apps.modules.api_key.json_handler"),
+        ):
+            assert api_key.handle_command("validate", ["openrouter"]) is True
+
+        mock_validate.assert_called_once_with(["openrouter"])
+
+    def test_validate_google_reaches_google_client_end_to_end(self):
+        """Through the real router, `validate google` lands in google_client."""
+        from aipass.api.apps.api import discover_modules, route_command
+
+        modules = discover_modules()
+        with patch("aipass.api.apps.modules.google_client._cmd_validate") as mock_cmd:
+            handled = route_command("validate", ["google"], modules)
+
+        assert handled is True
+        mock_cmd.assert_called_once()
+
+
+class TestTrailingHelpDoesNotExecute:
+    """A help flag must explain the command, never run it.
+
+    api.py's router historically inspected only the first arg after the command,
+    and this module gated on args[0] only, so `get-key openrouter --help` reached
+    get_key() and printed masked key material instead of help. Reported by
+    @seedgo via the help_flag_safety standard.
+    """
+
+    def test_get_key_with_provider_and_trailing_help_does_not_retrieve(self):
+        """`get-key <provider> --help` prints help, retrieves nothing."""
+        with (
+            patch(PATCH_CONSOLE),
+            patch("aipass.api.apps.modules.api_key.print_help") as mock_help,
+            patch("aipass.api.apps.modules.api_key.get_key") as mock_get,
+        ):
+            assert api_key.handle_command("get-key", ["openrouter", "--help"]) is True
+
+        mock_get.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_no_key_material_reaches_stdout_on_help_probe(self, capsys):
+        """The security assertion: no fragment of a real key can be printed.
+
+        Uses a synthetic key — a populated machine would otherwise disclose
+        key[:6] and key[-4:] to the terminal.
+        """
+        fake_key = "sk-or-v1-SYNTHETICTESTKEYNOTREAL00000000000000ZZZZ"
+        with (
+            patch("aipass.api.apps.modules.api_key.keys") as mock_keys,
+            patch("aipass.api.apps.modules.api_key.json_handler"),
+        ):
+            mock_keys.get_api_key.return_value = fake_key
+            api_key.handle_command("get-key", ["openrouter", "--help"])
+
+        out = capsys.readouterr().out
+        assert "ZZZZ" not in out
+        assert "sk-or-" not in out
+
+    def test_get_secret_with_trailing_help_does_not_retrieve(self):
+        """`get-secret <provider/slug> --help` prints help, reads no secret."""
+        with (
+            patch(PATCH_CONSOLE),
+            patch("aipass.api.apps.modules.api_key.print_help") as mock_help,
+            patch("aipass.api.apps.modules.api_key.get_secret_cmd") as mock_secret,
+        ):
+            assert api_key.handle_command("get-secret", ["telegram/bot", "--help"]) is True
+
+        mock_secret.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_validate_with_provider_and_trailing_help_does_not_validate(self):
+        """`validate <provider> --help` prints help, validates nothing."""
+        with (
+            patch(PATCH_CONSOLE),
+            patch("aipass.api.apps.modules.api_key.print_help") as mock_help,
+            patch("aipass.api.apps.modules.api_key.validate_key") as mock_validate,
+        ):
+            assert api_key.handle_command("validate", ["openrouter", "-h"]) is True
+
+        mock_validate.assert_not_called()
+        mock_help.assert_called_once()

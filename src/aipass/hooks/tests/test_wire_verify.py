@@ -348,6 +348,27 @@ class TestHandleCommand:
     def test_help_word(self):
         assert wire_verify.handle_command("verify", ["help"]) is True
 
+    def test_error_findings_exit_non_zero(self):
+        """Its own --help promises 'Exits non-zero on any ERROR finding' — keep that promise.
+
+        Returning True routed as handled, and hooks.main() turned that into exit 0,
+        so a wiring break printed FAILED and reported success to any caller reading
+        the exit code.
+        """
+        import pytest
+
+        mock_result = {"ok": False, "errors": ["broken wiring"], "warnings": [], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+            with pytest.raises(SystemExit) as exc:
+                wire_verify.handle_command("verify", [])
+        assert exc.value.code != 0
+
+    def test_clean_run_does_not_exit(self):
+        """The passing path must stay a normal return — only ERROR findings exit."""
+        mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+            assert wire_verify.handle_command("verify", []) is True
+
 
 class TestRenderResults:
     def test_renders_pass(self):

@@ -90,6 +90,43 @@ class TestHandleCommandRouting:
         result = display.handle_command("foobar", [])
         assert result is False
 
+    # help_flag_safety — a help flag ANYWHERE means explain, never execute.
+    # run_demo is patched out in every case: a question must not reach a doing path.
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_help_flag_after_demo_prints_help(self, mock_help, mock_run_demo):
+        """`display demo --help` — flag at args[1] must still be read."""
+        result = display.handle_command("display", ["demo", "--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_dash_h_after_demo_prints_help(self, mock_help, mock_run_demo):
+        result = display.handle_command("show", ["demo", "-h"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_demo_as_command_with_help_flag_prints_help(self, mock_help, mock_run_demo):
+        """`drone @cli demo --help` — verb arrives in command, flag in args."""
+        result = display.handle_command("demo", ["--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
+    @patch.object(display, "run_demo")
+    @patch.object(display, "print_help")
+    def test_help_flag_at_any_later_position_prints_help(self, mock_help, mock_run_demo):
+        result = display.handle_command("display", ["demo", "extra", "--help"])
+        mock_help.assert_called_once()
+        mock_run_demo.assert_not_called()
+        assert result is True
+
     def test_display_unknown_subcommand_returns_false(self):
         result = display.handle_command("display", ["unknown_sub"])
         assert result is False

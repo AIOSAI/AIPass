@@ -21,6 +21,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.modules.usage_tracker import handle_command
 from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
 
 # All external dependencies are patched at the module level so no
@@ -369,7 +370,8 @@ def test_cleanup_success(mock_cleanup_handler, mock_header, mock_console, mock_s
     mock_cleanup_handler.cleanup_old_data.return_value = 5
     mock_data_path = MagicMock()
     mock_data_path.exists.return_value = True
-    mock_path_cls.return_value.resolve.return_value.parent.parent.parent.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
+    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
 
     usage_tracker.cleanup_data(["45"])
 
@@ -393,7 +395,8 @@ def test_cleanup_nothing_to_clean(
     mock_cleanup_handler.cleanup_old_data.return_value = 0
     mock_data_path = MagicMock()
     mock_data_path.exists.return_value = True
-    mock_path_cls.return_value.resolve.return_value.parent.parent.parent.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
+    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
 
     usage_tracker.cleanup_data(["30"])
 
@@ -416,7 +419,8 @@ def test_cleanup_default_30_days(
     mock_cleanup_handler.cleanup_old_data.return_value = 3
     mock_data_path = MagicMock()
     mock_data_path.exists.return_value = True
-    mock_path_cls.return_value.resolve.return_value.parent.parent.parent.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
+    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
 
     usage_tracker.cleanup_data([])
 
@@ -439,7 +443,8 @@ def test_cleanup_custom_days(mock_cleanup_handler, mock_header, mock_console, mo
     mock_cleanup_handler.cleanup_old_data.return_value = 7
     mock_data_path = MagicMock()
     mock_data_path.exists.return_value = True
-    mock_path_cls.return_value.resolve.return_value.parent.parent.parent.__truediv__.return_value.__truediv__.return_value = mock_data_path
+    _api_json_dir = mock_path_cls.return_value.resolve.return_value.parent.parent.parent
+    _api_json_dir.__truediv__.return_value.__truediv__.return_value = mock_data_path
 
     usage_tracker.cleanup_data(["90"])
 
@@ -466,3 +471,57 @@ def test_handle_command_propagates_exception(mock_console, mock_header, mock_jh,
 
     with pytest.raises(RuntimeError, match="handler failed"):
         usage_tracker.handle_command("stats", [])
+
+
+class TestTrailingHelpDoesNotExecute:
+    """A help flag must explain the verb, never run it.
+
+    The entry-point guard in api.py only inspects the first arg after the
+    command, so `cleanup 30 --help` reaches this module with args[0] == "30".
+    Before the fix that parsed 30 as a retention window and ran a real,
+    data-deleting cleanup.
+    """
+
+    def test_cleanup_with_days_and_trailing_help_shows_help(self):
+        """`cleanup 30 --help` prints help instead of deleting usage data."""
+        with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.cleanup_data") as mock_cleanup:
+            assert handle_command("cleanup", ["30", "--help"]) is True
+
+        mock_cleanup.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_track_with_id_and_trailing_help_shows_help(self):
+        """`track <gen_id> --help` prints help instead of tracking."""
+        with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.track_usage") as mock_track:
+            assert handle_command("track", ["gen-123", "-h"]) is True
+
+        mock_track.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_caller_usage_with_name_and_trailing_help_shows_help(self):
+        """`caller-usage flow --help` prints help instead of querying."""
+        with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.show_caller_usage") as mock_show:
+            assert handle_command("caller-usage", ["flow", "--help"]) is True
+
+        mock_show.assert_not_called()
+        mock_help.assert_called_once()
+
+    def test_bare_help_in_value_position_is_data(self):
+        """`track <id> help` names a caller — only `--help`/`-h` are flags.
+
+        Bare `help` keeps its meaning in the first position (`cleanup help`),
+        so the anywhere-scan is limited to the unambiguous flag spellings.
+        """
+        with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.track_usage") as mock_track:
+            assert handle_command("track", ["gen-123", "help"]) is True
+
+        mock_track.assert_called_once_with(["gen-123", "help"])
+        mock_help.assert_not_called()
+
+    def test_bare_help_first_position_still_shows_help(self):
+        """`cleanup help` keeps working — existing alias, unchanged."""
+        with patch(f"{PATCH_ROOT}.print_help") as mock_help, patch(f"{PATCH_ROOT}.cleanup_data") as mock_cleanup:
+            assert handle_command("cleanup", ["help"]) is True
+
+        mock_cleanup.assert_not_called()
+        mock_help.assert_called_once()

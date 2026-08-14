@@ -30,6 +30,9 @@ from aipass.cli.apps.modules import error, warning
 # JSON handler for logging
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# Whole-sequence help detection (help_flag_safety)
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+
 # Drone services for @ resolution
 
 # Diagnostics handlers
@@ -130,8 +133,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in ("diagnostics", "diagnostics_audit"):
         return False
 
-    # --help → full help
-    if args and args[0] in ["--help", "-h", "help"]:
+    # A help flag ANYWHERE means explain: `diagnostics aipass --help` used to
+    # answer "Unknown argument" for a question it can answer.
+    if wants_help(None, args):
         print_help()
         return True
 

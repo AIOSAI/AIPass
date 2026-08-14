@@ -13,5 +13,8 @@ build/
 *.tmp
 *.swp
 
-# Machine-local audit artifact (regenerated on every audit run)
+# Machine-local audit artifacts (regenerated on every audit run). The scoped
+# form lands here too — a per-branch run writes last_audit_{branch}.json into
+# THIS directory whichever branch was audited, so the glob has to cover them all.
 .seedgo/last_audit.json
+.seedgo/last_audit_*.json

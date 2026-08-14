@@ -10,6 +10,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -27,6 +28,7 @@ from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
+from aipass.backup.apps.modules.display import refuse_missing_root
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.versioned import run_versioned
 
@@ -56,12 +58,24 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # Screen the WHOLE sequence, not just args[0]. This module has a
+    # standalone __main__ entry that never reaches the router's help
+    # normalisation, so a trailing flag used to fall through and run the
+    # verb for real. Bare "help" stays first-position-only: later
+    # positions are user values (filenames), not flags.
+    if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
 
     project_root = args[0]
     show_panels = "--quiet" not in args
+
+    # Refuse before the shared scan — snapshot/versioned each guard themselves,
+    # but the scan below would otherwise run against a path that isn't there.
+    if not Path(project_root).is_dir():
+        refuse_missing_root("all", project_root, show_panels)
+        return True
+
     logger.info(f"[backup] Running full backup cycle for {project_root}")
 
     # ONE scan shared between both modes (single-scan rule)

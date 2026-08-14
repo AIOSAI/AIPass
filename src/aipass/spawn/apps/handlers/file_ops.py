@@ -17,8 +17,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 from aipass.spawn.apps.handlers.json import json_handler
 
-# Patterns to skip during template copy
-SKIP_NAMES = {"__pycache__", ".git", ".template_registry.json"}
+# Patterns to skip during template copy.
+# Cache directories belong to whoever ran the tools, never to the new branch —
+# .pytest_cache shipped spawn's own cached node IDs into every citizen until
+# it was added here (DPLAN-0291 audit; see tests/test_template_hygiene.py).
+SKIP_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git", ".template_registry.json"}
 
 
 def ensure_directory(path):

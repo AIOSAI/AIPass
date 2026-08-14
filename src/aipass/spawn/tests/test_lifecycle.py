@@ -1103,6 +1103,23 @@ class TestHandleDelete:
 
         assert result == 1
 
+    def test_failed_dry_run_prints_no_raw_markup(self, capsys, repo_root, mock_registry):
+        """The failure line must not leak literal Rich tags.
+
+        error() writes plain text, so the dry-run mode marker built for console.print()
+        surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
+        """
+        from aipass.spawn.apps.modules.delete import handle_delete
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            handle_delete(["--dry-run", "--yes", "@spawn"])
+
+        combined = "".join(capsys.readouterr())
+        assert "Delete FAILED" in combined
+        assert "[dim]" not in combined
+        assert "[/dim]" not in combined
+        assert "(dry-run)" in combined
+
 
 class TestHandleSyncRegistry:
     """Tests for handle_sync_registry() CLI entry."""

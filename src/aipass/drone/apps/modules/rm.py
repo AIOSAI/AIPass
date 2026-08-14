@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.broker.client import (
     is_sandboxed as _is_sandboxed,
     broker_delete as _broker_delete,
 )
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 DRONE_MODULE = {
     "name": "rm",
@@ -58,7 +59,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args):
         print_help()
         return True
 

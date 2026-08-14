@@ -7,9 +7,14 @@
 
 """Test versioned engine — baseline, diff, skip, never-delete, restore."""
 
+import tempfile
 import time
 from pathlib import Path
 from unittest.mock import patch
+
+# Inert path input for the path builder — never touched on disk, so it only
+# needs to be a valid absolute path on the running OS.
+FAKE_PROJECT_ROOT = str(Path(tempfile.gettempdir()) / "project")
 
 
 class TestVersionedBaseline:
@@ -267,7 +272,7 @@ class TestVersionedFilePath:
         with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
-            result = Path(build_versioned_file_path("/tmp/project", "README.md"))
+            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
             assert "root" in str(result)
             assert result.name == "README.md"
 
@@ -276,7 +281,7 @@ class TestVersionedFilePath:
         with patch("aipass.backup.apps.handlers.json.json_handler.log_operation"):
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
-            result = Path(build_versioned_file_path("/tmp/project", "src/main.py"))
+            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
             assert "src" in str(result)
             assert result.name == "main.py"
             assert result.parent.name == "main.py"
@@ -287,7 +292,7 @@ class TestVersionedFilePath:
             from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
 
             long_name = "a" * 60 + ".py"
-            result = Path(build_versioned_file_path("/tmp/project", long_name))
+            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
             assert result.name == long_name
             assert len(result.parent.name) < 50
 

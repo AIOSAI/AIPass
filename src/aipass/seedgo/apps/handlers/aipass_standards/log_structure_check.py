@@ -163,44 +163,70 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": passed, "checks": checks, "score": score, "standard": "LOG_STRUCTURE"}
 
 
-def check_branch_post(branch_path: str) -> tuple:
-    """Branch-level log structure post-checks. Called by audit pipeline after file-level checks.
+# Written into every dispatched branch's logs/ by @ai_mail's dispatch machinery,
+# not by the branch. Counting them made the audit's own delivery mechanism
+# manufacture the observation: @cli was reported as having 3 local logs on the
+# night it was dispatched, when it has none of its own.
+_MAIL_LANE_LOG_PREFIX = "dispatch_"
+
+
+def _is_mail_lane_artifact(log_file: Path) -> bool:
+    """Return True if *log_file* belongs to @ai_mail's lane rather than the branch."""
+    return log_file.name.startswith(_MAIL_LANE_LOG_PREFIX)
+
+
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored signpost lines for the log structure standard.
 
     Two-tier model:
       - system_logs/ at repo root is managed by prax (runtime dispatch).
-        Having many system logs and few local logs is normal.
-      - logs/ at branch root holds local-only logs. Flat placement is
-        fine — the standard does not prescribe internal organisation.
+      - logs/ at branch root holds local-only logs.
+
+    "Local logs, no system logs" used to be a branch-level VIOLATION worth 50.
+    It is reported here instead, and the reasons are two:
+
+    1. It is not always a defect. @cli's modules cannot import prax at all
+       (circular: prax depends on cli), so every prax call site lives in cli.py
+       and every one of them is a failure path — logger.error on module-load
+       failure, logger.warning on KeyboardInterrupt, logger.error on an
+       unhandled exception. A HEALTHY @cli emits zero system logs BY
+       CONSTRUCTION: the zero is the success case, not a symptom.
+
+    2. It was not a function of the CODE. The count comes from live log files,
+       so a branch's score moved when logs rotated or were cleared with nothing
+       edited — @cli read 100% one morning and 50% the same evening with the
+       structural facts about their code identical on both days. A score that
+       moves on its own is worse than a wrong score, because nobody can act on
+       it. Everything else this standard checks reads the source and stays
+       scored.
+
+    Returns plain strings on the audit's info channel (see
+    architecture_check.check_branch_info for the pattern), so it can never
+    reach a score by construction.
+
+    Args:
+        branch_path: Branch root to inspect.
 
     Returns:
-        Tuple of (violations_list, scores_list)
+        List of info lines, empty when there is nothing to signpost.
     """
     bp = Path(branch_path)
-    violations: list[dict] = []
-    scores: list[int] = []
-
-    in_dirs = [f for f in bp.rglob("*.log") if f.parent.name == "logs"]
+    local_logs = [f for f in bp.rglob("*.log") if f.parent.name == "logs" and not _is_mail_lane_artifact(f)]
+    if not local_logs:
+        return []
 
     repo = next(
         (p for p in [bp] + list(bp.parents) if (p / "AIPASS_REGISTRY.json").is_file()),
         None,
     )
-    if repo and (repo / "system_logs").is_dir():
-        sd = repo / "system_logs"
-        system_count = len(list(sd.glob(f"{bp.name}_*.log")))
-        if in_dirs and system_count == 0:
-            scores.append(50)
-            violations.append(
-                {
-                    "file": "(branch-level)",
-                    "path": str(sd),
-                    "score": 50,
-                    "issues": [
-                        f"Branch has {len(in_dirs)} local log(s) but 0 system logs — prax dispatch may be misconfigured"
-                    ],
-                }
-            )
-        else:
-            scores.append(100)
+    if repo is None or not (repo / "system_logs").is_dir():
+        return []
 
-    return violations, scores
+    sd = repo / "system_logs"
+    if list(sd.glob(f"{bp.name}_*.log")):
+        return []
+    return [
+        f"{bp.name}: {len(local_logs)} local log(s) under logs/, 0 system log(s) in {sd}/ — "
+        "prax writes a system log only when something calls it, so a branch whose prax call sites "
+        "are all failure paths shows zero here by design. Runtime observation, not scored."
+    ]

@@ -19,8 +19,6 @@ ARCHITECTURE:
 
 import os
 import sys
-import time
-import signal
 
 from pathlib import Path
 from typing import List, Any
@@ -239,10 +237,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         True if command was handled, False otherwise
     """
     # Built-in commands handled by entry point
-    if command == "watch":
-        start_watch()
-        return True
-
     if command == "push":
         return route_command("rollover", ["push"], modules)
 
@@ -254,68 +248,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             logger.error(f"[memory] Module {module.__name__} error: {e}")
 
     return False
-
-
-# =============================================================================
-# WATCH MODE
-# =============================================================================
-
-
-def start_watch() -> None:
-    """
-    Start memory watcher - monitors branch memory files for auto-rollover
-
-    Watches all branches from AIPASS_REGISTRY.json. When entry counts
-    exceed v2 limits, automatically triggers rollover.
-
-    Press Ctrl+C to stop.
-    """
-    from ..handlers.monitor.memory_watcher import (  # type: ignore[import-not-found]
-        start_memory_watcher,
-        stop_memory_watcher,
-    )
-    from ..handlers.monitor.detector import get_rollover_stats  # type: ignore[import-not-found]
-
-    # Signal handler for graceful shutdown
-    def signal_handler(sig, frame):
-        """Handle SIGINT for graceful watcher shutdown."""
-        console.print("\n")
-        console.print("[dim]Stopping watcher...[/dim]")
-        stop_memory_watcher()
-        console.print("[green]>[/green] Watcher stopped")
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-
-    console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Watch Mode[/bold cyan]", border_style="cyan", box=box.ROUNDED))
-    console.print()
-
-    # Start the watcher
-    result = start_memory_watcher()
-
-    if not result.get("success"):
-        error(f"Failed to start watcher: {result.get('error')}")
-        return
-
-    console.print(f"[green]>[/green] Watching {result.get('count', 0)} branch directories")
-    console.print("[dim]Auto-rollover enabled when files exceed limits[/dim]")
-    console.print("[dim]Press Ctrl+C to stop[/dim]")
-    console.print()
-
-    # Show initial status
-    stats = get_rollover_stats()
-    if stats.get("success"):
-        ready = stats.get("files_ready", 0)
-        total = stats.get("files_checked", 0)
-        status_marker = "[red]![/red]" if ready > 0 else "[green]OK[/green]"
-        console.print(f"{status_marker} Current: {total} files monitored, {ready} ready for rollover")
-        console.print()
-
-    # Keep running until Ctrl+C
-    console.print("[dim]Watcher active. Waiting for file changes...[/dim]")
-    while True:
-        time.sleep(1)
 
 
 # =============================================================================

@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _HANDLER_MOCKS = {
     "aipass.prax.apps.handlers.json": MagicMock(),
     "aipass.prax.apps.handlers.json.json_handler": MagicMock(),
@@ -681,3 +683,130 @@ class TestPersistence:
 
         mod, _ = _import_tracker(monkeypatch)
         assert mod._state_loaded is False
+
+
+class TestRateHistoryPersistence:
+    """The measured rates themselves survive to disk.
+
+    Without this, get_snapshot() in a fresh CLI process can only ever report
+    0 lines/min: from_dict() rebuilt an empty deque, so 'show last known
+    rates' showed every file as idle regardless of what the scan measured.
+    """
+
+    def _persisted(self, log_file, samples):
+        """Build a persisted-state payload carrying rate samples."""
+        return {
+            "module_name": "rate_tracker",
+            "files": {
+                str(log_file): {
+                    "last_offset": 100,
+                    "last_check": time.time(),
+                    "rates": samples,
+                    "warning_sustained": 0,
+                    "critical_sustained": 0,
+                    "fired_warning": False,
+                    "fired_critical": False,
+                }
+            },
+        }
+
+    def test_to_dict_carries_rate_history(self, tmp_path, monkeypatch):
+        """A scanned rate is written into the persisted payload, not dropped."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        state = mod.FileRateState(0, time.time())
+        state.rates.append((time.time(), 42.0))
+
+        payload = state.to_dict()
+
+        assert "rates" in payload, "rate history must be persisted"
+        assert payload["rates"][-1][1] == 42.0
+
+    def test_snapshot_reports_rate_from_persisted_state(self, tmp_path, monkeypatch):
+        """A fresh process reports the rate the previous scan measured.
+
+        This is the live defect: `log-health scan` reported 5 active files,
+        `log-health snapshot` seconds later reported 329 idle.
+        """
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        mod.json_handler.load_json.return_value = self._persisted(log_file, [[time.time(), 42.0]])
+
+        snapshot = mod.get_snapshot()
+
+        assert len(snapshot) == 1
+        assert snapshot[0]["rate_lines_per_min"] == 42.0
+
+    def test_stale_samples_are_not_restored(self, tmp_path, monkeypatch):
+        """Samples older than the deque's own horizon do not come back.
+
+        A continuously running tracker would have evicted them, so feeding
+        them into the threshold window after a long downtime would raise a
+        runaway alarm from history rather than from what is happening now.
+        """
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        ancient = time.time() - (mod._RATE_HISTORY_SIZE * mod.SCAN_INTERVAL) - 60
+        mod.json_handler.load_json.return_value = self._persisted(log_file, [[ancient, 900.0]])
+
+        snapshot = mod.get_snapshot()
+
+        assert snapshot[0]["rate_lines_per_min"] == 0.0
+        assert snapshot[0]["age_seconds"] is None
+
+    def test_snapshot_reports_sample_age(self, tmp_path, monkeypatch):
+        """Snapshot carries how old its newest sample is, so display can say so."""
+        logs_dir = tmp_path / "system"
+        logs_dir.mkdir(parents=True)
+        log_file = logs_dir / "test_module.log"
+        log_file.write_text("x" * 100)
+
+        mod, _ = _import_tracker(monkeypatch, logs_dir=logs_dir)
+        mod.json_handler.load_json.return_value = self._persisted(log_file, [[time.time() - 30.0, 12.0]])
+
+        snapshot = mod.get_snapshot()
+
+        assert snapshot[0]["age_seconds"] == pytest.approx(30.0, abs=5.0)
+
+    def test_persisted_rates_survive_a_full_round_trip(self, tmp_path, monkeypatch):
+        """to_dict() -> from_dict() preserves the measured rate."""
+        mod, _ = _import_tracker(monkeypatch)
+        state = mod.FileRateState(0, time.time())
+        state.rates.append((time.time(), 7.5))
+
+        restored = mod.FileRateState.from_dict(state.to_dict())
+
+        assert list(restored.rates)[-1][1] == 7.5
+
+    def test_unreadable_samples_are_reported_not_dropped_in_silence(self, monkeypatch):
+        """A corrupt persistence file must say so — prax's whole job is visibility."""
+        mod, _ = _import_tracker(monkeypatch)
+        good = (time.time(), 4.0)
+
+        with patch.object(mod.logger, "warning") as warn:
+            restored = mod.FileRateState.from_dict({"rates": [None, [], 42, list(good)]})
+
+        assert list(restored.rates) == [good]
+        assert warn.call_count == 1, "one summary line, never one per sample"
+        assert warn.call_args[0][1] == 3
+
+    def test_clean_restore_stays_quiet(self, monkeypatch):
+        """The warning must not fire on well-formed state."""
+        mod, _ = _import_tracker(monkeypatch)
+
+        with patch.object(mod.logger, "warning") as warn:
+            mod.FileRateState.from_dict({"rates": [[time.time(), 4.0]]})
+
+        assert warn.call_count == 0

@@ -455,6 +455,35 @@ class TestNeverUpdateGuard:
         assert result["success"] is True
         assert dashboard.read_text() == dashboard_before
 
+    def test_scaffold_test_never_re_added(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """tests/test_scaffold.py is create-only — a branch that deleted it never gets it back.
+
+        The .py skip only guards files that already exist; a missing .py still lands via
+        the addition branch. Once a branch has a real suite the scaffold smoke test can
+        only ever skip, so re-adding it re-creates a permanently-inert test (@seedgo
+        ruling, DPLAN-0291 wave 2).
+        """
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        tests_tpl = template_dir / "tests"
+        tests_tpl.mkdir(exist_ok=True)
+        (tests_tpl / "test_scaffold.py").write_text("def test_scaffold(): pass\n")
+
+        branch_tests = branch_dir / "tests"
+        branch_tests.mkdir(exist_ok=True)
+        (branch_tests / "test_real_suite.py").write_text("def test_real(): pass\n")
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            result = update_branch("test_branch")
+
+        assert result["success"] is True
+        assert not (branch_tests / "test_scaffold.py").exists()
+        added = [a["template_path"] for a in result.get("additions_detail", [])]
+        assert "tests/test_scaffold.py" not in added
+
     def test_zero_renames_always(self, tmp_path, template_dir, branch_dir, mock_registry):
         """P1 engine never proposes renames."""
         from aipass.spawn.apps.handlers.update_ops import update_branch
@@ -574,6 +603,27 @@ class TestHandleUpdate:
 
         result = handle_update([])
         assert result == 1
+
+    def test_failed_dry_run_prints_no_raw_markup(self, capsys, tmp_path, template_dir, mock_registry):
+        """The failure line must not leak literal Rich tags.
+
+        error() writes plain text, so the dry-run mode marker built for console.print()
+        surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
+        """
+        from aipass.spawn.apps.modules.update import handle_update
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            handle_update(["@no_such_branch"])
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "Update FAILED" in combined
+        assert "[dim]" not in combined
+        assert "[/dim]" not in combined
+        assert "(dry-run)" in combined
 
     def test_single_branch_arg(self, tmp_path, template_dir, branch_dir, mock_registry):
         """@branch arg should call update_branch."""

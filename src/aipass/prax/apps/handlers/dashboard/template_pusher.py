@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-08-13
 # =============================================
 
 """
@@ -20,7 +20,9 @@ Purpose:
 
 Independence:
     Reads template and registry directly. No service or module dependencies.
-    Quick status calculation is self-contained (copied logic, not imported).
+    Quick status is calculated by the one shared implementation in status.py —
+    the copy that used to live here drifted and shipped a block with no
+    todo_count.
 """
 
 import json
@@ -34,6 +36,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
+from .status import calculate_quick_status, merge_quick_status  # noqa: E402
 
 # =============================================================================
 # PATH RESOLUTION
@@ -71,8 +74,14 @@ DEPRECATED_SECTIONS = [
     "todo",
 ]
 
-# Deprecated quick_status keys to REMOVE during push
-DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins", "commons_mentions"]
+# Deprecated quick_status keys to REMOVE during push.
+#
+# A key belongs here only when NOBODY writes it. commons_mentions was listed
+# because prax stopped computing it — but @flow took ownership rather than
+# retiring it (flow/apps/handlers/dashboard/push_branch_dashboard.py OWNED_KEYS),
+# so this list outlived the ownership change and would have deleted a live key
+# from every branch on the next push. Removed 2026-08-13.
+DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
 # Required sections with their default data (must match template)
 REQUIRED_SECTIONS = {
@@ -114,51 +123,28 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
 
 
 # =============================================================================
-# QUICK STATUS CALCULATION (SELF-CONTAINED)
+# QUICK STATUS CALCULATION (DELEGATES TO status.py)
 # =============================================================================
 
 
-def _calculate_quick_status(sections: Dict) -> Dict:
+def _calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) -> Dict:
     """
     Calculate quick_status from live section data.
 
-    Self-contained version (same logic as operations.py but independent).
-    Reads directly from section fields. No external imports.
+    Thin delegate to the single implementation in status.py. This was a fourth
+    self-contained copy until 2026-08-13, and being self-contained is exactly
+    what made it dangerous: it had no todo_count at all, so the fleet-wide push
+    published a block missing a counter every other writer maintains.
 
     Args:
         sections: All dashboard sections dict
+        branch_path: Branch root, for counts sourced from local files. None for
+            spawn's builder template, which has no .trinity/ or inbox to read.
 
     Returns:
-        Quick status dict with summary, action flags, and counts
+        Quick status dict with counts, action flag, and summary
     """
-    ai_mail = sections.get("ai_mail", {})
-    flow = sections.get("flow", {})
-
-    new_mail = ai_mail.get("new", ai_mail.get("unread", 0))
-    opened_mail = ai_mail.get("opened", 0)
-    active_plans_raw = flow.get("active_plans", 0)
-    active_plans = len(active_plans_raw) if isinstance(active_plans_raw, list) else int(active_plans_raw or 0)
-
-    new_mail = int(new_mail or 0)
-    opened_mail = int(opened_mail or 0)
-
-    action_required = new_mail > 0 or active_plans > 0
-
-    parts = []
-    if new_mail > 0:
-        parts.append(f"{new_mail} new emails")
-    if opened_mail > 0:
-        parts.append(f"{opened_mail} opened")
-    if active_plans > 0:
-        parts.append(f"{active_plans} active plans")
-
-    return {
-        "new_mail": new_mail,
-        "opened_mail": opened_mail,
-        "active_plans": active_plans,
-        "action_required": action_required,
-        "summary": ", ".join(parts) if parts else "All clear",
-    }
+    return calculate_quick_status(sections, branch_path)
 
 
 # =============================================================================
@@ -217,8 +203,17 @@ def _update_spawn_template(
         result["changes"].append({"branch": "SPAWN_TEMPLATE", "actions": spawn_actions})
 
 
-def _apply_structural_updates(data: dict, template: dict, branch_actions: List[str]) -> tuple:
+def _apply_structural_updates(
+    data: dict, template: dict, branch_actions: List[str], branch_path: "Path | None" = None
+) -> tuple:
     """Apply structural updates from template to existing dashboard data.
+
+    Args:
+        data: The dashboard dict to update in place.
+        template: Template to take structural elements from.
+        branch_actions: Running list of human-readable actions taken.
+        branch_path: Branch root, so quick_status counts come from the branch's
+            own files. None for spawn's builder template, which has none.
 
     Returns (changed: bool, branch_actions: list).
     """
@@ -254,9 +249,10 @@ def _apply_structural_updates(data: dict, template: dict, branch_actions: List[s
         branch_actions.append("updated _warning header")
         changed = True
 
-    # Recalculate quick_status from live data
+    # Recalculate quick_status from live data, merging so this push cannot
+    # delete a key another service owns (the invariant agreed with @flow).
     if "sections" in data:
-        new_qs = _calculate_quick_status(data["sections"])
+        new_qs = merge_quick_status(data.get("quick_status"), _calculate_quick_status(data["sections"], branch_path))
         if data.get("quick_status") != new_qs:
             data["quick_status"] = new_qs
             changed = True
@@ -363,7 +359,7 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
             result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
             continue
 
-        changed, branch_actions = _apply_structural_updates(data, template, branch_actions)
+        changed, branch_actions = _apply_structural_updates(data, template, branch_actions, branch_path)
 
         if changed:
             data["last_updated"] = datetime.now().isoformat()

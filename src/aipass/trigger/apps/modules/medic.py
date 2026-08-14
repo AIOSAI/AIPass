@@ -27,8 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 from aipass.trigger.apps.handlers.json import json_handler
 
 from aipass.trigger.apps.handlers.medic_state import (
@@ -537,7 +537,7 @@ def _route_medic_module(args: list) -> bool:
     if not args:
         print_introspection()
         return True
-    if args[0] in ["--help", "-h", "help"]:
+    if wants_help(args):
         print_help()
         return True
     return handle_command(args[0], args[1:])
@@ -569,7 +569,7 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute"]:
         return False
 
-    if args and args[0] in ["--help", "-h", "help"]:
+    if wants_help(args):
         print_help()
         return True
 

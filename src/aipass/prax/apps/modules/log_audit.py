@@ -28,6 +28,7 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 
 def print_introspection():
@@ -155,7 +156,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h", "help"):
+    # A dashed help flag ANYWHERE wins — `enforce -h` asked about enforce, and
+    # answering it by truncating every oversized log is the worst possible reply.
+    # Placed after the ownership check above: prax.py tries each module in turn,
+    # so a scan at the top of the function would hijack other modules' help.
+    if wants_help(args):
         print_help()
         return True
 
@@ -271,7 +276,7 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    if "--help" in sys.argv:
+    if wants_help(sys.argv[1:]):
         print_help()
         sys.exit(0)
 

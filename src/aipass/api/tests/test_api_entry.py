@@ -326,3 +326,48 @@ class TestMain:
 
         assert result == 1
         mock_logger.error.assert_called_once()
+
+
+class TestRouterNormalisesHelpFlag:
+    """The router must normalise a help flag anywhere in the args.
+
+    This is the fleet pattern @aipass/@backup/@daemon use: every module then
+    receives exactly ["--help"] and none can be reached with a stray flag still
+    in its args. Checking only remaining_args[0] let `get-key openrouter --help`
+    reach the retrieval path and disclose key material.
+    """
+
+    def _run(self, argv):
+        """Run main() with argv, returning the args each module was handed."""
+        seen = []
+
+        def fake_handle(command, args):
+            seen.append((command, list(args)))
+            return True
+
+        module = MagicMock()
+        module.handle_command.side_effect = fake_handle
+
+        with (
+            patch("aipass.api.apps.api.discover_modules", return_value=[module]),
+            patch("aipass.api.apps.api.json_handler"),
+            patch("sys.argv", ["api.py"] + argv),
+        ):
+            main()
+        return seen
+
+    def test_trailing_help_normalised_to_help_only(self):
+        """`get-key openrouter --help` reaches the module as ["--help"]."""
+        assert self._run(["get-key", "openrouter", "--help"]) == [("get-key", ["--help"])]
+
+    def test_trailing_short_flag_normalised(self):
+        """`cleanup 30 -h` reaches the module as ["--help"], not as a value."""
+        assert self._run(["cleanup", "30", "-h"]) == [("cleanup", ["--help"])]
+
+    def test_help_deep_in_args_normalised(self):
+        """A help flag past the second position is still a help request."""
+        assert self._run(["integrations", "call", "publish_devto", "--help"]) == [("integrations", ["--help"])]
+
+    def test_normal_args_pass_through_untouched(self):
+        """Commands without a help flag are handed their real args."""
+        assert self._run(["get-key", "openrouter"]) == [("get-key", ["openrouter"])]

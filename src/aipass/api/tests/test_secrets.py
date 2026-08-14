@@ -631,3 +631,21 @@ class TestSetSecretModule:
             secrets_module.set_secret("telegram", "bot", data, as_json=True)
 
         mock_handler.set_secret.assert_called_once_with("telegram", "bot", data, as_json=True)
+
+
+class TestSecretsHandleCommand:
+    """The secrets module owns no CLI commands — get-secret routes via api_key."""
+
+    def test_no_args_returns_false_and_is_silent(self, capsys: object) -> None:
+        """Claiming a no-arg command would swallow it before api.py can reject it.
+
+        secrets is discovered last, so returning True here makes api.py's
+        "Unknown command" branch unreachable for every unknown command.
+        """
+        assert secrets_module.handle_command("bogus-command", []) is False
+        assert capsys.readouterr().out == ""  # type: ignore[union-attr]
+
+    def test_help_flag_returns_false_and_is_silent(self, capsys: object) -> None:
+        """A trailing help flag for another module's command is not ours to answer."""
+        assert secrets_module.handle_command("bogus-command", ["--help"]) is False
+        assert capsys.readouterr().out == ""  # type: ignore[union-attr]

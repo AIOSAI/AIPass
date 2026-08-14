@@ -11,6 +11,7 @@
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.sound import MUTE_FLAG, is_muted
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
@@ -38,7 +39,7 @@ def handle_command(command: str, args: list) -> bool:
 
         sub = args[0]
 
-        if sub in ("--help", "-h", "help"):
+        if wants_help(args):
             CONSOLE.print("[bold cyan]hooksound[/bold cyan] — Mute/unmute all hook audio")
             CONSOLE.print()
             CONSOLE.print("  drone @hooks hooksound        Show current status")

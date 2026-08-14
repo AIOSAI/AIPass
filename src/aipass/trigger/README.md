@@ -5,17 +5,25 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-08
+**Last Updated:** 2026-08-13
 
 ## Quick Start
 
 ```bash
-drone @trigger status                        # Event bus + medic state
+drone @trigger medic status                  # Medic state + live watcher + mutes
 drone @trigger errors list                   # View tracked errors
-drone @trigger medic status                  # Check dispatch gating
+drone @trigger status                        # Branch log watcher state (see note)
 drone @trigger escalation status             # Repeat-signature digest lane
 drone @trigger fire error_detected branch=api error_type=ImportError
 ```
+
+> **`status` reports this process, not the daemon.** `drone @trigger status`
+> prints the branch log watcher belonging to the CLI process you just started —
+> which has none — so it always says `Active: False` even while the systemd
+> watcher runs. For the live answer use `drone @trigger medic status`, which
+> reads the service, or `systemctl --user status trigger-log-watcher`. Recorded
+> in APLAN-0008 as an open item; the README used to claim this command showed
+> "event bus + medic state", which it never did.
 
 ## Commands
 
@@ -25,9 +33,9 @@ drone @trigger --help                       # Full command listing
 drone @trigger --version                    # Version string
 
 # Event bus
-drone @trigger fire <event> [key=val ...]   # Fire an event with optional data
+drone @trigger fire <event> [key=val ...]   # Fire an event; reports handlers run/failed
 drone @trigger list                         # List all registered events + handlers
-drone @trigger status                       # Event bus and medic state
+drone @trigger status                       # Branch log watcher state (see note)
 
 # Error registry
 drone @trigger errors list                  # View tracked errors
@@ -67,7 +75,10 @@ drone @trigger log_events --help            # System watcher help
 from aipass.trigger.apps.modules.core import Trigger
 
 # Fire an event — all registered handlers run
-Trigger.fire("plan_file_created", path="/path/to/FPLAN-0042.md")
+result = Trigger.fire("plan_file_created", path="/path/to/FPLAN-0042.md")
+# {'event': 'plan_file_created', 'handlers': 1, 'ran': 1, 'failed': 0}
+# A nested fire (one issued from inside a handler) is queued, and says so:
+# {'event': 'inner', 'deferred': True}
 
 # Register a handler
 def on_plan_created(**data):
@@ -78,6 +89,38 @@ Trigger.on("plan_file_created", on_plan_created)
 # Remove a handler
 Trigger.off("plan_file_created", on_plan_created)
 ```
+
+**Handler failures are isolated, not hidden.** A handler that raises never
+propagates to the caller and never stops the other handlers — that isolation is
+the point of a bus. But isolation used to be indistinguishable from silence:
+`drone @trigger fire` printed a green `Fired event:` whether every handler ran,
+every handler crashed, or the event name was a typo nothing listened to. Firing
+`plan_file_moved` with the wrong kwargs during the APLAN-0008 audit crashed the
+handler and still reported success; the only trace was an ERROR line that the log
+watcher later re-reported as a medic error. `fire()` now returns the counts above
+and the CLI prints them, so a wrong-key or wrong-name fire is visible where it is
+typed. Handler exceptions are still logged, still counted toward the
+consecutive-failure auto-disable, and still never raised at the caller.
+
+**A help flag anywhere explains; it never executes.** `--help` and `-h` are
+matched exactly at *any* position in the argument sequence, so
+`medic mute @branch --help` describes muting instead of performing it. Every
+module's `handle_command` gates on `handlers/cli/help_flags.wants_help()`
+before doing any work — but *after* checking that the module owns the command,
+since a module that claimed any invocation carrying `--help` would hijack every
+other module's help at the entry point. The bare word `help` is deliberately
+positional (position 0 only): trigger's own commands take it as a legitimate
+value — `errors suppress <id> help` is a reason and `fire evt message=help` is
+event payload. Matching is exact for the same reason, so `message=--help` stays
+a payload too. The fleet-wide version of this bug (seedgo `help_flag_safety`,
+2026-08-13) performed a 17-branch config reset and a real backup run from
+commands that were asked to describe themselves; trigger's own worst case was
+a 24-hour medic mute with no unmute.
+
+**Event data contracts are per-handler and are not published here.** Sibling
+events do not share key names — `plan_file_created` and `plan_file_deleted` take
+`path`, while `plan_file_moved` takes `src_path` and `dest_path`. Read the
+handler in `apps/handlers/events/` before firing one by hand.
 
 ```python
 from aipass.trigger.apps.modules.errors import report_error
@@ -256,6 +299,8 @@ trigger/
 │       ├── escalation.py           # Repeat-signature counting + digest email
 │       ├── log_watcher.py          # Branch log watcher (watchdog, position tracking)
 │       ├── medic_state.py          # Medic state persistence (medic_state.json)
+│       ├── cli/
+│       │   └── help_flags.py       # wants_help(): a help flag anywhere explains, never executes
 │       ├── json/
 │       │   ├── json_handler.py     # JSON structure logging
 │       │   └── config_loader.py    # Operator config loader (S193 self-heal doctrine)
@@ -273,7 +318,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # System log watcher (system_logs/ dir)
-├── tests/                          # 898 tests across 23 modules
+├── tests/                          # 1015 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -330,21 +375,30 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-898 tests across 23 test modules, all passing. Coverage: 100/100 public functions (100%).
+1015 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
 ```
 
-Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`
+Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `test_error_reporter`, `test_medic_state`, `test_log_watcher`, `test_watchers_log_watcher`, `test_branch_log_events`, `test_log_events`, `test_json_handler`, `test_pr_status_sync`, `test_error_detected`, `test_event_handlers`, `test_log_watcher_service`, `test_plan_file_handler`, `test_startup_handler`, `test_trigger_entry`, `test_memory_pool_handler`, `test_runaway_handler`, `test_config_migration`, `test_escalation`, `test_trigger_config_loader`, `test_help_flags`
 
 ## Compliance
 
-Seedgo: 99% (43 standards). Zero type errors. The single remaining deduction is `handlers` on `handlers/escalation.py`: its five same-branch imports are all ALLOWED by the published handlers standard ("same-branch handler imports: ALLOWED, even across packages"), but `handlers_check` computes a handler's own package as the path part after `handlers/` — for a file sitting at the handlers root that is the *filename*, so the exemption can never match. Raised with @seedgo as a standards question rather than restructured around; the same check rejects the standard's own documented ALLOWED example.
+Seedgo: **100% with bypasses, 98% without** (44 standards). Zero type errors. Both
+numbers are published deliberately: 100% is the shielded score, and the 26 bypass
+rules behind it each suppress exactly one real violation — measured by running the
+audit with `bypass: []` and matching one rule to one surviving violation, with no
+violation left un-bypassed and no rule left dead (APLAN-0008). The registry
+holds **zero `tests/*` rules**, so the checklist-lane trap that bit other branches
+(a rule that reads dead in the audit lane while still suppressing findings in the
+PostToolUse hook) does not apply here.
+
+The largest single deduction is `handlers` on `handlers/escalation.py`: its five same-branch imports are all ALLOWED by the published handlers standard ("same-branch handler imports: ALLOWED, even across packages"), but `handlers_check` computes a handler's own package as the path part after `handlers/` — for a file sitting at the handlers root that is the *filename*, so the exemption can never match. Raised with @seedgo as a standards question rather than restructured around; the same check rejects the standard's own documented ALLOWED example.
 
 ---
 
-*Last Updated: 2026-08-08*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -62,11 +62,10 @@ def clear() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Bridge is a utility module — no drone commands. Always returns False."""
-    if args and args[0] in ("--help", "-h", "help"):
-        print_introspection()
-        return False
-    if not args:
-        print_introspection()
-        return False
+    """Bridge is a utility module — no drone commands. Always returns False.
+
+    Stays silent: bridge is discovered before the modules that own the real
+    commands, so printing here would prepend its banner to the output of every
+    no-arg command. Introspection is reachable via __main__ instead.
+    """
     return False

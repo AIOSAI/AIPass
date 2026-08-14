@@ -154,7 +154,10 @@ _SYSTEM_LOGS_BRANCH_PREFIXES: list = sorted(
 )
 
 # Event fire callback (set by module, avoids handler importing from modules)
-_fire_event: Optional[Callable[..., None]] = None
+# Return type is deliberately `object`, not None: Trigger.fire returns an
+# execution summary (APLAN-0008) and the watcher ignores it. Pinning the
+# callback to -> None would reject the real bus as an invalid callback.
+_fire_event: Optional[Callable[..., object]] = None
 
 # Cached answer to "should I read WARNING lines at all?".  This runs per log
 # line, so it must not hit the config file every time; the TTL keeps an
@@ -439,7 +442,7 @@ def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optiona
         return None
 
 
-def set_event_callback(callback: Callable[..., None]) -> None:
+def set_event_callback(callback: Callable[..., object]) -> None:
     """
     Set the callback function for firing events.
 

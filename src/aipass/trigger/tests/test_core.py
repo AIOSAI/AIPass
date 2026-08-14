@@ -130,7 +130,7 @@ def test_fire_calls_registered_handler(trigger_cls):
 def test_fire_no_handlers_does_not_error(trigger_cls):
     """fire() on an event with zero handlers completes without raising."""
     result = trigger_cls.fire("nonexistent_event")
-    assert result is None
+    assert result["handlers"] == 0 and result["failed"] == 0
 
 
 def test_fire_passes_data_kwargs(trigger_cls):
@@ -442,23 +442,23 @@ def test_fire_only_triggers_matching_event(trigger_cls):
 
 
 def test_fire_none_event_name(trigger_cls):
-    """fire(None) handles None event gracefully -- no handlers match, returns None."""
+    """fire(None) handles None event gracefully -- no handlers match, none run."""
     from typing import Any
 
     none_event: Any = None
     result = trigger_cls.fire(none_event)
-    assert result is None
+    assert result["handlers"] == 0 and result["ran"] == 0
 
 
 def test_fire_empty_string_event(trigger_cls):
-    """fire('') with empty string event fires without error (no handlers match)."""
+    """fire('') with empty string event fires without error (handler still runs)."""
     handler = MagicMock()
     trigger_cls.on("", handler)
 
     result = trigger_cls.fire("")
 
     handler.assert_called_once()
-    assert result is None
+    assert result["ran"] == 1 and result["failed"] == 0
 
 
 def test_on_none_handler(trigger_cls):
@@ -470,13 +470,55 @@ def test_on_none_handler(trigger_cls):
     trigger_cls.fire("event")
 
 
-def test_fire_return_type_is_none(trigger_cls):
-    """fire() always returns None."""
+def test_fire_returns_execution_summary(trigger_cls):
+    """fire() reports what it actually did.
+
+    Was `test_fire_return_type_is_none`, which pinned an implementation detail
+    rather than an invariant. The bus isolates handler failures BY DESIGN — one
+    handler raising must never break the others or the caller — but isolation is
+    not the same as silence: a caller (above all the CLI) has to be able to tell
+    "ran fine" from "every handler blew up" and from "nothing was listening".
+    Found live in the APLAN-0008 audit: firing an event with the wrong kwargs
+    crashed the handler and still printed a green `Fired event:`.
+    """
     handler = MagicMock()
     trigger_cls.on("deploy", handler)
 
     result = trigger_cls.fire("deploy")
-    assert result is None
+    assert result == {"event": "deploy", "handlers": 1, "ran": 1, "failed": 0}
+
+
+def test_fire_summary_counts_failed_handlers(trigger_cls):
+    """A raising handler is counted as failed, and the rest still run."""
+
+    def exploding_handler(**kwargs):
+        raise ValueError("boom")
+
+    trigger_cls.on("mixed_event", exploding_handler)
+    trigger_cls.on("mixed_event", MagicMock())
+
+    result = trigger_cls.fire("mixed_event")
+    assert result == {"event": "mixed_event", "handlers": 2, "ran": 1, "failed": 1}
+
+
+def test_fire_summary_reports_zero_handlers_for_unknown_event(trigger_cls):
+    """A typo'd event name is reported as 0 handlers, not as a success."""
+    result = trigger_cls.fire("no_such_event_xyz")
+    assert result == {"event": "no_such_event_xyz", "handlers": 0, "ran": 0, "failed": 0}
+
+
+def test_fire_summary_marks_deferred_nested_events(trigger_cls):
+    """An event fired from inside a handler is queued — the summary says so."""
+    seen = {}
+
+    def outer(**kwargs):
+        seen["nested"] = kwargs["fire_event"]("inner_event")
+
+    trigger_cls.on("outer_event", outer)
+    trigger_cls.on("inner_event", MagicMock())
+
+    trigger_cls.fire("outer_event")
+    assert seen["nested"] == {"event": "inner_event", "deferred": True}
 
 
 def test_on_return_type_is_none(trigger_cls):
@@ -613,3 +655,154 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
     # Neither should be disabled yet (threshold is 5)
     assert (fail_handler, "DRONE") not in trigger_cls._disabled_handlers
     assert (fail_handler, "MEMORY") not in trigger_cls._disabled_handlers
+
+
+# ---------------------------------------------------------------------------
+# Tests -- _coerce_value (CLI `fire key=value` typing)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "00123456",  # all-digit fingerprint/hash with a leading zero
+        "007",
+        "00",  # a bare "0" IS lossless and stays an int -- see the test below
+        "1_0",  # int() accepts underscore literals -> 10
+        "+5",  # int() accepts a sign -> 5
+        " 5",  # int() strips whitespace -> 5
+        "1.50",  # float() drops the trailing zero -> 1.5
+        "1e3",  # float() reshapes to 1000.0
+    ],
+)
+def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
+    """A value is only typed when the numeric form is byte-identical.
+
+    Identity tokens travelling through `fire key=value` are strings that may
+    happen to be all digits: an 8-char error_hash is all-digit 2.3% of the
+    time, and handle_error_detected annotates fingerprint/error_hash/
+    registry_id as str. Coercing "00123456" to int 123456 both breaks the type
+    contract and silently deletes a character from the user's token.
+    """
+    from aipass.trigger.apps.modules.core import _coerce_value
+
+    result = _coerce_value(token)
+    if result != token:
+        assert str(result) == token, f"{token!r} was mangled into {result!r}"
+    assert result == token
+    assert isinstance(result, str)
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [("2", 2), ("0", 0), ("-7", -7), ("1.5", 1.5), ("-0.25", -0.25)],
+)
+def test_coerce_value_still_types_lossless_numbers(token, expected):
+    """The guard must not over-correct: count=2 has to arrive as an int."""
+    from aipass.trigger.apps.modules.core import _coerce_value
+
+    result = _coerce_value(token)
+    assert result == expected
+    assert isinstance(result, type(expected))
+
+
+def test_coerce_value_leaves_plain_strings_alone():
+    """Non-numeric values are untouched, as before."""
+    from aipass.trigger.apps.modules.core import _coerce_value
+
+    assert _coerce_value("api") == "api"
+    assert _coerce_value("a1b2c3d4") == "a1b2c3d4"
+
+
+def test_fire_cli_delivers_all_digit_identity_token_unmangled(trigger_cls):
+    """`fire ... fingerprint=00123456` must reach the handler as that string."""
+    from aipass.trigger.apps.modules import core
+
+    received = {}
+
+    def capture(**kwargs):
+        received.update(kwargs)
+
+    trigger_cls.on("error_detected", capture)
+    core.handle_command("fire", ["error_detected", "fingerprint=00123456", "count=2"])
+
+    assert received["fingerprint"] == "00123456"
+    assert received["count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests -- help_flag_safety canary (a help flag ANYWHERE explains, never runs)
+# ---------------------------------------------------------------------------
+
+
+def test_help_flag_after_the_event_name_does_not_fire(trigger_cls, monkeypatch):
+    """`fire <event> --help` must describe the command, never fire the event.
+
+    The old gate read args[0] only, so the flag one position later was
+    discarded and the event fired. Trigger.fire is the dispatch target and is
+    mocked here: the assertion is that it is never reached.
+    """
+    from aipass.trigger.apps.modules import core
+
+    fired = MagicMock()
+    monkeypatch.setattr(core.Trigger, "fire", fired)
+    printed = MagicMock()
+    monkeypatch.setattr(core, "_print_help", printed)
+
+    result = core.handle_command("fire", ["error_detected", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    fired.assert_not_called()
+
+
+def test_short_help_flag_after_key_values_does_not_fire(trigger_cls, monkeypatch):
+    """`-h` behind a full key=value payload still explains rather than fires."""
+    from aipass.trigger.apps.modules import core
+
+    fired = MagicMock()
+    monkeypatch.setattr(core.Trigger, "fire", fired)
+    printed = MagicMock()
+    monkeypatch.setattr(core, "_print_help", printed)
+
+    result = core.handle_command("fire", ["error_detected", "branch=api", "-h"])
+
+    assert result is True
+    printed.assert_called_once()
+    fired.assert_not_called()
+
+
+def test_bare_word_help_as_a_payload_value_still_fires(trigger_cls, monkeypatch):
+    """`help` later on the line is a VALUE, not a request for the manual.
+
+    This is why only the dashed forms scan the whole sequence: an event
+    payload may legitimately carry the word.
+    """
+    from aipass.trigger.apps.modules import core
+
+    fired = MagicMock(return_value={"event": "e", "handlers": 1, "ran": 1, "failed": 0})
+    monkeypatch.setattr(core.Trigger, "fire", fired)
+    printed = MagicMock()
+    monkeypatch.setattr(core, "_print_help", printed)
+
+    result = core.handle_command("fire", ["error_detected", "message=help"])
+
+    assert result is True
+    fired.assert_called_once()
+    printed.assert_not_called()
+
+
+def test_module_route_help_flag_after_subcommand_does_not_fire(trigger_cls, monkeypatch):
+    """`core fire <event> --help` — the flag survives module-name routing."""
+    from aipass.trigger.apps.modules import core
+
+    fired = MagicMock()
+    monkeypatch.setattr(core.Trigger, "fire", fired)
+    printed = MagicMock()
+    monkeypatch.setattr(core, "_print_help", printed)
+
+    result = core.handle_command("core", ["fire", "error_detected", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    fired.assert_not_called()

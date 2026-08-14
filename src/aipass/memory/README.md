@@ -42,6 +42,9 @@ drone @memory templates push-templates     # Push template updates to all branch
 drone @memory templates diff-templates     # Show template differences per branch
 drone @memory templates template-status    # Show template version and push status
 
+drone @memory pool status                  # Pool file count, config, vector stats
+drone @memory pool process                 # Vectorize pool files + check rollover
+
 drone @memory lint                         # Audit .trinity entries for over-limit violations (read-only)
 drone @memory lint @devpulse               # Lint a specific branch
 
@@ -57,32 +60,34 @@ drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+
 memory/
 ├── apps/
 │   ├── memory.py                # Entry point — auto-discovers modules
-│   ├── modules/                 # 7 modules
+│   ├── modules/                 # 9 modules
 │   │   ├── governance.py        # Surfacing governance — re-exports from handlers
 │   │   ├── lint.py              # Entry limit violation scanner (read-only)
+│   │   ├── pool.py              # Pool vectorization + auto-process
 │   │   ├── rollover.py          # Rollover orchestration, status, sync-lines
 │   │   ├── search.py            # Semantic query routing
 │   │   ├── symbolic.py          # Fragmented memory extraction and search
 │   │   ├── templates.py         # Template push, diff, status
-│   │   └── verify.py            # Plan vectorization check
-│   └── handlers/                # 15 handler groups
+│   │   ├── verify.py            # Plan vectorization check
+│   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
+│   └── handlers/                # 14 handler groups
 │       ├── archive/             # indexer.py
+│       ├── cli/                 # help_flags.py — help-flag detection
 │       ├── governance/          # engine.py — surfacing decision logic
-│       ├── intake/              # plans_processor.py, pool_processor.py
+│       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py, memory_files.py, entry_limits.py, lint_handler.py, config_loader.py
-│       ├── learnings/           # manager.py
-│       ├── monitor/             # detector.py, memory_watcher.py
+│       ├── monitor/             # detector.py, memory_watcher.py, watch_runner.py
 │       ├── rollover/            # extractor.py, orchestrator.py
 │       ├── schema/              # normalize.py
-│       ├── search/              # query_executor.py, vector_search.py
-│       ├── storage/             # chroma.py, chroma_subprocess.py
+│       ├── search/              # query_executor.py
+│       ├── storage/             # chroma_subprocess.py
 │       ├── symbolic/            # chroma_client, deduplicator, extractor, hook, retriever, storage
 │       ├── templates/           # pusher.py, differ.py, spawn_pusher.py
 │       ├── tracking/            # line_counter.py, tab_renderer.py
 │       ├── vector/              # embedder.py, embed_subprocess.py
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1063 tests
+├── tests/                       # 997 tests
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -119,6 +124,31 @@ The **date** half is off for the snapshot lane (`date_guard=False`). Snapshots a
 - **Loud skip.** Every unreadable row is reported — `result["warnings"]` names the container and the offending indices, a prax `WARNING` is logged, and `normalize_all_memory_files()` returns `files_with_warnings` (also printed by the CLI). Warnings are *not* mutations, so a file with nothing to change is left byte-identical.
 - **Type repair.** A `number` stored as a numeric string (`"171"`) or integral float is coerced to `int`, recorded in `changes`, and persisted — the half-repaired container that used to raise `TypeError` inside `sorted()` now heals itself.
 - A container with **no** numbers at all (the normal `todos` shape) is skipped silently — that is a legitimate shape, not corruption.
+
+### A help flag is never an instruction
+
+Every module routes its help check through `handlers/cli/help_flags.wants_help()`, evaluated **before** any subcommand dispatch. Modules used to read `args[0]` only, so a flag in a later slot was discarded and the subcommand ran instead — `drone @memory rollover push --help` performed the fleet-wide `per_branch` reset it was being asked to describe.
+
+A dashed flag (`--help`, `-h`) counts anywhere on the line. The bare word `help` counts anywhere only for modules whose subcommands take no free text (`rollover`, `templates`, `pool`, `lint`); for `search`, `symbolic` and `verify` it counts in the first slot only, so `drone @memory search rollover help` stays a three-word query.
+
+### `watch` is a module, and the entry point imports no handlers
+
+`drone @memory watch` was a built-in on `apps/memory.py`, which therefore imported
+two `monitor/` handlers directly — the one `encapsulation` violation on the branch.
+It is now `modules/watch.py` (CLI routing) over `handlers/monitor/watch_runner.py`
+(the session: start, report, block, shut down on Ctrl+C). A contract test fails the
+suite if any handler import reappears in the entry point.
+
+No-args still starts the watcher — that is the live contract — with the Level 2
+introspection block printed as the watcher's banner, so the operator sees which
+handlers it is wired to before it takes over the terminal.
+
+**Every `apps/modules/*.py` ships a `__main__` block, so all of them must survive
+direct execution.** Six relative imports in `rollover.py` and `pool.py` meant they
+did not: `python3 apps/modules/rollover.py --help` died with *"attempted relative
+import with no known parent package"* — the same defect class that left `watch`
+dead, invisible because routing through the entry point imports them as a package.
+All six are absolute now, and a contract test scans the whole directory.
 
 ### Subprocess Isolation
 
@@ -180,20 +210,40 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 1063 passed, 0 failures, 0 skips
-- **Seedgo:** 100%
+- **Tests:** 997 passed, 0 failures, 0 skips
+- **Seedgo:** 100%. No new bypass rules were added to reach it.
+- **Bypass registry:** 111 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+
+### Dead code, archived not deleted (2026-08-13)
+
+Three handler files had no caller: `learnings/manager.py` (superseded by the
+rollover extractor), `search/vector_search.py` and `storage/chroma.py` (both
+in-process ChromaDB paths, superseded by `chroma_subprocess.py`). All three moved
+to `.archive/unwired_handlers_20260813/` together with the 105 tests that covered
+them — tests over unreachable code report coverage that does not exist.
+
+`chroma.py` was **not** in the original finding; it surfaced only after
+`vector_search.py`, its sole referencer, was archived. Two sibling files look
+equally unreferenced and are load-bearing: `chroma_subprocess.py` and
+`embed_subprocess.py` are executed as *scripts* by path in memory's `.venv`, never
+imported. Disposition here is per-file and measured — repo-wide grep, dynamic
+`importlib` check, and a path-invocation check — never "the checker said
+unreferenced". See that directory's README for the full method.
 
 ---
 
 ## Known Issues
 
 - `search` requires fastembed in memory `.venv/` — fails without it
-- `rollover status` shows 0 branches when registry path not resolved
-- `memory_threshold_exceeded` trigger event registered but never fired
+- `drone @memory push` (and `rollover push`) overwrites every branch's `per_branch` limits with defaults, fleet-wide, with **no confirmation prompt**. Now that BAUD writes this config, an accidental `push` silently discards operator tuning. Open item — see APLAN-0010.
+- Entry point imports two `monitor/` handlers directly for the built-in `watch` command, which the `encapsulation` standard flags (66% on `apps/memory.py`). Deliberately unshielded — the fix is to move `watch` into a module. Open item — see APLAN-0010.
+- `pool.py` and `lint.py` score 85% on `introspection`: the checker only recognises a help guard whose `if` test contains a literal `"--help"`, so the shared `wants_help()` predicate is invisible to it. Both intercept help correctly (live-verified). Reported to @seedgo; not bypassed.
+
+**Cleared 2026-08-13:** `rollover status` showing 0 branches did not reproduce (17 branches from two working directories). `memory_threshold_exceeded` appears nowhere in this branch's code — the previous note described @trigger's registry, not memory's.
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-13 (full branch audit, APLAN-0010)*
 
 ---
 [← Back to AIPass](../../../README.md)

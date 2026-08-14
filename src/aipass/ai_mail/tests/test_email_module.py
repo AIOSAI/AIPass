@@ -898,6 +898,10 @@ class TestHandleSend:
 
     def test_send_interactive_mode(self, monkeypatch):
         """A cancelled interactive send is still a handled command."""
+        # pytest's stdin is not a terminal, so without this the no-TTY guard
+        # answers first and this test would pass while never reaching the
+        # cancel path it is named for.
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.parse_send_args",
             lambda args: {"mode": "interactive"},
@@ -1732,8 +1736,35 @@ class TestEmailSendIntrospection:
 class TestSendInteractiveExtended:
     """Extended tests for email_send._send_interactive."""
 
+    def test_send_interactive_without_a_terminal_refuses_before_listing_branches(self, monkeypatch):
+        """No TTY: refuse with usage, and do not print a branch list first.
+
+        `drone @ai_mail email` with no args used to reach the prompts through a
+        routed subprocess and block until drone's 30s timeout (measured live,
+        APLAN-0006). The listing must not print either — output that precedes a
+        certain refusal reads as progress toward a send that cannot happen.
+        """
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        listed: list[str] = []
+        monkeypatch.setattr(
+            email_send_mod,
+            "get_all_branches",
+            lambda: listed.append("called") or [{"name": "ALPHA", "email": "@alpha"}],
+        )
+        errors: list[str] = []
+        monkeypatch.setattr(email_send_mod, "error", lambda msg: errors.append(str(msg)))
+
+        result = email_send_mod._send_interactive()
+
+        assert result is False
+        assert listed == []
+        assert any("terminal" in e for e in errors)
+
     def test_send_interactive_complete_path(self, monkeypatch):
         """User provides input successfully, send proceeds."""
+        # Same reason as test_send_interactive_mode: the no-TTY guard runs first
+        # under pytest, so the terminal has to be pinned to reach the send path.
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.setattr(
             email_send_mod,
             "get_all_branches",

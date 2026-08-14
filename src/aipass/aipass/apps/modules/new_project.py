@@ -20,6 +20,7 @@ from pathlib import Path
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error, success
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 COMMAND = "new"
@@ -135,7 +136,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         json_handler.log_operation("new_project_usage", {"command": command})
         print_introspection()
         return True
-    if args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         json_handler.log_operation("new_project_help", {"command": command})
         print_help()
         return True

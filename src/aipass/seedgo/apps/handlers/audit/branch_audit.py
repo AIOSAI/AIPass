@@ -5,7 +5,7 @@
 # Created: 2026-03-05
 # Modified: 2026-03-09
 # =============================================
-"""Branch Audit Handler — auto-discovers checkers from handlers/standards/ via glob."""
+"""Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
 import copy
 import importlib.util
@@ -440,7 +440,11 @@ def audit_branch(
 
 
 def audit_branch_incremental(
-    branch: Dict[str, str], bypass_rules: list, pack_path: Path | None = None, force_full: bool = False
+    branch: Dict[str, str],
+    bypass_rules: list,
+    pack_path: Path | None = None,
+    force_full: bool = False,
+    no_bypass: bool = False,
 ) -> Dict:
     """Audit a branch, reusing cached results when nothing relevant changed.
 
@@ -466,16 +470,27 @@ def audit_branch_incremental(
     until B is touched or `--full` is used. This is deliberate: busting
     diagnostics on any-branch-dirty would gut the fast path (pyright is
     most of the ~5 minute fleet cost). CI's always-full audit is the backstop.
+
+    no_bypass (--no-bypass) audits with every bypass rule switched off. It
+    empties bypass_rules itself so the flag and the rules can never disagree —
+    a stamp that claimed "no bypasses" over an audit that applied them would be
+    a lie told by the cache. The two modes are stamped AND keyed apart, so
+    neither is ever served the other's score, and neither evicts the other:
+    publishing both numbers is routine, and a shared key would mean a
+    guaranteed full re-scan every time either one is refreshed.
     """
+    if no_bypass:
+        bypass_rules = []
     branch_name, branch_path = branch["name"], Path(branch["path"])
+    cache_key = f"{branch_name}::no-bypass" if no_bypass else branch_name
     resolved_pack_path = (
         pack_path if pack_path is not None else Path(__file__).resolve().parent.parent / "aipass_standards"
     )
     diag_path = Path(__file__).resolve().parent.parent / "diagnostics" / "diagnostics_check.py"
 
     cache = incremental_cache.load_cache()
-    branch_entry = incremental_cache.get_branch_entry(cache, branch_name)
-    stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path)
+    branch_entry = incremental_cache.get_branch_entry(cache, cache_key)
+    stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
 
     watch_files = _collect_watch_files(branch_path)
     current_fp = incremental_cache.collect_fingerprints(watch_files)
@@ -502,7 +517,7 @@ def audit_branch_incremental(
     )
 
     new_files_doc = {rel: {"fp": current_fp[rel], "results": file_result_cache.get(rel, {})} for rel in current_fp}
-    incremental_cache.set_branch_entry(cache, branch_name, {"stamp": stamp, "files": new_files_doc, "output": output})
+    incremental_cache.set_branch_entry(cache, cache_key, {"stamp": stamp, "files": new_files_doc, "output": output})
     incremental_cache.save_cache(cache)
     output["_cache_hit"] = False
     return output

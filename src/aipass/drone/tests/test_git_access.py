@@ -22,6 +22,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
 )
 from aipass.drone.apps.handlers.git.diff_handler import get_branch_diff
 from aipass.drone.apps.handlers.git.log_handler import get_git_log
+from aipass.drone.apps.handlers.git.show_handler import show_object
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes, stage_branch_dir
 from aipass.drone.apps.handlers.git.checkout_handler import checkout_branch
 from aipass.drone.apps.modules.git_module import handle_command
@@ -113,6 +114,41 @@ class TestGitAccessTiers:
     def test_pr_in_owner_tier(self) -> None:
         cmds = GIT_ACCESS_TIERS["owner"]["commands"]
         assert "pr" in cmds
+
+    def test_prune_temp_in_owner_tier(self) -> None:
+        """prune-temp deletes merged remote citizen/* branches — delete-branch class.
+
+        It shipped in neither tier, so verify_git_access fell through to
+        'Unknown git command' for every caller including the owner, while the
+        help screen advertised it as global. Found in the APLAN-0003 audit,
+        tier ruled by @devpulse 2026-08-13.
+        """
+        cmds = GIT_ACCESS_TIERS["owner"]["commands"]
+        assert "prune-temp" in cmds
+        assert "prune-temp" not in GIT_ACCESS_TIERS["global"]["commands"]
+
+    def test_every_registered_command_holds_a_tier(self) -> None:
+        """No command may be dispatchable without a tier — the class-level guard.
+
+        This is the invariant prune-temp broke. Registering a verb in _COMMANDS
+        and wiring it to a handler makes it *dispatchable*, never *reachable*:
+        auth runs first and refuses anything it cannot find in a tier. Asserting
+        the specific verb would only have caught the one instance, so assert the
+        rule instead — the next verb added without a tier fails here.
+        """
+        from aipass.drone.apps.modules.git_module import _COMMANDS
+
+        tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
+        orphaned = sorted(set(_COMMANDS) - tiered)
+        assert orphaned == [], f"registered but unreachable — in no tier: {orphaned}"
+
+    def test_no_tier_grants_a_command_that_does_not_exist(self) -> None:
+        """The mirror: a tier entry with no registered command is a dead grant."""
+        from aipass.drone.apps.modules.git_module import _COMMANDS
+
+        tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
+        phantom = sorted(tiered - set(_COMMANDS))
+        assert phantom == [], f"granted but not registered: {phantom}"
 
 
 # ===========================================================================
@@ -684,6 +720,106 @@ class TestLogHandler:
 # ===========================================================================
 # 5. commit_handler
 # ===========================================================================
+
+
+class TestShowHandler:
+    """git show — reading history at global read tier.
+
+    Requested by @seedgo via @devpulse 2026-08-13: auditing a bypass prune means
+    reading what was DELETED, and status/diff/log only show the present. Reading
+    history is not a write, so every citizen auditing its own past can do it.
+    """
+
+    def test_show_ref_only(self, repo_dir: Path) -> None:
+        mock_result = MagicMock(returncode=0, stdout="commit abc1234\n\n    feat: thing\n", stderr="")
+
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=mock_result) as run:
+            result = show_object("abc1234")
+
+        assert result["success"] is True
+        assert "feat: thing" in result["content"]
+        assert run.call_args[0][0] == ["git", "show", "abc1234"]
+
+    def test_show_ref_with_path_uses_colon_form(self, repo_dir: Path) -> None:
+        """`show <ref> <path>` must read the file AT that commit, not the diff."""
+        mock_result = MagicMock(returncode=0, stdout='{"bypass": []}\n', stderr="")
+
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=mock_result) as run:
+            result = show_object("abc1234", "src/aipass/prax/.seedgo/bypass.json")
+
+        assert result["success"] is True
+        assert run.call_args[0][0] == ["git", "show", "abc1234:src/aipass/prax/.seedgo/bypass.json"]
+
+    def test_show_is_not_scoped_to_callers_branch(self, repo_dir: Path) -> None:
+        """A path outside the caller's own branch must be readable.
+
+        The whole point is @seedgo verifying @prax's prune. Scoping this to the
+        caller's directory the way status/diff/log do would refuse exactly the
+        use case it was granted for.
+        """
+        mock_result = MagicMock(returncode=0, stdout="content", stderr="")
+
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=mock_result) as run:
+            result = show_object("HEAD~5", "src/aipass/memory/apps/memory.py")
+
+        assert result["success"] is True
+        assert "src/aipass/memory/apps/memory.py" in run.call_args[0][0][2]
+
+    def test_ref_that_git_would_read_as_a_flag_is_refused(self, repo_dir: Path) -> None:
+        """Refuse before any argv is built — the tag_handler lesson (S49)."""
+        for bad in ("", "-n", "--output=/tmp/x", "-"):
+            result = show_object(bad)
+            assert result["success"] is False, f"accepted flag-like ref {bad!r}"
+            assert "content" in result
+
+    def test_path_that_git_would_read_as_a_flag_is_refused(self, repo_dir: Path) -> None:
+        result = show_object("abc1234", "--output=/tmp/pwned")
+        assert result["success"] is False
+
+    def test_git_failure_reports_honestly(self, repo_dir: Path) -> None:
+        mock_result = MagicMock(returncode=128, stdout="", stderr="fatal: bad object deadbeef")
+
+        with patch("aipass.drone.apps.handlers.git.show_handler.subprocess.run", return_value=mock_result):
+            result = show_object("deadbeef")
+
+        assert result["success"] is False
+        assert "bad object" in result["message"]
+
+    def test_subprocess_error_is_caught(self, repo_dir: Path) -> None:
+        with patch(
+            "aipass.drone.apps.handlers.git.show_handler.subprocess.run",
+            side_effect=OSError("git missing"),
+        ):
+            result = show_object("abc1234")
+
+        assert result["success"] is False
+        assert "git missing" in result["message"]
+
+
+class TestShowCommandRouting:
+    """`drone @git show` reaches the handler at global tier."""
+
+    def test_show_is_global_tier(self) -> None:
+        assert "show" in GIT_ACCESS_TIERS["global"]["commands"]
+        assert "show" not in GIT_ACCESS_TIERS["owner"]["commands"]
+
+    def test_non_owner_may_show(self, seedgo_dir: Path) -> None:
+        """The requesting citizen is a non-owner — that is the whole point."""
+        assert verify_git_access("show") == "seedgo"
+
+    def test_show_dispatches_to_handler(self, seedgo_dir: Path) -> None:
+        with patch("aipass.drone.apps.modules.git_module.show_handler.show_object") as mock_show:
+            mock_show.return_value = {"success": True, "content": "file body", "message": "ok"}
+            result = handle_command("show", ["abc1234", "some/path.py"])
+
+        mock_show.assert_called_once_with("abc1234", "some/path.py")
+        assert result["exit_code"] == 0
+        assert result["stdout"] == "file body"
+
+    def test_show_without_ref_returns_usage(self, seedgo_dir: Path) -> None:
+        result = handle_command("show", [])
+        assert result["exit_code"] == 1
+        assert "Usage" in result["stderr"]
 
 
 class TestStageBranchDir:

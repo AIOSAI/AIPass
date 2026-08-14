@@ -76,14 +76,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         False — no commands handled here
     """
-    if not args:
-        print_introspection()
-        return True
-
-    if args[0] in ("--help", "-h", "help"):
-        print_help()
-        return True
-
     return False
 
 

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 
@@ -67,11 +68,21 @@ def print_introspection() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Library module — not a command handler. Returns False for all commands."""
+    """Claim the ``permissions`` command and render the trust list; ignore the rest.
+
+    route_command() offers every command to every module in discovery order, so a
+    module that prints while returning False writes above whichever module
+    actually answers. The old gate keyed on the ARGUMENTS (no args, or --help)
+    rather than the command name, so the trust list leaked over every bare
+    subcommand — while `drone @seedgo permissions` itself was answered with
+    "Unknown command" and then printed the block anyway.
+    """
+    if command != "permissions":
+        return False
     if not args:
         print_introspection()
-        return False
-    if args[0] in ("--help", "-h", "help"):
+        return True
+    if wants_help(None, args):
         print_introspection()
-        return False
+        return True
     return False

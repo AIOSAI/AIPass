@@ -39,6 +39,7 @@ import pytest
 STATUS_PATH = "aipass.prax.apps.handlers.dashboard.status"
 REFRESH_PATH = "aipass.prax.apps.handlers.dashboard.refresh"
 OPS_PATH = "aipass.prax.apps.handlers.dashboard.operations"
+PUSHER_PATH = "aipass.prax.apps.handlers.dashboard.template_pusher"
 
 
 def _load(module_path: str):
@@ -159,11 +160,12 @@ FLOW_LIST_SECTION = {
 
 
 def _calculators():
-    """The three entry points that compute a quick_status block."""
+    """Every entry point that computes a quick_status block."""
     return [
         ("status.calculate_quick_status", _load(STATUS_PATH).calculate_quick_status),
         ("refresh._calculate_quick_status", _load(REFRESH_PATH)._calculate_quick_status),
         ("operations._calculate_quick_status_standalone", _load(OPS_PATH)._calculate_quick_status_standalone),
+        ("template_pusher._calculate_quick_status", _load(PUSHER_PATH)._calculate_quick_status),
     ]
 
 
@@ -185,14 +187,100 @@ class TestListShapedActivePlans:
         branch = _seed_branch(tmp_path, {})
         assert calc({}, branch)["active_plans"] == 0, name
 
-    def test_all_three_calculators_agree(self, tmp_path):
-        """One calculation, three doors. Drift here is what lost the guard."""
+    def test_every_calculator_agrees(self, tmp_path):
+        """One calculation, four doors. Drift here is what lost the guard."""
         branch = _seed_branch(tmp_path, {})
         results = [calc(FLOW_LIST_SECTION, branch) for _name, calc in _calculators()]
-        assert results[0] == results[1] == results[2]
+        assert all(r == results[0] for r in results[1:])
 
     def test_canary_unguarded_comparison_raises(self):
         """Proof the guard is load-bearing: the old expression still explodes."""
         active_plans = FLOW_LIST_SECTION["flow"]["active_plans"]
         with pytest.raises(TypeError):
             _ = active_plans > 0
+
+
+# ---------------------------------------------------------------------------
+# Finding 3 — push-template is a fourth writer, and it deletes on purpose
+# ---------------------------------------------------------------------------
+
+
+class TestPushTemplateIsNotAWreckingBall:
+    """`dashboard push-template` writes every branch's dashboard, fleet-wide.
+
+    It carried its own self-contained calculator (no todo_count, no merge) and a
+    deprecation list naming ``commons_mentions`` — a key @flow OWNS and writes
+    (``flow/apps/handlers/dashboard/push_branch_dashboard.py``). prax used to own
+    that key and retired it; the list outlived the ownership change, so one push
+    would have deleted flow's key from every branch by declared policy.
+    """
+
+    def test_commons_mentions_is_not_deprecated(self):
+        pusher = _load(PUSHER_PATH)
+        assert "commons_mentions" not in pusher.DEPRECATED_QUICK_STATUS_KEYS
+
+    def test_structural_update_preserves_foreign_key(self, tmp_path):
+        pusher = _load(PUSHER_PATH)
+        branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
+        data = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+        pusher._apply_structural_updates(data, {}, [], branch)
+        assert data["quick_status"]["commons_mentions"] == 4
+
+    def test_structural_update_keeps_todo_count(self, tmp_path):
+        """The pusher's own calculator had no todo_count at all, so it dropped it."""
+        pusher = _load(PUSHER_PATH)
+        branch = _seed_branch(tmp_path, {"new_mail": 0, "todo_count": 99}, todos=2)
+        data = json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+        pusher._apply_structural_updates(data, {}, [], branch)
+        assert data["quick_status"]["todo_count"] == 2
+
+    def test_structural_update_without_a_branch_stays_placeholder(self, tmp_path):
+        """spawn's builder template has no .trinity/ or inbox — it must not gain counts."""
+        pusher = _load(PUSHER_PATH)
+        data = {"quick_status": {}, "sections": {"flow": {"active_plans": 0}}}
+        pusher._apply_structural_updates(data, {}, [], None)
+        assert data["quick_status"]["todo_count"] == 0
+        assert data["quick_status"]["new_mail"] == 0
+
+    def test_canary_deprecation_list_still_deletes(self):
+        """Proof the first assertion can fail: the removal loop is real."""
+        qs = {"commons_mentions": 4, "pending_bulletins": 1}
+        for key in ["pending_bulletins", "commons_mentions"]:
+            qs.pop(key, None)
+        assert qs == {}
+
+
+# ---------------------------------------------------------------------------
+# Finding 4 — action_required must agree with the summary beside it
+# ---------------------------------------------------------------------------
+
+
+class TestActionRequiredMatchesItsOwnSummary:
+    """@flow measured prax writing ``action_required: False`` next to ``1 todos``.
+
+    Identical counts, opposite flag from the two writers — the same clobber
+    species as Finding 1, moved out of a key and into a boolean, and it is the
+    field Patrick's card reads for 'needs attention'.
+    """
+
+    @pytest.mark.parametrize("name,calc", _calculators())
+    def test_todos_alone_require_action(self, name, calc, tmp_path):
+        branch = _seed_branch(tmp_path, {}, todos=1)
+        (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": []}), encoding="utf-8")
+        result = calc({}, branch)
+        assert result["todo_count"] == 1, name
+        assert result["action_required"] is True, name
+
+    @pytest.mark.parametrize("name,calc", _calculators())
+    def test_all_clear_requires_no_action(self, name, calc, tmp_path):
+        branch = _seed_branch(tmp_path, {}, todos=0)
+        (branch / ".ai_mail.local" / "inbox.json").write_text(json.dumps({"messages": []}), encoding="utf-8")
+        result = calc({}, branch)
+        assert result["summary"] == "All clear", name
+        assert result["action_required"] is False, name
+
+    def test_canary_old_rule_disagrees_with_its_summary(self):
+        """Proof of the reported defect: the retired expression ignores todos."""
+        new_mail, active_plans, todo_count = 0, 0, 1
+        assert (new_mail > 0 or active_plans > 0) is False
+        assert f"{todo_count} todos"

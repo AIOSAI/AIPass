@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple
 
 from aipass.cli.apps.modules import console, error as cli_error, success
+from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
@@ -1195,7 +1196,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     if command != "doctor":
         return False
 
-    if args and args[0] in ("--help", "-h", "help"):
+    if wants_help(args):
         print_help()
         return True
 

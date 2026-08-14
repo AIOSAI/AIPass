@@ -5,9 +5,9 @@
 **Purpose:** Display and output formatting service for all AIPass branches. Provides consistent terminal output — headers, success/error/warning messages, section breaks, and operation templates — so every branch looks the same without duplicating Rich formatting code.
 **Module:** `aipass.cli`
 **Version:** 2.1.0
-**Seedgo:** 99%
-**Tests:** 127 passing (5 files)
-**Last Updated:** 2026-07-17
+**Seedgo:** 98%
+**Tests:** 159 tests across 8 files — 167 passing, 1 skipped at runtime (parametrized cases expand)
+**Last Updated:** 2026-08-13
 
 ## Quick Start
 
@@ -63,7 +63,7 @@ console.print("[bold cyan]Custom Rich output[/bold cyan]")
 
 ## Public API
 
-Exported from `apps/modules/__init__.py` (10 symbols):
+Exported from `apps/modules/__init__.py` (14 symbols):
 
 | Function | Signature | Purpose |
 |----------|-----------|---------|
@@ -77,11 +77,15 @@ Exported from `apps/modules/__init__.py` (10 symbols):
 | `section()` | `section(title)` | Visual section separator with title |
 | `operation_start()` | `operation_start(operation, **details)` | Standard operation begin header |
 | `operation_complete()` | `operation_complete(**summary)` | Completion summary with optional timing |
+| `mark_command_failed()` | `mark_command_failed()` | Set the process failure flag (`error()` calls it automatically) |
+| `command_failed()` | `command_failed() -> bool` | Whether the failure flag is set since last reset |
+| `reset_command_state()` | `reset_command_state()` | Clear the failure flag (tests, `main()` entry) |
+| `resolve_exit()` | `resolve_exit(handled) -> int` | Exit code: not-handled→1, handled+failed→2, handled+ok→0 |
 
 Import paths:
 ```python
 from aipass.cli import console, header, success, error, warning, section  # Top-level (6 symbols)
-from aipass.cli.apps.modules import header, fatal, operation_start        # Full set (10 symbols)
+from aipass.cli.apps.modules import header, fatal, operation_start        # Full set (14 symbols)
 from aipass.cli.apps.modules.display import header                        # Direct module
 ```
 
@@ -95,7 +99,6 @@ drone @cli display             # Display module info
 drone @cli display demo        # Run display function showcase
 drone @cli templates           # Templates module info
 drone @cli templates demo      # Run templates function showcase
-python -m aipass.cli --help    # Same help (no drone required)
 ```
 
 ## Architecture
@@ -103,12 +106,11 @@ python -m aipass.cli --help    # Same help (no drone required)
 ```
 cli/
 ├── __init__.py                 # Top-level exports (6 symbols) + cli_entry()
-├── __main__.py                 # python -m aipass.cli entry
 ├── apps/
 │   ├── cli.py                  # Entry point (main, discover_modules, route_command)
 │   ├── modules/                # PUBLIC — import from here
-│   │   ├── __init__.py         # Re-exports all 10 display + template symbols
-│   │   ├── display.py          # header, success, error, warning, fatal, section
+│   │   ├── __init__.py         # Re-exports all 14 display + template symbols
+│   │   ├── display.py          # header, success, error, warning, fatal, section, exit-code API
 │   │   └── templates.py        # operation_start, operation_complete
 │   ├── handlers/               # PRIVATE — internal implementation
 │   │   ├── json/
@@ -116,15 +118,17 @@ cli/
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 127 tests across 5 files
-│   ├── test_display.py         # 45 tests — display functions + routing + triggers
+├── tests/                      # 141 tests across 7 files (140 pass, 1 skip)
+│   ├── test_display.py         # 55 tests — display functions + routing + exit codes
 │   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
 │   ├── test_templates.py       # 28 tests — operation templates + routing
 │   ├── test_handler_guard.py   # 8 tests — cross-branch import guard
-│   └── test_integration.py     # 7 tests — main() flow, entry points
+│   ├── test_integration.py     # 6 tests — main() flow, entry points
+│   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
+│   └── test_scaffold.py        # 1 test — skipped, superseded by the real suite
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
-└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter)
+└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__)
 ```
 
 **Two-tier design:**
@@ -164,12 +168,13 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 | Entry | Command | How |
 |-------|---------|-----|
 | drone | `drone @cli [command]` | Routes to `apps/cli.py:main()` |
-| Module | `python -m aipass.cli [args]` | `__main__.py` calls `main()` |
-| console_scripts | `aipass` on PATH | `cli_entry()` in `__init__.py` |
+| Import | `from aipass.cli import ...` | The real entry point — 252 call sites fleet-wide |
+
+`python -m aipass.cli` is **not** an entry point — `__main__.py` was archived 2026-05-02 (no branch in the fleet ships one). `cli_entry()` still exists in `__init__.py` but is no longer wired: `pyproject.toml` maps the `aipass` script to `aipass.aipass.apps.aipass:main`. See APLAN-0002 for the keep-or-retire decision.
 
 ---
 
-*Last Updated: 2026-05-16*
+*Last Updated: 2026-08-13*
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -305,8 +305,13 @@ def main():
         command = args[0]
         remaining_args = args[1:] if len(args) > 1 else []
 
-        # Subcommand --help guard
-        if remaining_args and remaining_args[0] in ["--help", "-h"]:
+        # Subcommand help guard — a help flag ANYWHERE means "explain this
+        # command", never "run it", and every module receives exactly ["--help"]
+        # so none can be reached with a stray flag still in its args.
+        # Checking only remaining_args[0] let `get-key <provider> --help` reach
+        # the retrieval path and print masked key material, and `cleanup 30
+        # --help` run a real cleanup. Reported by @seedgo (help_flag_safety).
+        if any(arg in ("--help", "-h") for arg in remaining_args):
             for module in modules:
                 if module.handle_command(command, ["--help"]):
                     return 0

@@ -316,7 +316,7 @@ def _scan_system_logs_for_errors(
     return errors
 
 
-def _run_error_catchup(fire_event: Optional[Callable[..., None]] = None) -> None:
+def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> None:
     """Catch-up on errors missed while Trigger wasn't running.
 
     Loads last_scan_timestamp from error_catchup.json, scans system logs for

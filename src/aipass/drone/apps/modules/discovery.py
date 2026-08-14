@@ -19,6 +19,7 @@ from aipass.cli.apps.modules import console
 from aipass.drone.apps.handlers.discovery_handler import HelpResult
 from aipass.drone.apps.handlers.json import json_handler
 from .resolver import list_branches, resolve_branch
+from aipass.drone.apps.handlers.help_flags import wants_help
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
@@ -36,7 +37,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
             print_introspection()
             return True
         args = []
-    if command in ("--help", "-h") or (args and args[0] in ("--help", "-h")):
+    if wants_help(command, args, bare_help=False):
         print_help()
         return True
     json_handler.log_operation("handle_command", {"module": "discovery", "command": command})

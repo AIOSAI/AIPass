@@ -635,3 +635,61 @@ def test_output_capture_status_contains_all_fields():
     output = "\n".join(printed)
     for field in ["State:", "Log watcher:", "Muted branches:", "Suppressed:", "Rate limited:"]:
         assert field in output, f"Status output missing field: {field}"
+
+
+# ---------------------------------------------------------------------------
+# help_flag_safety canary — a help flag ANYWHERE explains, never executes
+# ---------------------------------------------------------------------------
+
+
+def test_help_flag_after_a_branch_operand_does_not_mute(monkeypatch):
+    """`medic mute @branch --help` must describe muting, never mute.
+
+    Medic is a live dispatch surface: a real mute silences error dispatch to
+    a citizen for 24h with no unmute. The handler is mocked so this canary
+    can never perform one — the assertion is that it is never reached.
+    """
+    medic = _import_medic()
+
+    muted = MagicMock()
+    monkeypatch.setattr(medic, "_handle_mute", muted)
+    printed = MagicMock()
+    monkeypatch.setattr(medic, "print_help", printed)
+
+    result = medic.handle_command("mute", ["@trigger", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    muted.assert_not_called()
+
+
+def test_help_flag_after_read_only_verb_does_not_run_it(monkeypatch):
+    """`medic status extra -h` — read-only probe, same gate."""
+    medic = _import_medic()
+
+    ran = MagicMock()
+    monkeypatch.setattr(medic, "_handle_status", ran)
+    printed = MagicMock()
+    monkeypatch.setattr(medic, "print_help", printed)
+
+    result = medic.handle_command("status", ["extra", "-h"])
+
+    assert result is True
+    printed.assert_called_once()
+    ran.assert_not_called()
+
+
+def test_help_flag_survives_module_name_routing(monkeypatch):
+    """`medic mute @branch --help` routed through the module name."""
+    medic = _import_medic()
+
+    muted = MagicMock()
+    monkeypatch.setattr(medic, "_handle_mute", muted)
+    printed = MagicMock()
+    monkeypatch.setattr(medic, "print_help", printed)
+
+    result = medic.handle_command("medic", ["mute", "@trigger", "--help"])
+
+    assert result is True
+    printed.assert_called_once()
+    muted.assert_not_called()

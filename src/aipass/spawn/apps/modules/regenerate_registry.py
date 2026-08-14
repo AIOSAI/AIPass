@@ -13,7 +13,7 @@ All implementation logic lives in apps/handlers/regenerate_registry_ops.py.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error
 
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, get_available_classes
@@ -150,7 +150,7 @@ def handle_regenerate_registry(args: list[str]) -> int:
 
 def _print_help() -> None:
     """Print usage help for regenerate-registry command."""
-    warning("Usage: drone @spawn regenerate-registry [class_name | --all]")
+    console.print("[bold cyan]Usage:[/bold cyan] drone @spawn regenerate-registry \\[class_name | --all]")
     console.print()
     console.print("  [green](no args)[/green]       Regenerate aipass_framework template registry (default)")
     console.print("  [green]<class>[/green]          Regenerate registry for a specific template class")

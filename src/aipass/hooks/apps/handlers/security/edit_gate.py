@@ -19,7 +19,6 @@ from typing import Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 
-STATE_FILE = Path(__file__).parent.parent.parent.parent.parent / ".diagnostics_state.json"
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 # A project root is the directory holding a *_REGISTRY.json — the same marker
@@ -506,14 +505,8 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
-        if not STATE_FILE.exists():
-            return {"stdout": "", "exit_code": 0}
-
-        try:
-            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, IOError) as exc:
-            logger.info("[HOOKS] edit_gate: diagnostics_state unreadable: %s", exc)
-            return {"stdout": "", "exit_code": 0}
+        ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+        state = ds.load()
 
         errored_file = state.get("file", "")
         errors = state.get("errors", [])
@@ -536,6 +529,27 @@ def handle(hook_data: dict) -> dict:
         if not errored_branch:
             return {"stdout": "", "exit_code": 0}
         if current_branch and errored_branch and current_branch != errored_branch:
+            return {"stdout": "", "exit_code": 0}
+
+        # The block must describe what is true now, not what was true when auto_fix
+        # last ran. Any resolving write the hook did not observe — a Bash heredoc, an
+        # external editor — used to leave the state behind and block forever.
+        fresh = ds.revalidate(errored)
+        if fresh is not None:
+            if not fresh:
+                ds.clear()
+                return {"stdout": "", "exit_code": 0}
+            errors = fresh
+
+        # An error that can only be fixed in another file cannot justify blocking edits
+        # to other files: that is the red-first deadlock, unsatisfiable by any allowed
+        # action. A single locally-fixable error among them keeps the block.
+        if ds.all_cross_file(errors):
+            logger.info(
+                "[HOOKS] edit_gate: %d cross-file error(s) in %s — not blocking (resolve elsewhere)",
+                len(errors),
+                Path(errored_file).name,
+            )
             return {"stdout": "", "exit_code": 0}
 
         error_summary = "\n".join(f"  L{e['line']}: {e['message']}" for e in errors[:5])

@@ -71,10 +71,21 @@ def _prepare_rollover_mocks(monkeypatch):
     rollover_pkg = MagicMock()
     rollover_pkg.orchestrator = mock_orchestrator
 
+    # help_flags is pure argument inspection with no dependencies — mocking it
+    # would only hide whether the routing guard actually holds, so use the real one.
+    import importlib
+
+    real_help_flags = importlib.import_module("aipass.memory.apps.handlers.cli.help_flags")
+    cli_pkg = MagicMock()
+    cli_pkg.help_flags = real_help_flags
+
     handlers_pkg = MagicMock()
     handlers_pkg.monitor = monitor_pkg
     handlers_pkg.rollover = rollover_pkg
+    handlers_pkg.cli = cli_pkg
 
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli", cli_pkg)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.help_flags", real_help_flags)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers", handlers_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
@@ -248,6 +259,67 @@ class TestHandleCommand:
     def test_empty_string_command_returns_false(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
         assert rollover.handle_command("", []) is False
+
+
+# ===========================================================================
+# Tests: a help flag AFTER the subcommand must not execute the subcommand
+# ===========================================================================
+
+
+class TestSubcommandHelpFlag:
+    """A trailing --help asks a question; it must never perform the action.
+
+    The routing used to read help flags at args[0] only, so
+    'rollover push --help' fired the system-wide per_branch reset — the
+    dangerous direction for every write subcommand this module owns.
+    """
+
+    def test_push_help_does_not_push(self, monkeypatch):
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "push_defaults") as pushed:
+            assert rollover.handle_command("rollover", ["push", "--help"]) is True
+        pushed.assert_not_called()
+
+    def test_run_help_does_not_run_rollover(self, monkeypatch):
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "run_rollover") as ran:
+            assert rollover.handle_command("rollover", ["run", "--help"]) is True
+        ran.assert_not_called()
+
+    def test_sync_lines_help_does_not_sync(self, monkeypatch):
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "sync_line_counts") as synced:
+            assert rollover.handle_command("rollover", ["sync-lines", "-h"]) is True
+        synced.assert_not_called()
+
+    def test_check_help_prints_help_not_check(self, monkeypatch):
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "check_triggers") as checked:
+            with patch.object(rollover, "print_help") as helped:
+                assert rollover.handle_command("rollover", ["check", "help"]) is True
+        checked.assert_not_called()
+        helped.assert_called_once()
+
+    def test_help_flag_in_later_position_still_caught(self, monkeypatch):
+        """The flag need not sit directly after the subcommand."""
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "push_defaults") as pushed:
+            assert rollover.handle_command("rollover", ["push", "--force", "--help"]) is True
+        pushed.assert_not_called()
+
+    def test_unknown_subcommand_with_help_prints_help(self, monkeypatch):
+        """Help wins over the unknown-subcommand error — the user is asking."""
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "print_help") as helped:
+            assert rollover.handle_command("rollover", ["nonexistent", "--help"]) is True
+        helped.assert_called_once()
+
+    def test_subcommand_without_help_flag_still_executes(self, monkeypatch):
+        """The guard must not swallow ordinary invocations."""
+        rollover, _ = _import_rollover(monkeypatch)
+        with patch.object(rollover, "check_triggers") as checked:
+            assert rollover.handle_command("rollover", ["check"]) is True
+        checked.assert_called_once()
 
 
 # ===========================================================================

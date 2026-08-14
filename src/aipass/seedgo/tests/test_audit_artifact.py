@@ -337,6 +337,79 @@ def test_default_path_is_derived_not_hardcoded(tmp_path):
     assert default.parent.parent.name == "seedgo"
 
 
+def test_scoped_run_does_not_clobber_the_fleet_artifact(tmp_path):
+    """A single-branch run writes its own file; last_audit.json stays fleet-only.
+
+    @prax ran 'audit aipass @prax' and it overwrote last_audit.json with a
+    one-branch document. metadata.scope was honest, but a consumer reading the
+    file cold measured one branch and concluded the other 16 were clean.
+    """
+    scoped = audit_artifact.default_artifact_path("prax")
+    fleet = audit_artifact.default_artifact_path()
+
+    assert scoped != fleet
+    assert scoped.name == "last_audit_prax.json"
+    assert scoped.parent == fleet.parent
+
+
+def test_no_bypass_run_does_not_clobber_the_normal_artifact(tmp_path):
+    """A --no-bypass run writes its own file — same tree, deliberately lower numbers.
+
+    Identical hazard to the scoped-run one above: a consumer reading
+    last_audit.json cold has no way to know the run that produced it had every
+    bypass rule switched off, and would publish the raw score as the real one.
+    """
+    fleet = audit_artifact.default_artifact_path()
+    fleet_raw = audit_artifact.default_artifact_path(no_bypass=True)
+    scoped_raw = audit_artifact.default_artifact_path("prax", no_bypass=True)
+
+    assert fleet_raw != fleet
+    assert fleet_raw.name == "last_audit_no_bypass.json"
+    assert scoped_raw.name == "last_audit_prax_no_bypass.json"
+    assert scoped_raw != audit_artifact.default_artifact_path("prax")
+
+
+def test_no_bypass_write_lands_on_its_own_path(tmp_path, monkeypatch):
+    """write_audit_artifact routes a --no-bypass run away from the normal file."""
+    monkeypatch.setattr(audit_artifact, "_SEEDGO_ROOT", tmp_path)
+
+    out = audit_artifact.write_audit_artifact(_make_results(tmp_path / "prax", file_count=1), no_bypass=True)
+
+    assert out.name == "last_audit_no_bypass.json"
+    assert not (tmp_path / ".seedgo" / "last_audit.json").exists()
+
+
+def test_metadata_records_whether_bypasses_were_disabled(tmp_path):
+    """metadata.no_bypass tells a consumer which number it is holding."""
+    branch_root = tmp_path / "prax"
+
+    raw = _write_and_load(tmp_path, _make_results(branch_root), no_bypass=True)
+    normal = _write_and_load(tmp_path, _make_results(branch_root))
+
+    assert raw["metadata"]["no_bypass"] is True
+    assert normal["metadata"]["no_bypass"] is False
+
+
+def test_scoped_write_lands_on_the_scoped_path(tmp_path, monkeypatch):
+    """write_audit_artifact routes a scoped run to the scoped default."""
+    monkeypatch.setattr(audit_artifact, "_SEEDGO_ROOT", tmp_path)
+
+    out = audit_artifact.write_audit_artifact(_make_results(tmp_path / "prax", file_count=1), specific_branch="prax")
+
+    assert out.name == "last_audit_prax.json"
+    assert not (tmp_path / ".seedgo" / "last_audit.json").exists()
+
+
+def test_fleet_write_still_lands_on_last_audit_json(tmp_path, monkeypatch):
+    """A full-fleet run keeps the canonical name consumers already read."""
+    monkeypatch.setattr(audit_artifact, "_SEEDGO_ROOT", tmp_path)
+
+    out = audit_artifact.write_audit_artifact(_make_results(tmp_path / "prax", file_count=1))
+
+    assert out.name == "last_audit.json"
+    assert out == tmp_path / ".seedgo" / "last_audit.json"
+
+
 def test_write_creates_missing_directories(tmp_path):
     """Destination directory is created on demand."""
     target = tmp_path / "deep" / "nested" / "audit.json"

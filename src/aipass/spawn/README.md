@@ -44,7 +44,14 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 | Class | Template | What It Creates |
 |-------|----------|-----------------|
-| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ |
+| `aipass_framework` (default) | `templates/aipass_framework/` | Full 3-layer scaffold: .trinity/, .aipass/, apps/ (modules/ + handlers/), tests/, docs/, logs/ — 45 files, 23 dirs |
+| `project_agent` | `templates/project_agent/` | Minimal citizen for an external project: .trinity/, .aipass/, apps/ (modules/ + handlers/), artifacts/, logs/ — 17 files, 9 dirs |
+
+`admin` is permanently refused as a class or `--template` value — see Grant Admin below.
+
+**Class is resolved from the passport, not guessed.** A leading positional that is
+not a known class is read as the target path: `create wizard` makes a branch named
+WIZARD in `./wizard` rather than refusing an unknown class (open item — see the APLAN).
 
 ---
 
@@ -76,8 +83,22 @@ drone @spawn update @branch_name --dry-run                     # Explicit previe
 ### Delete
 
 ```bash
-drone @spawn delete @branch_name                               # Archive + deregister
+drone @spawn delete @branch_name --dry-run                     # Preview
+drone @spawn delete @branch_name --yes                         # Archive + deregister
 ```
+
+**Delete refuses protected branches, and every live citizen is protected.**
+`is_protected()` guards three layers, any one sufficient: the hardcoded floor
+(spawn, devpulse, drone), a registry entry carrying `owner: true`, and a passport
+with `citizenship.registered: true`. Since `create` writes `registered: true`, a
+branch is protected from the moment it exists. There is no `--force` — retiring a
+citizen means clearing that passport flag first.
+
+Verified live 2026-08-13 (APLAN-0007): the `infrastructure (devpulse, drone, spawn)`
+and `active citizen` refusals both fire and exit 1. The `registry owner` layer is
+**unreachable in the live fleet** — `devpulse` is the only entry carrying
+`owner: true` and it short-circuits at layer 1, so no branch can reach layer 2.
+It is covered by unit tests against a synthetic registry, not by live behaviour.
 
 ### Sync and Regenerate
 
@@ -213,7 +234,9 @@ spawn/
 
 ## Tests
 
-**403 tests | 1 skipped | 0 failed** across 18 test files (410 collected — parametrized cases expand):
+**435 passed | 1 skipped | 0 failed** across 19 test files (436 collected — parametrized cases expand).
+The one skip is `test_scaffold.py`: the shipped scaffold smoke test skips by design once a
+branch has a real conftest (see Known Issues).
 
 | File | Focus |
 |------|-------|
@@ -230,6 +253,12 @@ spawn/
 | `test_error_resilience.py` | Error handling and edge cases |
 | `test_check_fix_identity.py` | Owner/identity check and fix (DPLAN-0239 P4) |
 | `test_admin_fence.py` | Admin grant ceremony + permanent admin-class refusal (DPLAN-0288) |
+| `test_owner_resolver.py` | Owner resolution + `is_protected()` protection layers |
+| `test_passport_drift.py` | Fleet passport drift canary |
+| `test_template_hygiene.py` | Template content invariants |
+| `test_output_streams.py` | stdout/stderr routing |
+| `test_repair.py` | Structural repair + relocation |
+| `test_scaffold.py` | Shipped scaffold smoke test (skips once a real conftest exists) |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
 **Public functions:** 57 total, 57 tested (100%)
@@ -253,21 +282,23 @@ spawn/
 
 ## Known Issues
 
-- `sync-templates` is a no-op — `template_owners.json` has no entries (template IS source of truth, not downstream consumer)
+- `sync-templates` is a no-op — `template_owners.json` has no entries (template IS source of truth, not downstream consumer). Re-verified live 2026-08-13.
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
+- `create <unknown-class> <path>` does not refuse: an unrecognised leading positional is read as the target path (APLAN-0007)
+- `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291
 
 ---
 
 ## Metrics
 
-- **Seedgo:** 100%
-- **Tests:** 409 passed, 1 skipped, 0 failed
+- **Seedgo:** 100% with bypasses, 98% without (15 live bypass rules, all measured 2026-08-13)
+- **Tests:** 435 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
-- **Template registry:** 44 files, 23 dirs (aipass_framework)
-- **Battle test:** 17/17 commands pass (2026-04-22)
+- **Template registry:** 45 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
+- **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
 
 ---
 
-*Last Updated: 2026-08-12*
+*Last Updated: 2026-08-13*
 
 [← Back to AIPass](../../../README.md)

@@ -168,12 +168,14 @@ def handle_command(command: str, args: list) -> bool:
     """
     from aipass.cli.apps.modules import console, success, error
 
+    from aipass.trigger.apps.handlers.cli.help_flags import wants_help
+
     # Handle module-name routing (drone @trigger branch_log_events <subcmd>)
     if command == "branch_log_events":
         if not args:
             print_introspection()
             return True
-        if args[0] in ["--help", "-h", "help"]:
+        if wants_help(args):
             print_help()
             return True
         subcommand = args[0]
@@ -189,7 +191,9 @@ def handle_command(command: str, args: list) -> bool:
     if command not in ["start", "stop", "status", "reset"]:
         return False
 
-    if args and args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence gate, AFTER the ownership check: a module that claimed
+    # any command carrying --help would hijack every other module's help.
+    if wants_help(args):
         print_help()
         return True
 

@@ -24,7 +24,11 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 
 **APLANs never trimmed, rarely closed.** They accumulate history. When branch gets major overhaul, start fresh APLAN + archive old one.
 
+**APLANs STAY OPEN -- do not close on task completion.** (Patrick ruling, 2026-08-13.) Dispatch checklists + task footers saying "close your plan" do NOT apply to APLANs -- that instruction is for the task's FPLAN/PPLAN, never this document. Closing an APLAN archives the branch's living health record; a closed APLAN is a bug, not a completion. If one gets closed by mistake, restore it.
+
 **Keep items current.** Check boxes when work done. Add ! issues as found. Update metrics when you verify. Document should always reflect reality.
+
+**ONE APLAN per branch.** Before creating, check for an existing one (`drone @flow list open` or your branch root) -- future audits UPDATE the living doc, never create a second. If you find a closed one in `.backup/processed_plans/`, restore it instead of recreating -- current mechanic: move the file back to your branch root first, THEN `drone @flow restore <ID>` (the restore verb cannot yet fetch the file itself; @flow's APLAN-0004 tracks that build).
 
 ---
 
@@ -36,8 +40,8 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | **Last verified** | {today} |
 | **Open items** | 0 |
 | **Tests** | 0 pass, 0 fail |
-| **Seedgo** | 0% (0 standards) |
-| **Bypass entries** | 0 |
+| **Seedgo** | 0% with bypasses / 0% without (publish BOTH -- one number is how a branch lies about itself) |
+| **Bypass entries** | 0 total: 0 live / 0 dead (last measured: date) |
 | **CLI score** | Nav 0/5, Output 0/5 |
 
 ## Current State

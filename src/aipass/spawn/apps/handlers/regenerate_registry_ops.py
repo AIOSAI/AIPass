@@ -27,8 +27,9 @@ from aipass.spawn.apps.handlers.meta_ops import compute_file_hash, load_template
 _SPAWN_DIR = ".spawn"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
 
-# Directories to skip entirely during scan
-_SKIP_DIRS = {"__pycache__", ".git"}
+# Directories to skip entirely during scan — must mirror file_ops.SKIP_NAMES,
+# or the registry tracks artifacts the copy engine refuses to copy.
+_SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
 
 # Files to skip within .spawn/ (tracking files that shouldn't be in the registry)
 _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}

@@ -28,6 +28,7 @@ from rich.markup import escape
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
+from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.email.create import load_email_file
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item, format_email_header
 from aipass.ai_mail.apps.handlers.email.inbox_ops import load_inbox
@@ -140,7 +141,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     valid = ["send", "email", "inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
     if command not in valid:
         return False
-    if args and args[0] in ["--help", "-h", "help"]:
+    # Whole-sequence: a flag after the first argument would otherwise reach
+    # handle_send/handle_close/handle_reply and mutate a mailbox.
+    if wants_help(args):
         print_help()
         return True
 

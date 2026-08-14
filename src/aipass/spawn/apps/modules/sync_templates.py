@@ -82,7 +82,7 @@ def handle_sync_templates(args: list[str]) -> int:
     Returns exit code (0=success, 1=failure).
     """
     if args and args[0] in ["--help", "-h"]:
-        warning("Usage: drone @spawn sync-templates [--status|--sync|--dry-run]")
+        console.print("[bold cyan]Usage:[/bold cyan] drone @spawn sync-templates [--status|--sync|--dry-run]")
         console.print()
         console.print("  [green](no args)[/green]   Report which managed template files are stale")
         console.print("  [green]--status[/green]    Same as no args")

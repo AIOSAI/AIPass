@@ -805,6 +805,86 @@ class TestReadInboxMessageId:
         assert _read_inbox_message_id(inbox, 1) is None
 
 
+class TestResolveMailToken:
+    """_resolve_mail_token() — a real message ID always beats the index convenience.
+
+    ai_mail IDs are str(uuid4())[:8] — 8 hex chars with no version nibble, so
+    (10/16)^8 = 2.3% of them contain no a-f and are indistinguishable from an
+    inbox index by shape alone. Reported live by @trigger 2026-08-13 after a
+    message in their own inbox could not be opened by the ID the listing printed.
+    """
+
+    @staticmethod
+    def _seat(tmp_path: Path, ids: list[str]) -> None:
+        """Build a citizen seat with an inbox holding `ids` in array order."""
+        (tmp_path / ".trinity").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps({"messages": [{"id": i} for i in ids]}),
+            encoding="utf-8",
+        )
+
+    def test_all_digit_id_resolves_to_itself(self, tmp_path: Path, monkeypatch) -> None:
+        """An all-digit message ID is an ID, not an index — the reported bug."""
+        self._seat(tmp_path, ["b7c79832", "04727185"])
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        assert _resolve_mail_token("04727185") == "04727185"
+
+    def test_id_wins_over_valid_index_collision(self, tmp_path: Path, monkeypatch) -> None:
+        """An all-digit ID that is ALSO a valid index must not open another message.
+
+        This is the silent half of the defect: no error, just the wrong mail.
+        """
+        self._seat(tmp_path, ["deadbeef", "00000002"])
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        # Display index 2 would be "deadbeef" (array is reversed for display).
+        assert _resolve_mail_token("00000002") == "00000002"
+
+    def test_index_still_resolves_when_not_an_id(self, tmp_path: Path, monkeypatch) -> None:
+        """The convenience survives: a bare index still maps to display order."""
+        self._seat(tmp_path, ["newest", "oldest"])
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        assert _resolve_mail_token("1") == "oldest"
+        assert _resolve_mail_token("2") == "newest"
+
+    def test_failed_resolution_preserves_original_token(self, tmp_path: Path, monkeypatch) -> None:
+        """On failure return what the user typed — never int-round-trip it.
+
+        str(int("08532166")) drops the leading zero, so the not-found error
+        named an ID the user never typed. That mangling is what made the
+        original report take a minute to read instead of a second.
+        """
+        self._seat(tmp_path, ["b7c79832"])
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        assert _resolve_mail_token("08532166") == "08532166"
+
+    def test_hex_id_passes_through(self, tmp_path: Path, monkeypatch) -> None:
+        """A normal hex ID is returned untouched whether or not it is in the inbox."""
+        self._seat(tmp_path, ["b7c79832"])
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        assert _resolve_mail_token("b7c79832") == "b7c79832"
+        assert _resolve_mail_token("c4d41074") == "c4d41074"
+
+    def test_no_inbox_returns_token_unchanged(self, tmp_path: Path, monkeypatch) -> None:
+        """No seat, no inbox — pass the token through rather than inventing one."""
+        monkeypatch.chdir(tmp_path)
+        from aipass.drone.apps.drone import _resolve_mail_token
+
+        assert _resolve_mail_token("04727185") == "04727185"
+        assert _resolve_mail_token("3") == "3"
+
+
 class TestDiscoverModules:
     """_discover_modules() auto-discovery."""
 

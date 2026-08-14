@@ -33,6 +33,7 @@ if sys.platform == "win32":
 from pathlib import Path
 
 from aipass.cli.apps.modules import console, error, success, warning
+from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.mbank.process import process_closed_plans
 from aipass.flow.apps.handlers.runner.lock_ops import acquire_lock, release_lock
@@ -65,8 +66,9 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag
-    if args[0] in ["--help", "-h", "help"]:
+    # Handle help flag ANYWHERE in the sequence -- post archives and
+    # vectorises closed plans, so a help probe must not reach it
+    if wants_help(args):
         print_help()
         return True
 

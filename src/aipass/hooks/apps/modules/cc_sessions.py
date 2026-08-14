@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -318,6 +319,14 @@ def handle_command(command: str, args: list) -> bool:
     if command in ("sessions", "cc_sessions"):
         if not args:
             print_introspection()
+            return True
+
+        if wants_help(args):
+            CONSOLE.print("[bold cyan]sessions[/bold cyan] — CC session listing & reclaim")
+            CONSOLE.print()
+            CONSOLE.print("  drone @hooks sessions                  List all CC sessions")
+            CONSOLE.print("  drone @hooks sessions reclaim          Stop all live sessions")
+            CONSOLE.print("  drone @hooks sessions reclaim @branch  Stop sessions for a branch")
             return True
 
         if args[0] == "reclaim":

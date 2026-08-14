@@ -24,6 +24,7 @@ import tempfile
 import time
 
 from aipass.hooks.apps.modules.engine import dispatch
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
@@ -221,7 +222,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    if args[0] in ("--help", "-h"):
+    if wants_help(args):
         print_introspection()
         return True
 
