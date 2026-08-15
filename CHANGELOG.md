@@ -11,6 +11,49 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+**feat(host)** — DPLAN-0300: the phone becomes a terminal — attach lane, photo
+lane, verb doors (@api server-side; @baud's client lands in the BAUD repo).
+`WS /v1/room/attach` spawns a PTY running the desktop's exact attach-or-create
+tmux command (SIGHUP = detach, rooms survive close); the bearer rides
+`Sec-WebSocket-Protocol` and the server echoes only the sentinel, never the
+token; binary frames are keystrokes/output forwarded unchanged, text frames are
+control (resize — refused-not-clamped, never fatal). The pump waits
+FIRST_COMPLETED with hangup-first (gather-both deadlocked on quiet rooms,
+leaking a thread + an undetached tmux client per closed sheet). The fix that
+mattered most: the PTY child now ACQUIRES its controlling terminal (login_tty,
+setsid+TIOCSCTTY fallback for 3.10) and the PTY is born at a real 80x24 —
+before this, TIOCSWINSZ's SIGWINCH had no recipient, so the tmux client read
+0x0 at startup, fell back to 80x24, and stayed deaf to every resize any client
+would ever send. That deafness painted 80 columns into a ~46-column phone:
+mangled lines and the stacking status bar, root-caused live by reading stty and
+tmux list-clients link by link until they disagreed. Rooms are stamped `mouse
+on` + `window-size smallest` on EVERY attach, each chained tmux command with
+its own `-t`. `POST /v1/files/upload` (operate, multipart field `image`): the
+server names the file — the client filename is never read; magic-byte sniffing
+with an offset table (WebP/HEIC put size before brand), 25MB refused not
+truncated and checked twice, 0600 via os.open, lands in ~/Pictures/BAUD beside
+the desktop's screenshots. Kill/wake/lock verb doors, phone face serving, and
+FastAPI validation errors normalized into the documented error envelope
+("image: Field required" in words, not a naked 422 shape). pyproject grows
+python-multipart in `[host]`; `tests/.archive/` whitelisted so the superseded
+capture-lane tests ship revivable (`--capture-room` stays parked as the future
+look-don't-touch lane for read-scope room viewing). ~1002 api tests green
+incl. mutation-checked resize guards that caught the genuinely-untested 3.10
+fallback. Riding along: @skills screen_lock v1.0.0 (loginctl password-lock,
+every agent keeps running — the walking-away-from-the-desk piece) and
+devpulse's dispatch-protocol prompt lines (S248: mail reaches an awake agent
+only at hook boundaries — long briefs now carry re-check-inbox-before-done).
+Live-accepted by Patrick from his S24 through the real stack — attach, type
+directly into the TUI, photo, finger-scroll: "this is usable rn."
+
+**feat(fleet)** — DPLAN-0291 audit wave, morning completions. @spawn S118
+closes all 4 open items: `create <unknown-class>` refused red-first (the repro
+created WIZARD on disk before the fix), `.ai_mail.local/` never-update
+exclusion, `sync-templates` retired outright (template_owners.json empty twice
+running) — 434 green, seedgo 100%, APLAN-0007 signed GREEN. @daemon hardens
+memory_health per APLAN-0015 (3 fixes, not 1). @skills telegram base_bot +
+suspend tests. @aipass APLAN-0018 stamped.
+
 **feat(host)** — DPLAN-0300 Stage 0: the host API lands (@api, FPLAN-0411).
 The fleet's first phone-ready surface: loopback-only FastAPI behind
 sha256-hashed bearer tokens (compare_digest, read|operate scopes, file-edit

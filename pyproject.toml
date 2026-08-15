@@ -68,6 +68,11 @@ bluesky = [
 host = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    # Multipart parsing for POST /v1/files/upload. FastAPI needs it to read a
+    # form body at all, and raises at app-creation time when it is missing, so
+    # the server guards the import and answers 503 with this hint rather than
+    # failing to start.
+    "python-multipart>=0.0.9",
 ]
 seedgo = []
 dev = [

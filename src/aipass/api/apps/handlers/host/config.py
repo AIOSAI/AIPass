@@ -53,9 +53,17 @@ CONFIG_SLUG = "config"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 
-# Phase 1 gate. See the module docstring — this is a reservation, not a limit of
-# the code below. Phase 5's security review is what flips it.
-LOOPBACK_ONLY = True
+# OPENED 2026-08-14 by Patrick's ruling on the Phase 5 security review (C1 audit
+# shipped, C2 blast radius accepted in his words, C3 admission list verified by
+# devpulse: exactly two enrolled devices, both his).
+#
+# READ THIS BEFORE ASSUMING THE GATE IS GONE. This flag governs ONE refusal — the
+# non-loopback one. Everything else in validate_bind() is independent of it and
+# still refuses: wildcards (is_unspecified), hostnames, addresses this machine
+# does not hold, and out-of-range ports. Setting it False widens the server from
+# "loopback only" to "one real address this machine actually holds". It does NOT
+# make 0.0.0.0 bindable, and the ratified NO-GO says nothing beyond the tailnet.
+LOOPBACK_ONLY = False
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "host": DEFAULT_HOST,

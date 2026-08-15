@@ -38,6 +38,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
+from datetime import datetime
 from typing import List, Optional
 
 from aipass.cli.apps.modules import console, header, success, error, warning
@@ -166,14 +167,21 @@ def handle_command(command: str, args: List[str]) -> bool:
     Returns:
         True if command was handled, False to pass through.
     """
+    # Both spellings answer. `drone @api` bare lists MODULE names, so it
+    # advertises "host_api" while the command is "host-api" — @baud read the
+    # self-map, typed what it said, and reported themselves blocked over one
+    # character. A surface that publishes a spelling which does not work is the
+    # surface's bug. Spelled literally so a checker can see the match too.
+    mine = command in ("host-api", "host_api")
+
     # NO-ARGS GATE (seedgo standard)
     if not args:
-        if command == "host-api":
+        if mine:
             print_introspection()
             return True
         return False
 
-    if command != "host-api":
+    if not mine:
         return False
 
     # HELP GATE — a help flag ANYWHERE means "explain", never "run". Checking
@@ -332,7 +340,60 @@ def _cmd_list_tokens() -> None:
     for record in records:
         state = "[red]revoked[/red]" if record["revoked"] else "[green]active[/green]"
         console.print(f"  [cyan]{record['id']}[/cyan]  {record['label']}  [dim]{record['scope']}[/dim]  {state}")
+        console.print(f"                [dim]{_provenance(record)}[/dim]")
     console.print()
+
+
+def _provenance(record: dict) -> str:
+    """
+    The one line that answers who minted a token, whether it is live, and when
+    it died.
+
+    Written because the store learning it three fields would have changed
+    nothing on its own: an operate token appeared on this system and the honest
+    answer to "who minted this" was that nobody had recorded it. Provenance
+    nobody can read at the place they actually look is provenance that does not
+    exist — so the listing carries it, not just the JSON.
+
+    Args:
+        record: A row from list_tokens().
+
+    Returns:
+        A single dim line for beneath the record.
+    """
+    parts = [f"minted by {record.get('minted_by') or host_tokens.UNKNOWN_MINTER}"]
+
+    # 'never used' rather than a blank: a token minted an hour ago that has
+    # never been presented is a different situation from a live one, and the
+    # difference is the whole reason the field exists.
+    parts.append(f"last used {_stamp(record.get('last_used'))}" if record.get("last_used") else "never used")
+
+    if record.get("revoked_at"):
+        parts.append(f"revoked {_stamp(record.get('revoked_at'))}")
+
+    return " · ".join(parts)
+
+
+def _stamp(value: object) -> str:
+    """
+    Render a stored ISO timestamp for a human, without inventing precision.
+
+    Args:
+        value: An ISO timestamp string, or anything else.
+
+    Returns:
+        'YYYY-MM-DD HH:MM', or the raw value if it will not parse — never an
+        empty string, because a stamp that renders as nothing reads as absent.
+    """
+    text = str(value or "")
+    try:
+        return datetime.fromisoformat(text).strftime("%Y-%m-%d %H:%M")
+    except ValueError as e:
+        # Shown raw rather than swallowed: the only way a stored stamp fails to
+        # parse is a hand-edited store or a shape change nobody migrated, and
+        # the operator reading this listing is exactly who should see it.
+        logger.warning("[host_api] unreadable timestamp %r in the token store: %s", text, e)
+        return text
 
 
 def _cmd_revoke_token(args: List[str]) -> None:

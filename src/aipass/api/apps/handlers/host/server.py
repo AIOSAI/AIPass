@@ -36,6 +36,11 @@ Endpoints added in Phase 2 (read lane):
     GET /v1/files   - read scope. Names not paths, 512KB cap, cap is reported.
     GET /v1/diff    - read scope. Routed through drone's git lane, never raw git.
 
+Phase 5 adds the phone face itself, served from this same origin (see face.py):
+    GET /             - @baud's bundle. NO auth: a browser navigating to a URL
+                        cannot send a bearer header, and the shell discloses
+                        nothing. Every byte of data stays behind /v1/*.
+
 Endpoints added on C1 (routed, but the exec behind them is GATED):
     GET /v1/fleet   - read scope. @baud's snapshot envelope, unchanged.
     GET /v1/rooms   - read scope. A filter over that same snapshot.
@@ -45,11 +50,16 @@ Both answer 503 with a named reason until `fleet.SNAPSHOT_READY` is flipped.
 it and would open a GUI window instead of erroring — see fleet.py. Their schema
 is implemented field-for-field, so nothing here changes when the gate opens.
 
+Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
+    POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
+                                     admin keyword is UNREACHABLE through it,
+                                     not merely set False.
+    POST /v1/verbs/kill            - Routed, validated and GATED: @baud has no
+                                     headless kill, and theirs is the one door.
+    POST /v1/verbs/lock            - Proxied to @skills' screen_lock. Never
+                                     gated — lock must fire from anywhere.
+
 RESERVED, NOT BUILT (FPLAN-0411; do not add without the phase that owns it):
-    POST /v1/verbs/wake            - Phase 3, admin=False pinned by test
-    POST /v1/verbs/kill            - Phase 3, explicit target + room's own
-                                     project. Also held on @baud's rebuild.
-    POST /v1/verbs/lock            - Phase 3, held on C2 (@skills extraction)
     POST /v1/notify                - Phase 4, content-minimized through the relay
     quick-send / interrupt         - later round, CONFIRMED build (agnostic
                                      ruling). Reuses @ai_mail's verified
@@ -68,15 +78,21 @@ Functions:
     serve()         - Validate the bind, then run uvicorn
 """
 
+import asyncio
+import json
 from typing import Any, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.api.apps.handlers.host import uploads as host_uploads
+from aipass.api.apps.handlers.host import verbs as host_verbs
 
 
 class UnavailableHTTPException(Exception):
@@ -95,25 +111,58 @@ class UnavailableHTTPException(Exception):
 
 
 try:
-    from fastapi import Depends, FastAPI, HTTPException, Request
-    from fastapi.responses import JSONResponse, Response
+    from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import FileResponse, JSONResponse, Response
     from fastapi.security import HTTPBearer
+    from fastapi.staticfiles import StaticFiles
 
     HOST_API_AVAILABLE = True
 except ImportError as e:
     logger.warning("[host_api] server libraries not available: %s", e)
 
+    Body = None  # type: ignore[assignment, misc]
     Depends = None  # type: ignore[assignment, misc]
     FastAPI = None  # type: ignore[assignment, misc]
+    File = None  # type: ignore[assignment, misc]
+    UploadFile = None  # type: ignore[assignment, misc]
+    # Not None: handed to @app.exception_handler(), which wants a class. Same
+    # reason HTTPException gets a stand-in rather than a None above.
+    RequestValidationError = UnavailableHTTPException  # type: ignore[assignment, misc]
     # Not None: this name is raised and also handed to @app.exception_handler(),
     # both of which need a class. See UnavailableHTTPException above.
     HTTPException = UnavailableHTTPException  # type: ignore[assignment, misc]
     Request = None  # type: ignore[assignment, misc]
+    WebSocket = None  # type: ignore[assignment, misc]
     JSONResponse = None  # type: ignore[assignment, misc]
     Response = None  # type: ignore[assignment, misc]
+    FileResponse = None  # type: ignore[assignment, misc]
     HTTPBearer = None  # type: ignore[assignment, misc]
+    StaticFiles = None  # type: ignore[assignment, misc]
 
     HOST_API_AVAILABLE = False
+
+# Multipart is a SECOND optional dependency, guarded separately from the rest of
+# the [host] extra because FastAPI raises at ROUTE-REGISTRATION time when a form
+# route exists and this is missing — an unguarded upload route would take the
+# whole server down for someone who has fastapi and uvicorn but not this. The
+# route is registered either way and answers 503 with the install hint, because
+# a 404 on a route that should exist reads as "wrong URL" and sends the caller
+# looking in the wrong place.
+try:
+    # python_multipart, not multipart: the old top-level name still resolves but
+    # warns, and it is a DIFFERENT package on PyPI that some environments have
+    # instead. Importing the one FastAPI actually uses is the only check worth
+    # making — the other name could succeed and still leave the route broken.
+    import python_multipart  # noqa: F401  (imported for availability, not for use)
+
+    MULTIPART_AVAILABLE = True
+except ImportError as e:
+    logger.warning("[host_api] multipart support not available — the upload route will refuse: %s", e)
+
+    MULTIPART_AVAILABLE = False
+
+MULTIPART_HINT = "pip install 'aipass[host]' — the upload route needs python-multipart to read a form body"
 
 INSTALL_HINT = "pip install -e '.[host]'  (or: pip install fastapi uvicorn)"
 
@@ -152,6 +201,123 @@ def _deny(status: int, code: str, message: str) -> Any:
     return HTTPException(status_code=status, detail={"error": {"code": code, "message": message}})
 
 
+def _peer(request: Any) -> str:
+    """
+    Name the caller's address for the audit trail.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        The peer address, or 'unknown' when the transport does not expose one.
+    """
+    client = getattr(request, "client", None)
+    host = getattr(client, "host", None) if client else None
+
+    # 'unknown' rather than a blank: an audit line that silently drops the field
+    # reads as though nobody thought to record it.
+    return str(host) if host else "unknown"
+
+
+def _validation_sentence(errors: list) -> str:
+    """
+    Turn a validation failure into the sentence a phone can show.
+
+    Args:
+        errors: FastAPI's structured error list.
+
+    Returns:
+        One line naming each bad field and what is wrong with it. 'body' is
+        dropped from the location because every field on a POST is in the body
+        and repeating it says nothing — 'image: Field required' is the whole
+        useful content of a 422, and it is what the operator needs to read.
+    """
+    parts = []
+    for error in errors:
+        pieces = [str(piece) for piece in error.get("loc", ()) if str(piece) != "body"]
+        location = ".".join(pieces) or "body"
+        parts.append(f"{location}: {error.get('msg', 'invalid')}")
+
+    # Never empty: a 422 whose message is a blank string is the same failure
+    # this handler exists to fix, one layer further in.
+    return "; ".join(parts) or "The request could not be validated"
+
+
+def _declared_length(upload: Any) -> Optional[int]:
+    """
+    The size an upload CLAIMS to be, if it claimed one.
+
+    Only ever used to refuse early. A body that lies about its length is caught
+    by the running total while it is read, so this is a cheap first gate and
+    never the one the cap depends on — trusting it alone is how a 25MB cap
+    lets a 200MB body through with a small number in its header.
+
+    Args:
+        upload: The uploaded file object.
+
+    Returns:
+        The declared size, or None when the request sent no usable
+        Content-Length — which is the normal case for a chunked upload.
+    """
+    headers = getattr(upload, "headers", None)
+    raw = headers.get("content-length") if headers else None
+
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        # A malformed header is not a size. Falling through to None means the
+        # real check does the work, which is where the truth was anyway — but
+        # it is worth a line, because a client sending garbage here is either
+        # broken or probing, and neither leaves another trace.
+        logger.warning("[host_api] ignoring an unreadable Content-Length on an upload: %r", raw)
+        return None
+
+
+def _audit_refusal(
+    request: Any,
+    reason: str,
+    required: str,
+    token_id: str = "",
+    held: str = "",
+) -> None:
+    """
+    Record a refused request in the durable audit trail.
+
+    Security review condition C1. Before this, a refusal produced a log line with
+    no peer address, so "which device has been knocking, and how often" had no
+    answer. The audit distinguishes WHY; the response deliberately does not.
+
+    THE RAW TOKEN NEVER ENTERS THIS FUNCTION. Only the id — which is safe, is
+    what `revoke-token` takes, and is therefore the one identifier that makes an
+    audit line actionable. Not a prefix of the value either: a prefix leaks
+    entropy for free.
+
+    Args:
+        request: The incoming request, for the peer address and path.
+        reason: Machine-readable refusal reason.
+        required: Scope the endpoint demanded.
+        token_id: Token id, when a valid token was identified.
+        held: Scope the token actually holds, when known.
+    """
+    peer = _peer(request)
+    path = str(getattr(getattr(request, "url", None), "path", "") or "")
+
+    logger.warning("[host_api] auth refused: reason=%s peer=%s path=%s", reason, peer, path)
+
+    json_handler.log_operation(
+        "host_api_auth_refused",
+        {
+            "reason": reason,
+            "peer": peer,
+            "path": path,
+            "method": str(getattr(request, "method", "") or ""),
+            "required": required,
+            "token_id": token_id,
+            "held": held,
+        },
+    )
+
+
 def require_scope(required: str = "read"):
     """
     Build a dependency enforcing bearer auth at *required* scope.
@@ -166,35 +332,118 @@ def require_scope(required: str = "read"):
         A FastAPI dependency returning the authenticated token record.
     """
 
-    def _dependency(credentials: Optional[Any] = Depends(_bearer)) -> dict:
+    def _dependency(request: Request, credentials: Optional[Any] = Depends(_bearer)) -> dict:
         if credentials is None or not getattr(credentials, "credentials", None):
+            _audit_refusal(request, "missing_credentials", required)
             raise _deny(401, "unauthorized", "Bearer token required")
 
         record = host_tokens.verify_token(credentials.credentials)
         if record is None:
-            # Rejected and revoked are deliberately indistinguishable to the
-            # caller — a revoked device learns "no", not "you were valid until
-            # 10:42". The reason is in our log, not the response.
-            logger.warning("[host_api] auth rejected: token not recognised or revoked")
+            # Unrecognised and REVOKED are byte-identical to the caller — a
+            # revoked device learns "no", not "you were valid until 10:42". The
+            # difference lives in the audit trail, never in the response.
+            _audit_refusal(request, "token_unrecognised", required)
             raise _deny(401, "unauthorized", "Token not recognised")
 
         if not host_tokens.scope_allows(str(record.get("scope", "")), required):
-            logger.warning(
-                "[host_api] scope refused: id=%s has %s, needs %s",
-                record.get("id"),
-                record.get("scope"),
+            _audit_refusal(
+                request,
+                "scope_refused",
                 required,
+                token_id=str(record.get("id", "")),
+                held=str(record.get("scope", "")),
             )
             raise _deny(403, "forbidden", f"This token's scope cannot perform a '{required}' action")
+
+        # Only a token that BOTH verified and cleared its scope is "used". A
+        # refused request means a credential was presented, which is the audit's
+        # story, not this one — and stamping on a failed verify would let a
+        # prober populate the store it is probing. Best-effort by contract: it
+        # never raises, so it can never fail a request that already passed.
+        host_tokens.touch_token(str(record.get("id", "")))
 
         return record
 
     return _dependency
 
 
+def socket_bearer(websocket: Any, required: str = "operate") -> dict:
+    """
+    Authenticate a WebSocket from its subprotocol offer.
+
+    A browser cannot set an Authorization header on a WebSocket. The two places
+    a token could go are the query string and the `Sec-WebSocket-Protocol`
+    header, and the query string is disqualified outright: URLs are written to
+    access logs, proxy logs and browser history, so a token there is a
+    credential copied to three places nobody chose.
+
+    The client therefore offers two protocol values — a sentinel name and the
+    bearer — and the server echoes back ONLY the sentinel. Echoing the token
+    would put it in the handshake RESPONSE, undoing the whole point.
+
+    Args:
+        websocket: The incoming connection.
+        required: Scope the socket demands.
+
+    Returns:
+        The authenticated token record.
+
+    Raises:
+        PermissionError: No credential offered, unrecognised, or wrong scope.
+            One exception type on purpose: the caller closes the socket with a
+            policy code either way, and a WebSocket handshake has no envelope to
+            carry a reason without inventing one.
+    """
+    header = websocket.headers.get("sec-websocket-protocol", "")
+    offered = [value.strip() for value in header.split(",") if value.strip()]
+
+    if host_attach.BEARER_SUBPROTOCOL not in offered or len(offered) < 2:
+        raise PermissionError("Bearer token required on the Sec-WebSocket-Protocol header")
+
+    # The token is whatever was offered ALONGSIDE the sentinel. Taking it
+    # positionally rather than by index tolerates a client reordering, which is
+    # allowed by the protocol and would otherwise be an unexplainable 401.
+    candidates = [value for value in offered if value != host_attach.BEARER_SUBPROTOCOL]
+    record = None
+    for candidate in candidates:
+        record = host_tokens.verify_token(candidate)
+        if record is not None:
+            break
+
+    if record is None:
+        raise PermissionError("Token not recognised")
+
+    if not host_tokens.scope_allows(str(record.get("scope", "")), required):
+        raise PermissionError(f"This token's scope cannot perform a '{required}' action")
+
+    host_tokens.touch_token(str(record.get("id", "")))
+
+    return record
+
+
 # ==============================================
 # APP
 # ==============================================
+
+
+def _face_file_route(filename: str):
+    """
+    Build a route handler serving one file from the bundle root.
+
+    The name is bound at app-creation time from a directory listing, never taken
+    from the request, so there is no caller-supplied path here to fence.
+
+    Args:
+        filename: File name at the bundle root.
+
+    Returns:
+        An async route handler returning that file.
+    """
+
+    async def _serve_file() -> Any:
+        return FileResponse(host_face.face_root() / filename)
+
+    return _serve_file
 
 
 def create_app() -> Any:
@@ -218,13 +467,43 @@ def create_app() -> Any:
 
     @app.exception_handler(HTTPException)
     async def _envelope_handler(request: Request, exc: HTTPException) -> Any:
-        """Send every error through the one envelope shape the client parses."""
+        """Send every refusal this server RAISES through the one envelope."""
         detail = exc.detail
         if isinstance(detail, dict) and "error" in detail:
             payload = detail
         else:
             payload = {"error": {"code": "error", "message": str(detail)}}
         return JSONResponse(status_code=exc.status_code, content=payload)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_envelope_handler(request: Request, exc: Any) -> Any:
+        """
+        The other half of the envelope, and it was missing until @baud hit it.
+
+        Validation fires IN FRONT of every handler, so it never reached the
+        envelope above — it emitted FastAPI's own `{"detail": [...]}` instead.
+        A client coding to the documented shape therefore lost the sentence on
+        EVERY validation error, on every route: Patrick was holding a phone
+        reading "HTTP 422" while that same response body named the exact field
+        and the exact problem.
+
+        The sentence is the product here, the way it is everywhere else on this
+        server. `fields` keeps the structured original so nothing a client had
+        before is taken away — this widens the envelope, it does not narrow it.
+        """
+        errors = exc.errors() if hasattr(exc, "errors") else []
+        payload = {
+            "error": {
+                "code": "invalid_request",
+                "message": _validation_sentence(errors),
+                "fields": [
+                    {"loc": [str(piece) for piece in error.get("loc", ())], "msg": str(error.get("msg", ""))}
+                    for error in errors
+                ],
+            }
+        }
+        logger.warning("[host_api] rejected a malformed request: %s", payload["error"]["message"])
+        return JSONResponse(status_code=422, content=payload)
 
     # response_class + the Response return annotation keep FastAPI from
     # inferring a body model — 204 must not carry one.
@@ -269,6 +548,47 @@ def create_app() -> Any:
         except host_reads.ReadUnavailable as e:
             raise _deny(503, "read_unavailable", str(e)) from e
 
+    if MULTIPART_AVAILABLE:
+
+        @app.post("/v1/files/upload")
+        async def files_upload(
+            image: UploadFile = File(...),
+            record: dict = Depends(require_scope("operate")),
+        ) -> dict:
+            """
+            Store one image from the phone and return the absolute path.
+
+            Operate scope, because it writes to disk. The response path is the
+            entire product of this route — the phone types it into the open
+            attach socket, which is how the image reaches an agent.
+
+            The client's own filename is not a parameter here. `image.filename`
+            exists on the object FastAPI hands over and is deliberately never
+            read: a name that arrives from a phone is attacker-controlled, and
+            the only sanitiser worth trusting is not having the input at all.
+            """
+            try:
+                return host_uploads.store_image(image.file, _declared_length(image))
+            except host_uploads.UploadRefused as e:
+                raise _deny(400, "upload_refused", str(e)) from e
+            except host_uploads.UploadUnavailable as e:
+                raise _deny(503, "upload_unavailable", str(e)) from e
+
+    else:
+
+        @app.post("/v1/files/upload")
+        async def files_upload_unavailable(
+            record: dict = Depends(require_scope("operate")),
+        ) -> dict:
+            """
+            The same route, answering honestly when it cannot do the job.
+
+            Registered rather than omitted: a 404 here would tell the phone the
+            URL is wrong, which is the one thing it is not. 503 with the hint
+            says the door exists and this host is missing a part.
+            """
+            raise _deny(503, "upload_unavailable", MULTIPART_HINT)
+
     @app.get("/v1/diff")
     async def diff(
         branch: str,
@@ -306,9 +626,304 @@ def create_app() -> Any:
         except host_fleet.FleetUnavailable as e:
             raise _deny(503, "fleet_unavailable", str(e)) from e
 
-    routes = ["/v1/ping", "/v1/whoami", "/v1/feed", "/v1/files", "/v1/diff", "/v1/fleet", "/v1/rooms"]
-    logger.info("[host_api] app created (Phase 2 read lane: %s)", ", ".join(routes))
-    json_handler.log_operation("host_api_app_created", {"phase": 2, "routes": routes})
+    # ── The verb lane (Phase 3) ───────────────────────────────────────────
+    # POST only, operate scope only. Every one of these is a proxy: the branch
+    # that owns the mechanism is named in verbs.py, and this file maps its two
+    # exception types onto the two honest status codes — 400 when the caller got
+    # it wrong, 503 when a mechanism could not be reached at all.
+    #
+    # A mechanism that RAN and said no is neither: it comes back 200 with
+    # {ok: false} and the door's own sentence, which @baud renders verbatim.
+    #
+    # Bodies are read as plain fields, never bound to a model, so an unknown key
+    # is ignored rather than rejected. That is deliberate: @baud's client sends
+    # no `confirmed` flag and this server would not honour one if it did — their
+    # confirm dialog is pocket-safety, and pocket-safety is not authorisation.
+
+    @app.post("/v1/verbs/wake")
+    async def verb_wake(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Wake a citizen. Proxied to @ai_mail; admin is unreachable from here."""
+        try:
+            return host_verbs.wake_branch(
+                branch=str(payload.get("branch") or ""),
+                project=str(payload.get("project") or ""),
+                message=str(payload.get("message") or ""),
+                fresh=bool(payload.get("fresh")),
+            )
+        except host_verbs.VerbRefused as e:
+            raise _deny(400, "verb_refused", str(e)) from e
+        except host_verbs.VerbUnavailable as e:
+            raise _deny(503, "verb_unavailable", str(e)) from e
+
+    @app.post("/v1/verbs/kill")
+    async def verb_kill(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """End a branch's session through @baud's door. Explicit target always."""
+        try:
+            return host_verbs.kill_room(
+                branch=str(payload.get("branch") or ""),
+                project=str(payload.get("project") or ""),
+            )
+        except host_verbs.VerbRefused as e:
+            raise _deny(400, "verb_refused", str(e)) from e
+        except host_verbs.VerbUnavailable as e:
+            raise _deny(503, "verb_unavailable", str(e)) from e
+
+    @app.post("/v1/verbs/lock")
+    async def verb_lock(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Lock the machine, through @skills. Takes nothing and asks nothing."""
+        return host_verbs.lock_screen()
+
+    @app.websocket("/v1/room/attach")
+    async def room_attach(websocket: WebSocket, branch: str = "", project: str = "") -> None:
+        """
+        Attach a real tmux client to a branch's room, over a WebSocket.
+
+        Operate scope without exception: an attached room is a shell prompt, so
+        there is no reading half to split off. Closing the socket detaches —
+        the room and everything in it survive.
+        """
+        try:
+            socket_bearer(websocket, "operate")
+        except PermissionError as e:
+            # Refused BEFORE accept, so the handshake itself fails and no PTY is
+            # ever spawned for an unauthenticated caller. A browser cannot read
+            # a close code on a handshake that never completed — it reports a
+            # bare connection error — and that is the right shape HERE and only
+            # here: there is exactly one reason this stage refuses, so the
+            # sentence the client loses is one it can already infer.
+            logger.warning("[host_api] socket refused for %s: %s", branch or "<no branch>", e)
+            _audit_socket_refusal(websocket, str(e))
+            await websocket.close(code=1008, reason=str(e))
+            return
+
+        # Accepted now that the caller is known, and deliberately BEFORE the
+        # remaining checks. Everything below refuses something the operator can
+        # act on — wrong branch, wrong project, no tmux — and a browser only
+        # surfaces a close code and reason on an ESTABLISHED socket. Refusing
+        # these pre-accept would put a fixable sentence somewhere the phone
+        # cannot render it, which is a blank error screen holding an answer.
+        # No PTY exists yet either way: the spawn is still below.
+        #
+        # Echo the SENTINEL, never the token: the accepted subprotocol appears
+        # in the handshake RESPONSE, and a token there would undo the whole
+        # reason it is not in the query string.
+        await websocket.accept(subprotocol=host_attach.BEARER_SUBPROTOCOL)
+
+        if project:
+            try:
+                host_verbs.require_project(project)
+            except host_verbs.VerbRefused as e:
+                logger.warning("[host_api] socket refused on project %s: %s", project, e)
+                _audit_socket_refusal(websocket, str(e))
+                await websocket.close(code=1008, reason=str(e))
+                return
+
+        try:
+            target = host_verbs.citizen_address(branch)
+            session = host_attach.open_attach(branch, cwd=host_reads.resolve_branch_root(branch))
+        except (host_verbs.VerbRefused, host_attach.AttachRefused) as e:
+            logger.warning("[host_api] socket refused for %s: %s", branch or "<no branch>", e)
+            _audit_socket_refusal(websocket, str(e))
+            await websocket.close(code=1008, reason=str(e))
+            return
+        except (host_verbs.VerbUnavailable, host_attach.AttachUnavailable, host_reads.ReadUnavailable) as e:
+            # 1011 is "server error" — ours, not the caller's, same split the
+            # HTTP lanes make between 400 and 503. Logged at error rather than
+            # warning for the same reason: a refusal this server caused is one
+            # somebody has to go and fix, and it leaves no other trace.
+            logger.error("[host_api] attach unavailable for %s: %s", branch or "<no branch>", e)
+            json_handler.log_operation(
+                "host_api_socket_unavailable",
+                {"branch": branch, "reason": str(e), "route": "/v1/room/attach"},
+            )
+            await websocket.close(code=1011, reason=str(e))
+            return
+
+        logger.info("[host_api] socket attached to %s for %s", session.room, target)
+
+        await _pump(websocket, session)
+
+    def _audit_socket_refusal(websocket: Any, reason: str) -> None:
+        """
+        Record a refused socket with its peer, like the HTTP lane does.
+
+        The structured record only — each call site logs its own sentence, so
+        the log says WHICH gate turned the socket away rather than four
+        identical lines that all read 'socket refused'.
+
+        Args:
+            websocket: The refused connection.
+            reason: Why it was refused.
+        """
+        client = getattr(websocket, "client", None)
+        json_handler.log_operation(
+            "host_api_socket_refused",
+            {"peer": getattr(client, "host", "") or "unknown", "reason": reason, "route": "/v1/room/attach"},
+        )
+
+    async def _pump(websocket: Any, session: Any) -> None:
+        """
+        Run the bidirectional pump until either side goes away.
+
+        The PTY read is blocking, so it lives on a thread executor rather than
+        the event loop — a blocking read on the loop would freeze every other
+        request this server is serving, which on a single-worker uvicorn means
+        the whole phone.
+
+        Args:
+            websocket: The accepted connection.
+            session: The live AttachSession.
+        """
+        loop = asyncio.get_running_loop()
+        stop = asyncio.Event()
+
+        async def room_to_socket() -> None:
+            """PTY output → client. Binary frames: the room emits escape
+            sequences and partial UTF-8 across chunk boundaries, and decoding
+            here would corrupt both."""
+            while not stop.is_set():
+                data = await loop.run_in_executor(None, session.read)
+                if not data:
+                    break
+                await websocket.send_bytes(data)
+            stop.set()
+
+        async def socket_to_room() -> None:
+            """Client input → PTY. Bytes forwarded UNCHANGED — the key bar
+            sends real control bytes, exactly as a keyboard would, so there is
+            nothing here to interpret."""
+            while not stop.is_set():
+                message = await websocket.receive()
+
+                if message.get("type") == "websocket.disconnect":
+                    break
+
+                if message.get("bytes") is not None:
+                    session.write(message["bytes"])
+                    continue
+
+                text = message.get("text")
+                if text:
+                    _handle_control(session, text)
+            stop.set()
+
+        tasks = [asyncio.ensure_future(room_to_socket()), asyncio.ensure_future(socket_to_room())]
+
+        try:
+            # FIRST_COMPLETED, not gather. Waiting for BOTH deadlocks on a quiet
+            # room: the phone closes the sheet, socket_to_room ends, and
+            # room_to_socket is still parked in a blocking os.read that will not
+            # return until the room happens to print something. The detach — and
+            # the SIGHUP with it — would wait on output that may never come, and
+            # the executor thread would stay parked with it.
+            #
+            # Either direction ending means the attach is over, so the first one
+            # to finish is the signal.
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            # Always, and FIRST: hangup closes the descriptor, which is what
+            # breaks the blocked reader out of os.read. Cancelling the task
+            # alone would not — a thread sitting in a syscall does not notice
+            # an asyncio cancellation.
+            session.hangup()
+
+            for task in tasks:
+                task.cancel()
+
+            # Let the unblocked reader finish rather than leaving it to be
+            # collected mid-flight, which logs a 'task was destroyed but it is
+            # pending' at whoever reads the server log next.
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _handle_control(session: Any, text: str) -> None:
+        """
+        Handle a control frame from the client.
+
+        Text frames are CONTROL, binary frames are KEYSTROKES. That split is
+        what lets a resize travel on the same socket without a resize message
+        ever being mistaken for something the operator typed.
+
+        Args:
+            session: The live AttachSession.
+            text: The JSON control message.
+        """
+        try:
+            message = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("[host_api] ignoring an unparseable control frame on %s", session.room)
+            return
+
+        if not isinstance(message, dict) or message.get("type") != "resize":
+            logger.warning("[host_api] ignoring an unknown control frame on %s", session.room)
+            return
+
+        try:
+            session.resize(message.get("cols"), message.get("rows"))
+        except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError) as e:
+            # Never fatal: a bad resize should not drop a live session the
+            # operator is working in.
+            logger.warning("[host_api] resize refused on %s: %s", session.room, e)
+
+    @app.get("/", include_in_schema=False)
+    async def face_entry() -> Any:
+        """
+        Serve @baud's phone face.
+
+        Unauthenticated on purpose: a browser navigating to a URL cannot send a
+        bearer header, so gating this would mean inventing a second, weaker auth
+        system to guard a public bundle that renders a token door and nothing
+        else. The data wall is on /v1/*, where the data is.
+        """
+        try:
+            return FileResponse(host_face.entry_file())
+        except host_face.FaceUnavailable as e:
+            raise _deny(503, "face_unavailable", str(e)) from e
+
+    # NOT a catch-all. The bundle's own files get their own routes, so nothing
+    # registered on this app — now or by a later caller — can be shadowed. See
+    # face.py: the first cut DID mount "/" and the existing scope tests caught it.
+    if host_face.is_face_available():
+        if host_face.assets_dir().is_dir():
+            app.mount("/assets", StaticFiles(directory=str(host_face.assets_dir())), name="face-assets")
+
+        for filename in host_face.root_files():
+            app.add_api_route(
+                f"/{filename}",
+                _face_file_route(filename),
+                methods=["GET"],
+                include_in_schema=False,
+            )
+
+        logger.info("[host_api] phone face served from %s", host_face.face_root())
+    else:
+        # Not fatal: the API is the product, the face is a client of it.
+        logger.warning("[host_api] phone face not built — / will report it. %s", host_face.BUILD_HINT)
+
+    routes = [
+        "/v1/ping",
+        "/v1/whoami",
+        "/v1/feed",
+        "/v1/files",
+        "/v1/files/upload",
+        "/v1/diff",
+        "/v1/fleet",
+        "/v1/rooms",
+        "/v1/verbs/wake",
+        "/v1/verbs/kill",
+        "/v1/verbs/lock",
+        "/v1/room/attach",
+    ]
+    logger.info("[host_api] app created (read lane + verb lane: %s)", ", ".join(routes))
+    json_handler.log_operation("host_api_app_created", {"phase": 3, "routes": routes})
     return app
 
 

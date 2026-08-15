@@ -499,6 +499,157 @@ class TestThreeFieldsThreeQuestions:
 
 
 # ==============================================
+# END-ROOM — the second headless verb
+# ==============================================
+
+ENDED = {
+    "project": "AIPASS",
+    "branch": "cli",
+    "room": "baud-cli",
+    "ended": True,
+    "detail": "ended 'baud-cli'",
+    "generated_at": "2026-08-15T03:50:40Z",
+    "error": None,
+}
+
+NOTHING_TO_END = {**ENDED, "room": None, "ended": False, "detail": "nothing to end"}
+
+REFUSED = {**ENDED, "room": None, "ended": False, "detail": None, "error": "no branch named nosuch in project AIPASS"}
+
+
+class TestEndRoomInvocation:
+    """
+    The command line handed to their binary. It is short, and every part of it
+    is load-bearing.
+    """
+
+    def test_the_flag_and_the_branch_are_what_they_published(self, seated: Path) -> None:
+        """`baud --end-room <branch>`, exactly."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
+            host_fleet.end_room("cli", "AIPASS")
+
+        assert run.call_args.args[0][:3] == ["baud", "--end-room", "cli"]
+
+    def test_the_project_travels_verbatim(self, seated: Path) -> None:
+        """
+        A key in BAUD's census, so its case is theirs and not ours to fix.
+
+        The read lane already passes it through raw; a kill that normalised it
+        would refuse for a reason that looks like a missing project.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
+            host_fleet.end_room("cli", "AIPASS")
+
+        assert run.call_args.args[0][3:] == ["--project", "AIPASS"]
+
+    def test_the_two_headless_verbs_are_never_sent_together(self, seated: Path) -> None:
+        """
+        Their exit-2 rule, honoured by construction: this never builds a line
+        carrying both. A caller who wrote a read AND a kill in one invocation
+        does not know what they asked for, and guessing is how a read becomes a
+        kill.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
+            host_fleet.end_room("cli", "AIPASS")
+
+        assert "--snapshot" not in run.call_args.args[0]
+
+    def test_it_runs_from_our_root_not_wherever_the_server_started(self, seated: Path) -> None:
+        """BAUD walks UP from cwd to find a root — a server started from / would fail."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
+            host_fleet.end_room("cli", "AIPASS")
+
+        assert run.call_args.kwargs["cwd"] == str(seated)
+
+    def test_the_timeout_actually_reaches_subprocess(self, seated: Path) -> None:
+        """A timeout constant that never reaches subprocess.run protects nothing."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
+            host_fleet.end_room("cli", "AIPASS")
+
+        assert run.call_args.kwargs["timeout"] == host_fleet.END_ROOM_TIMEOUT_SECONDS
+
+
+class TestEndRoomContract:
+    """
+    @baud's envelope, passed through rather than interpreted. `detail` and
+    `error` are mutually exclusive by construction, and `ended` is a fact rather
+    than a success flag.
+    """
+
+    def test_a_real_kill_comes_back_whole(self, seated: Path) -> None:
+        """Their envelope, unchanged — this module adapts nothing."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))):
+            envelope = host_fleet.end_room("cli", "AIPASS")
+
+        assert envelope == ENDED
+
+    def test_nothing_to_end_is_exit_zero_and_stays_a_success(self, seated: Path) -> None:
+        """
+        A room already gone IS the goal state, so it is not an error here.
+
+        Turning this into a raise would tell an operator their kill failed when
+        the thing they wanted is already true.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(NOTHING_TO_END))):
+            envelope = host_fleet.end_room("cli", "AIPASS")
+
+        assert envelope["ended"] is False
+        assert envelope["error"] is None
+
+    def test_a_refusal_arrives_as_a_whole_envelope_not_an_exception(self, seated: Path) -> None:
+        """
+        Exit 1 still carries a full envelope, so their sentence survives.
+
+        Raising here would replace their diagnosis with ours, which is the one
+        thing this lane is not allowed to do.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(REFUSED))):
+            envelope = host_fleet.end_room("nosuch", "AIPASS")
+
+        assert envelope["error"] == "no branch named nosuch in project AIPASS"
+
+    def test_empty_stdout_is_our_invocation_fault(self, seated: Path) -> None:
+        """Exit 2: BAUD never ran, so nothing was killed. Ours to own."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(2, "", "one headless verb at a time")):
+            with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+                host_fleet.end_room("cli", "AIPASS")
+
+        assert "invocation" in str(excinfo.value).lower()
+
+    def test_unparseable_stdout_never_reads_as_a_kill(self, seated: Path) -> None:
+        """Garbage on stdout is unavailable, never a quietly successful kill."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, "not json")):
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.end_room("cli", "AIPASS")
+
+    def test_a_wedged_binary_cannot_park_the_request(self, seated: Path) -> None:
+        """
+        The window-hang hazard, on the verb where it would hurt most.
+
+        If a build that does not know the flag is ever reached, it falls through
+        to tauri and opens a GUI. The timeout is what stops that from holding a
+        phone request open forever.
+        """
+        with patch.object(
+            host_fleet.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd="baud", timeout=host_fleet.END_ROOM_TIMEOUT_SECONDS),
+        ):
+            with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+                host_fleet.end_room("cli", "AIPASS")
+
+        assert "timed out" in str(excinfo.value).lower()
+
+    def test_a_missing_binary_is_named(self, seated: Path) -> None:
+        """'Unavailable' with no subject is how a gap becomes folklore."""
+        with patch.object(host_fleet.subprocess, "run", side_effect=FileNotFoundError("no baud")):
+            with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+                host_fleet.end_room("cli", "AIPASS")
+
+        assert "baud" in str(excinfo.value).lower()
+
+
+# ==============================================
 # ROUTES
 # ==============================================
 

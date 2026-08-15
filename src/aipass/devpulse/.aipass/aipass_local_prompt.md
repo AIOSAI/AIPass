@@ -84,6 +84,9 @@ drone @flow list open                                      # active plans
 # Dispatch — in-flight comms
 
  - **Steer a working agent with `email` (no wake), NOT `dispatch`.** `dispatch` = send **+ wake** (hand NEW work to a sleeping agent). An agent already running is awake, so `drone @ai_mail email @target "Subject" "Msg"` reaches it mid-task via its hook — no re-wake, no interrupt. Forgot something / need to correct a brief / add context → **email it in-flight**, don't re-dispatch. (`drone @ai_mail --help`)
+ - **Email reaches an awake agent only at a HOOK BOUNDARY — it is not an interrupt.** An agent deep in a build sees your correction whenever it next hits one, which may be after it ships. S248: both @api and @baud built a superseded design because the correction landed mid-build and neither re-checked before reporting. So **every brief for a build over ~10 min carries: re-check your inbox before you report done.** Steering is not landed until it is read.
+ - **Pinning the contract in ONE file both agents read fixes DRIFT, not STALENESS.** Learning #388's fix guarantees two briefs agree; it does nothing for an agent that read the file at minute 0 and ships minute-20 code against it. Amend the file AND say what changed in the mail — the file is the truth, the mail is the alarm.
+ - **When two agents must agree on a protocol and cannot mail each other (project fence), extract the spec from whichever side decides it, ahead of a green build.** Name the exact questions, demand the answers early and unprompted, and relay as a FILE, never retyped. Compass 2026-08-14: this is what let @baud be pivoted while still running instead of building blind for an hour.
  - **No backticks in dispatch/email body strings** — bash runs `` `word` `` as command-substitution and silently eats it. Use single quotes or plain text (hit this live: a backtick'd word vanished from a brief).
 
 # Watchdog

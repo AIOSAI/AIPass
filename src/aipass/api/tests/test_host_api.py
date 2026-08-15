@@ -172,19 +172,57 @@ class TestValidateBind:
 
         assert "not available" in str(exc.value).lower()
 
-    def test_non_loopback_refused_in_phase_1(self) -> None:
-        """Phase 1 is loopback-only until the security review clears a wider bind."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind(TAILNET_SHAPED, 8787)
+    def test_the_loopback_gate_is_open(self) -> None:
+        """
+        Opened 2026-08-14 by Patrick's ruling on the Phase 5 security review.
+
+        Pinned as a fact rather than left implicit: whoever reads this next
+        should see that the gate was OPENED by a decision, not eroded.
+        """
+        assert host_config.LOOPBACK_ONLY is False
+
+    def test_closing_the_gate_still_refuses_non_loopback(self) -> None:
+        """
+        The refusal path survives the flip and can be switched back on.
+
+        A gate that is deleted the moment it opens cannot be closed again if the
+        review's conditions ever stop holding.
+        """
+        with patch.object(host_config, "LOOPBACK_ONLY", True):
+            with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
+                host_config.validate_bind(TAILNET_SHAPED, 8787)
 
         assert "loopback-only" in str(exc.value).lower()
-
-    def test_non_loopback_refusal_names_the_review_gate(self) -> None:
-        """The refusal has to tell you WHY, or the next person just deletes the check."""
-        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
-            host_config.validate_bind(TAILNET_SHAPED, 8787)
-
         assert "security review" in str(exc.value).lower()
+
+    def test_opening_the_gate_did_not_open_the_wildcard(self) -> None:
+        """
+        THE test that matters after the flip, and the ratified NO-GO in code.
+
+        LOOPBACK_ONLY governs exactly one refusal. The wildcard check is separate
+        and unconditional: widening to a real address must never widen to every
+        address. If this ever goes green-by-deletion, the server can answer on
+        interfaces nobody chose.
+        """
+        for wildcard in ("0.0.0.0", "::"):
+            with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
+                host_config.validate_bind(wildcard, 8787)
+
+            assert "every" in str(exc.value).lower()
+
+    def test_opening_the_gate_did_not_open_hostnames(self) -> None:
+        """An ambiguous bind is still refused — the flip changed one rule only."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
+            host_config.validate_bind("localhost", 8787)
+
+        assert "literal ip" in str(exc.value).lower()
+
+    def test_opening_the_gate_did_not_open_unheld_addresses(self) -> None:
+        """Still probe-bound: an address this machine does not hold is refused."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
+            host_config.validate_bind(UNHELD_ADDRESS, 8787)
+
+        assert "not available" in str(exc.value).lower()
 
     def test_loopback_accepted(self) -> None:
         """127.0.0.1 is the Phase 1 target and must pass cleanly."""
@@ -640,6 +678,40 @@ class TestCommandRouting:
         """An unknown subcommand of a command we own is our error to report."""
         assert handle_command("host-api", ["frobnicate"]) is True
         quiet_module["error"].assert_called_once()
+
+
+class TestTheSpellingOurOwnSelfMapAdvertises:
+    """
+    `drone @api` bare lists MODULE names, so it prints 'host_api' — while the
+    command is 'host-api'. @baud read the self-map, typed what it said, got
+    "unknown command", and reported themselves blocked over one character.
+
+    They filed it against themselves. The trap is ours: a surface that publishes
+    a spelling which does not work is the surface's bug, not the reader's. Both
+    answer now.
+    """
+
+    def test_the_underscore_spelling_is_accepted(self, quiet_module: dict) -> None:
+        """The exact string the module list prints."""
+        with patch.object(host_api_module, "_cmd_list_tokens") as listed:
+            assert handle_command("host_api", ["list-tokens"]) is True
+
+        listed.assert_called_once()
+
+    def test_the_underscore_spelling_shows_the_same_self_map(self, quiet_module: dict) -> None:
+        """Bare, it must not fall through to 'unknown command' either."""
+        with patch("aipass.api.apps.modules.host_api.print_introspection") as intro:
+            assert handle_command("host_api", []) is True
+
+        intro.assert_called_once()
+
+    def test_the_help_gate_still_covers_the_alias(self, quiet_module: dict) -> None:
+        """A second spelling must not become a second, ungated door."""
+        with patch(PATCH_MOD_HELP) as helped, patch.object(host_api_module, "_cmd_serve") as served:
+            assert handle_command("host_api", ["serve", "--help"]) is True
+
+        helped.assert_called_once()
+        served.assert_not_called()
 
 
 class TestIssueTokenCommand:

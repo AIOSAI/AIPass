@@ -98,6 +98,18 @@ src/aipass/*/apps/integrations/**
 !src/aipass/spawn/templates/aipass_framework/.claude/
 !src/aipass/spawn/templates/aipass_framework/.claude/**
 
+# Host API superseded-capture-lane park (DPLAN-0300 Round 18, 2026-08-14). Same
+# species as the memory park below and caught the same way: @api saw the bare
+# .archive/ rule would make their archive README claim "kept" while a fresh
+# clone had nothing, and reported it rather than editing this file themselves.
+# Kept rather than dropped because --capture-room survives in @baud's binary for
+# a look-don't-touch view, and these are the tests that lane would start from.
+# Selective: only this park is tracked, the rest of api/tests/.archive stays local.
+!src/aipass/api/tests/.archive/
+src/aipass/api/tests/.archive/*
+!src/aipass/api/tests/.archive/test_host_terminal_superseded_capture_lane.py
+!src/aipass/api/tests/.archive/README.md
+
 # Memory fragments park exception (Patrick 2026-08-14: parked revivable, so the
 # archived copy must ship — fresh clones can't revive from one machine's disk).
 # Selective: only the park is tracked, the rest of memory/.archive stays local.
