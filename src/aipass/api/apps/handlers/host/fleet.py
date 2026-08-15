@@ -23,7 +23,26 @@ be believed. @baud owns that judgment; this is a pipe (design call D0).
 So: no field is added, dropped or renamed, `has_room` is filtered on but never
 computed, and `live_agent_sessions` is served raw rather than joined to the
 branch list — matching 'baud-devpulse' to branch 'devpulse' would mean owning
-their session-naming convention over here.
+their session-naming convention over here. @baud confirmed the non-join and gave
+a better reason than mine: the join already exists in the envelope as
+`outside_room`, which they derive by matching a pane's CWD to the branch
+directory rather than by parsing session names.
+
+THREE FIELDS, THREE DIFFERENT QUESTIONS (@baud, pinned by test)
+--------------------------------------------------------------
+    has_room             a session BAUD named for this branch EXISTS. Name match
+                         only. An empty room is has_room true.
+    outside_room         an agent is seated here, in a session BAUD did not
+                         create. Null when has_room is true.
+    live_agent_sessions  an INTERACTIVE claude is actually alive, decided by the
+                         process table. A dispatched headless claude looks like
+                         the same 'claude' in a pane, so panes alone would lie.
+
+ALIVENESS IS `live_agent_sessions` AND ONLY THAT. A client that renders "agent is
+alive" from `has_room` ships a green circle over an empty room — the exact lie
+@baud's m12 badge work existed to kill. This server cannot control what a client
+renders, but it never manufactures an aliveness signal of its own, so the only
+field that can be read for it is the one that means it.
 
 THE GATE, AND WHY IT IS STILL HERE
 ---------------------------------
@@ -205,14 +224,20 @@ def read_snapshot(project: str = "") -> Dict[str, Any]:
 
 def read_rooms(project: str = "") -> Dict[str, Any]:
     """
-    Project the snapshot down to room information.
+    Project the snapshot down to rooms BAUD made.
+
+    This answers "which branches have a BAUD room", NOT "where does this agent
+    live" and NOT "who is alive". A branch seated in a foreign session has
+    has_room false and is absent here; its `outside_room` still travels on the
+    full card via /v1/fleet, which is where that question belongs.
 
     Args:
         project: Optional project name, passed through to the snapshot.
 
     Returns:
         Dict with project, generated_at, live_agent_sessions (raw) and
-        branches_with_rooms.
+        branches_with_rooms. No aliveness field is synthesised — see the module
+        docstring on the three fields.
 
     Raises:
         FleetUnavailable: The seam is gated, or BAUD could not produce a read.

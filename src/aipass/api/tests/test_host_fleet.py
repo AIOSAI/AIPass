@@ -405,6 +405,99 @@ class TestRooms:
             host_fleet.read_rooms()
 
 
+# An empty room: BAUD made a session for this branch, and nobody is in it.
+EMPTY_ROOM = {
+    "project": "AIPASS",
+    "generated_at": "2026-08-14T23:37:37Z",
+    "error": None,
+    # 'ghost' has a room; it is NOT in here, so it is not alive.
+    "live_agent_sessions": ["baud-devpulse"],
+    "branches": [
+        {"name": "ghost", "has_room": True, "outside_room": None, "interactive": False},
+        {"name": "devpulse", "has_room": True, "outside_room": None, "interactive": True},
+        {"name": "squatter", "has_room": False, "outside_room": "some-other-session", "interactive": True},
+    ],
+}
+
+
+class TestThreeFieldsThreeQuestions:
+    """
+    @baud's sharp edge, pinned at their request.
+
+    has_room, outside_room and live_agent_sessions answer three DIFFERENT
+    questions, and conflating the first with the third is the exact bug their m12
+    badge work existed to kill — a green circle over a room with nobody in it.
+
+        has_room            a session BAUD named for this branch EXISTS. Name
+                            match only. An empty room is has_room true.
+        outside_room        an agent is seated here in a session BAUD did not
+                            create. Null when has_room is true.
+        live_agent_sessions an INTERACTIVE claude is actually alive, decided by
+                            the process table. A dispatched headless claude looks
+                            like the same 'claude' in a pane, so panes alone lie.
+
+    This server cannot enforce what a client renders. What it CAN guarantee is
+    that it never manufactures an aliveness signal of its own, so the only thing
+    a client can read aliveness from is the field that means it.
+    """
+
+    def test_an_empty_room_is_still_a_room(self, ready: None, seated: Path) -> None:
+        """has_room means the room exists, not that anyone is home."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
+            rooms = host_fleet.read_rooms()
+
+        listed = [branch["name"] for branch in rooms["branches_with_rooms"]]
+        assert "ghost" in listed
+
+    def test_the_empty_room_is_not_reported_as_alive(self, ready: None, seated: Path) -> None:
+        """
+        The lie this test exists to prevent.
+
+        'ghost' has a room and is absent from live_agent_sessions. Nothing in the
+        payload may suggest otherwise.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
+            rooms = host_fleet.read_rooms()
+
+        assert "ghost" not in str(rooms["live_agent_sessions"])
+
+    def test_no_aliveness_field_is_invented_anywhere(self, ready: None, seated: Path) -> None:
+        """
+        No synthesised 'alive'/'online'/'active' key, on the payload or the cards.
+
+        If one ever appears, a client will render it, and it will be this
+        server's guess rather than BAUD's process-table read.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
+            rooms = host_fleet.read_rooms()
+
+        invented = {"alive", "online", "active", "is_alive", "running"}
+        assert not invented & set(rooms.keys())
+        for card in rooms["branches_with_rooms"]:
+            assert not invented & set(card.keys())
+
+    def test_outside_room_is_not_a_room_baud_made(self, ready: None, seated: Path) -> None:
+        """
+        'squatter' is seated somewhere BAUD did not create, so it is not a room.
+
+        Its outside_room still travels on the full card via /v1/fleet — that is
+        where a client asks "which session is this agent in". /v1/rooms answers
+        the narrower question and says so.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
+            rooms = host_fleet.read_rooms()
+
+        assert "squatter" not in [branch["name"] for branch in rooms["branches_with_rooms"]]
+
+    def test_outside_room_survives_untouched_on_the_fleet_card(self, ready: None, seated: Path) -> None:
+        """Nothing is dropped from the envelope, so nothing is lost system-wide."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
+            snapshot = host_fleet.read_snapshot()
+
+        squatter = [card for card in snapshot["branches"] if card["name"] == "squatter"][0]
+        assert squatter["outside_room"] == "some-other-session"
+
+
 # ==============================================
 # ROUTES
 # ==============================================

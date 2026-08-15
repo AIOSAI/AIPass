@@ -47,7 +47,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
-          pip install -e ".[dev]"
+          pip install -e ".[dev,host]"
       # tests/e2e build a wheel + clean venv per the dedicated e2e-wheel.yml
       # workflow — they are not part of the fast unit lane.
       # Plain pytest: this job's old `coverage run` wrapper produced data that
@@ -97,7 +97,7 @@ jobs:
           python-version: "3.13"
       - run: |
           python -m pip install --require-hashes -r .github/requirements/pip.txt
-          pip install -e ".[dev]"
+          pip install -e ".[dev,host]"
       - run: coverage run -m pytest --rootdir=. --ignore=tests/e2e
       - run: coverage xml
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0

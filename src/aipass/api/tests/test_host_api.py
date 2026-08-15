@@ -681,10 +681,33 @@ class TestIssueTokenCommand:
         assert host_tokens.list_tokens()[0]["scope"] == "operate"
 
 
+@pytest.fixture
+def extra_present():
+    """
+    Pin the [host] extra as installed.
+
+    These tests are about the CLI's OWN gates — the bind rule and the port parse
+    — not about whether FastAPI is importable. `_cmd_serve` returns early with an
+    install hint when the extra is missing, so inheriting availability from the
+    environment made these tests measure the machine instead of the code.
+
+    That cost a red CI run (bd082878) and, worse, hid a false pass: the port test
+    was green on runners because the install-hint return fired before the check
+    it claims to exercise ever ran.
+    """
+    with patch.object(host_server, "is_available", return_value=True):
+        yield
+
+
 class TestServeCommand:
     """Serving is gated on the bind rule."""
 
-    def test_bind_refusal_is_reported_and_server_never_starts(self, store: Path, quiet_module: dict) -> None:
+    def test_bind_refusal_is_reported_and_server_never_starts(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+    ) -> None:
         """A refused bind must surface as an error, not a traceback, and above
         all must not reach a listener."""
         with patch.object(host_server, "serve", side_effect=host_config.BindRefused("nope")) as mock_serve:
@@ -693,13 +716,37 @@ class TestServeCommand:
         mock_serve.assert_called_once()
         quiet_module["error"].assert_called_once()
 
-    def test_non_numeric_port_refused_before_serving(self, store: Path, quiet_module: dict) -> None:
+    def test_non_numeric_port_refused_before_serving(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+    ) -> None:
         """A bad --port is caught in the CLI, never handed to the server."""
         with patch.object(host_server, "serve") as mock_serve:
             handle_command("host-api", ["serve", "--port", "eighty"])
 
         mock_serve.assert_not_called()
         quiet_module["error"].assert_called_once()
+
+    def test_port_check_is_what_refuses_it_not_the_install_gate(
+        self,
+        store: Path,
+        quiet_module: dict,
+        extra_present: None,
+    ) -> None:
+        """
+        The regression guard for the false pass above.
+
+        A valid --port must REACH serve. If this ever fails alongside the test
+        above passing, the early return has come back and 'refused before
+        serving' means 'never got there at all'.
+        """
+        with patch.object(host_server, "serve") as mock_serve:
+            handle_command("host-api", ["serve", "--port", "8790"])
+
+        mock_serve.assert_called_once()
+        quiet_module["error"].assert_not_called()
 
     def test_missing_extra_reports_install_hint(self, store: Path, quiet_module: dict) -> None:
         """Without the extra, the operator gets instructions, not an ImportError."""

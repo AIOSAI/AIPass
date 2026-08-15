@@ -5,7 +5,7 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (44/44 at 100%; 99% with all bypasses disabled) | **Tests:** 713 pass | **Functions:** 118 public (118 tested)
+**Seedgo:** 100% (44/44 at 100%; 99% with all bypasses disabled) | **Tests:** 719 pass | **Functions:** 118 public (118 tested)
 **Last Updated:** 2026-08-14
 
 ---
@@ -96,7 +96,7 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 713 tests across 34 files
+└── tests/                             # 719 tests across 34 files
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -195,6 +195,14 @@ never derived, and `live_agent_sessions` is served raw rather than joined to the
 branch list. BAUD's binary is resolved to the same built release path the desktop
 launcher execs. `fleet.SNAPSHOT_READY` remains as a kill switch: switched off
 means **503 with a reason**, never a synthesised fleet.
+
+**Aliveness is `live_agent_sessions`, and only that.** The three fleet fields
+answer three different questions: `has_room` means a BAUD-named session *exists*
+(an empty room is `has_room: true`), `outside_room` names a session BAUD did not
+create, and `live_agent_sessions` is the process-table read. Rendering "alive"
+from `has_room` puts a green circle over an empty room. This server never
+synthesises an aliveness signal, so the only field a client can read it from is
+the one that means it — pinned by test at @baud's request.
 
 The verb lane and push are reserved, not built. See FPLAN-0411.
 

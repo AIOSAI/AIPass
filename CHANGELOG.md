@@ -31,7 +31,14 @@ branch" and sent @api hunting a phantom; wall stays shut, test pins it shut,
 embedder parked to .archive, skills TG start/kill control-verb fixes), and
 README/APLAN truth-ups. Patrick live-verified the whole chain same day:
 dev-window click-through, release rebuild, his own --snapshot run, /v1/fleet
-200 on real data.
+200 on real data. CI hardening rider: the bind-refusal test inherited fastapi
+from the local venv (green at home, red on every runner); both
+availability-dependent tests now pin `is_available` explicitly, a new guard
+asserts a valid port actually reaches serve (its neighbor test had been
+passing on CI for the wrong reason), and ci.yml + setup.sh now install the
+`[host]` extra — before this, CI had never made a single HTTP request against
+AIPass's first network-listening service; the auth/scope/traversal tests ran
+only on developer machines.
 
 **feat(fleet)** — night shift DPLAN-0295: the prompt-lane sweep (Patrick's
 ruling, compass #272 — the agent never waits for the system) plus four ruled
