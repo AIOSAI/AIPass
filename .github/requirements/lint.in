@@ -12,4 +12,4 @@
 #
 # Regenerate:
 #   pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=lint.txt lint.in
-ruff==0.16.1
+ruff==0.16.2
