@@ -32,18 +32,19 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 
 | Metric | Value |
 |--------|-------|
-| **Health** | YELLOW |
-| **Last verified** | 2026-08-13 (S117) |
-| **Open items** | 4 |
-| **Tests** | 435 pass, 1 skipped, 0 fail |
-| **Seedgo** | 100% with bypasses / 98% without (44 standards) |
-| **Bypass entries** | 15 (was 56 -- 41 pruned, every one measured in both lanes) |
-| **Live command sweep** | 29/29 paths pass, incl. error + refusal paths |
+| **Health** | GREEN |
+| **Last verified** | 2026-08-15 (S118) |
+| **Open items** | 0 |
+| **Tests** | 434 pass, 1 skipped, 0 fail |
+| **Seedgo** | 100% (44 standards) |
+| **Bypass entries** | 15 (unchanged since S117 prune) |
+| **Live command sweep** | unknown-class refusal live-verified this session (`create wizard` -> exit 1, no branch made) |
 
-**Why YELLOW, not GREEN:** every headline number is green, but the audit found a
-README claim that was false, a live-mailbox write in the update path, and a
-protection layer that cannot fire in the live fleet. Numbers alone would have
-signed this GREEN; the findings are what the colour is for.
+**S118 closed all 4 remaining open items** from the S117 audit: the unknown-class
+refusal for `create`, the `.ai_mail.local/` never-update exclusion (devpulse
+ruling), and `sync-templates` retired outright (`template_owners.json` confirmed
+empty twice running, no live use). The `is_protected()` layer-2 unreachability
+item was already covered by unit tests at S117 and needed no further action.
 
 ## Current State
 
@@ -72,30 +73,7 @@ class helpers for that reason.
 
 ### Open
 
-- [ ] **`create <unknown-class> <path>` does not refuse** -- an unrecognised leading
-  positional is read as the target path, so `create wizard` silently makes a branch
-  named WIZARD in `./wizard`. The `admin` fence is a special case in front of the
-  parser; there is no general unknown-class refusal. Documented in README Known
-  Issues. Impact: low (typo makes a stray branch, not data loss), but it is a
-  silent wrong-thing-done rather than an error.
-- [ ] **`update` deep-merges into `.ai_mail.local/inbox.json`** -- a live mailbox
-  owned by @ai_mail. `deep_merge` keeps existing scalars and non-empty lists, so
-  **no message is lost**; verified by reading the merge implementation. The residual
-  risk is that `update --apply` rewrites another branch's runtime state at all: a
-  message arriving between read and write could be dropped. `DASHBOARD.local.json`
-  is already excluded as live state -- same category. Proposal: add
-  `.ai_mail.local/` to `_NEVER_UPDATE_PREFIXES`. NOT done unilaterally: it changes
-  fleet update semantics and touches another branch's data contract. Raised with
-  devpulse + @ai_mail.
-- [ ] **`is_protected()` layer 2 (`registry owner`) is unreachable in the live
-  fleet** -- devpulse is the only entry carrying `owner: true` and it short-circuits
-  on the layer-1 hardcoded floor. The layer is not dead code (an external project
-  registry can have a non-floor owner), but it has never executed here. Now covered
-  by unit tests against a synthetic registry (added this session).
-- [ ] **`sync-templates` is a no-op** -- `template_owners.json` has no entries.
-  Re-verified live this session, still true. The template IS the source of truth,
-  so there is nothing upstream to pull from; the command is scaffolding for a
-  relationship that does not exist. Either wire it or retire it.
+None -- all 4 items opened at S117 closed at S118 (see Resolved).
 
 ### Resolved
 
@@ -120,16 +98,50 @@ class helpers for that reason.
   `test_update.py::test_scaffold_test_never_re_added`. Create-only, never re-added.
 - [x] **`repair_ops.py` duplicate `fcntl` import** (S117) -- gone; single guarded
   import at L59. Its stale windows_compat bypass rule was pruned above.
+- [x] **`create <unknown-class> <path>` did not refuse** (S118) -- fixed in
+  `apps/spawn.py`: a lone `create` positional is now refused unless it is a
+  registered citizen class OR path-shaped (`/`, `\`, or leading `~`/`.`/`@`),
+  mirroring the `admin`-fence pattern (DPLAN-0288). Red-first
+  (`test_cli_routing.py::TestCreateUnknownClassRefusal`, 4 tests): the repro test
+  failed against unfixed code with `WIZARD` actually created on disk before the
+  fix. Live-verified post-fix: `create wizard` -> exit 1, refusal message naming
+  both registered classes, no directory created. `create <path>` and
+  `create <class> <path>` unaffected -- 86 tests across
+  `test_cli_routing.py`/`test_admin_fence.py`/`test_contracts.py`/
+  `test_citizen_classes.py` green.
+- [x] **`update` deep-merged into `.ai_mail.local/inbox.json`** (S118) --
+  devpulse ruling: YES, add to never-update prefixes (their read: mailbox is
+  live runtime state, same category as `DASHBOARD.local.json`, and the
+  exclusion only reduces what update writes so the blast radius of being wrong
+  is zero). `_NEVER_UPDATE_PREFIXES` in `apps/handlers/update_ops.py` now reads
+  `(".trinity/", ".ai_mail.local/")`. Red-first: new test
+  `test_update.py::TestNeverUpdateGuard::test_ai_mail_local_inbox_never_touched`
+  failed against unfixed code (template's `schema_version` key leaked into the
+  branch's live inbox via `_merge_json`), passes after the fix. Full
+  `test_update.py` -- 23 passed.
+- [x] **`is_protected()` layer 2 (`registry owner`) unreachable in the live
+  fleet** (S117) -- not dead code, just never executed here (devpulse is the
+  only owner-flagged entry and is caught by the layer-1 floor first); already
+  covered by mutation-proven unit tests against a synthetic registry added at
+  S117. No further action needed -- carried in Open by mistake at S117, moved
+  here at S118.
+- [x] **`sync-templates` retired** (S118) -- devpulse's lean: RETIRE unless a
+  live use exists. `template_owners.json` re-confirmed empty (`managed_files:
+  {}`) a third time running across two audits, no consumer anywhere in the
+  codebase depends on the command executing. Removed entirely:
+  `apps/modules/sync_templates.py`, `apps/handlers/sync_templates_ops.py`,
+  routing/help/introspection in `apps/spawn.py`, the `TestSyncTemplates` class
+  (5 tests) from `test_lifecycle.py`, references in `test_output_streams.py`,
+  README (Quick Start, architecture tree x2, Known Issues, stale metrics), and
+  `.aipass/aipass_local_prompt.md`. `template_owners.json` itself left in place
+  (nothing else reads it, no reason to delete a harmless empty config).
+  Full suite: 434 passed, 1 skipped, 0 failed (net -1 from 435: -6 removed,
+  +5 added across the three items above). Seedgo re-run: 100% across all 44
+  standards.
 
 ## What Needs Doing
 
-### @spawn to handle (dispatch)
-- [ ] Decide the general unknown-class refusal for `create` (open item 1).
-- [ ] Wire or retire `sync-templates` (open item 4).
-
-### devpulse to handle
-- [ ] Ruling on excluding `.ai_mail.local/` from template update (open item 2) --
-  needs @ai_mail's agreement since it is their data contract.
+Nothing open. All S117 items closed at S118.
 
 ### Tracked elsewhere
 - [ ] Nothing currently tracked in another plan.
@@ -154,6 +166,7 @@ silently dropped.
 | Date | Action | Result |
 |------|--------|--------|
 | 2026-08-13 | Fleet audit round (DPLAN-0291), wave 3 | YELLOW -- 4 open, 6 resolved |
+| 2026-08-15 | Closed all 4 open items per devpulse's mail ruling (bfba4f0a) | GREEN -- 0 open, 11 resolved |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0288 (admin ceremony)
@@ -176,6 +189,19 @@ exclusion, and a bypass prune of retired-passport rules -- all timestamped 08:15
 today. Attributing to no one; recording that they were verified, not inherited on
 trust. Every claim above was re-measured this session.
 
+**S118 (2026-08-15):** Closed all 4 S117 open items, triggered by devpulse's reply
+(mail bfba4f0a) verifying APLAN-0007 and ruling/delegating the three live decisions.
+Unknown-class refusal for `create` and the `.ai_mail.local/` never-update exclusion
+both built red-first (failing repro test against unfixed code, confirmed green after).
+`sync-templates` retired outright rather than wired -- `template_owners.json` empty
+a third time running, no consumer anywhere. `is_protected()` layer-2 item turned out
+to already be closed at S117 (it was carried in Open by mistake -- the mutation-proven
+tests already existed); moved to Resolved, no code change needed. Full suite 434
+passed / 1 skipped / 0 failed (net -1: -6 removed with sync-templates, +5 added
+across the other two items). Seedgo re-run 100% across all 44 standards. Live-verified
+the refusal by hand: `create wizard` exits 1 with a message naming both registered
+classes, no directory created.
+
 ## Listen (TTS-friendly summary)
 
 Spawn's audit is signed yellow. Every number is green: four hundred thirty five tests
@@ -196,12 +222,21 @@ folder name and makes a branch with the wrong name.
 
 Forty one bypass rules were deleted after proving each one suppresses nothing in both
 audit lanes. Two test isolation leaks are closed, so the suite no longer writes into
-the real repository while it runs. Next attention goes to the unknown class refusal
-and to deciding whether the sync templates command should be wired up or retired,
-because it currently does nothing at all.
+the real repository while it runs.
 
-Last verified 2026-08-13.
+Update at session one eighteen: the audit is signed green. All four open items closed
+the same day devpulse replied with a ruling and two decisions. Creating a branch with
+an unknown class now refuses in front of the parser instead of quietly making a branch
+with the wrong name, built red first against a live repro. The update command no longer
+touches another branch's mailbox file at all, following devpulse's ruling that a
+template updater should never write into another agent's live runtime state, also built
+red first. The sync templates command did nothing since it had no configured entries,
+so it was retired outright rather than wired up. The fourth item was already fixed at
+the prior session and only needed moving from open to resolved. Full suite still green,
+seedgo still one hundred percent, and the refusal was hand-verified live.
+
+Last verified 2026-08-15.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-13*
+*Updated: 2026-08-15*

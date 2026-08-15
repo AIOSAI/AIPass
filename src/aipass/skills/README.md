@@ -159,7 +159,7 @@ src/aipass/skills/
       validator.py         # Check requirements
       template.py          # Skill templates
     plugins/               # Plugin extensions
-  lib/                     # Built-in skills (branch_health, drone_commands, github, inbox_check, system_status, telegram)
+  lib/                     # Built-in skills (branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram)
   templates/               # Skill creation templates
   skills_json/             # JSON tracking directory
   dropbox/                 # External storage sync

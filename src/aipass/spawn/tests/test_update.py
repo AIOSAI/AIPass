@@ -455,6 +455,50 @@ class TestNeverUpdateGuard:
         assert result["success"] is True
         assert dashboard.read_text() == dashboard_before
 
+    def test_ai_mail_local_inbox_never_touched(self, tmp_path, template_dir, branch_dir, mock_registry):
+        """Update must never merge into .ai_mail.local/inbox.json — it is a branch's
+        live mailbox, runtime state in the same category as DASHBOARD.local.json
+        (APLAN-0007 open item 2, devpulse ruling: add .ai_mail.local/ to
+        _NEVER_UPDATE_PREFIXES). The template's inbox.json gains a new key the
+        live branch inbox doesn't have (a plausible real-world template schema
+        change) so a plain deep-merge would detectably touch the file even though
+        no message is ever lost — that touch itself is the thing being refused."""
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        mail_tpl = template_dir / ".ai_mail.local"
+        mail_tpl.mkdir(exist_ok=True)
+        (mail_tpl / "inbox.json").write_text(
+            json.dumps(
+                {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": [], "schema_version": 2},
+                indent=2,
+            )
+        )
+
+        mail_branch = branch_dir / ".ai_mail.local"
+        mail_branch.mkdir(exist_ok=True)
+        inbox = mail_branch / "inbox.json"
+        inbox.write_text(
+            json.dumps(
+                {
+                    "mailbox": "inbox",
+                    "total_messages": 3,
+                    "unread_count": 1,
+                    "messages": [{"id": "m1", "from": "@someone", "subject": "hi"}],
+                },
+                indent=2,
+            )
+        )
+        inbox_before = inbox.read_text()
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            result = update_branch("test_branch")
+
+        assert result["success"] is True
+        assert inbox.read_text() == inbox_before
+
     def test_scaffold_test_never_re_added(self, tmp_path, template_dir, branch_dir, mock_registry):
         """tests/test_scaffold.py is create-only — a branch that deleted it never gets it back.
 

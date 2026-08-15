@@ -12,7 +12,7 @@ SPAWN — agent factory + branch lifecycle manager AIPass.
 - Grant birthright citizenship via `passport` command
 - Update branches templates (single/batch class, --dry-run)
 - Delete branches (archive + deregister)
-- Sync registry + templates against filesystem
+- Sync registry against filesystem
 - Regenerate template registries fresh file hashes
 - Own builder template — blueprint every new branch created from
 
@@ -40,7 +40,6 @@ apps/
 │   ├── delete.py         # Delete CLI
 │   ├── passport.py       # Passport CLI (birthright)
 │   ├── sync_registry.py  # Registry repair CLI
-│   ├── sync_templates.py # Template sync CLI
 │   └── regenerate_registry.py  # Registry regen CLI
 └── handlers/
     ├── file_ops.py       # Template copy, path rename

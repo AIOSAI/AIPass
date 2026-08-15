@@ -72,6 +72,14 @@ profile, read, handoff, feedback + 2 internal `_doctor_*`).
 
 - [ ] **cross-os gap #9 (owner: aipass)** -- pre-flight prints real exceptions
       as "Unknown command", which hid gap #1 for hours. Local todo #9.
+- [ ] **`init update` re-enrols trust only when the merge rewrites hooks.json**
+      (found by @hooks 2026-08-14, mail 27cf3668, my code). Enrollment at
+      `handlers/init/bootstrap.py:553-560` is gated behind
+      `existing_hooks != merged_hooks`. Drift in a field the template does not
+      carry survives the union-merge unchanged, so no write happens, no
+      `_enroll_project` runs, and the command reports "already current" while
+      the project stays dark. @hooks reproduced it on their own project by
+      adding a `timeout` field. Not urgent per the reporter. Local todo #11.
 
 ### Resolved in S112 (2026-08-13, evening)
 

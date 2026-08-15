@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_health.py
 # Description: Branch Memory Health Checker
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-01-30
-# Modified: 2026-01-30
+# Modified: 2026-08-15
 # =============================================
 
 """
@@ -16,7 +16,7 @@ Provides health status reporting for the Branch Activity Monitoring System.
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Sequence
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
@@ -37,6 +37,20 @@ OPTIONAL_FILES = [".trinity/observations.json"]
 # Freshness thresholds (in days)
 FRESHNESS_WARNING_DAYS = 7
 FRESHNESS_RED_DAYS = 30
+
+# Structural containers a .trinity file must carry (schema 3.0.0), keyed by filename.
+# A file missing one of these is genuinely broken — the entries have nowhere to land.
+#
+# Caps are deliberately NOT checked here. Schema 3.0.0 moved limits out of every
+# .trinity file into @memory's memory.config.json, where defaults are deep-merged
+# with per-branch overrides. A copy of the caps in this handler would be a snapshot
+# that drifts, and re-implementing the merge is how @memory and @daemon end up
+# disagreeing about "over cap". Entry-count and entry-size health are @memory's
+# read-only APIs to answer, not ours to re-derive (@memory, 2026-08-13).
+TRINITY_CONTAINERS: Dict[str, Sequence[str]] = {
+    "local.json": ("sessions", "key_learnings", "todos"),
+    "observations.json": ("observations",),
+}
 
 
 def check_memory_files_exist(branch_path: str, branch_name: str) -> Dict[str, Any]:
@@ -106,60 +120,63 @@ def check_memory_files_exist(branch_path: str, branch_name: str) -> Dict[str, An
     }
 
 
-def validate_memory_structure(file_path: str) -> Dict[str, Any]:
+def validate_memory_structure(file_path: str, expected_containers: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """
-    Validate memory file structure (check metadata exists, check limits field).
+    Validate memory file structure — is this .trinity file usable at all?
 
-    Validates that .local.json and .observations.json files have proper structure:
-    - document_metadata section exists
-    - limits field exists within metadata
-    - Basic required fields present
+    Checks the three things that make a memory file structurally sound:
+    - a metadata section exists ("document_metadata" or "metadata")
+    - that metadata carries a readable schema_version
+    - the entry containers for this filename exist and are lists
+
+    Caps are NOT checked here — see TRINITY_CONTAINERS for why.
 
     Args:
         file_path: Absolute path to the memory file.
+        expected_containers: Container names to require. Defaults to the
+            TRINITY_CONTAINERS entry for the filename (empty for unknown names).
 
     Returns:
         Dict with structure:
         {
             "valid": bool,
             "has_metadata": bool,
-            "has_limits": bool,
+            "schema_version": str or None,
+            "containers": {"name": bool, ...},
+            "missing_containers": [str],
             "issues": [str],
             "metadata_fields": [str] (if metadata exists)
         }
     """
     path = Path(file_path)
 
-    if not path.exists():
+    if expected_containers is None:
+        expected_containers = TRINITY_CONTAINERS.get(path.name, ())
+
+    def _failure(issue: str) -> Dict[str, Any]:
+        """Build an early-exit result for a file that cannot be read."""
         return {
             "valid": False,
             "has_metadata": False,
-            "has_limits": False,
-            "issues": ["File does not exist"],
+            "schema_version": None,
+            "containers": {name: False for name in expected_containers or ()},
+            "missing_containers": list(expected_containers or ()),
+            "issues": [issue],
             "metadata_fields": [],
         }
+
+    if not path.exists():
+        return _failure("File does not exist")
 
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except json.JSONDecodeError as e:
         logger.warning("Invalid JSON in memory file %s: %s", file_path, e)
-        return {
-            "valid": False,
-            "has_metadata": False,
-            "has_limits": False,
-            "issues": [f"Invalid JSON: {str(e)}"],
-            "metadata_fields": [],
-        }
+        return _failure(f"Invalid JSON: {str(e)}")
     except OSError as e:
         logger.warning("Cannot read memory file %s: %s", file_path, e)
-        return {
-            "valid": False,
-            "has_metadata": False,
-            "has_limits": False,
-            "issues": [f"Cannot read file: {str(e)}"],
-            "metadata_fields": [],
-        }
+        return _failure(f"Cannot read file: {str(e)}")
 
     issues = []
 
@@ -179,14 +196,25 @@ def validate_memory_structure(file_path: str) -> Dict[str, Any]:
     if not has_metadata:
         issues.append("No metadata section found (expected 'document_metadata' or 'metadata')")
 
-    # Check limits field
-    has_limits = False
-    if metadata_section and isinstance(metadata_section, dict):
+    # Check schema_version — an unversioned file cannot be interpreted safely
+    schema_version = None
+    if isinstance(metadata_section, dict):
         metadata_fields = list(metadata_section.keys())
-        if "limits" in metadata_section:
-            has_limits = True
+        raw_version = metadata_section.get("schema_version")
+        if isinstance(raw_version, str) and raw_version.strip():
+            schema_version = raw_version
         else:
-            issues.append("No 'limits' field in metadata")
+            issues.append("No readable 'schema_version' in metadata")
+
+    # Check entry containers — a missing container means entries have nowhere to land
+    containers: Dict[str, bool] = {}
+    missing_containers: List[str] = []
+    for name in expected_containers:
+        present = isinstance(data.get(name), list)
+        containers[name] = present
+        if not present:
+            missing_containers.append(name)
+            issues.append(f"Missing entry container: '{name}'")
 
     # Overall validity
     valid = has_metadata and len(issues) == 0
@@ -194,7 +222,9 @@ def validate_memory_structure(file_path: str) -> Dict[str, Any]:
     return {
         "valid": valid,
         "has_metadata": has_metadata,
-        "has_limits": has_limits,
+        "schema_version": schema_version,
+        "containers": containers,
+        "missing_containers": missing_containers,
         "issues": issues,
         "metadata_fields": metadata_fields,
     }
@@ -390,11 +420,12 @@ if __name__ == "__main__":
     print(f"  Missing optional: {existence['missing_optional']}")
 
     # Test structure validation
-    local_path = f"{test_path}/{test_name}.local.json"
+    local_path = f"{test_path}/.trinity/local.json"
     structure = validate_memory_structure(local_path)
     print(f"  Structure valid: {structure['valid']}")
     print(f"  Has metadata: {structure['has_metadata']}")
-    print(f"  Has limits: {structure['has_limits']}")
+    print(f"  Schema version: {structure['schema_version']}")
+    print(f"  Missing containers: {structure['missing_containers']}")
 
     # Test freshness
     freshness = check_freshness(local_path)

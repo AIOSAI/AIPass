@@ -25,7 +25,6 @@ from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 from aipass.spawn.apps.modules.repair import handle_repair
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
-from aipass.spawn.apps.modules.sync_templates import handle_sync_templates
 from aipass.spawn.apps.modules.update import handle_update
 
 HELP_HANDLERS = [
@@ -33,7 +32,6 @@ HELP_HANDLERS = [
     ("delete", handle_delete),
     ("repair", handle_repair),
     ("sync-registry", handle_sync_registry),
-    ("sync-templates", handle_sync_templates),
     ("regenerate-registry", handle_regenerate_registry),
     ("grant-admin", handle_grant_admin),
 ]

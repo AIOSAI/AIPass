@@ -72,7 +72,7 @@ daemon/
 │   │   ├── monitoring/
 │   │   │   ├── activity_collector.py  # Collects branch activity data
 │   │   │   ├── inbox_scanner.py       # Cross-branch stale unread-mail detection
-│   │   │   ├── memory_health.py       # Memory health checks (see Known Issues)
+│   │   │   ├── memory_health.py       # Memory health: files, structure, freshness
 │   │   │   ├── red_flag_detector.py   # Detects anomalies / red flags
 │   │   │   └── report_generator.py    # Renders activity + branch reports
 │   │   ├── schedule/
@@ -252,13 +252,6 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 *Verified live 2026-08-13 (APLAN-0015). Items are listed only if reproduced this session.*
 
-- **Memory health is fleet-wide noise.** `memory_health.validate_memory_structure()` requires a
-  `limits` field inside `document_metadata`. The `.trinity` schema (3.0.0) dropped it — caps now
-  live in @memory's `memory.config.json` and surface as `*_meta` lines. Measured: **0 of 17**
-  branches carry the field, so every branch reports WARNING forever, including ones whose memory
-  was updated minutes ago. A genuinely broken `.trinity` is indistinguishable from the noise.
-  The unit tests use a synthetic fixture that *does* have `limits`, so the suite stays green.
-  Fix needs @memory's call on what the current schema's health marker should be.
 - **`update` digest reads empty** (0 messages, 0 sessions, no focus) even with live mail and 30+
   recorded sessions — `data_loader` reads different paths than `.trinity/local.json`. Long-standing.
 - **`apps/modules/wakeup_ops.py` is orphaned.** Not in the router's module list, so
@@ -266,8 +259,18 @@ remaining import is from an archived file. Scheduling is now decentralized: each
   print string. Its 9 tests are the only thing importing it.
 - **`apps/plugins/discover_plugins()` is orphaned** — its sole caller is an archived file.
 
-### Resolved this session
+### Resolved
 
+- ~~Memory health is fleet-wide noise~~ (2026-08-15) — `validate_memory_structure()` demanded a
+  `limits` field that schema 3.0.0 dropped, so **0 of 17** branches passed and every one read
+  WARNING forever. Per @memory's schema call the check now asks whether the file is *usable*:
+  a metadata section, a readable `schema_version`, and the entry containers for its filename
+  (`sessions`/`key_learnings`/`todos` in `local.json`, `observations` in `observations.json`).
+  Caps stay @memory's — they live in `memory.config.json` as defaults deep-merged with per-branch
+  overrides, and a copy here would drift. Measured after: **17 of 17 clean**, while a real
+  pre-3.0.0 file (`projects/speakeasy`) is still flagged with three concrete reasons. Tests now
+  pin the live `.trinity` files, not just a fixture — that pin immediately caught this branch's
+  own `local.json` carrying a `todos_meta` line with no `todos` container.
 - ~~`drone @daemon activity_report` (underscore) fails~~ — works; an explicit alias branch handles it.
 - ~~A trailing `--help` could execute the verb~~ — the router now scans every remaining arg, not
   just the first. `inbox-sweep --hours 48 --help` used to run a real sweep and wake branches.
@@ -285,11 +288,11 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-- **409 tests** across 18 test files
+- **420 tests** across 18 test files
 - 10/10 modules covered, 44/50 public functions tested
 - Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-15*
 
 ---
 [← Back to AIPass](../../../README.md)

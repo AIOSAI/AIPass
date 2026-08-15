@@ -34,7 +34,7 @@ apps/
 │   ├── validator.py          # Requirement checking (pip, bins, config)
 │   └── template.py           # Template resolution and copying
 ├── plugins/               # Extension point (empty)
-lib/                       # Built-in skills: branch_health, drone_commands, github, inbox_check, system_status, telegram
+lib/                       # Built-in skills: branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram
 templates/                 # Skill creation templates (markdown_only, with_handler, full)
 ```
 

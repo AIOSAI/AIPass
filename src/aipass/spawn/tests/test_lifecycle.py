@@ -1,6 +1,6 @@
 # =================== META ====================
 # Name: test_lifecycle.py
-# Description: Tests for spawn lifecycle commands (delete, sync-registry, sync-templates)
+# Description: Tests for spawn lifecycle commands (delete, sync-registry)
 # Version: 1.1.0
 # Created: 2026-03-07
 # Modified: 2026-03-07
@@ -8,11 +8,10 @@
 
 """Tests for spawn lifecycle management commands.
 
-Tests delete_branch(), sync_registry(), and sync_templates().
+Tests delete_branch() and sync_registry().
 """
 
 import json
-import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -874,208 +873,6 @@ class TestFixPassportRegistryId:
         assert "myagent" in result.get("ids_fixed", [])
         passport = json.loads(passport_path.read_text())
         assert passport["citizenship"]["registry_id"] == "correct-uuid-abc"
-
-
-# ---------------------------------------------------------------------------
-# SYNC TEMPLATES Tests
-# ---------------------------------------------------------------------------
-
-
-class TestSyncTemplates:
-    """Tests for sync_templates()."""
-
-    def test_empty_owners_no_stale(self, repo_root):
-        """With empty template_owners.json, no files should be stale."""
-        from aipass.spawn.apps.handlers.sync_templates_ops import sync_templates
-
-        # Create empty template_owners.json
-        owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(
-            json.dumps(
-                {
-                    "metadata": {"description": "test"},
-                    "managed_files": {},
-                },
-                indent=2,
-            )
-        )
-
-        with (
-            patch("aipass.spawn.apps.handlers.sync_templates_ops._REPO_ROOT", repo_root),
-            patch("aipass.spawn.apps.handlers.sync_templates_ops._TEMPLATE_OWNERS_PATH", owners_path),
-        ):
-            result = sync_templates()
-
-        assert result["managed_files"] == 0
-        assert result["stale"] == []
-        assert result["current"] == []
-        assert result["synced"] == []
-        assert result["errors"] == []
-
-    def test_status_report_works(self, repo_root):
-        """Status report (default) should work without errors."""
-        from aipass.spawn.apps.handlers import sync_templates_ops as st_mod
-
-        # Create template_owners with a managed file
-        source_branch_dir = repo_root / "src" / "aipass" / "prax"
-        source_branch_dir.mkdir(parents=True)
-        source_file = source_branch_dir / "config.json"
-        source_file.write_text(json.dumps({"key": "value"}, indent=2))
-
-        # Create template location
-        template_dir = repo_root / "templates"
-        template_dir.mkdir()
-
-        owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(
-            json.dumps(
-                {
-                    "metadata": {"description": "test"},
-                    "managed_files": {
-                        "prax_config": {
-                            "source_branch": "prax",
-                            "source_path": "config.json",
-                            "template_path": "config.json",
-                        }
-                    },
-                },
-                indent=2,
-            )
-        )
-
-        # Save originals
-        orig_root = st_mod._REPO_ROOT
-        orig_owners = st_mod._TEMPLATE_OWNERS_PATH
-
-        try:
-            st_mod._REPO_ROOT = repo_root
-            st_mod._TEMPLATE_OWNERS_PATH = owners_path
-
-            result = st_mod.sync_templates()
-        finally:
-            st_mod._REPO_ROOT = orig_root
-            st_mod._TEMPLATE_OWNERS_PATH = orig_owners
-
-        assert result["managed_files"] == 1
-        # Source exists but template doesn't yet -> stale
-        assert "prax_config" in result["stale"]
-
-    def test_sync_copies_file(self, repo_root):
-        """sync=True should copy source files to template location."""
-        from aipass.spawn.apps.handlers import sync_templates_ops as st_mod
-
-        # Create source file
-        source_dir = repo_root / "src" / "aipass" / "prax"
-        source_dir.mkdir(parents=True)
-        source_file = source_dir / "config.json"
-        source_file.write_text(json.dumps({"key": "source_value"}, indent=2))
-
-        # Create the template target dir
-        template_target_dir = repo_root / "template_target"
-        template_target_dir.mkdir()
-
-        owners_path = repo_root / "template_owners.json"
-        owners_path.write_text(
-            json.dumps(
-                {
-                    "metadata": {"description": "test"},
-                    "managed_files": {
-                        "prax_config": {
-                            "source_branch": "prax",
-                            "source_path": "config.json",
-                            "template_path": "config.json",
-                        }
-                    },
-                },
-                indent=2,
-            )
-        )
-
-        orig_root = st_mod._REPO_ROOT
-        orig_owners = st_mod._TEMPLATE_OWNERS_PATH
-
-        try:
-            st_mod._REPO_ROOT = repo_root
-            st_mod._TEMPLATE_OWNERS_PATH = owners_path
-
-            # Override _file_hash to work and patch template file destination
-            def patched_sync(sync=False, dry_run=False):
-                """Patched sync that redirects template paths."""
-                owners_data = st_mod._load_template_owners()
-                managed_files = owners_data.get("managed_files", {})
-                current = []
-                stale = []
-                synced = []
-                errors = []
-
-                for file_key, file_info in managed_files.items():
-                    source_branch = file_info.get("source_branch", "")
-                    source_path_str = file_info.get("source_path", "")
-                    template_path_str = file_info.get("template_path", "")
-
-                    source_file = repo_root / "src" / "aipass" / source_branch / source_path_str
-                    template_file = template_target_dir / template_path_str
-
-                    if not source_file.exists():
-                        errors.append(f"Source not found: {source_file}")
-                        continue
-
-                    source_hash = st_mod._file_hash(source_file)
-                    if template_file.exists():
-                        template_hash = st_mod._file_hash(template_file)
-                        if source_hash == template_hash:
-                            current.append(file_key)
-                            continue
-
-                    stale.append(file_key)
-                    if sync and not dry_run:
-                        template_file.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(source_file), str(template_file))
-                        synced.append(file_key)
-
-                return {
-                    "managed_files": len(managed_files),
-                    "current": current,
-                    "stale": stale,
-                    "synced": synced,
-                    "errors": errors,
-                }
-
-            result = patched_sync(sync=True)
-        finally:
-            st_mod._REPO_ROOT = orig_root
-            st_mod._TEMPLATE_OWNERS_PATH = orig_owners
-
-        assert result["managed_files"] == 1
-        assert "prax_config" in result["synced"]
-
-        # Template file should now exist
-        template_file = template_target_dir / "config.json"
-        assert template_file.exists()
-        assert json.loads(template_file.read_text())["key"] == "source_value"
-
-    def test_handle_sync_templates_no_args(self):
-        """handle_sync_templates with no args should return 0 (status report)."""
-        from aipass.spawn.apps.modules.sync_templates import handle_sync_templates
-
-        # With the real template_owners.json being empty, this should work
-        result = handle_sync_templates([])
-        assert result == 0
-
-    def test_missing_template_owners(self, tmp_path):
-        """Missing template_owners.json should handle gracefully."""
-        from aipass.spawn.apps.handlers import sync_templates_ops as st_mod
-
-        orig_owners = st_mod._TEMPLATE_OWNERS_PATH
-
-        try:
-            st_mod._TEMPLATE_OWNERS_PATH = tmp_path / "nonexistent.json"
-            result = st_mod.sync_templates()
-        finally:
-            st_mod._TEMPLATE_OWNERS_PATH = orig_owners
-
-        assert result["managed_files"] == 0
-        assert result["errors"] == []
 
 
 # ---------------------------------------------------------------------------

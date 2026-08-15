@@ -13,7 +13,7 @@
 - Create new branches from class-scoped templates (aipass_framework)
 - Update branches from templates (single or batch by class, with --dry-run)
 - Delete branches (archive + deregister)
-- Sync registry and templates against filesystem
+- Sync registry against filesystem
 - Regenerate template registries with fresh file hashes
 - Replace all `{{PLACEHOLDER}}` patterns with branch-specific values
 - Register new citizens in `AIPASS_REGISTRY.json`
@@ -49,9 +49,11 @@ Every branch belongs to a **citizen class**, which determines its template:
 
 `admin` is permanently refused as a class or `--template` value — see Grant Admin below.
 
-**Class is resolved from the passport, not guessed.** A leading positional that is
-not a known class is read as the target path: `create wizard` makes a branch named
-WIZARD in `./wizard` rather than refusing an unknown class (open item — see the APLAN).
+**Class is resolved from the passport, not guessed.** A leading positional is read
+as a target path only when it is either a known class (`create <class> <path>`) or
+carries an explicit path marker (a separator, `~`, `.`/`..`, or `@`). A bare token
+with neither — `create wizard` — refuses by name instead of silently making a
+branch called WIZARD in `./wizard` (APLAN-0007, fixed).
 
 ---
 
@@ -105,7 +107,6 @@ It is covered by unit tests against a synthetic registry, not by live behaviour.
 ```bash
 drone @spawn sync-registry                                     # Report healthy/stale/unregistered
 drone @spawn sync-registry --fix                               # Rebuild .spawn/ tracking + fix passport registry_ids
-drone @spawn sync-templates                                    # Pull managed files from sources (partial — see Known Issues)
 drone @spawn regenerate-registry                               # Regenerate aipass_framework template hashes
 drone @spawn regenerate-registry --all                         # All template classes
 
@@ -170,7 +171,6 @@ spawn/
 │   │   ├── update.py                    # Update CLI — single/batch by class
 │   │   ├── delete.py                    # Delete CLI — archive + deregister
 │   │   ├── sync_registry.py             # Registry repair CLI
-│   │   ├── sync_templates.py            # Template sync CLI
 │   │   ├── regenerate_registry.py       # Template registry regeneration CLI
 │   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
 │   └── handlers/
@@ -183,7 +183,6 @@ spawn/
 │       ├── update_ops.py                # Update workflow (Phase 0 snapshot → detect → execute)
 │       ├── delete_ops.py                # Delete workflow (resolve → archive → cleanup → deregister)
 │       ├── sync_registry_ops.py         # Registry sync (CWD-aware, external project support)
-│       ├── sync_templates_ops.py        # Template sync implementation
 │       ├── regenerate_registry_ops.py   # Template registry hash regeneration
 │       ├── json_ops.py                  # JSON deep merge, backup utilities
 │       └── json/
@@ -234,7 +233,7 @@ spawn/
 
 ## Tests
 
-**435 passed | 1 skipped | 0 failed** across 19 test files (436 collected — parametrized cases expand).
+**434 passed | 1 skipped | 0 failed** across 19 test files (435 collected — parametrized cases expand).
 The one skip is `test_scaffold.py`: the shipped scaffold smoke test skips by design once a
 branch has a real conftest (see Known Issues).
 
@@ -261,7 +260,7 @@ branch has a real conftest (see Known Issues).
 | `test_scaffold.py` | Shipped scaffold smoke test (skips once a real conftest exists) |
 | `conftest.py` | Fixtures: mock templates, registry protection |
 
-**Public functions:** 57 total, 57 tested (100%)
+**Public functions:** 55 total, 55 tested (100%)
 
 ---
 
@@ -282,9 +281,7 @@ branch has a real conftest (see Known Issues).
 
 ## Known Issues
 
-- `sync-templates` is a no-op — `template_owners.json` has no entries (template IS source of truth, not downstream consumer). Re-verified live 2026-08-13.
 - `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
-- `create <unknown-class> <path>` does not refuse: an unrecognised leading positional is read as the target path (APLAN-0007)
 - `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291
 
 ---
@@ -292,7 +289,7 @@ branch has a real conftest (see Known Issues).
 ## Metrics
 
 - **Seedgo:** 100% with bypasses, 98% without (15 live bypass rules, all measured 2026-08-13)
-- **Tests:** 435 passed, 1 skipped, 0 failed
+- **Tests:** 434 passed, 1 skipped, 0 failed
 - **Module coverage:** 23/23 (100%)
 - **Template registry:** 45 files, 23 dirs (aipass_framework) · 17 files, 9 dirs (project_agent)
 - **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
