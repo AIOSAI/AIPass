@@ -1,25 +1,18 @@
 """Tests for the CLI templates module — operation output templates."""
 
 import pytest
-from io import StringIO
 from unittest.mock import patch
-
-from rich.console import Console
 
 from aipass.cli.apps.modules import templates
 from aipass.cli.apps.modules import display
 
+from .conftest import make_capture_console
+
 
 @pytest.fixture
 def plain_console():
-    """Rich Console that writes plain text (no ANSI codes) for assertions."""
-    buf = StringIO()
-    cons = Console(file=buf, no_color=True, width=120)
-
-    def get_output() -> str:
-        return buf.getvalue()
-
-    return cons, get_output
+    """Console pinned against the environment; output stripped to visible chars."""
+    return make_capture_console(highlight=False)
 
 
 # ============================================================================

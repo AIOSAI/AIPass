@@ -33,15 +33,15 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-14 (S142) |
+| **Last verified** | 2026-08-16 (S144) |
 | **Open items** | 9 (0 blocking) |
-| **Tests** | 1083 pass, 0 fail, 0 skip (37 test files) |
-| **Seedgo** | 100% (45 standards, 35 files) |
+| **Tests** | 1116 pass, 0 fail, 0 skip (40 test files) |
+| **Seedgo** | 100% (44 checkers, 35 files) |
 | **Seedgo with bypass OFF** | 99% -- 18 violations across 7 standards |
 | **Bypass entries** | 18 (51 -> 17 by measured prune, +1 added with `help_flags.py`) |
 | **Ruff** | clean |
 | **Type errors** | 0 |
-| **Test map** | 105 public functions, 105 tested (100%) |
+| **Test map** | 108 public functions, 108 tested (100%) |
 | **Commands run live** | 41 invocations, 12 of them error paths (4 command surfaces deliberately not run — listed below) |
 
 YELLOW, not GREEN: nothing is down, the suite is green and every command runs — but a live
@@ -292,6 +292,9 @@ generalised to a branch that carries `tests/*` rules.
 
 | Date | Action | Result |
 |------|--------|--------|
+| 2026-08-16 | Steer 4228b27a (@devpulse) — "a fleet-internal reply was eaten" | NO OUTAGE. @seedgo's reply delivered fine; it sits in @devpulse's store as `361cefd6` (they searched for the sender's id `de0cef3e`) and they closed it themselves at 10:11:35. Real defect was traceability: delivery minted a fresh id and dropped the sender's, so no field linked the two copies. `sent_id` now rides along on BOTH lanes, and view/reply/close resolve either id through one shared resolver. Item 1's fixture (id 42284adc, ISO-Z stamp) is unreproducible — appears nowhere but in the report's own text; suite proven not to write live mailboxes (byte-identical across a full run) + standing guard added. 1100 -> 1116 tests. Reply lane needed a SECOND fix, caught by verifying my own reply after reporting done |
+| 2026-08-16 | Mail 85c0ce6b (@api) — no public door to the notification feed | Built. `feed_path()` is now the one construction site in `notify.py`, lazily re-exported as `aipass.ai_mail.feed_path` / `FEED_PATH` so `import aipass.ai_mail` costs no prax import (both directions measured in clean interpreters). README gained a reader contract: the trim replaces the inode and lines carry no id, so positional cursors go stale silently — key on `ts`. 1088 -> 1100 tests |
+| 2026-08-16 | Reply-lane fence bug (dispatch f285b9cf, @baud blocked) | Fixed. Premise DISCONFIRMED — the lane was never closed. Root cause was two resolvers for one question; the fence now reads reply.py's stamped `reply_path`, bounded to project. 1083 -> 1088 tests |
 | 2026-08-14 | Cross-scope addressing symptom (dispatch 6af8efd5, found by @api) | Diagnosed + fixed. Missing-sweep hypothesis DISCONFIRMED — sweep present and admin-gated by design. Real defect was the refusal message denying a real address. 1074 -> 1083 tests, audit 100%, no dispatch/wake code touched |
 | 2026-08-13 | Fix round to 100 (dispatch 9cbc0121) — `help_flag_safety` 0/100 on 3 modules | Fixed. 97% -> **100%**, standard 0 -> **100**. Tests 1053 -> 1074 (8 red-first). New `handlers/cli/help_flags.py` + 1 documented bypass. Live-proven against a nonexistent target; no mail sent, no branch woken |
 | 2026-08-13 | Mail a119ec12 (@devpulse) — dispatch footer CLOSE-YOUR-PLAN vs APLAN convention | Mine, confirmed at `footer.py:27` before building (I had guessed @hooks — wrong, and S129 is why I checked). Reworded, footer 1.2.0, 1 red-first test |
@@ -383,7 +386,7 @@ look. Two more belong to seedgo rather than to ai mail: a standard that asks a p
 file to implement a help flag, and the file checker still checking files that have been
 deliberately disabled, which affects every branch that follows the house rule.
 
-Health is yellow. Last verified August thirteenth.
+Health is yellow. Last verified August sixteenth.
 
 ---
 *Created: 2026-08-13*

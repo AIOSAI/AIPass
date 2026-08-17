@@ -125,6 +125,15 @@ ROOM_PREFIX = "baud-"
 
 TMUX_BINARY = "tmux"
 
+# The watch lane's binary — the same drone that started this server, so it
+# resolves from the server's own PATH with no login shell in between.
+MONITOR_BINARY = "drone"
+
+# What a targetless watch calls itself in labels and logs. A watch with no
+# target is global mission control, and "watch-" with nothing after it would
+# read as a truncated name rather than a deliberate one.
+GLOBAL_WATCH_LABEL = "watch-all"
+
 # The subprotocol the client offers, carrying the bearer as a second value. The
 # server echoes THIS name back, never the token — the accepted protocol is
 # visible in the handshake response.
@@ -165,20 +174,123 @@ def is_available() -> bool:
     return PTY_AVAILABLE
 
 
-def room_name(branch: str) -> str:
+def _tmux_safe(text: str) -> str:
+    """
+    Flatten anything outside [A-Za-z0-9_-] to '-', mirroring @baud's sanitize.
+
+    '.' and ':' carry tmux target syntax; a name containing them would glob or
+    address another session. Same charset as `room_name` in @baud's lib.rs —
+    the two implementations are pinned to the same test vectors.
+
+    Args:
+        text: Raw name component.
+
+    Returns:
+        The tmux-safe form.
+    """
+    return "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "_-" else "-" for ch in text)
+
+
+def room_name(branch: str, scope: str = "") -> str:
     """
     The tmux session name for a branch, in @baud's convention.
 
+    Anchor rooms keep their historical plain names ('baud-memory'); a branch
+    in another project carries that project as a scope
+    ('baud-vera-studio-vera'), so two projects' same-named branches can never
+    land in each other's sessions. The rule is the desktop's `room_name` in
+    lib.rs, mirrored — a phone attach and a desktop attach must always agree
+    on which room a card means.
+
     Args:
         branch: Branch name, with or without a leading '@'.
+        scope: The branch's project, LOWERCASED by the caller, for non-anchor
+            projects. Empty for the anchor.
 
     Returns:
-        The session name, e.g. 'baud-memory'.
+        The session name, e.g. 'baud-memory' or 'baud-vera-studio-vera'.
     """
-    return ROOM_PREFIX + branch.strip().lstrip("@")
+    plain = _tmux_safe(branch.strip().lstrip("@"))
+    if scope:
+        return ROOM_PREFIX + _tmux_safe(scope) + "-" + plain
+    return ROOM_PREFIX + plain
 
 
-def attach_command(branch: str) -> List[str]:
+def shell_room_name(project: str, branch: str = "") -> str:
+    """
+    The tmux session name for an EMPTY shell — no claude, just a prompt.
+
+    A separate `baud-shell-` namespace, deliberately: the fleet scan matches
+    agent rooms by exact name and skips everything else under 'baud-', so a
+    shell can never be mistaken for a branch's live session or dressed up as
+    an outside room. The project is ALWAYS in the name — including the
+    anchor's — because a shell is a place, and 'baud-shell-devpulse' does not
+    say which devpulse when two projects have one.
+
+    Args:
+        project: The project the shell stands in, lowercased by the caller
+            (census name for external projects, seated name for the anchor).
+        branch: Branch whose directory the shell opens in; empty for a shell
+            at the project root.
+
+    Returns:
+        'baud-shell-aipass', 'baud-shell-aipass-devpulse',
+        'baud-shell-testing-testing' — that shape.
+    """
+    room = ROOM_PREFIX + "shell-" + _tmux_safe(project.strip().lower())
+    if branch and branch.strip():
+        room += "-" + _tmux_safe(branch.strip().lstrip("@"))
+    return room
+
+
+def valid_monitor_target(target: str) -> bool:
+    """
+    Charset fence for a watch target — MIRRORED from `valid_monitor_target`
+    in @baud's pty.rs, character for character.
+
+    A branch list ('seedgo,cli') or the 'commons' feed keyword. Anything
+    outside it is refused: the phone picks targets off the fleet snapshot, it
+    never composes command lines — and the fence is what makes that a fact
+    about the system rather than a fact about today's client.
+    """
+    return bool(target) and all(
+        ch.islower() and ch.isascii() or ch.isdigit() and ch.isascii() or ch in "_-," for ch in target
+    )
+
+
+def monitor_command(target: str = "") -> List[str]:
+    """
+    The watch argv: `drone @prax monitor run <target>` — the exact command the
+    desktop's monitor pane runs (pty.rs `monitor_create`), minus its login
+    shell: this server was itself started by drone, so drone resolves from the
+    server's own PATH and there is no shell for a target to be interpreted by.
+
+    AN EMPTY TARGET DROPS THE ARGUMENT ENTIRELY, and that is the whole point of
+    the default. `drone @prax monitor run` with nothing after it is global
+    mission control — every branch at once — and it is what the desktop runs.
+    @prax also documents `run all` for the same thing, and this lane deliberately
+    does NOT use it: the desktop's argv is the one being mirrored, and if those
+    two paths ever diverge on @prax's side the phone must diverge with the desk,
+    not with the synonym.
+
+    Before this, the no-target form was unreachable: the charset fence refused
+    an empty string and this function always appended one. @baud measured it and
+    shipped the phone's door DISABLED rather than pointing it at a single
+    branch's monitor, which would have rendered perfectly and been a lie.
+
+    Args:
+        target: A branch list or 'commons'. Empty means every branch.
+
+    Returns:
+        The argv, with no trailing argument when target is empty.
+    """
+    command = ["drone", "@prax", "monitor", "run"]
+    if target:
+        command.append(target)
+    return command
+
+
+def attach_command(branch: str, scope: str = "") -> List[str]:
     """
     The exact argv the desktop runs, mirrored — including its room options.
 
@@ -198,6 +310,8 @@ def attach_command(branch: str) -> List[str]:
 
     Args:
         branch: Branch whose room to attach to.
+        scope: The branch's project scope for non-anchor projects — see
+            `room_name`.
 
     Returns:
         The tmux client command as a list — a list, never a string, because a
@@ -205,8 +319,18 @@ def attach_command(branch: str) -> List[str]:
         `;` is its own argument: that is how tmux separates commands in an argv,
         and it is why no shell escaping is involved anywhere here.
     """
-    room = room_name(branch)
+    return client_command(room_name(branch, scope))
 
+
+def client_command(room: str) -> List[str]:
+    """
+    The tmux client argv for a NAMED room — the shared tail of every attach.
+
+    Agent rooms and empty shells differ only in what runs inside and where the
+    room is born; the client that carries the bytes is identical. One builder,
+    so the mouse and window-size lessons in `attach_command`'s docstring are
+    learned once and hold for both.
+    """
     return [
         TMUX_BINARY,
         "new-session",
@@ -271,18 +395,24 @@ class AttachSession:
     harder to see than it deserves to be.
     """
 
-    def __init__(self, process: Any, descriptor: int, branch: str, room: str) -> None:
+    def __init__(self, process: Any, descriptor: int, branch: str, room: str, read_only: bool = False) -> None:
         """
         Args:
             process: The spawned tmux client.
             descriptor: Master side of the PTY.
             branch: Branch this room belongs to.
             room: The tmux session name.
+            read_only: A tier-0 watch — output streams, input refuses. The
+                refusal lives HERE, at the layer that counts, exactly where the
+                desktop puts it (`pty_write` refuses monitor panes): a client
+                that never sends bytes is politeness, a session that refuses
+                them is the contract.
         """
         self.process = process
         self.descriptor = descriptor
         self.branch = branch
         self.room = room
+        self.read_only = read_only
         self._closed = False
 
     @property
@@ -322,7 +452,12 @@ class AttachSession:
                 buttons send real control bytes (\\x03 for Ctrl+C), exactly as a
                 keyboard would, so there is nothing here to interpret and no
                 allowlist to keep in step with somebody else's.
+
+        Raises:
+            AttachRefused: This is a read-only watch — nothing types into it.
         """
+        if self.read_only:
+            raise AttachRefused(f"{self.room} is a read-only watch — nothing types into it")
         os.write(self.descriptor, data)
 
     def resize(self, cols: int, rows: int) -> None:
@@ -377,27 +512,33 @@ class AttachSession:
         logger.info("[host_api] detached from %s — the room survives", self.room)
 
 
-def open_attach(branch: str, cwd: Optional[Path] = None) -> AttachSession:
+def open_attach(branch: str, cwd: Optional[Path] = None, scope: str = "", room: str = "") -> AttachSession:
     """
     Spawn a PTY running a tmux client into a branch's room.
 
     Args:
-        branch: Branch whose room to attach to. Required.
+        branch: Branch whose room to attach to. Required unless `room` names
+            the room directly (an empty shell has no branch to be named after).
         cwd: Directory the room is created in when it does not exist yet — the
             branch's own directory, so an attach-or-create lands somewhere that
             makes sense rather than wherever this server was started.
+        scope: The branch's project scope for non-anchor projects — decides
+            the room NAME, exactly as the desktop decides it (see `room_name`).
+        room: Explicit room name override — the shell lane's door. When set,
+            `branch`/`scope` no longer decide the name (use `shell_room_name`
+            to build it) and `branch` may be empty.
 
     Returns:
         A live AttachSession.
 
     Raises:
-        AttachRefused: No branch named.
+        AttachRefused: No branch named and no room override.
         AttachUnavailable: No PTY on this platform, or tmux is not installed.
     """
     if not PTY_AVAILABLE:
         raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
 
-    if not branch or not branch.strip():
+    if not (room and room.strip()) and (not branch or not branch.strip()):
         raise AttachRefused("A branch name is required — this lane has no default room")
 
     if not shutil.which(TMUX_BINARY):
@@ -405,9 +546,93 @@ def open_attach(branch: str, cwd: Optional[Path] = None) -> AttachSession:
         # and "attach failed" with no subject is a support ticket.
         raise AttachUnavailable(f"{TMUX_BINARY} is not installed on this host — the attach lane runs a tmux client")
 
-    room = room_name(branch)
-    command = attach_command(branch)
+    if room and room.strip():
+        room = room.strip()
+        command = client_command(room)
+    else:
+        room = room_name(branch, scope)
+        command = attach_command(branch, scope)
 
+    process, master = _spawn_pty(command, cwd, room)
+
+    json_handler.log_operation("host_api_attach_opened", {"branch": branch, "room": room, "pid": process.pid})
+    logger.info("[host_api] attached to %s (pid %s)", room, process.pid)
+
+    # A shell has no branch; its room name is the truest label it owns.
+    return AttachSession(process, master, branch.strip().lstrip("@") or room, room)
+
+
+def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
+    """
+    Spawn a tier-0 watch: `drone @prax monitor run <target>` on its own PTY.
+
+    The phone twin of the desktop's monitor pane (m9): live output, no
+    keyboard. Deliberately NOT tmux-backed — the opposite call from the shell
+    lane, for the opposite reason. A shell holds work, so it must survive its
+    client; a watch holds nothing, so when the socket closes the observer
+    dies and nothing was lost. A persistent watcher would just be a process
+    printing into a room nobody is in.
+
+    Args:
+        target: What to watch — a branch name off the fleet snapshot, or
+            'commons' for the feed. EMPTY means global mission control, every
+            branch at once, which is the desktop's own default form. A non-empty
+            target is fenced by `valid_monitor_target`.
+        cwd: Where the monitor runs — the repo root, where drone expects to
+            stand.
+
+    Returns:
+        A live AttachSession with `read_only=True` — its `write` refuses.
+
+    Raises:
+        AttachRefused: A named target fails the charset fence.
+        AttachUnavailable: No PTY on this platform, or drone is not on PATH.
+    """
+    if not PTY_AVAILABLE:
+        raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
+
+    cleaned = target.strip().lstrip("@")
+
+    # ABSENCE IS NOT A BAD VALUE, and the two questions are kept apart on
+    # purpose. `valid_monitor_target` is mirrored from @baud's pty.rs character
+    # for character and answers "is this string a legal target" — so it still
+    # refuses the empty string and stays a faithful mirror. Whether a target was
+    # NAMED AT ALL is asked here, once, before the fence is consulted. Folding
+    # "" into the fence would have been the shorter diff and would have quietly
+    # broken the mirror this lane's safety rests on.
+    if cleaned and not valid_monitor_target(cleaned):
+        raise AttachRefused(f"Not a monitor target: {target!r}")
+
+    if not shutil.which(MONITOR_BINARY):
+        raise AttachUnavailable(f"{MONITOR_BINARY} is not on this host's PATH — the watch lane runs it")
+
+    label = f"watch-{cleaned}" if cleaned else GLOBAL_WATCH_LABEL
+    process, master = _spawn_pty(monitor_command(cleaned), cwd, label)
+
+    json_handler.log_operation("host_api_watch_opened", {"target": cleaned, "pid": process.pid})
+    logger.info("[host_api] watching %s (pid %s)", cleaned or "every branch", process.pid)
+
+    return AttachSession(process, master, cleaned or GLOBAL_WATCH_LABEL, label, read_only=True)
+
+
+def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
+    """
+    Spawn `command` as the child of a fresh PTY. The shared mechanics of every
+    lane that ends in a live terminal — attach, shell, and watch differ only
+    in what runs and whether it listens.
+
+    Args:
+        command: The argv to run.
+        cwd: Directory the child starts in; None inherits the server's.
+        room: What to call this session in logs and error sentences.
+
+    Returns:
+        (process, master descriptor).
+
+    Raises:
+        AttachUnavailable: The spawn itself failed; both descriptors are
+            closed before the error leaves.
+    """
     # openpty rather than fork: the child is a normal subprocess with the slave
     # as its three standard descriptors, so it can be signalled and waited on
     # like anything else. forkpty would hand back a bare pid and a fork this
@@ -418,7 +643,7 @@ def open_attach(branch: str, cwd: Optional[Path] = None) -> AttachSession:
 
     # openpty hands back a 0x0 terminal, and a tmux client reads that at startup,
     # decides it is not a real size, and falls back to its OWN 80x24. The
-    # docstring below has always PROMISED 80x24 and until now it was true only by
+    # contract has always PROMISED 80x24 and until the stamp it was true only by
     # that accident. Stamped for real, before the child exists, so the contract
     # and the kernel agree from the first byte.
     set_winsize(master, DEFAULT_COLS, DEFAULT_ROWS)
@@ -444,8 +669,8 @@ def open_attach(branch: str, cwd: Optional[Path] = None) -> AttachSession:
     except OSError as e:
         os.close(master)
         os.close(slave)
-        logger.error("[host_api] could not start a tmux client for %s: %s", room, e)
-        raise AttachUnavailable(f"Could not start a tmux client for {room}: {e}") from e
+        logger.error("[host_api] could not start a client for %s: %s", room, e)
+        raise AttachUnavailable(f"Could not start a client for {room}: {e}") from e
     finally:
         # The child holds its own copy; keeping ours open would mean the master
         # never reports EOF when the client exits, and the pump would hang
@@ -455,10 +680,7 @@ def open_attach(branch: str, cwd: Optional[Path] = None) -> AttachSession:
         except OSError as e:
             logger.debug("[host_api] slave descriptor for %s was already closed: %s", room, e)
 
-    json_handler.log_operation("host_api_attach_opened", {"branch": branch, "room": room, "pid": process.pid})
-    logger.info("[host_api] attached to %s (pid %s)", room, process.pid)
-
-    return AttachSession(process, master, branch.strip().lstrip("@"), room)
+    return process, master
 
 
 # ==============================================

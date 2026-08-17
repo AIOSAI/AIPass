@@ -187,6 +187,31 @@ avoid drift. Both `registry_monitor`'s scan pass and `heal_registry`'s doctrine
 self-heal (collisions / unregistered files / wrong-prefix rows) import this
 same set, so a folder added here is skipped by both in lockstep.
 
+### Orphaned Locations Heal Themselves
+
+Branches get tested, moved and re-seated constantly, so plan rows pointing at
+stale paths are **expected debris, not an anomaly** (ruling 2026-08-16). Hand-
+editing the JSON is the wrong fix: it does not stick while code elsewhere still
+writes the stale value. `drone @flow registry scan` re-attributes them instead,
+as part of a normal scan.
+
+A row is orphaned when its `location` is not where its citizen lives — either
+the path is gone from disk, or it exists but merely *contains* the seat (a
+project root holding records that belong to the branch inside it). Detection is
+deliberately those two signals only: a plan filed at the repo root or inside a
+citizen's own subdirectory is a normal filing, and treating every non-seat path
+as debris buried the real orphans under ~30 false positives when first tried.
+
+Attribution runs on evidence, in order: a directory containing exactly one live
+seat *is* that citizen's ground; failing that, exactly one live citizen sharing
+the directory name **within the same repository**. A bare name match across
+repositories is a coincidence, not an identity, and is refused.
+
+Anything unattributable is **quarantined, never guessed and never dropped** —
+the row stays untouched and `drone @flow registry status` lists it with the
+reason, for a human ruling. Re-running the healer changes nothing the second
+time.
+
 ---
 
 ## Close Pipeline
@@ -229,6 +254,45 @@ counter, so it still reaches `action_required` and the summary line
 (`todo_count: 9` → `"9 todos"`). Every other foreign key is passed through
 without interpretation.
 
+### The `flow` Section Shape
+
+Every branch's `DASHBOARD.local.json` carries a `flow` section, `managed_by`
+flow, written by `push_flow_to_branch_dashboard()`:
+
+| Field | Shape | Meaning |
+|-------|-------|---------|
+| `active_plans` | **int** | count of *all* open plans for this branch |
+| `open_recent` | list of `{plan_id, subject, created}` | the **5 newest open plans** by created date, newest first |
+| `recently_closed` | list of `{id, subject, closed}` | last 5 closed within 7 days |
+| `total_plans` | int | every plan ever filed for this branch |
+
+`open_recent` is the bounded reading window: agents get their bearings from 5
+named plans plus a total, never from a wall of rows. **The cap is enforced in
+the renderer** (`_build_open_recent`, `OPEN_RECENT_LIMIT = 5`), not in the
+consumer — a reader that has to remember to slice will eventually forget. The
+full list lives behind `drone @flow list open`, on request.
+
+**`active_plans` is a count, not a list** — ruling of 2026-08-16 (Patrick, via
+`@devpulse`). Flow's push used to publish every open-plan row here; on a branch
+with 23 open plans that was 6,096 of the section's 8,552 bytes, and it was the
+unbounded context the ruling exists to kill. The list left the section
+entirely, and `active_count` collapsed into this one name. The int also matches
+what `@prax`'s refresh already writes, so the field means the same thing no
+matter which writer built the section.
+
+Card values are written per-branch on plan events, so a change to this contract
+only reaches a branch that files a plan afterwards — a quiet branch keeps the
+old shape indefinitely. `push_flow_to_all_branch_dashboards()` sweeps every
+branch Flow holds plans for and is how a contract change lands fleet-wide.
+Paths without a dashboard are skipped, never created.
+
+> **Two writers, one section.** `@prax`'s dashboard refresh also builds this
+> section, wholesale (`recently_closed` as `{plan_id, subject}`, and no
+> `open_recent` / `total_plans`). Whichever writer ran last wins the whole
+> section — the per-key merge above protects `quick_status` only, not section
+> level. `active_plans` now agrees across both writers; `open_recent` should
+> still be read as present-or-absent until `@prax`'s side is aligned.
+
 ---
 
 ## Integration Points
@@ -243,6 +307,13 @@ without interpretation.
 - All branches — plan creation, tracking, closure, and archival
 - `aipass.devpulse` — plan status aggregation for system dashboards
 - Central reporting — `PLANS.central.json` with per-branch plan sections (all branches, not just flow)
+
+In `PLANS.central.json`, `statistics.total_closed` is a **real count of every
+plan a branch has ever closed**, not the size of the `recently_closed` window
+beside it. The two are different numbers and only coincide on branches with
+five or fewer closures. `recently_closed` is capped at 5; `total_closed` is
+measured by `push_central` from the full registry and carried through
+aggregation untouched, plus anything auto-closed during the run.
 
 ---
 

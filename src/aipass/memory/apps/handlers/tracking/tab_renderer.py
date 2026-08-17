@@ -27,6 +27,7 @@ from typing import Any, Dict
 
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.json import config_loader
 
 logger = get_system_logger()
 
@@ -118,19 +119,21 @@ def render_tab(
             f"not the todo. Add freely — BAU."
         )
 
-    # --- Rollover sections: look up count -------------------------------------
-    per_branch = rollover_cfg.get("per_branch", {})
-    defaults = rollover_cfg.get("defaults", {})
-    branch_cfg = per_branch.get(branch_name, defaults)
+    # --- Rollover sections: ask the ONE resolver, never re-derive --------------
+    # This banner is written INTO the agent's own memory file, where it reads as
+    # an instruction about that agent's limits. It must therefore state what the
+    # engine actually enforces. The old local lookup did neither: it fell back
+    # per-branch-dict instead of per-file-key (so a per_branch entry missing its
+    # `local` block silently ignored the defaults the engine would have used),
+    # and it hard-defaulted a missing count to 15 — printing a limit that does
+    # not exist. Both are gone: config_loader.resolve_limits is the single
+    # implementation, shared with `config get` and pinned against the detector.
+    count = config_loader.resolve_limits(rollover_cfg, branch_name).get(section_name, {}).get("count")
 
-    # Determine which file-level block to read
-    if section_name == "observations":
-        file_block = branch_cfg.get("observations", {})
-    else:
-        file_block = branch_cfg.get("local", {})
-
-    section_cfg = file_block.get(section_name, {})
-    count = section_cfg.get("count", 15)
+    if count is None:
+        # No limit anywhere for this section — say so. Naming a number here
+        # would be inventing an instruction nothing will honour.
+        return f"⟦ rollover ON → no entry limit configured · {field} ≤{max_chars} chars ⟧"
 
     return f"⟦ rollover ON → oldest archived to @memory · keep {count} · {field} ≤{max_chars} chars ⟧"
 

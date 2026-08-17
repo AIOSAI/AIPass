@@ -273,6 +273,17 @@ lives in exactly one place
 (`handlers/dashboard/status.py::calculate_quick_status`) — `refresh.py`,
 `operations.py` and `template_pusher.py` all delegate to it.
 
+**`sections.flow` has two writers too.** @flow's push and prax's refresh both
+build that section wholesale, so the same invariant applies one level up. prax
+mirrors @flow's five-key contract exactly — `managed_by`, `active_plans` (an int
+count), `open_recent` (the 5 newest open plans, newest first), `recently_closed`
+(closed inside the same 7-day window @flow uses), `total_plans` — pinned in
+`tests/test_flow_section_contract.py` so the two writers cannot drift apart
+again. `total_plans` is the one key prax has no honest source for, so it carries
+@flow's value through instead of deriving one: the central file's per-branch
+`statistics.total_closed` reads its own already-capped 5-entry list as the
+closed universe, and reports 5 for a branch with 104 closed plans.
+
 `action_required` is true when any counter the block renders in `summary` is
 non-zero, todos included. It previously ignored `todo_count`, so a branch could
 publish `"1 todos"` and `action_required: false` side by side — measured by

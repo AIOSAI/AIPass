@@ -37,6 +37,7 @@ from aipass.spawn.apps.handlers.meta_ops import (
     save_branch_meta,
 )
 from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.class_registry import get_template_dir, refuse_forbidden_class
 from aipass.spawn.apps.handlers.json import json_handler
 
@@ -630,7 +631,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
             passport.setdefault("citizenship", {})["registry_id"] = metadata_id
             if not dry_run:
                 try:
-                    passport_path.write_text(json.dumps(passport, indent=2, ensure_ascii=False), encoding="utf-8")
+                    atomic_write_text(passport_path, json.dumps(passport, indent=2, ensure_ascii=False))
                 except IOError as e:
                     logger.warning("[fix-identity] Failed to write passport %s: %s", branch.get("name", "?"), e)
                     continue
@@ -655,7 +656,7 @@ def fix_owner_identity(registry_path=None, dry_run=False):
         passport.setdefault("identity", {})["citizen_class"] = "aipass_framework"
         if not dry_run:
             try:
-                passport_path.write_text(json.dumps(passport, indent=2, ensure_ascii=False), encoding="utf-8")
+                atomic_write_text(passport_path, json.dumps(passport, indent=2, ensure_ascii=False))
             except IOError as e:
                 logger.warning("[fix-identity] Failed to migrate citizen_class for %s: %s", branch.get("name", "?"), e)
                 continue

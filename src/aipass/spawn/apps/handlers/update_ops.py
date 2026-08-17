@@ -29,6 +29,7 @@ from aipass.spawn.apps.handlers.meta_ops import (
     load_template_registry,
     save_branch_meta,
 )
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import find_registry, load_registry, branches_as_list
@@ -189,7 +190,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
                 try:
                     content = template_file.read_text(encoding="utf-8")
                     content = replace_placeholders(content, replacements)
-                    dest.write_text(content, encoding="utf-8")
+                    atomic_write_text(dest, content)
                 except (UnicodeDecodeError, UnicodeEncodeError) as enc_err:
                     logger.warning("[update] Binary file, copying directly: %s (%s)", resolved_path, enc_err)
                     shutil.copy2(template_file, dest)
@@ -402,7 +403,7 @@ def _heal_passport(
 
         if not dry_run:
             backup_json(dest, backup_dir=backup_dest)
-            dest.write_text(merged_text, encoding="utf-8")
+            atomic_write_text(dest, merged_text)
 
         if trace:
             logger.info("[update] Passport healed: %s", dest)
@@ -443,7 +444,7 @@ def _merge_json(
 
         if not dry_run:
             backup_json(dest, backup_dir=backup_dest)
-            dest.write_text(merged_text, encoding="utf-8")
+            atomic_write_text(dest, merged_text)
 
         if trace:
             logger.info("[update] JSON merged: %s", dest.name)

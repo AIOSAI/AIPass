@@ -139,6 +139,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+# Entry type -> (file key, leaf key) inside the rollover limits tree. These
+# three are the ONLY settable rollover limits. The FILE key is the unit the
+# rollover engine resolves per branch (see _resolve_limits); the leaf key is
+# the entry family inside it.
+ENTRY_TYPE_KEYS: dict[str, tuple[str, str]] = {
+    "sessions": ("local", "sessions"),
+    "key_learnings": ("local", "key_learnings"),
+    "observations": ("observations", "observations"),
+}
+
+
 def deep_merge(base: dict, overrides: dict) -> dict:
     """Recursively merge *overrides* into *base* without mutating either."""
     result = copy.deepcopy(base)
@@ -157,13 +168,19 @@ def _write_config_file(config: dict[str, Any]) -> bool:
     this file concurrently — a half-written file would be read as corrupt,
     turning a routine write into a fleet-wide fall back to defaults.
 
+    ``ensure_ascii=False`` matches every other JSON writer on this branch
+    (memory_files, central_writer, detector, normalize, both pushers) and is
+    what the operator's file already holds.  With the default True, setting a
+    single limit rewrote every em-dash in the file as ``\\u2014`` — a whole-file
+    diff carrying no change, on the file BAUD puts in front of the operator.
+
     Returns:
         True if the file was written, False if the write failed (logged).
     """
     tmp_path = _CONFIG_PATH.parent / f"{_CONFIG_PATH.name}.tmp-{os.getpid()}"
     try:
         _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        tmp_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(tmp_path, _CONFIG_PATH)
         return True
     except OSError as exc:
@@ -353,3 +370,300 @@ def push_defaults_to_per_branch() -> dict[str, Any]:
         return {"success": False, "error": f"Failed to write {_CONFIG_PATH}"}
 
     return {"success": True, "branches": len(per_branch), "per_branch": per_branch}
+
+
+# =============================================================================
+# ROLLOVER LIMITS — READ
+# =============================================================================
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """Return *value* when it is a dict, else an empty dict.
+
+    Every node in this tree is hand-editable, so a string or a list can turn
+    up anywhere.  Coercing to {} keeps a malformed corner from raising into a
+    caller that only asked what a limit is.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]:
+    """Resolve the limits the rollover engine will REALLY apply to *branch*.
+
+    Mirrors ``monitor/detector.py`` ``_should_rollover`` exactly: the lookup is
+    per FILE KEY, not per leaf key.  If ``per_branch[branch]["local"]`` exists
+    at all then ``defaults["local"]`` is never consulted for that branch — so a
+    per-branch entry carrying only ``sessions`` leaves ``key_learnings`` with
+    NO limit, not the default one.  A deep merge here would report a limit the
+    engine does not enforce, which is the one thing this function must not do.
+
+    "Override" is decided BY VALUE, not by where the number came from: all 17
+    branches carry a materialized per_branch entry, and calling every one of
+    them an override would be pure noise.  A value is an override when it
+    differs from the corresponding default.
+
+    Args:
+        rollover_cfg: The ``rollover`` section (already loaded — no I/O here).
+        branch: Branch name, matched case-insensitively.
+
+    Returns:
+        ``{entry_type: {"count", "default_count", "auto_compact_cap",
+        "source", "is_override"}}`` for each of the three entry types.
+        ``count`` is None when neither per_branch nor defaults set one.
+    """
+    per_branch = _as_dict(rollover_cfg.get("per_branch"))
+    defaults = _as_dict(rollover_cfg.get("defaults"))
+    branch_cfg = _as_dict(per_branch.get(branch.lower()))
+
+    resolved: dict[str, Any] = {}
+    for entry_type, (file_key, leaf_key) in ENTRY_TYPE_KEYS.items():
+        file_limits = _as_dict(branch_cfg.get(file_key))
+        source = "per_branch"
+        if not file_limits:
+            file_limits = _as_dict(defaults.get(file_key))
+            source = "defaults"
+
+        leaf = _as_dict(file_limits.get(leaf_key))
+        default_leaf = _as_dict(_as_dict(defaults.get(file_key)).get(leaf_key))
+        count = leaf.get("count")
+        default_count = default_leaf.get("count")
+
+        resolved[entry_type] = {
+            "count": count,
+            "default_count": default_count,
+            "auto_compact_cap": leaf.get("auto_compact_cap"),
+            "source": source,
+            "is_override": count != default_count,
+        }
+
+    return resolved
+
+
+def resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]:
+    """Public, no-I/O resolver — the ONE implementation of "what does the engine enforce".
+
+    Takes an already-loaded ``rollover`` section so a caller rendering every
+    branch reads the config once, not once per branch.
+
+    Every surface that answers "what limit applies to this branch" must come
+    through here.  ``config get`` and ``tab_renderer`` both used to carry their
+    own lookup; the tab's copy resolved per-branch-dict instead of per-file-key
+    and hard-defaulted a missing count to 15, so it could print a banner
+    claiming a limit the engine does not enforce — into the agent's own memory
+    file, where it reads as an instruction.  Two writers, one truth: this is
+    the writer.
+
+    Args:
+        rollover_cfg: The ``rollover`` section, already loaded.
+        branch: Branch name, matched case-insensitively.
+
+    Returns:
+        See ``_resolve_limits``.
+    """
+    return _resolve_limits(rollover_cfg, branch)
+
+
+def get_default_limits() -> dict[str, Any]:
+    """Return the global default limit for each entry type.
+
+    Returns:
+        ``{entry_type: {"count": int | None, "auto_compact_cap": int | None}}``.
+    """
+    defaults = _as_dict(section("rollover").get("defaults"))
+
+    limits: dict[str, Any] = {}
+    for entry_type, (file_key, leaf_key) in ENTRY_TYPE_KEYS.items():
+        leaf = _as_dict(_as_dict(defaults.get(file_key)).get(leaf_key))
+        limits[entry_type] = {"count": leaf.get("count"), "auto_compact_cap": leaf.get("auto_compact_cap")}
+
+    return limits
+
+
+def get_effective_limits(branch: str) -> dict[str, Any]:
+    """Return the limits the rollover engine applies to *branch*.
+
+    Args:
+        branch: Branch name, matched case-insensitively.
+
+    Returns:
+        See ``_resolve_limits`` — one entry per settable entry type.
+    """
+    return _resolve_limits(section("rollover"), branch)
+
+
+def get_branches_with_overrides() -> dict[str, Any]:
+    """Return only the configured branches whose limits deviate from defaults.
+
+    Loads the config once, not once per branch: 17 loads would mean 17 reads
+    and 17 operation-log lines for a single display.
+
+    Returns:
+        ``{branch: effective_limits}``, branch-sorted, deviating branches only.
+    """
+    rollover_cfg = section("rollover")
+    per_branch = _as_dict(rollover_cfg.get("per_branch"))
+
+    deviating: dict[str, Any] = {}
+    for branch in sorted(per_branch):
+        limits = _resolve_limits(rollover_cfg, branch)
+        if any(row["is_override"] for row in limits.values()):
+            deviating[branch] = limits
+
+    return deviating
+
+
+# =============================================================================
+# ROLLOVER LIMITS — WRITE
+# =============================================================================
+
+
+def _read_config_for_write() -> tuple[dict[str, Any] | None, str | None]:
+    """Read the config for a read-modify-write, or refuse to touch it.
+
+    Same no-clobber contract as ``load()`` and ``push_defaults_to_per_branch()``:
+    a file that EXISTS but cannot be read is never written over — it may be one
+    stray comma from correct and carry hand-tuned per-branch limits.  A
+    genuinely-MISSING file is regenerated first (load()'s documented contract),
+    so an operator's edit lands in a complete file rather than a stub.
+
+    Returns:
+        ``(config, None)`` when the file is usable, else ``(None, refusal)``.
+    """
+    if not _CONFIG_PATH.exists():
+        load()
+
+    loaded: Any = None
+    try:
+        loaded = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        # Bad syntax, bad bytes and bad permissions all mean the same thing
+        # here: we cannot know what is in the file, so we must not write it.
+        logger.error(f"[config_loader] Cannot write onto unreadable config: {type(exc).__name__}: {exc}")
+
+    if isinstance(loaded, dict):
+        return loaded, None
+
+    logger.error(f"[config_loader] Refusing write onto unreadable {_CONFIG_PATH}")
+    return None, f"Config at {_CONFIG_PATH} is unreadable — fix or move it aside, then try again"
+
+
+def _apply_limit(tree: dict[str, Any], file_key: str, leaf_key: str, count: int) -> None:
+    """Set ``tree[file_key][leaf_key]["count"] = count`` in place.
+
+    Only the count is touched.  ``auto_compact_cap`` — and anything else an
+    operator parked beside it — survives, because v1 sets one number rather
+    than rewriting the leaf.
+    """
+    file_section = _as_dict(tree.get(file_key))
+    leaf_section = _as_dict(file_section.get(leaf_key))
+    leaf_section["count"] = count
+    file_section[leaf_key] = leaf_section
+    tree[file_key] = file_section
+
+
+def _seed_branch_entry(defaults: dict[str, Any], branch: str) -> dict[str, Any]:
+    """Build a fresh per_branch entry in the shape materialize_per_branch() makes.
+
+    Args:
+        defaults: The ``rollover.defaults`` tree to seed from.
+        branch: Lowercase branch key.
+
+    Returns:
+        Limits copied from defaults plus the same ``_note`` line a push writes.
+    """
+    entry = {key: copy.deepcopy(val) for key, val in defaults.items() if key != "_note"}
+    entry["_note"] = f"Limits for @{branch}. Manual edits persist until next push."
+    return entry
+
+
+def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]:
+    """Write one per-branch rollover limit override.
+
+    Never prints and never raises: the module layer owns the refusal wording.
+
+    Args:
+        branch: Branch name — the lowercase form is always what gets written.
+        entry_type: One of ``ENTRY_TYPE_KEYS``.
+        count: The new limit (bounds are the module layer's contract).
+
+    Returns:
+        ``{"success": True, "branch", "entry_type", "count", "pushed"}`` or
+        ``{"success": False, "error": <sentence>}``.  ``pushed`` is always
+        False: this writes ONE branch's entry, it never runs the fleet-wide
+        push.  It is reported rather than assumed so the machine surface
+        states the delivery semantics in data instead of in prose.
+    """
+    if entry_type not in ENTRY_TYPE_KEYS:
+        return {"success": False, "error": f"Unknown entry type: '{entry_type}'"}
+
+    current, refusal = _read_config_for_write()
+    if current is None:
+        return {"success": False, "error": refusal}
+
+    file_key, leaf_key = ENTRY_TYPE_KEYS[entry_type]
+    key = branch.lower()
+
+    rollover_cfg = _as_dict(current.get("rollover"))
+    defaults = _as_dict(rollover_cfg.get("defaults")) or copy.deepcopy(DEFAULT_CONFIG["rollover"]["defaults"])
+    per_branch = _as_dict(rollover_cfg.get("per_branch"))
+
+    entry = _as_dict(per_branch.get(key)) or _seed_branch_entry(defaults, key)
+    _apply_limit(entry, file_key, leaf_key, count)
+
+    per_branch[key] = entry
+    rollover_cfg["per_branch"] = per_branch
+    current["rollover"] = rollover_cfg
+
+    if not _write_config_file(current):
+        return {"success": False, "error": f"Failed to write {_CONFIG_PATH}"}
+
+    json_handler.log_operation(
+        "config_set_branch_limit",
+        {"branch": key, "entry_type": entry_type, "count": count},
+        module_name="config_loader",
+    )
+    return {"success": True, "branch": key, "entry_type": entry_type, "count": count, "pushed": False}
+
+
+def set_default_limit(entry_type: str, count: int) -> dict[str, Any]:
+    """Write one global default rollover limit.
+
+    ``per_branch`` is deliberately left alone — ``rollover push`` stays the one
+    explicit fleet-wide reset, so raising a default never silently rewrites
+    seventeen branches an operator may have tuned by hand.
+
+    Args:
+        entry_type: One of ``ENTRY_TYPE_KEYS``.
+        count: The new default limit.
+
+    Returns:
+        ``{"success": True, "entry_type", "count", "pushed"}`` or
+        ``{"success": False, "error": <sentence>}``.  ``pushed`` is always
+        False and says the load-bearing thing about this verb: the new
+        default reached NO branch.  ``rollover push`` is what delivers it.
+    """
+    if entry_type not in ENTRY_TYPE_KEYS:
+        return {"success": False, "error": f"Unknown entry type: '{entry_type}'"}
+
+    current, refusal = _read_config_for_write()
+    if current is None:
+        return {"success": False, "error": refusal}
+
+    file_key, leaf_key = ENTRY_TYPE_KEYS[entry_type]
+
+    rollover_cfg = _as_dict(current.get("rollover"))
+    defaults = _as_dict(rollover_cfg.get("defaults")) or copy.deepcopy(DEFAULT_CONFIG["rollover"]["defaults"])
+    _apply_limit(defaults, file_key, leaf_key, count)
+
+    rollover_cfg["defaults"] = defaults
+    current["rollover"] = rollover_cfg
+
+    if not _write_config_file(current):
+        return {"success": False, "error": f"Failed to write {_CONFIG_PATH}"}
+
+    json_handler.log_operation(
+        "config_set_default_limit",
+        {"entry_type": entry_type, "count": count},
+        module_name="config_loader",
+    )
+    return {"success": True, "entry_type": entry_type, "count": count, "pushed": False}

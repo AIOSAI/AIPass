@@ -355,3 +355,117 @@ class TestIsVerifiedAdminCaller:
         with patch(f"{_H_VERIFIED}.verify_admin_caller", verifier):
             assert is_verified_admin_caller() is True
             assert is_verified_admin_caller() is False
+
+
+class TestReplyProofMailboxResolution:
+    """The proof must be found wherever the replying branch's mailbox actually is.
+
+    @baud's replies to fleet dispatches were refused with the cross-project
+    sentence (2026-08-16), and the reply lane itself was never the problem — it
+    passes whenever the proof is found. The failure is that two different
+    resolvers disagree about *which mailbox is the sender's*:
+
+    ``handle_reply`` finds the original through ``_resolve_branch_path()``
+    (env, registry, fallback), so the reply is built and sent. The boundary then
+    re-derives the mailbox through ``_resolve_reply_path()``, a walk UP from
+    ``AIPASS_CALLER_CWD`` — which finds nothing unless the caller happens to be
+    standing in the mailbox directory or below it. Original found, proof not
+    found, reply refused.
+
+    ``reply.py`` already saw this coming and stamps ``reply_path`` on every
+    reply, derived from ``from_branch_path`` — "the branch actually replying" —
+    precisely because the CWD guess "can name the wrong branch entirely". The
+    boundary just never read it.
+
+    The real tree is why the old fixture hid this: @baud's seat is
+    ``projects/baud/src/baud/baud``, four levels below the project root, so a
+    caller standing at ``projects/baud`` walks up past the mailbox and out of
+    the project entirely. Every existing test set the CWD to the mailbox
+    directory itself, pinning the one condition under which the resolver works.
+    """
+
+    def _boundary(self, recipient: Path, email_data, sender_email: str = "@baud", to_branch: str = "@devpulse"):
+        from aipass.ai_mail.apps.handlers.email.delivery import _check_cross_project_boundary
+
+        return _check_cross_project_boundary(recipient, sender_email, email_data=email_data, to_branch=to_branch)
+
+    @pytest.fixture
+    def deep_seat(self, repo, monkeypatch):
+        """@baud's mailbox where it really lives: projects/baud/src/baud/baud."""
+        seat = repo / "projects" / "baud" / "src" / "baud" / "baud"
+        (seat / ".ai_mail.local").mkdir(parents=True)
+        (seat / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps({"messages": [{"id": "abc123", "from": "@devpulse", "subject": "Dispatch"}]}),
+            encoding="utf-8",
+        )
+        # The caller stands at the PROJECT root, not in the mailbox directory.
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(repo / "projects" / "baud"))
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "baud")
+        return seat
+
+    def test_reply_passes_when_the_cwd_walk_up_finds_no_mailbox(self, repo, deep_seat):
+        """The reported bug: a real reply, refused because the proof was sought
+        in a mailbox the caller does not happen to be standing in."""
+        refused, msg = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={
+                "in_reply_to": "abc123",
+                "from": "@baud",
+                "reply_path": str(deep_seat / ".ai_mail.local" / "inbox.json"),
+            },
+        )
+        assert refused is False, f"a sanctioned reply was refused: {msg}"
+
+    def test_fresh_send_still_refused_from_the_same_seat(self, repo, deep_seat):
+        """The wall is not softened: no in_reply_to is still initiation."""
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"from": "@baud", "reply_path": str(deep_seat / ".ai_mail.local" / "inbox.json")},
+        )
+        assert refused is True
+
+    def test_a_stamped_path_outside_the_senders_project_is_not_proof(self, repo, deep_seat):
+        """The fence: reply_path travels with the message, so it cannot be
+        allowed to nominate an arbitrary mailbox elsewhere on disk."""
+        outsider = repo / "src" / "aipass" / "devpulse" / ".ai_mail.local"
+        outsider.mkdir(parents=True, exist_ok=True)
+        (outsider / "inbox.json").write_text(
+            json.dumps({"messages": [{"id": "forged", "from": "@devpulse"}]}),
+            encoding="utf-8",
+        )
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={
+                "in_reply_to": "forged",
+                "from": "@baud",
+                "reply_path": str(outsider / "inbox.json"),
+            },
+        )
+        assert refused is True, "a reply_path outside the sender's project must not count as proof"
+
+    def test_forged_id_still_refused_even_with_a_valid_path(self, repo, deep_seat):
+        """Widening WHERE we look never widens WHAT counts as proof."""
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={
+                "in_reply_to": "no-such-id",
+                "from": "@baud",
+                "reply_path": str(deep_seat / ".ai_mail.local" / "inbox.json"),
+            },
+        )
+        assert refused is True
+
+    def test_the_cwd_route_still_works_when_it_resolves(self, repo, monkeypatch):
+        """The original resolver stays as a fallback for callers with no stamp."""
+        seat = repo / "projects" / "baud"
+        (seat / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+        (seat / ".ai_mail.local" / "inbox.json").write_text(
+            json.dumps({"messages": [{"id": "abc123", "from": "@devpulse"}]}),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(seat))
+        refused, _ = self._boundary(
+            repo / "src" / "aipass" / "devpulse",
+            email_data={"in_reply_to": "abc123", "from": "@baud"},
+        )
+        assert refused is False

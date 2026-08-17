@@ -5,8 +5,13 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (44/44 at 100%; 99% with all bypasses disabled) | **Tests:** 1002 pass | **Functions:** 156 public (151 tested)
-**Last Updated:** 2026-08-14
+**Seedgo:** 99% (42/44 at 100%) | **Tests:** 1191 pass | **Functions:** 193 public (171 tested)
+**Last Updated:** 2026-08-16
+
+*The two categories under 100% are both in the host lane and both known:
+`server.py`'s attach route is genuinely deeply nested (a PTY pump inside a
+WebSocket handler inside the app factory), and `settings.py` is in-flight work
+carrying three silent catches. Neither is bypassed — a bypass would hide them.*
 
 ---
 
@@ -96,7 +101,7 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1002 tests across 40 files
+└── tests/                             # 1114 test functions across 45 files
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -161,6 +166,16 @@ a server-side file edit — a phone that keeps its token forever is inert once t
 host stops honouring it. Refused requests are audited with the peer address, so
 "which device has been knocking" has an answer.
 
+**A revoked token and an unknown one answer identically — and are logged
+differently.** Both get the same 401 and the same sentence, because a response
+that distinguished them would let a prober learn which of its guesses was once
+real. The trail records `token_revoked` (with the token's id) or
+`token_unrecognised` (with none). This was one line of aspiration in a comment
+until 2026-08-16, when Patrick's phone was refused for nine minutes and the log
+could not say whether it had presented a credential this host once issued or
+garbage — the store was provably intact, so that missing distinction *was* the
+gap between the evidence and an answer.
+
 **The store answers three questions about every credential**, added after an
 operate-scoped token appeared on this machine and nobody could say who minted it:
 `minted_by` (best-effort, from the branch drone names in the child environment —
@@ -193,15 +208,22 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/ping` | none | 204, no body — separates "tunnel down" from "token bad" |
 | `GET /v1/whoami` | read | Enrollment check; returns only what the caller already holds |
 | `GET /v1/feed?since=&limit=` | read | Cursor is a **timestamp**, clamped both ends, `gap` flagged |
-| `GET /v1/files?branch=&file=` | read | Branch by NAME, file relative to it; 512KB cap **refuses**, never trims |
-| `GET /v1/diff?branch=&staged=` | read | Routed through `drone @git`, never raw git; truncation is reported |
+| `GET /v1/files?branch=&file=&project=` | read | Branch by NAME, file relative to it; 512KB cap **refuses**, never trims. Any project |
+| `GET /v1/dir?branch=&dir=&project=` | read | One directory level, the phone's file browser. Any project |
+| `GET /v1/diff?branch=&staged=&project=` | read | Routed through `drone @git`, never raw git; truncation is reported. Any project |
+| `GET /v1/git-changes?branch=&project=` | read | A branch's changed-file list in @baud's desktop card contract — tracked only, branch-local names |
 | `GET /v1/fleet?project=` | read | @baud's snapshot envelope, unchanged. `project` is case-sensitive |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
+| `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
+| `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
+| `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
+| `POST /v1/memory-config/set-default` | operate | `{type, count}` — the default only. **Does not reach any branch** |
+| `POST /v1/memory-config/push` | operate | Empty body. What actually delivers a default everywhere |
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
 | `POST /v1/files/upload` | operate | Multipart image. The SERVER names the file; returns its absolute path |
-| `WS /v1/room/attach?branch=&project=` | operate | A real PTY running a tmux client. Bearer on the subprotocol |
+| `WS /v1/room/attach?branch=&project=&kind=` | operate\* | A real PTY. Bearer on the subprotocol. `kind=watch` is **read** scope; a watch with **no branch** is global mission control |
 | `GET /` | none | @baud's phone face, served from this same origin |
 
 **Verbs answer `{ok, detail}` at 200, and the line matters:** `ok: false` means the
@@ -210,6 +232,82 @@ mechanism **ran and said no**, with the owning branch's own sentence in `detail`
 mechanism was never reached — seam missing, door unreachable — that is a status
 code, not an `ok`. A wake refused by @ai_mail's blocklist is `200 {ok: false}`;
 a kill whose seam does not exist is 503.
+
+**The memory-config lane reads a document, not a screen.** It shipped scraping
+@memory's rendered text, because their config verbs had no machine surface — the
+most fragile handler in this branch, where a heading they reworded was a field it
+lost. It asked them for one; they shipped `--json` on all five verbs the same
+evening. The scraper is gone: nothing here reads a glyph, a marker or a column
+position, every command is sent with `--json` appended in **one** place, and the
+verdict is the `ok` boolean they emit. `raw` still rides on every response —
+their payload verbatim — so a caller is never trapped behind my reading of it.
+
+Two of their conventions remain load-bearing: their refusals **exit 0**, so the
+exit code is still never the verdict here; and `set-default` **changes only the
+default** — until `push` runs, all 17 branches keep their existing values. That
+surprise is @memory's design and is passed through untouched. It is now also
+*reported* rather than remembered: `pushed` comes from their payload, as does
+the `branches` count a push answers with. This lane used to hardcode
+`pushed: false`, which was a fact about their branch pinned in mine.
+
+**What is not one parseable object is `503`, never a verdict.** If `--json` ever
+stops being honoured — an older @memory on a fresh clone, a renamed flag, a
+banner ahead of the payload — this lane gets prose back and says it could not
+tell. After a write that is the honest answer, and a `200` would be a guess about
+Patrick's configuration.
+
+**A refusal has one shape on this lane, wherever it was decided:** `400
+memory_config_refused`, their sentence in `message`, their remedy line in
+`suggestion` (present and `null` where there is none), their whole payload in
+`raw`. It shipped with two — an argument this server rejected before routing was
+a 400, while a refusal @memory *spoke* came back `200 {ok: false}` — so a client
+had to check the status code **and** a flag to learn one fact. @baud found it
+reading the handler, devpulse confirmed it on the wire, and both now answer
+identically. Note this is deliberately **not** the verb lane's rule below: a
+refused wake is a normal outcome of asking and the phone renders it, but a
+refused write to fleet configuration is a caller error.
+
+**The git-changes lane answers @baud's question, not a second one.** The
+AgentSheet git tile had never made a network request — the phone transport
+listed `git_changes` in its not-yet table and threw before reaching the wire.
+The contract is theirs, read from their tree rather than invented here:
+`GitChanges { files, count }`, filled by `git diff HEAD --relative --name-only
+-- .`. Two consequences are reproduced deliberately. **Tracked files only** — a
+brand-new module does not move a card's badge, because `diff HEAD` cannot see a
+file git has never seen; counting it here would make the phone disagree with the
+desktop about the same branch at the same moment, with the phone being wrong.
+And **branch-local names**, because every `src/aipass` branch shares one repo and
+a repo-relative row would push the part that differs off a phone screen.
+Verified against a real branch: 14 files, identical to their command's own
+output, name for name.
+
+`untracked` rides alongside as a separate count, never folded into theirs.
+Matching a contract is not a reason to discard something already measured —
+@baud's own argument for their whole-project total is that a count hiding a new
+module reads as false calm, and that does not stop being true here.
+
+**This lane reads a rendered surface, and says so.** Git is drone-only, servers
+included, so it shells `drone @git status` and reads the porcelain codes drone
+passes through verbatim — keyed on that structure, never on the prose drone
+frames the list with. drone already has `get_branch_status()` returning
+`{ok, files, total}`, but only under `apps/handlers`, not on its public package
+surface, and reaching into another branch's internals is the layering mistake
+this package has made once already. A `--json` on `drone @git status`, or that
+function published, retires every line of the parsing. It has been asked for.
+
+**Its measured limit is drone's, and it is not hidden.** drone verifies a caller
+by finding a passport in the cwd hierarchy, so it refuses outright in any
+foreign project — exit 1, and no AIPass passport exists at `projects/baud` or
+anywhere external. This route resolves a foreign branch root perfectly well and
+then cannot ask git about it: `503` carrying drone's own sentence. An empty
+change list would paint a foreign branch as clean when nothing was ever
+measured. `/v1/diff` has the same limit for the same reason.
+
+**The one sentence this lane writes itself** is a write's `detail`. @memory's
+refusals carry prose and it travels verbatim; their success payloads carry facts
+and no prose, so `detail` is composed here out of the values *they just
+returned* — never out of the values sent to them. A `detail` field on their side
+retires it, and has been asked for.
 
 **Every error answers `{"error": {"code", "message"}}` — including the ones this
 server does not raise.** Validation fires in *front* of every handler, so it used
@@ -221,12 +319,52 @@ envelope — `{"code": "invalid_request", "message": "image: Field required",
 "fields": [...]}` — with the structured original kept beside the sentence, so the
 envelope got wider and nothing was taken away.
 
+**Browsing is free; the terminal binds to the seat.** Every READ route serves
+any project @baud's census knows — `files`, `dir`, `diff`, and the fleet routes
+that already did. This lane used to refuse anything but the seated project, so
+`/v1/fleet?project=BAUD` painted the cards and then every file under them
+refused with *"This server is seated in AIPass and does not serve project
+BAUD"* — one surface answering two different questions about the same project.
+Patrick's ruling, 2026-08-16: *"I should be able to open another project via the
+project tab drop down, and view other agent project files, open any passport and
+view watch read files. no restriction."* **Operate routes are untouched by this**
+— attach is the only takeover, and it still binds to the seat.
+
+The seat stays the default *and the fast path*: an omitted `project`, or the
+seat's own name in any case, resolves through the local citizen registry with no
+subprocess. Anything else resolves through @baud's census, which is where the
+branch's real path comes from — this server never composes a filesystem path for
+a project it is not seated in. A foreign project name travels **verbatim**, so
+their census keeps the one ruling on how a name is matched (which means it is
+case-sensitive there, while the seat is not — see the note on the verb lane
+below for the third variant, and no, those three have not been reconciled).
+The per-branch name fence is unchanged: free browsing is free browsing of
+*branches*, not of the disk.
+
 **`project` travels on every verb that names a target, and is never inferred**
 from this server's seat — @baud's rule, paid for with a killed session: a room
 name resolved against the wrong project names a *different* room. Deliberately
 stricter than the read lane, where an omitted project means the seated one.
-Comparison is case-insensitive; the wire says `AIPASS`, the directory says
-`AIPass`, and a case-sensitive check would refuse every verb the phone sends.
+The seat is still matched case-insensitively; the wire says `AIPASS`, the
+directory says `AIPass`, and a case-sensitive check would refuse every verb the
+phone sends.
+
+**The verbs reach any project too — one terminal, any agent.** Patrick's ruling,
+2026-08-16: *"the flow is ONE terminal; it hosts the agent I choose, no matter
+where I spawn it… Baud is an aipass tenant in `projects/`, vera is outside,
+external - that should NOT matter. When you block you create friction."* So the
+seat check is gone from `wake` and `kill`, and a foreign branch resolves through
+the **read lane's** resolver — one implementation of where a branch lives, which
+the operate lane inherited rather than copying. **Attach already did this**: its
+external door shipped with the attach train, so that half was a set of regression
+pins, not a fix. `lock` has no project at all — it locks *this* machine.
+
+**Requiring the project got MORE important, not less.** When only one project
+could be meant, an inferred seat was sloppy; now that any project can be meant,
+an inferred one silently names a different room. The ruling widens *who* can be
+reached and never *what a request may contain* — operate scope everywhere,
+garbage refused before any spawn, unknown branch or project refused in the
+census's own words, per-branch path fences untouched.
 
 **The verb lane owns no mechanism.** `verbs.py` imports no subprocess machinery
 at all, so it *cannot* run a program — every verb reaches its mechanism through a
@@ -342,7 +480,23 @@ end corrupts both. Resize is the only control verb: `{"type":"resize","cols":N,
 drop a room the operator is working in.
 
 **Scope is `operate`, with no reading half.** An attached room is a shell prompt,
-so there is no read-scope attach to offer.
+so there is no read-scope attach to offer. `kind=watch` is the exception and the
+reason the rule can stay strict: a watch is `drone @prax monitor run` on a
+read-only PTY whose `write` refuses, so observation is what the **read** scope
+*is* — demanding operate for it would make the read token a lie.
+
+**A watch with no branch is global mission control**, and it is the one lane on
+this surface where an absent branch is a real answer rather than the bug that
+killed a live session. `drone @prax monitor run` with nothing after it watches
+every branch — the desktop's own default pane — and it names no session to take
+over. Until 2026-08-16 that form was *unreachable*: the charset fence refused an
+empty string and the argv builder always appended a target, so @baud shipped the
+phone's door **disabled** rather than pointing it at one branch's monitor, which
+would have rendered perfectly and been a lie. The fence is mirrored from their
+`pty.rs` character for character and still refuses the empty string; whether a
+target was *named at all* is a different question, asked once before the fence is
+consulted. @prax also documents `run all` for the same thing and this lane
+deliberately does not use it — the desktop's argv is what is being mirrored.
 
 **The bearer rides `Sec-WebSocket-Protocol`, never the query string.** A browser
 cannot set an `Authorization` header on a WebSocket, and a token in a URL is a

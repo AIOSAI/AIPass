@@ -117,6 +117,17 @@ src/aipass/api/tests/.archive/*
 src/aipass/memory/.archive/*
 !src/aipass/memory/.archive/parked_symbolic_20260814/
 !src/aipass/memory/.archive/parked_symbolic_20260814/**
+
+# DPLAN-0297 governance sample capture (2026-08-16, @devpulse-endorsed early
+# action): durable JSON record of the 28-day surfacing sample from
+# logs/engine.log + .log.1, taken before rotation ages the source lines out —
+# the artifact IS the point, so it must survive in the repo, not just on one
+# machine's disk. Collides with the blanket `artifacts/` ignore above;
+# selective negation keeps the rest of memory/artifacts/ (runtime
+# placeholders) ignored.
+!src/aipass/memory/artifacts/
+src/aipass/memory/artifacts/*
+!src/aipass/memory/artifacts/dplan_0297_governance_sample_20260814.json
 !src/aipass/spawn/templates/aipass_framework/*_json/
 !src/aipass/spawn/templates/aipass_framework/*_json/**
 !src/aipass/spawn/templates/aipass_framework/logs/

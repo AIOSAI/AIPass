@@ -44,6 +44,9 @@ Phase 5 adds the phone face itself, served from this same origin (see face.py):
 Endpoints added on C1 (routed, but the exec behind them is GATED):
     GET /v1/fleet   - read scope. @baud's snapshot envelope, unchanged.
     GET /v1/rooms   - read scope. A filter over that same snapshot.
+    GET /v1/roster  - read scope. Every working agent in EVERY project, from
+                      @baud's own cross-project sweep. Takes no parameters:
+                      a dropped filter reads as a filter that worked.
 
 Both answer 503 with a named reason until `fleet.SNAPSHOT_READY` is flipped.
 @baud's flag is verified in their tree, but the shipped release binary predates
@@ -80,7 +83,8 @@ Functions:
 
 import asyncio
 import json
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
@@ -89,7 +93,9 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import reads as host_reads
+from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import uploads as host_uploads
 from aipass.api.apps.handlers.host import verbs as host_verbs
@@ -186,7 +192,7 @@ def is_available() -> bool:
 # ==============================================
 
 
-def _deny(status: int, code: str, message: str) -> Any:
+def _deny(status: int, code: str, message: str, **extra: Any) -> Any:
     """
     Build the standard error response.
 
@@ -194,11 +200,17 @@ def _deny(status: int, code: str, message: str) -> Any:
         status: HTTP status code.
         code: Short machine-readable code.
         message: Human-readable explanation.
+        **extra: Additional keys to carry INSIDE the error object. Same widening
+            the validation normaliser uses for `fields` — the envelope grows,
+            `code` and `message` are always there, and nothing a client had
+            before is taken away.
 
     Returns:
         An HTTPException carrying the shared error envelope.
     """
-    return HTTPException(status_code=status, detail={"error": {"code": code, "message": message}})
+    error: Dict[str, Any] = {"code": code, "message": message}
+    error.update(extra)
+    return HTTPException(status_code=status, detail={"error": error})
 
 
 def _peer(request: Any) -> str:
@@ -337,12 +349,25 @@ def require_scope(required: str = "read"):
             _audit_refusal(request, "missing_credentials", required)
             raise _deny(401, "unauthorized", "Bearer token required")
 
-        record = host_tokens.verify_token(credentials.credentials)
-        if record is None:
+        record, status = host_tokens.resolve_token(credentials.credentials)
+        # No record is no grant, whatever the status says. Belt and braces: the
+        # pair is the contract, and this door refuses rather than trusts it.
+        if record is None or status != host_tokens.STATUS_ACTIVE:
             # Unrecognised and REVOKED are byte-identical to the caller — a
             # revoked device learns "no", not "you were valid until 10:42". The
             # difference lives in the audit trail, never in the response.
-            _audit_refusal(request, "token_unrecognised", required)
+            #
+            # And the trail HAS it now. It did not on 2026-08-16, when Patrick's
+            # phone was refused for nine minutes and this comment's promise came
+            # up empty: both cases logged token_unrecognised, so "the phone held
+            # a revoked credential" could not be ruled in or out from the log.
+            revoked = status == host_tokens.STATUS_REVOKED
+            _audit_refusal(
+                request,
+                "token_revoked" if revoked else "token_unrecognised",
+                required,
+                token_id=str((record or {}).get("id", "")),
+            )
             raise _deny(401, "unauthorized", "Token not recognised")
 
         if not host_tokens.scope_allows(str(record.get("scope", "")), required):
@@ -548,6 +573,21 @@ def create_app() -> Any:
         except host_reads.ReadUnavailable as e:
             raise _deny(503, "read_unavailable", str(e)) from e
 
+    @app.get("/v1/dir")
+    async def dir_listing(
+        branch: str,
+        dir: str = "",
+        project: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """One directory level under a branch, by NAME. The phone's file browser."""
+        try:
+            return host_reads.list_dir(branch=branch, dir=dir, project=project)
+        except host_reads.ReadRefused as e:
+            raise _deny(400, "read_refused", str(e)) from e
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "read_unavailable", str(e)) from e
+
     if MULTIPART_AVAILABLE:
 
         @app.post("/v1/files/upload")
@@ -604,6 +644,20 @@ def create_app() -> Any:
         except host_reads.ReadUnavailable as e:
             raise _deny(503, "read_unavailable", str(e)) from e
 
+    @app.get("/v1/git-changes")
+    async def git_changes(
+        branch: str,
+        project: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """A branch's changed-file list, in @baud's desktop card contract."""
+        try:
+            return host_reads.read_git_changes(branch=branch, project=project)
+        except host_reads.ReadRefused as e:
+            raise _deny(400, "read_refused", str(e)) from e
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "read_unavailable", str(e)) from e
+
     @app.get("/v1/fleet")
     async def fleet(
         project: str = "",
@@ -615,6 +669,49 @@ def create_app() -> Any:
         except host_fleet.FleetUnavailable as e:
             raise _deny(503, "fleet_unavailable", str(e)) from e
 
+    @app.get("/v1/projects")
+    async def projects(
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """@baud's project census — the switcher menu's rows, unchanged."""
+        try:
+            return host_fleet.list_projects()
+        except host_fleet.FleetUnavailable as e:
+            raise _deny(503, "fleet_unavailable", str(e)) from e
+
+    @app.get("/v1/roster")
+    async def roster(
+        request: Request,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """
+        Every working agent in every project — @baud's own sweep, passed through.
+
+        This route takes NO parameters. A `project=` would look like a filter
+        and be dropped, which is worse than a refusal: the phone would render a
+        wheel it believes is scoped. The binary refuses the same argument for
+        the same reason, so both faces fail identically. Every parameter is
+        refused, not just `project` — otherwise the next filter someone invents
+        is ignored in silence under a different key.
+        """
+        if request.query_params:
+            named = ", ".join(sorted(request.query_params.keys()))
+            raise _deny(
+                400,
+                "roster_refused",
+                f"/v1/roster takes no parameters and will not silently drop one — received: {named}. "
+                "The roster spans every project by definition; there is nothing here to filter.",
+            )
+
+        try:
+            return host_fleet.read_roster()
+        except host_fleet.FleetUnavailable as e:
+            raise _deny(503, "fleet_unavailable", str(e)) from e
+        except host_fleet.FleetMisuse as e:
+            # Ours, not the caller's: this server built an argv the binary
+            # refuses, and no retry makes that better.
+            raise _deny(500, "roster_misuse", str(e)) from e
+
     @app.get("/v1/rooms")
     async def rooms(
         project: str = "",
@@ -625,6 +722,91 @@ def create_app() -> Any:
             return host_fleet.read_rooms(project=project)
         except host_fleet.FleetUnavailable as e:
             raise _deny(503, "fleet_unavailable", str(e)) from e
+
+    # ── The memory-config lane (DPLAN-0302) ───────────────────────────────
+    # @memory's rollover limits, read and written through @memory's own verbs.
+    # Reads are read scope; every write is operate.
+    #
+    # Their refusals EXIT 0 — branch-wide convention on their side — so a
+    # refusal is detected from the `ok` in their payload, never from the code.
+    #
+    # A REFUSAL IS 400 memory_config_refused HERE, wherever it was decided: an
+    # argument this server rejects before routing and a sentence @memory speaks
+    # after it answer identically, with their words in `message`, their remedy
+    # line in `suggestion`, and their whole payload in `raw`. This lane
+    # deliberately does NOT use the verb lane's {ok: false} at 200 — there, a
+    # refused wake is a normal outcome of asking and the phone renders it; here,
+    # a refused write to fleet configuration is a caller error. Shipping both
+    # shapes at once is exactly the bug @baud found reading this file.
+    #
+    # 503 stays what it always was — nobody was home — and now also covers an
+    # answer that did not parse. After a write that is the honest report: this
+    # server cannot tell whether it happened, and a 200 would be a guess about
+    # Patrick's configuration.
+
+    @app.get("/v1/memory-config")
+    async def memory_config(
+        branch: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """Rollover limits: the fleet view, or one branch's effective set."""
+        try:
+            return host_memory_config.read_config(branch=branch)
+        except host_memory_config.MemoryConfigRefused as e:
+            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+        except host_memory_config.MemoryConfigUnavailable as e:
+            raise _deny(503, "memory_config_unavailable", str(e)) from e
+
+    @app.post("/v1/memory-config/set")
+    async def memory_config_set(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Override one branch's limit for one entry type."""
+        try:
+            return host_memory_config.set_branch_limit(
+                branch=payload.get("branch", ""),
+                entry_type=payload.get("type", ""),
+                count=payload.get("count"),
+            )
+        except host_memory_config.MemoryConfigRefused as e:
+            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+        except host_memory_config.MemoryConfigUnavailable as e:
+            raise _deny(503, "memory_config_unavailable", str(e)) from e
+
+    @app.post("/v1/memory-config/set-default")
+    async def memory_config_set_default(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """
+        Change one global default.
+
+        Answers with pushed=false always: per_branch is untouched, so every
+        branch keeps reporting its old number until a push. @memory's
+        semantics, surfaced rather than smoothed over here.
+        """
+        try:
+            return host_memory_config.set_default_limit(
+                entry_type=payload.get("type", ""),
+                count=payload.get("count"),
+            )
+        except host_memory_config.MemoryConfigRefused as e:
+            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+        except host_memory_config.MemoryConfigUnavailable as e:
+            raise _deny(503, "memory_config_unavailable", str(e)) from e
+
+    @app.post("/v1/memory-config/push")
+    async def memory_config_push(
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Reset EVERY branch to the defaults. Takes no body."""
+        try:
+            return host_memory_config.push_defaults()
+        except host_memory_config.MemoryConfigRefused as e:
+            raise _deny(400, "memory_config_refused", str(e), raw=e.raw, suggestion=e.suggestion) from e
+        except host_memory_config.MemoryConfigUnavailable as e:
+            raise _deny(503, "memory_config_unavailable", str(e)) from e
 
     # ── The verb lane (Phase 3) ───────────────────────────────────────────
     # POST only, operate scope only. Every one of these is a proxy: the branch
@@ -682,17 +864,119 @@ def create_app() -> Any:
         """Lock the machine, through @skills. Takes nothing and asks nothing."""
         return host_verbs.lock_screen()
 
+    # ---------------------------------------------------------- settings --
+    # The desktop's two gears, served (DPLAN-0300): reads ride the read scope
+    # because a dial's position is observation; writes are operate because
+    # they change how agents wake and compact. Both faces write the SAME
+    # files through the same surgical rules — settings.py mirrors settings.rs
+    # so the gears can never drift on the operator's own config. Seat-scoped
+    # like the desktop's: the settings files live in THIS repo's branches.
+
+    @app.get("/v1/agent-settings")
+    async def agent_settings_read(
+        branch: str,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """One branch's three owned claude settings — absent keys read null."""
+        try:
+            return host_settings.read_agent_settings(host_reads.resolve_branch_root(branch))
+        except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
+            raise _deny(400, "settings_refused", str(e)) from e
+        except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
+            raise _deny(503, "settings_unavailable", str(e)) from e
+
+    @app.post("/v1/agent-settings")
+    async def agent_settings_write(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """
+        Patch one branch's claude settings. Three-state by JSON's own nature:
+        an absent field touches nothing, null removes, a value sets — and
+        only the three owned keys can appear, which is the surgical promise.
+        """
+        branch = str(payload.get("branch", ""))
+        patch = payload.get("patch")
+        if not isinstance(patch, dict):
+            raise _deny(400, "settings_refused", "the patch must be a JSON object")
+        try:
+            return host_settings.write_agent_settings(host_reads.resolve_branch_root(branch), patch)
+        except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
+            raise _deny(400, "settings_refused", str(e)) from e
+        except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
+            raise _deny(503, "settings_unavailable", str(e)) from e
+
+    @app.get("/v1/baud-settings")
+    async def baud_settings_read(
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """BAUD's own document for the seat, whole and opaque."""
+        try:
+            return host_settings.read_baud_settings(host_reads.repo_root())
+        except host_settings.SettingsRefused as e:
+            raise _deny(400, "settings_refused", str(e)) from e
+        except host_settings.SettingsUnavailable as e:
+            raise _deny(503, "settings_unavailable", str(e)) from e
+
+    @app.post("/v1/baud-settings")
+    async def baud_settings_write(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Shallow-merge into BAUD's document — null removes, nested replaces."""
+        patch = payload.get("patch")
+        if not isinstance(patch, dict):
+            raise _deny(400, "settings_refused", "the patch must be a JSON object")
+        try:
+            return host_settings.write_baud_settings(host_reads.repo_root(), patch)
+        except host_settings.SettingsRefused as e:
+            raise _deny(400, "settings_refused", str(e)) from e
+        except host_settings.SettingsUnavailable as e:
+            raise _deny(503, "settings_unavailable", str(e)) from e
+
+    @app.get("/v1/hooks-sound")
+    async def hooks_sound_read(
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """@hooks' mute switch, read live — the flag file is the only truth."""
+        return {"active": host_settings.hooks_sound_get()}
+
+    @app.post("/v1/hooks-sound")
+    async def hooks_sound_write(
+        payload: dict = Body(default={}),
+        record: dict = Depends(require_scope("operate")),
+    ) -> dict:
+        """Flip the machine-wide hook sounds — idempotent both directions."""
+        active = payload.get("active")
+        if not isinstance(active, bool):
+            raise _deny(400, "settings_refused", "'active' must be true or false")
+        try:
+            return {"active": host_settings.hooks_sound_set(active)}
+        except host_settings.SettingsUnavailable as e:
+            raise _deny(503, "settings_unavailable", str(e)) from e
+
     @app.websocket("/v1/room/attach")
-    async def room_attach(websocket: WebSocket, branch: str = "", project: str = "") -> None:
+    async def room_attach(websocket: WebSocket, branch: str = "", project: str = "", kind: str = "") -> None:
         """
         Attach a real tmux client to a branch's room, over a WebSocket.
 
         Operate scope without exception: an attached room is a shell prompt, so
         there is no reading half to split off. Closing the socket detaches —
         the room and everything in it survive.
+
+        `kind=shell` opens an EMPTY terminal instead of the agent's room — a
+        plain prompt in the branch's directory, or at the project root when no
+        branch is named. Same tmux discipline, separate `baud-shell-`
+        namespace: a phone terminal that dies with the screen lock is useless,
+        so shells persist and reattach exactly like agent rooms do.
         """
         try:
-            socket_bearer(websocket, "operate")
+            # A watch is tier-0 OBSERVATION — live output, no keyboard, its
+            # session refuses input at the layer that counts. Observation is
+            # what the read scope IS; demanding operate for it would make the
+            # read token a lie. Every other kind is a shell prompt with the
+            # operator's credentials at it, and stays operate.
+            socket_bearer(websocket, "read" if kind == "watch" else "operate")
         except PermissionError as e:
             # Refused BEFORE accept, so the handshake itself fails and no PTY is
             # ever spawned for an unauthenticated caller. A browser cannot read
@@ -718,20 +1002,115 @@ def create_app() -> Any:
         # reason it is not in the query string.
         await websocket.accept(subprotocol=host_attach.BEARER_SUBPROTOCOL)
 
-        if project:
-            try:
-                host_verbs.require_project(project)
-            except host_verbs.VerbRefused as e:
-                logger.warning("[host_api] socket refused on project %s: %s", project, e)
-                _audit_socket_refusal(websocket, str(e))
-                await websocket.close(code=1008, reason=str(e))
-                return
+        # WHICH project's room. The seat is the historical default; any other
+        # name resolves through BAUD's own census (the same engine the desktop
+        # trusts), which yields the branch's real path for the cwd and marks
+        # the room with the project scope — `baud-<project>-<branch>` — so a
+        # phone attach and a desktop attach always agree on which session a
+        # card means. An unknown project or branch refuses with a sentence;
+        # nothing ever falls back to the seat, because a fallback here attaches
+        # a room nobody asked for (key learning #22).
+        seated = host_reads.seated_project()
+        external = bool(project) and project.strip().lower() != seated.lower()
+        shell = kind == "shell"
 
         try:
-            target = host_verbs.citizen_address(branch)
-            session = host_attach.open_attach(branch, cwd=host_reads.resolve_branch_root(branch))
+            if kind and kind not in ("shell", "watch"):
+                raise host_attach.AttachRefused(
+                    f"Unknown room kind {kind!r} — this lane opens rooms, shells and watches"
+                )
+            if kind == "watch":
+                # The desktop card's watch button (m9): `drone @prax monitor
+                # run <branch>` on a read-only PTY.
+                #
+                # THIS USED TO REFUSE ANY PROJECT BUT THE SEAT, on the reasoning
+                # that a watch is anchor tooling. Patrick ruled against it and
+                # measuring settled it: `monitor run baud` answers "Live —
+                # scoped to BAUD" and `monitor run vera` answers "Live — scoped
+                # to VERA" plus @prax's own line, "VERA is not a known branch —
+                # nothing will be shown for it". Identical from the anchor and
+                # from each project's own root, so cwd was never the variable I
+                # believed it was.
+                #
+                # @prax refuses nothing and says precisely what it can and
+                # cannot show, on the screen the operator is already reading. My
+                # refusal was strictly worse: it blocked the tenant case that
+                # works, and would have replaced an accurate live warning with a
+                # guess. So no project check here, and no allowlist of watchable
+                # projects either — that would be a second model of what @prax
+                # can monitor, drifting from the first time they change it.
+                #
+                # NO BRANCH IS A REAL ANSWER HERE, and the only lane where it
+                # is. Everywhere else on this surface an absent branch is the
+                # bug that killed a live session (key learning #22), which is
+                # why the verb lane has no default target at all. A watch is
+                # different in kind: `drone @prax monitor run` with nothing
+                # after it is global mission control, the desktop's own default
+                # pane, and it names no session to take over. Read-only, no
+                # keyboard, nothing to seize.
+                #
+                # A NAMED branch still goes through the same existence gate
+                # every verb uses — 'commons' is a citizen too, so the feed
+                # keyword rides free.
+                if branch:
+                    # Existence through the same gate every verb uses, and now
+                    # with the project, so a tenant's or an external project's
+                    # branch is checked against ITS registry rather than the
+                    # seat's — where it does not exist and never did.
+                    target = f"watch {host_verbs.citizen_address(branch, project)}"
+                else:
+                    target = "watch (every branch)"
+                session = host_attach.open_monitor(branch, cwd=host_reads.repo_root())
+            else:
+                # Empty for agent rooms; a shell names its room itself, because the
+                # agent naming rule would land it in the agent's session.
+                room = ""
+                if branch:
+                    if external:
+                        row = host_fleet.resolve_branch(project, branch)
+                        if row is None:
+                            raise host_attach.AttachRefused(f"Project {project!r} has no branch named {branch!r}")
+                        target = f"@{branch} ({project})"
+                        cwd = Path(str(row.get("path", "")))
+                        scope = project.strip().lower()
+                    else:
+                        target = host_verbs.citizen_address(branch)
+                        cwd = host_reads.resolve_branch_root(branch)
+                        scope = ""
+                    if shell:
+                        room = host_attach.shell_room_name(project or seated, branch)
+                        target = f"shell {target}"
+                elif shell:
+                    # The one door with no branch: a shell at the project's root.
+                    if external:
+                        envelope = host_fleet.read_snapshot(project)
+                        root = str(envelope.get("root", "")).strip()
+                        if not root:
+                            raise host_attach.AttachRefused(
+                                f"Census for {project!r} reports no root to open a shell in"
+                            )
+                        cwd = Path(root)
+                    else:
+                        cwd = host_reads.repo_root()
+                    scope = ""
+                    room = host_attach.shell_room_name(project or seated)
+                    target = f"shell ({project or seated})"
+                else:
+                    raise host_attach.AttachRefused("A branch name is required — this lane has no default room")
+                # ONE spawn site, whichever lane resolved it — a per-poll spawn
+                # here is the leak test_the_session_is_created_once_per_socket
+                # pins by counting this very call.
+                session = host_attach.open_attach(branch, cwd=cwd, scope=scope, room=room)
         except (host_verbs.VerbRefused, host_attach.AttachRefused) as e:
             logger.warning("[host_api] socket refused for %s: %s", branch or "<no branch>", e)
+            _audit_socket_refusal(websocket, str(e))
+            await websocket.close(code=1008, reason=str(e))
+            return
+        except host_fleet.FleetUnavailable as e:
+            # The census could not answer — an unknown project name arrives
+            # here too, carrying the binary's own "no project named ..."
+            # sentence, which is the most actionable words this refusal has.
+            logger.warning("[host_api] socket census failed for %s/%s: %s", project, branch, e)
             _audit_socket_refusal(websocket, str(e))
             await websocket.close(code=1008, reason=str(e))
             return
@@ -808,7 +1187,17 @@ def create_app() -> Any:
                     break
 
                 if message.get("bytes") is not None:
-                    session.write(message["bytes"])
+                    try:
+                        session.write(message["bytes"])
+                    except host_attach.AttachRefused as e:
+                        # A read-only watch was typed into. The session's own
+                        # refusal (the layer that counts) ends the attach with
+                        # the sentence — a client that types into a watch has
+                        # broken the contract, and pretending the bytes landed
+                        # would be the silent fallback this house refuses.
+                        logger.warning("[host_api] input refused on %s: %s", session.room, e)
+                        await websocket.close(code=1008, reason=str(e))
+                        break
                     continue
 
                 text = message.get("text")
@@ -916,7 +1305,12 @@ def create_app() -> Any:
         "/v1/files/upload",
         "/v1/diff",
         "/v1/fleet",
+        "/v1/roster",
         "/v1/rooms",
+        "/v1/memory-config",
+        "/v1/memory-config/set",
+        "/v1/memory-config/set-default",
+        "/v1/memory-config/push",
         "/v1/verbs/wake",
         "/v1/verbs/kill",
         "/v1/verbs/lock",

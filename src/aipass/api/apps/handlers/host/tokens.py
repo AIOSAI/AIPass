@@ -117,6 +117,14 @@ LOCK_STALE_SECONDS = 30
 LOCK_WAIT_SECONDS = 5.0
 LOCK_POLL_SECONDS = 0.02
 
+# What a presented token turned out to be. THESE ARE AUDIT VOCABULARY, NEVER
+# RESPONSE VOCABULARY — revoked and unknown are refused identically at the door,
+# and the difference exists so the trail can answer 'was that device ever ours?'
+# after the fact. Answering it in the response would hand a prober an oracle.
+STATUS_ACTIVE = "active"
+STATUS_REVOKED = "revoked"
+STATUS_UNKNOWN = "unknown"
+
 SCOPES = ("read", "operate")
 
 # operate implies read; read implies nothing else.
@@ -410,12 +418,64 @@ def current_minter() -> str:
     return (os.environ.get(CALLER_ENV) or "").strip() or UNKNOWN_MINTER
 
 
-def verify_token(raw: str) -> Optional[Dict[str, Any]]:
+def resolve_token(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
     """
-    Resolve a raw bearer token to its record.
+    Resolve a raw bearer token to its record AND to what it turned out to be.
 
     Re-reads the store on every call, which is what makes revocation effective
     on the next request.
+
+    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 Patrick's phone
+    was refused for nine minutes and the trail said only token_unrecognised.
+    The store was provably intact, so the one thing that would have closed the
+    investigation — did that device present a credential we once issued, or
+    garbage? — was exactly what the log could not say. A revoked record was
+    skipped silently and became indistinguishable from a token nobody had ever
+    minted.
+
+    So the revoked match is now FOUND, not skipped. The caller gets the record
+    for the trail and the status for the decision, and it is the caller's job to
+    refuse anything that is not active — which is why the record comes back
+    paired with a status rather than alone.
+
+    Args:
+        raw: The bearer value presented by the client.
+
+    Returns:
+        (record, status). Status is active, revoked, or unknown. The record is
+        present for active and revoked, and None for unknown. A record returned
+        alongside 'revoked' IS NOT A GRANT.
+    """
+    if not raw or not isinstance(raw, str):
+        return None, STATUS_UNKNOWN
+
+    candidate = _hash_token(raw)
+
+    for record in load_tokens():
+        stored_hash = record.get("hash")
+        if not isinstance(stored_hash, str):
+            continue
+
+        if not hmac.compare_digest(candidate, stored_hash):
+            continue
+
+        if record.get("revoked"):
+            return record, STATUS_REVOKED
+
+        return record, STATUS_ACTIVE
+
+    return None, STATUS_UNKNOWN
+
+
+def verify_token(raw: str) -> Optional[Dict[str, Any]]:
+    """
+    Resolve a raw bearer token to its record, or None.
+
+    The narrow door: a record comes back only when the token is usable RIGHT
+    NOW. Callers that want to know why a refusal happened use resolve_token;
+    callers that only want the yes-or-no keep this one and cannot accidentally
+    honour a revoked record, because a revoked token never leaves here as a
+    truthy value.
 
     Args:
         raw: The bearer value presented by the client.
@@ -423,23 +483,8 @@ def verify_token(raw: str) -> Optional[Dict[str, Any]]:
     Returns:
         The matching, non-revoked record, or None.
     """
-    if not raw or not isinstance(raw, str):
-        return None
-
-    candidate = _hash_token(raw)
-
-    for record in load_tokens():
-        if record.get("revoked"):
-            continue
-
-        stored_hash = record.get("hash")
-        if not isinstance(stored_hash, str):
-            continue
-
-        if hmac.compare_digest(candidate, stored_hash):
-            return record
-
-    return None
+    record, status = resolve_token(raw)
+    return record if status == STATUS_ACTIVE else None
 
 
 def touch_token(token_id: str) -> None:

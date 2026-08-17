@@ -2,7 +2,7 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 350000,
   "enabledMcpjsonServers": [],
-  "model": "opus",
+  "model": "fable",
   "permissions": {
     "allow": [],
     "ask": [],

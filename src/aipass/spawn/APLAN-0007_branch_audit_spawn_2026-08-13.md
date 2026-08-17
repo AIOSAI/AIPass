@@ -33,12 +33,12 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN |
-| **Last verified** | 2026-08-15 (S118) |
+| **Last verified** | 2026-08-16 (S119) |
 | **Open items** | 0 |
-| **Tests** | 434 pass, 1 skipped, 0 fail |
+| **Tests** | 471 pass, 1 skipped, 0 fail |
 | **Seedgo** | 100% (44 standards) |
-| **Bypass entries** | 15 (unchanged since S117 prune) |
-| **Live command sweep** | unknown-class refusal live-verified this session (`create wizard` -> exit 1, no branch made) |
+| **Bypass entries** | 16 (+1 S119: `atomic_write.py`/`json_structure`, measured load-bearing in both lanes before adding) |
+| **Live command sweep** | unknown-class refusal live-verified S118 (`create wizard` -> exit 1, no branch made) |
 
 **S118 closed all 4 remaining open items** from the S117 audit: the unknown-class
 refusal for `create`, the `.ai_mail.local/` never-update exclusion (devpulse
@@ -77,6 +77,37 @@ None -- all 4 items opened at S117 closed at S118 (see Resolved).
 
 ### Resolved
 
+- [x] **Torn-write defect across spawn's own JSON/text write sites** (S119, fleet
+  error 90c9e40d, devpulse dispatch) -- `Path.write_text()` truncates in place, so
+  a concurrent reader lands on an empty or partial file. Spawn was NOT in the
+  original 7-branch sweep. Measured before fixing: 2 writers vs 2 readers in
+  separate processes against the real passport-write shape gave **38.2% and 55.3%
+  unusable reads** across two 8s runs (98,578 empty + 6,638 unparseable of 275,669
+  reads; fleet spread was 23-92.5%). After: **0.00%** unusable over 2,463,548 reads
+  in a 45s run -- at the pre-fix rate that run should have produced ~18,000 bad
+  reads.
+  Worst site was `sync_registry_ops.py:633,658` rewriting **another citizen's
+  `.trinity/passport.json`** during `sync-registry --fix` -- a torn write there
+  corrupts a branch's identity file. Also `file_ops.py:76,226`,
+  `update_ops.py:192,405,446`, plus two near-miss sites: `meta_ops.py:161` used
+  `Path.rename` (not atomic-overwrite on Windows) and both it and
+  `regenerate_registry_ops.py:90` used a FIXED `.tmp` name, so two concurrent
+  writers collided on one staging path.
+  Fix: new `apps/handlers/atomic_write.py` -> `atomic_write_text()` --
+  `mkstemp(dir=path.parent)` (same filesystem, so `os.replace` stays a real rename)
+  -> `os.write` -> `fsync` -> `close` -> `os.replace`, unlink staged file on every
+  failure path, **raises, never swallows**. Every site routed through it. Caller
+  contracts preserved exactly (passport loops still warn+continue, `_merge_json`
+  still returns `"error"`, `save_branch_meta` still returns `False`, the
+  `UnicodeEncodeError` -> `shutil.copy2` fallbacks still fire).
+  37 new tests in `tests/test_json_durability.py`, **21 red-first**. Includes an
+  AST source guard (`TestNoRawTruncatingWritesInSource`) that fails if a raw
+  truncating write reappears in `apps/`, exempting the two legitimate flock targets
+  (`repair_ops.py:61`, `registry.py:258`) by opened-path, not by variable name.
+  Guard mutation-checked red for both `open(...,'w')` and `.write_text(` shapes --
+  re-verified independently by me with my own probe after the build.
+  `registry.py:save_registry` needed no change: already routed through the shared
+  atomic `json_handler.write_json`.
 - [x] **`update --help` / `delete --help` fell through argparse** (S117) -- a past
   audit recorded both as broken. Re-tested live: both print proper subcommand help
   and exit 0. Stale finding, closed. This is exactly the item devpulse warned sits
@@ -167,6 +198,7 @@ silently dropped.
 |------|--------|--------|
 | 2026-08-13 | Fleet audit round (DPLAN-0291), wave 3 | YELLOW -- 4 open, 6 resolved |
 | 2026-08-15 | Closed all 4 open items per devpulse's mail ruling (bfba4f0a) | GREEN -- 0 open, 11 resolved |
+| 2026-08-16 | Torn-write template+live fix (devpulse dispatch bc4e48f9, error 90c9e40d) | GREEN -- templates already clean, 6 live sites fixed, 38%->0% unusable |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0288 (admin ceremony)
@@ -202,6 +234,26 @@ across the other two items). Seedgo re-run 100% across all 44 standards. Live-ve
 the refusal by hand: `create wizard` exits 1 with a message naming both registered
 classes, no directory created.
 
+**S119 (2026-08-16):** Fleet torn-write round (error 90c9e40d). The dispatch's
+premise was that spawn's TEMPLATE stamps a defective `json_handler.py` into every
+new citizen -- **it does not**. Neither template tree carries a `json_handler.py`
+at all (`apps/handlers/` holds only `__init__.py` + README in each), nothing in the
+create flow writes one, both template registries are clean with zero
+tree-vs-registry discrepancies, and a sweep of every file in both trees found no
+raw truncating write shape anywhere. Future citizens were never born with this bug.
+Verified twice -- by me at the start, independently again during the build.
+
+The real defect was in spawn's own live handlers, which bypassed the atomic path
+(see Resolved). Spawn's `json_handler.py` is a thin shim over
+`aipass.aipass.shared.json_handler`, whose `write_json` was ALREADY atomic -- so
+"fix your json_handler" was a no-op, while six handlers writing JSON *around* it
+were the actual hole. Chased the shim to the shared implementation before
+concluding anything; the file named in the dispatch was the one file that was fine.
+
+Not changed, and flagged to devpulse: the shared `write_json` returns `False` on
+`OSError` rather than raising. That is @aipass's contract on another branch's file,
+not mine to alter.
+
 ## Listen (TTS-friendly summary)
 
 Spawn's audit is signed yellow. Every number is green: four hundred thirty five tests
@@ -235,8 +287,20 @@ so it was retired outright rather than wired up. The fourth item was already fix
 the prior session and only needed moving from open to resolved. Full suite still green,
 seedgo still one hundred percent, and the refusal was hand-verified live.
 
-Last verified 2026-08-15.
+Update at session one nineteen: the fleet's torn write defect reached spawn, but not
+where anyone expected. The task assumed spawn's template stamps a broken json handler
+into every new branch. It does not stamp one at all, so no future citizen ever carried
+this bug. Spawn's own json handler was also already safe, because it delegates to a
+shared one that was fixed correctly. The real hole was six other handlers that wrote
+files directly, going around the safe path. The worst of them rewrote another
+citizen's passport, their identity file, in a way a reader could catch half finished.
+Measured before fixing: thirty eight to fifty five percent of concurrent reads came
+back empty or unreadable. After fixing: zero, across two and a half million reads.
+Every write now stages to a temp file beside the target and swaps atomically, and a
+source guard fails the suite if anyone reintroduces the unsafe shape.
+
+Last verified 2026-08-16.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-15*
+*Updated: 2026-08-16*

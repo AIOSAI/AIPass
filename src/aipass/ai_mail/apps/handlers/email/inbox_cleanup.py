@@ -274,13 +274,10 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
-            messages = inbox_data.get("messages", [])
-            target_msg = None
+            from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
-            for msg in messages:
-                if msg.get("id") == message_id:
-                    target_msg = msg
-                    break
+            messages = inbox_data.get("messages", [])
+            target_msg = find_message(messages, message_id)
 
             if target_msg is None:
                 return False, f"Message not found: {message_id}", None
@@ -343,15 +340,11 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             with open(inbox_file, "r", encoding="utf-8") as f:
                 inbox_data = json.load(f)
 
-            messages = inbox_data.get("messages", [])
-            message_to_archive = None
-            message_index = None
+            from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
-            for i, msg in enumerate(messages):
-                if msg.get("id") == message_id:
-                    message_to_archive = msg
-                    message_index = i
-                    break
+            messages = inbox_data.get("messages", [])
+            message_to_archive = find_message(messages, message_id)
+            message_index = messages.index(message_to_archive) if message_to_archive is not None else None
 
             if message_to_archive is None:
                 return False, f"Message not found: {message_id}"

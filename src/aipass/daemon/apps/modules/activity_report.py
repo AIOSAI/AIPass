@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_report.py
 # Description: Branch Activity Report Generator Module
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-01-30
-# Modified: 2026-03-08
+# Modified: 2026-08-16
 # =============================================
 
 """
@@ -16,6 +16,11 @@ This is a MODULE (orchestration layer) that coordinates:
 - activity_collector: Scans branches for file modifications
 - memory_health: Checks memory file health status
 - red_flag_detector: Detects presence violations (code changed but memory not updated)
+- @memory's get_branch_health: entry-count + entry-size facts (cross-branch)
+
+The @memory call lives HERE, in the module layer, deliberately: seedgo blocks
+handler-to-other-branch imports, so apps/handlers/monitoring/memory_health.py
+must never reach for it.
 """
 
 import os
@@ -70,6 +75,12 @@ def print_introspection():
         " [dim](generate_activity_report,"
         " generate_branch_report, get_json_report"
         " — report generation and JSON output)[/dim]"
+    )
+    console.print()
+    console.print("[yellow]Cross-branch:[/yellow]")
+    console.print(
+        "  [cyan]*[/cyan] @memory get_branch_health"
+        " [dim](entry-count + entry-size facts for branch-health — severity applied here)[/dim]"
     )
     console.print()
 
@@ -146,6 +157,97 @@ def _print_branch_health_help() -> None:
     console.print("  --hours N, -t N    Time window in hours (default: 24)")
     console.print("  --help, -h         Show this help message")
     console.print()
+
+
+# =============================================
+# MEMORY ENTRY HEALTH (@memory's public API)
+# =============================================
+
+# Severity is the CALLER's call — get_branch_health reports facts only. The
+# mapping below is @memory's, pinned in words in their module docstring
+# (aipass.memory.apps.modules.health) and restated here so no consumer
+# silently redecides it:
+#
+#   should_rollover True  -> INFO / pending. Rollover being due is not a
+#                            fault; it auto-fires at the next PreCompact.
+#                            NEVER WARNING.
+#   total_violations > 0  -> WARNING. A write got past the character-cap gate.
+#
+# The caps themselves are NOT re-encoded here. They live in @memory's
+# memory.config.json (defaults deep-merged with per-branch overrides); a copy
+# on this side would be a snapshot that drifts.
+#
+# Markers are UPPERCASE deliberately. console.print() parses Rich markup, and a
+# lowercase bracket tag like "[ok]" or "[info]" reads as a style name and is
+# silently swallowed — the marker vanishes from the live output while a test
+# asserting on the returned string still passes. Uppercase is not a valid style,
+# so it survives. Verified live, and pinned by test_markers_survive_rich_markup.
+
+SYMBOL_OK = "[OK]"
+SYMBOL_WARNING = "[!]"
+SYMBOL_PENDING = "[PENDING]"
+SYMBOL_SKIP = "[SKIP]"
+
+
+def _render_entry_health(branch_name: str) -> str:
+    """
+    Render entry-count and entry-size health for one branch via @memory.
+
+    Read-only. Degrades visibly, never silently: an unimportable @memory or an
+    unknown branch prints a named reason instead of an empty section.
+
+    Args:
+        branch_name: Branch to check, matched case-insensitively by @memory.
+
+    Returns:
+        Formatted report block (never raises).
+    """
+    lines: List[str] = ["", "=" * 60, f"MEMORY ENTRY HEALTH: {branch_name} (via @memory)", "=" * 60]
+
+    try:
+        from aipass.memory.apps.modules.health import get_branch_health
+    except ImportError as e:
+        logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
+        lines.append(f"  {SYMBOL_WARNING} UNAVAILABLE - @memory health API not importable: {e}")
+        return "\n".join(lines)
+
+    health = get_branch_health(branch_name)
+
+    if not health.get("success"):
+        reason = health.get("error", "unknown error")
+        logger.warning("[DAEMON] activity_report: entry health refused for %s: %s", branch_name, reason)
+        lines.append(f"  {SYMBOL_WARNING} {reason}")
+        return "\n".join(lines)
+
+    lines.append("Entry count (rollover trigger):")
+    for memory_type, result in (health.get("entry_count") or {}).items():
+        if result is None:
+            lines.append(f"  {SYMBOL_SKIP} {memory_type}: no file")
+            continue
+        current_lines = result.get("current_lines")
+        if result.get("should_rollover"):
+            reason = result.get("reason") or "over trigger"
+            lines.append(f"  {SYMBOL_PENDING} {memory_type}: rollover pending ({current_lines} lines) - {reason}")
+        else:
+            lines.append(f"  {SYMBOL_OK} {memory_type}: {current_lines} lines")
+
+    entry_size = health.get("entry_size") or {}
+    total_violations = entry_size.get("total_violations", 0)
+    lines.append("")
+
+    if not total_violations:
+        lines.append(f"Entry size: {SYMBOL_OK} no cap violations")
+        return "\n".join(lines)
+
+    lines.append(f"Entry size: {SYMBOL_WARNING} WARNING - {total_violations} cap violation(s)")
+    for violation in entry_size.get("violations", []):
+        lines.append(
+            f"  - {violation.get('file')} {violation.get('container')} "
+            f"'{violation.get('key')}': {violation.get('length')} chars "
+            f"(cap {violation.get('cap')}, over by {violation.get('over_by')})"
+        )
+
+    return "\n".join(lines)
 
 
 def _parse_hours_arg(args: List[str]) -> float:
@@ -279,6 +381,7 @@ def _handle_branch_health(args: List[str]) -> bool:
     hours = _parse_hours_arg(args)
     report = generate_branch_report(branch_name, since_hours=hours)
     console.print(report)
+    console.print(_render_entry_health(branch_name))
     logger.info("[DAEMON] activity_report: Branch health report generated for %s", branch_name)
     return True
 

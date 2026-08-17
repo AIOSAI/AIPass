@@ -270,3 +270,90 @@ class TestScopeRefusalIsAudited:
         refusal = _refusals(audit)[0]
         assert refusal["held"] == "read"
         assert refusal["required"] == "operate"
+
+
+@fastapi_required
+class TestARevokedTokenIsDistinguishableInTheTrail:
+    """
+    The audit must tell 'this device WAS enrolled' from 'this is garbage'.
+
+    Written on 2026-08-16 after a real incident: Patrick's phone was refused for
+    nine minutes with reason=token_unrecognised, and the log could not say
+    whether it had presented a revoked credential or a corrupted one. The store
+    was provably intact, so the log's inability to distinguish those two was the
+    thing standing between the evidence and an answer.
+
+    THE RESPONSE STILL TELLS NOTHING. A revoked device learns 'no', never 'you
+    were valid until 10:42' — the difference belongs in the trail and nowhere
+    else, which is what this branch's own comment promised before the code
+    delivered it.
+    """
+
+    def test_a_revoked_token_is_recorded_as_revoked(self, audited: Any) -> None:
+        """The reason names it, so one grep answers the next incident."""
+        client, audit = audited
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.revoke_token(record["id"])
+
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
+
+        assert _refusals(audit)[-1]["reason"] == "token_revoked"
+
+    def test_a_revoked_token_carries_its_id(self, audited: Any) -> None:
+        """
+        The id is the actionable half.
+
+        It is what revoke-token takes and what list-tokens prints, so a trail
+        line naming it identifies the device without touching the secret.
+        """
+        client, audit = audited
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.revoke_token(record["id"])
+
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
+
+        assert _refusals(audit)[-1]["token_id"] == record["id"]
+
+    def test_an_unknown_token_is_still_unrecognised(self, audited: Any) -> None:
+        """The other half of the distinction, or there is no distinction."""
+        client, audit = audited
+
+        client.get("/v1/whoami", headers={"Authorization": "Bearer not-a-real-token"})
+
+        assert _refusals(audit)[-1]["reason"] == "token_unrecognised"
+        assert _refusals(audit)[-1]["token_id"] == ""
+
+    def test_the_revoked_secret_never_enters_the_trail(self, audited: Any) -> None:
+        """Naming the id must not become an excuse to log the value."""
+        client, audit = audited
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.revoke_token(record["id"])
+
+        client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
+
+        assert raw not in str(_refusals(audit)[-1])
+
+    def test_both_refusals_answer_identically_to_the_caller(self, audited: Any) -> None:
+        """
+        Byte-identical: same status, same code, same sentence.
+
+        A response that differed would turn the audit's knowledge into an
+        oracle — a prober could learn which of its guesses was once real.
+        """
+        client, audit = audited
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.revoke_token(record["id"])
+
+        revoked = client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"})
+        unknown = client.get("/v1/whoami", headers={"Authorization": "Bearer not-a-real-token"})
+
+        assert revoked.status_code == unknown.status_code == 401
+        assert revoked.json() == unknown.json()
+
+    def test_a_revoked_token_is_still_refused(self, audited: Any) -> None:
+        """The trail gained a distinction; the door did not gain a key."""
+        client, audit = audited
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.revoke_token(record["id"])
+
+        assert client.get("/v1/whoami", headers={"Authorization": f"Bearer {raw}"}).status_code == 401

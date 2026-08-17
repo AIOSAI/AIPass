@@ -27,6 +27,18 @@ drone @memory rollover run                 # Execute rollover for files over lim
 drone @memory rollover status              # Show per-branch rollover statistics
 drone @memory rollover check               # Dry run — what needs rollover
 drone @memory rollover sync-lines          # Update line count metadata
+drone @memory rollover push                # ⚠ Reset ALL per_branch limits to defaults
+
+drone @memory config                       # Introspection — the three config verbs
+drone @memory config --help                # Full contract: types, bounds, semantics
+drone @memory config get                   # Defaults + every branch that deviates
+drone @memory config get @devpulse         # One branch's EFFECTIVE limits, marked
+drone @memory config set @devpulse sessions 25   # Override one branch
+drone @memory config set-default sessions 25     # Change the global default
+
+drone @memory config get --json            # Machine surface — ONE JSON document, no Rich
+drone @memory config get @devpulse --json  # `--json` rides in any slot on every config verb
+drone @memory rollover push --json         # …and on push. `--help` still outranks it.
 
 drone @memory search "query"               # Semantic search across all branch memories
 drone @memory search "query" --branch X    # Filter by branch
@@ -57,8 +69,9 @@ drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+
 memory/
 ├── apps/
 │   ├── memory.py                # Entry point — auto-discovers modules
-│   ├── modules/                 # 9 modules
+│   ├── modules/                 # 10 modules
 │   │   ├── governance.py        # Surfacing governance — re-exports from handlers
+│   │   ├── health.py            # Branch health wrapper (entry-count + entry-size, read-only)
 │   │   ├── lint.py              # Entry limit violation scanner (read-only)
 │   │   ├── pool.py              # Pool vectorization + auto-process
 │   │   ├── rollover.py          # Rollover orchestration, status, sync-lines
@@ -69,7 +82,7 @@ memory/
 │   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
 │   └── handlers/                # 14 handler groups
 │       ├── archive/             # indexer.py
-│       ├── cli/                 # help_flags.py — help-flag detection
+│       ├── cli/                 # help_flags.py — help-flag detection; json_flag.py — --json detection
 │       ├── governance/          # engine.py — surfacing decision logic
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py, memory_files.py, entry_limits.py, lint_handler.py, config_loader.py
@@ -84,7 +97,7 @@ memory/
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1022 tests — 810 run, 237 parked with the symbolic tier
+├── tests/                       # 1171 test functions — 1061 pass, 5 skip (parked symbolic tier)
 ├── .chroma/                     # ChromaDB vector store
 └── memory_json/                 # Operation logs + custom_config/memory.config.json
 ```
@@ -122,11 +135,31 @@ The **date** half is off for the snapshot lane (`date_guard=False`). Snapshots a
 - **Type repair.** A `number` stored as a numeric string (`"171"`) or integral float is coerced to `int`, recorded in `changes`, and persisted — the half-repaired container that used to raise `TypeError` inside `sorted()` now heals itself.
 - A container with **no** numbers at all (the normal `todos` shape) is skipped silently — that is a legitimate shape, not corruption.
 
+### A correct refusal must not become a runaway log (2026-08-16)
+
+@trigger raised `memory_extractor.log` CRITICAL at 634 lines/min. The safety valve was working
+exactly as designed — it was refusing to archive entries an external branch had written at the
+wrong end of its array — but it logged one `WARNING` **per refused entry**, each carrying the full
+entry (~800 bytes). One pass over one file produced **97 warning lines in a single second**.
+
+The valve's behaviour is unchanged; its volume is. One summary line per array per run names the
+count and the reason; the per-entry detail moved to `DEBUG`, where it stays recoverable while
+debugging without flooding a routine run.
+
+The wall was also hiding the thing worth alarming on. When a file is over its limit and *nothing*
+is archivable, the detector re-fires on it forever and refuses the same entries every run — a skip
+loop. That case now says `NOTHING DRAINED` in words and names the two shapes that cause it: an
+array that is not newest-first, or entries carrying no usable `number`. Same species as the
+auto-compact skip loop behind DPLAN-0290 item 3: *a lane whose refusals are all correct can still
+be a lane that never drains.*
+
 ### A help flag is never an instruction
 
 Every module routes its help check through `handlers/cli/help_flags.wants_help()`, evaluated **before** any subcommand dispatch. Modules used to read `args[0]` only, so a flag in a later slot was discarded and the subcommand ran instead — `drone @memory rollover push --help` performed the fleet-wide `per_branch` reset it was being asked to describe.
 
 A dashed flag (`--help`, `-h`) counts anywhere on the line. The bare word `help` counts anywhere only for modules whose subcommands take no free text (`rollover`, `templates`, `pool`, `lint`); for `search`, `symbolic` and `verify` it counts in the first slot only, so `drone @memory search rollover help` stays a three-word query.
+
+`handlers/cli/json_flag.py` is the sibling handler for `--json`, and `wants_json()` is deliberately read *after* the help check for the same reason: `--help --json` is still a question, so it prints help and emits no payload. See [`--json` — the machine surface](#--json--the-machine-surface).
 
 ### `watch` is a module, and the entry point imports no handlers
 
@@ -161,9 +194,27 @@ Every `.trinity/local.json` and `.trinity/observations.json` carries inline `*_m
 "sessions_meta": "⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars ⟧"
 ```
 
+**Nothing hand-edits that file.** `drone @memory config` is the verb surface over rollover limits — see [Rollover limit config verbs](#rollover-limit-config-verbs).
+
 **Source of truth:** `memory_json/custom_config/memory.config.json` — the operator-edited file *is* the runtime authority for rollover counts and entry char limits. `config_loader.DEFAULT_CONFIG` in code is the **regeneration seed**: when the file is genuinely *missing*, `load()` rebuilds it in full from those defaults so there is always a real file to edit. A file that *exists* but cannot be read — for **any** reason: bad syntax, bad bytes, bad permissions — is never written over (DPLAN-0206 red flag, `json_structure` v3.0.0) and never raises at the caller. `load()` logs an ERROR, serves defaults in memory, and leaves the bytes alone for the operator to fix; healing a stray comma must not cost them their per-branch tuning. `rollover push` refuses on the same condition rather than rebuilding from the seed. A file that parses is never rewritten either, so operator edits persist, and anything it omits is deep-merged from the defaults. Tab strings are *generated* from the effective config, never hand-written.
 
 **Sections:** `todos_meta` (rollover OFF — operational, never trimmed), `key_learnings_meta`, `sessions_meta`, `observations_meta` (all rollover ON).
+
+### One resolver, because the tab is an instruction
+
+A tab is written **into** the agent's own memory file, where it reads as an instruction about that
+agent's limits — so a tab naming a number the engine does not enforce is a lie in the one place an
+agent trusts. `render_tab` therefore asks `config_loader.resolve_limits()` and never re-derives
+anything; that is the same function behind `config get`, itself pinned against
+`detector._should_rollover` with the engine as the test oracle.
+
+Until 2026-08-16 it carried its own lookup and drifted two ways (found by @devpulse's wiring
+research, both reproduced before fixing): it fell back per-branch-**dict** rather than
+per-**file-key**, so a `per_branch` entry missing its `local` block ignored the defaults the engine
+would have used; and it hard-defaulted a missing `count` to **15**, printing a limit that did not
+exist. Where no limit is configured the tab now says `no entry limit configured` rather than naming
+a number. `TestTabAgreesWithTheEngine` pins all of it, including a guard that fails if a `count`
+fallback is ever reintroduced into this file.
 
 ### Two value flows
 
@@ -185,6 +236,125 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ---
 
+## Rollover limit config verbs
+
+`drone @memory config` is the verb surface over the rollover entry-count limits in
+`memory.config.json`, so nothing hand-edits that file (DPLAN-0302). @api execs these verbs to serve
+the BAUD settings panels, which makes **the CLI output and the refusal sentences the API contract** —
+change them and something downstream breaks.
+
+```bash
+drone @memory config                             # Introspection — the three verbs
+drone @memory config --help                      # Full usage
+drone @memory config get                         # Defaults + every branch that deviates
+drone @memory config get @devpulse               # One branch's EFFECTIVE limits, each marked
+drone @memory config set @devpulse sessions 25   # Override one branch
+drone @memory config set-default sessions 25     # Change the global default
+
+drone @memory config get --json                  # Machine surface (see below)
+drone @memory config get @devpulse --json
+drone @memory config set @devpulse sessions 25 --json
+drone @memory config set-default sessions 25 --json
+drone @memory rollover push --json
+```
+
+**Settable types — exactly three:** `sessions`, `key_learnings`, `observations`. `auto_compact_cap`
+is displayed read-only and preserved across writes, but is not settable in v1.
+
+**Bounds:** `1 <= count <= 100`. Zero would roll over every entry immediately; past 100 rollover
+stops being rollover. Unknown branches are refused against the registry — registry is truth.
+
+**Effective limits resolve per FILE KEY, not per leaf key** — `config get` mirrors
+`monitor/detector.py` `_should_rollover` exactly. If `per_branch[branch]["local"]` exists at all,
+`defaults["local"]` is never consulted for that branch, so a per-branch entry carrying only
+`sessions` leaves `key_learnings` with *no* limit rather than the default one. A deep merge here
+would report a limit the engine does not enforce; `test_matches_the_detector_on_a_real_file` pins
+the two together with the engine as the oracle.
+
+**`[OVERRIDE]` is decided by VALUE**, not by provenance: all 17 branches carry a materialized
+`per_branch` entry, so marking every one an override would be pure noise. A value is an override
+when it differs from the corresponding default.
+
+**`set-default` does not touch `per_branch`.** It changes `defaults` only — which means already
+materialized branches keep their old numbers and start reporting as `[OVERRIDE]`. `rollover push`
+remains the one explicit fleet-wide reset that brings every branch back to the defaults; its
+semantics are unchanged. Writes go through `config_loader._write_config_file` (atomic tmp +
+`os.replace`) and inherit the no-clobber contract: a config that exists but cannot be read is
+refused, never rewritten.
+
+**Apply timing:** limits take effect on the next rollover run (daemon tick) — there is no
+immediate-kick verb in v1. The `*_meta` tab strings in `.trinity/` files are likewise refreshed by
+the next rollover / sync-lines / push-templates run, so a freshly changed limit is live in the
+engine before it is visible in the tab text.
+
+### `--json` — the machine surface
+
+`config get`, `config get @branch`, `config set`, `config set-default` and `rollover push` all take
+`--json`. It exists because @api serves BAUD's memory-settings screens from these verbs and was
+**reading the rendered human output** — every wording change was a silent breakage waiting to happen.
+
+**`ok` is the machine success signal.** Refusals exit 0 branch-wide (that ruling is not this arc's to
+change), so an exit code tells a caller nothing and the old alternative was inferring failure from
+output *shape*. Every payload carries `ok` and `verb`; a refusal is `ok: false` plus `error` and
+`suggestion` — **the exact sentences the human path prints**, because those are the published
+contract. `suggestion` is always present, `null` where the refusal genuinely has no remedy line
+(the unreadable-config refusal is the one such case).
+
+**The flag rides in any slot** and is stripped before positional parsing, so
+`config set @memory sessions 25 --json` parses identically to the same line without it.
+**`--help` still outranks `--json`**: `config set @memory sessions 25 --help --json` prints help and
+writes neither the config nor a payload — same rule that stopped `rollover push --help` from
+performing the fleet-wide reset it was being asked to describe.
+
+**Exactly one JSON document reaches stdout** — no panels, no banners, nothing else, and stderr stays
+silent. The payload never travels through Rich: the shared console is width-80 with
+`is_terminal=False`, so it hard-wraps a long document and a wrap landing inside a string value
+inserts a newline *into* the value; it also parses markup, so a `[...]` token inside a string is
+eaten as a style name. Both corruptions are invisible to a test that asserts on the string handed to
+the printer, so `rollover._emit()` writes through `sys.stdout` and the tests assert on what reached
+the pipe.
+
+```jsonc
+// config get --json
+{"ok": true, "verb": "config get",
+ "defaults": {"sessions": {"count": 15, "auto_compact_cap": 3},
+              "key_learnings": {"count": 15}, "observations": {"count": 15}},
+ "overrides": {"devpulse": {"sessions": {"count": 25, "default_count": 15,
+                                         "is_override": true, "source": "per_branch"}}}}
+
+// config get @memory --json
+{"ok": true, "verb": "config get", "branch": "memory",
+ "limits": {"sessions": {"count": 15, "default_count": 15, "is_override": false,
+                         "source": "per_branch", "auto_compact_cap": 3},
+            "key_learnings": {...}, "observations": {...}}}
+
+// config set @memory sessions 25 --json
+{"ok": true, "verb": "config set", "branch": "memory",
+ "entry_type": "sessions", "count": 25, "pushed": false}
+
+// config set-default sessions 25 --json
+{"ok": true, "verb": "config set-default", "entry_type": "sessions", "count": 25, "pushed": false}
+
+// rollover push --json
+{"ok": true, "verb": "rollover push", "branches": 17}
+
+// any refusal
+{"ok": false, "verb": "config set", "error": "Unknown branch: @wizard",
+ "suggestion": "Registry is truth — run 'drone systems' to list branches"}
+```
+
+`overrides` holds only the branches that deviate — `{}` when none do — and inside a branch only the
+entry types that actually deviate, the same rule the rendered OVERRIDES block applies. `count` is
+`null` when no limit is configured: the resolution is per FILE KEY, so a per-branch entry carrying
+only `sessions` leaves `key_learnings` with *no* limit, and reporting `15` there would claim
+enforcement that does not happen. `auto_compact_cap` appears only where one is set (`sessions`).
+
+`pushed` is always `false` on both write verbs and states the delivery semantics in data:
+`set-default` reaches **no** branch — `rollover push` is what delivers it. It is reported by
+`config_loader`, not synthesized in the module, so the payload cannot drift from what the writer did.
+
+---
+
 ## Integration Points
 
 **Depends on:**
@@ -197,6 +367,7 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 - All branches — rollover archival when `.trinity/` files hit limits
 - All branches — semantic search across archived memories
 - All branches — `.trinity/` template distribution and sync
+- `@daemon` — branch health check (entry-count rollover status + entry-size cap violations) via `apps/modules/health.py`'s `get_branch_health(branch_name)`, since seedgo blocks handler-to-other-branch-handler imports and daemon's own handlers cannot reach `handlers/monitor/detector.py` / `handlers/json/lint_handler.py` directly
 
 **ML dependencies (memory `.venv/` only):**
 - `fastembed` — ONNX embeddings (model: `sentence-transformers/all-MiniLM-L6-v2`)
@@ -207,9 +378,9 @@ Returns defaults (not per-branch overrides) — appropriate for template resolut
 
 ## Quality
 
-- **Tests:** 997 passed, 0 failures, 0 skips
-- **Seedgo:** 100%. No new bypass rules were added to reach it.
-- **Bypass registry:** 111 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+- **Tests:** 1070 passed, 0 failures, 5 skipped (2026-08-16). The 5 skips are the parked symbolic-fragments tier and its embedder — see `.archive/parked_symbolic_20260814/`.
+- **Seedgo:** 100%. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
+- **Bypass registry:** 113 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
 
 ### Dead code, archived not deleted (2026-08-13)
 

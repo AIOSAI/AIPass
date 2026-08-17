@@ -609,6 +609,7 @@ attributed to nobody.
 
 | Date | Action | Result |
 |------|--------|--------|
+| 2026-08-16 | Dispatch 643f9e7a (@devpulse) -- torn-write json_handler, final sweep leg | json_handler v1.1.0 -> v1.2.0, both write sites routed through `_atomic_write_json`; measured 842/1075 reads unusable (78.3%) before, 0/1120 after on the same harness; 29 new tests in test_json_durability.py, 13 red first; 1691 tests, audit 100%. Template question answered NO -- no implementation template exists. Raise-after-pass CONFIRMED and reproduced: 100 vs 60 on a 5-file corpus |
 | 2026-08-14 | Dispatch 28225ed5 (@devpulse) -- night shift item 5 | Swallowing except fixed (crash now attributable, score untouched by design); log_structure revived observe-only, 0 score effect proven on re-measured audits; post-check found DEAD since 0095139f -- S86 de-score account corrected; 1662 tests |
 | 2026-08-13 | Mail 28cce6ae (@devpulse) + 2d282aea (@aipass) | dispatch_*.log excluded from the local-log count (@cli only branch of 17 affected); @aipass's 1-of-13 measured and REFUSED as a false-negative report -- router exemption working as designed; runtime-state sweep queued and flagged pre-proof |
 | 2026-08-13 | Dispatch reply 4c2e258c (@cli) | Both my findings confirmed + fixed by them; they returned 2 checker bugs of mine -- help_flag arm (e) shipped (0/152 fleet impact), log_structure de-scored to the info channel (runtime-state dependence removed). @cli 99% -> 100%. Corrected myself: arm (e) does NOT cover their real file |

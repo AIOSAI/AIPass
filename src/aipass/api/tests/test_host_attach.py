@@ -95,7 +95,7 @@ def cat_session(quiet: Any):
     whose behaviour under read, write and hangup is identical to tmux's, and it
     cannot touch anybody's session if a test goes wrong.
     """
-    with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+    with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
         session = host_attach.open_attach("api", cwd=None)
         try:
             yield session
@@ -141,6 +141,87 @@ class TestTheCommandIsTheDesktopsCommand:
     def test_an_address_form_resolves_to_the_same_room(self) -> None:
         """'@memory' and 'memory' are one room, never two."""
         assert host_attach.room_name("@memory") == host_attach.room_name("memory")
+
+    def test_external_rooms_carry_the_project_scope(self) -> None:
+        """
+        THE DESKTOP'S OWN TEST VECTORS, copied from `room_names_are_tmux_safe`
+        and `external_rooms_carry_the_project_scope` in @baud's lib.rs. Two
+        implementations of one rule stay honest by sharing examples: anchor
+        rooms keep their historical plain names, an external project marks its
+        rooms so same-named branches can never collide, and '.'/':' (tmux
+        target syntax) flatten to '-' in both name halves.
+        """
+        assert host_attach.room_name("vera", "vera-studio") == "baud-vera-studio-vera"
+        assert host_attach.room_name("chess", "chess") == "baud-chess-chess"
+        assert host_attach.room_name("x", "a.b:c") == "baud-a-b-c-x"
+        assert host_attach.room_name("AIPASS.admin") == "baud-AIPASS-admin"
+        assert host_attach.room_name("a:b c") == "baud-a-b-c"
+
+    def test_a_scoped_command_targets_the_scoped_room_everywhere(self) -> None:
+        """
+        Every `-t` in the chained argv must carry the SCOPED name — a chain
+        that created `baud-baud-baud` but set mouse on `baud-baud` would
+        configure a stranger's room (the exact species of the no-dash-t bug).
+        """
+        command = host_attach.attach_command("baud", "baud")
+
+        assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-baud-baud"]
+        for chained in _chained(command):
+            if "-t" in chained:
+                assert chained[chained.index("-t") + 1] == "baud-baud-baud"
+
+    def test_shell_rooms_live_in_their_own_namespace(self) -> None:
+        """
+        `baud-shell-` is a namespace the fleet scan can never mistake for an
+        agent: the scan matches agent rooms by EXACT name and skips every other
+        'baud-' session, so a shell shows up nowhere as a live claude or an
+        outside room. The project is always in the name — anchor included —
+        because two projects can each have a devpulse, and the shell's name
+        must say which floor it stands on. Same sanitize charset as agent
+        rooms: one rule, two namespaces.
+        """
+        assert host_attach.shell_room_name("AIPass") == "baud-shell-aipass"
+        assert host_attach.shell_room_name("aipass", "devpulse") == "baud-shell-aipass-devpulse"
+        assert host_attach.shell_room_name("TESTING", "testing") == "baud-shell-testing-testing"
+        assert host_attach.shell_room_name("a.b:c", "@x") == "baud-shell-a-b-c-x"
+
+    def test_monitor_targets_are_branch_lists_or_commons(self) -> None:
+        """
+        THE DESKTOP'S OWN FENCE VECTORS, copied from
+        `monitor_targets_are_branch_lists_or_commons` and
+        `monitor_target_fence_refuses_command_shapes` in @baud's pty.rs. Two
+        implementations of one charset stay honest by sharing examples.
+        """
+        assert host_attach.valid_monitor_target("commons")
+        assert host_attach.valid_monitor_target("seedgo")
+        assert host_attach.valid_monitor_target("seedgo,cli")
+        assert host_attach.valid_monitor_target("ai_mail")
+        assert not host_attach.valid_monitor_target("")
+        assert not host_attach.valid_monitor_target("seedgo; rm -rf /")
+        assert not host_attach.valid_monitor_target("SEEDGO")
+        assert not host_attach.valid_monitor_target("a b")
+        assert not host_attach.valid_monitor_target("../etc")
+
+    def test_the_watch_command_is_the_desktops_command(self) -> None:
+        """
+        `drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
+        command, minus its login shell: this server was started BY drone, so
+        drone resolves from its own PATH and no shell ever sees the target.
+        """
+        assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
+
+    def test_a_shell_command_targets_the_shell_room_everywhere(self) -> None:
+        """
+        The shell lane reuses the agent lane's argv builder, so the mouse and
+        window-size lessons hold there too — pinned against the same
+        no-dash-t species, on the shared builder directly.
+        """
+        command = host_attach.client_command("baud-shell-aipass")
+
+        assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-shell-aipass"]
+        for chained in _chained(command):
+            assert "-t" in chained, f"chained command with no target: {chained}"
+            assert chained[chained.index("-t") + 1] == "baud-shell-aipass"
 
     def test_the_command_is_attach_or_create(self) -> None:
         """
@@ -206,17 +287,20 @@ class TestTheCommandIsTheDesktopsCommand:
         A list argv cannot be word-split, so a branch name cannot become one.
 
         The registry already refuses non-citizens, but defence that costs
-        nothing is defence worth keeping.
+        nothing is defence worth keeping. Since the desktop's sanitize was
+        mirrored in (scoped rooms round), the hostile name ALSO flattens to
+        the tmux-safe charset first — same rule the desktop has always
+        applied — so the injection shape is disarmed twice: once by the
+        charset, and structurally by never touching a shell.
         """
         command = host_attach.attach_command("memory; rm -rf /")
 
         assert isinstance(command, list)
-        # The whole hostile name survives as ONE element rather than being split
-        # into a session name and a second command — including where it is
+        # The flattened name survives as ONE element — including where it is
         # re-used as the -t target of every chained option.
-        assert command[command.index("-s") + 1] == "baud-memory; rm -rf /"
+        assert command[command.index("-s") + 1] == "baud-memory--rm--rf--"
         for chained in _chained(command):
-            assert chained[chained.index("-t") + 1] == "baud-memory; rm -rf /"
+            assert chained[chained.index("-t") + 1] == "baud-memory--rm--rf--"
 
 
 def _evaluated_strings(module: Any) -> list:
@@ -352,7 +436,7 @@ class TestThePumpMovesRealBytes:
         Raising instead would turn an ordinary exit into an error the socket
         handler has to special-case.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["echo", "done"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["echo", "done"]):
             session = host_attach.open_attach("api")
 
         deadline = time.monotonic() + 5
@@ -395,7 +479,7 @@ class TestTheRoomCanActuallyHearAResize:
         import struct
         import termios
 
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
@@ -416,7 +500,7 @@ class TestTheRoomCanActuallyHearAResize:
         """
         calls = []
 
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             with patch.object(host_attach, "set_winsize", side_effect=lambda *a: calls.append("winsize")):
                 with patch.object(host_attach.subprocess, "Popen") as spawn:
                     spawn.side_effect = lambda *a, **k: calls.append("popen") or MagicMock(pid=1)
@@ -432,7 +516,7 @@ class TestTheRoomCanActuallyHearAResize:
         with no controlling tty. The preexec_fn does the setsid ITSELF, so the
         signal isolation is kept and the terminal is gained.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1)
                 host_attach.open_attach("api")
@@ -449,7 +533,7 @@ class TestTheRoomCanActuallyHearAResize:
         it, so the child still has to be in its own session — the fix moves that
         into the preexec_fn rather than dropping it.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
@@ -542,7 +626,7 @@ class TestTheRoomCanActuallyHearAResize:
         terminal. Before the fix this raised ENOTTY, which is the kernel saying
         'nobody is listening', and is precisely why SIGWINCH went nowhere.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
@@ -613,7 +697,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
     def test_hangup_sends_sighup_and_not_a_kill(self, quiet: Any) -> None:
         """The signal itself, captured — a detaching terminal sends SIGHUP."""
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         session.process = MagicMock()
@@ -623,7 +707,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
     def test_hangup_closes_the_descriptor(self, quiet: Any) -> None:
         """A leaked master descriptor per attach is a file handle leak per glance."""
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         descriptor = session.descriptor
@@ -647,7 +731,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
         That is why the guard is a flag checked first, not a try/except wrapped
         around the close.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         session.hangup()
@@ -667,7 +751,7 @@ class TestHangupDetachesAndNeverKillsTheRoom:
 
         Restarting the host API must never end somebody's attached session.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["cat"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
@@ -684,6 +768,60 @@ class TestOpeningAnAttach:
         """No default room — the same rule every room-targeting lane holds."""
         with pytest.raises(host_attach.AttachRefused):
             host_attach.open_attach("")
+
+    def test_a_room_override_needs_no_branch(self, quiet: Any, tmp_path: Path) -> None:
+        """
+        The shell door: a named room IS the subject, so the branch-required
+        rule steps aside. The session's label falls back to the room name —
+        a shell has no branch, and an empty label in the logs is a session
+        nobody can point at.
+        """
+        with patch.object(host_attach, "client_command", lambda room: ["cat"]):
+            session = host_attach.open_attach("", cwd=tmp_path, room="baud-shell-aipass")
+
+        try:
+            assert session.room == "baud-shell-aipass"
+            assert session.branch == "baud-shell-aipass"
+        finally:
+            session.hangup()
+
+    def test_a_watch_is_read_only_at_the_layer_that_counts(self, quiet: Any, tmp_path: Path) -> None:
+        """
+        The desktop holds the no-keyboard line twice — xterm's `disableStdin`
+        up top and `pty_write`'s refusal underneath, 'the one that counts'.
+        This is our underneath: a polite client never sends bytes, but the
+        SESSION refusing them is what makes tier-0 a contract rather than a
+        client habit.
+        """
+        with patch.object(host_attach, "monitor_command", lambda target: ["cat"]):
+            session = host_attach.open_monitor("seedgo", cwd=tmp_path)
+
+        try:
+            assert session.read_only
+            assert session.room == "watch-seedgo"
+            with pytest.raises(host_attach.AttachRefused):
+                session.write(b"echo hijacked\n")
+        finally:
+            session.hangup()
+
+    def test_a_watch_target_is_fenced_before_anything_spawns(self, quiet: Any) -> None:
+        """A refused target never reaches a PTY, let alone a process."""
+        with patch.object(host_attach.subprocess, "Popen") as spawn:
+            with pytest.raises(host_attach.AttachRefused):
+                host_attach.open_monitor("seedgo; rm -rf /")
+
+        spawn.assert_not_called()
+
+    def test_a_room_override_wins_over_the_naming_rule(self, quiet: Any, tmp_path: Path) -> None:
+        """A branch AND a room: the room decides the name, the branch the label."""
+        with patch.object(host_attach.subprocess, "Popen") as spawn:
+            spawn.return_value = MagicMock(pid=1234)
+            session = host_attach.open_attach("devpulse", cwd=tmp_path, room="baud-shell-aipass-devpulse")
+
+        command = spawn.call_args.args[0]
+        assert command[: command.index(";")] == ["tmux", "new-session", "-A", "-s", "baud-shell-aipass-devpulse"]
+        assert session.room == "baud-shell-aipass-devpulse"
+        assert session.branch == "devpulse"
 
     def test_a_missing_tmux_is_named_rather_than_shrugged_at(self, quiet: Any) -> None:
         """'Attach failed' with no subject is a support ticket."""
@@ -715,7 +853,7 @@ class TestOpeningAnAttach:
         A room created wherever the server happened to start is a shell in the
         wrong directory, which is worse than no shell — it looks right.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["pwd"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["pwd"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1234)
                 host_attach.open_attach("api", cwd=tmp_path)
@@ -727,7 +865,7 @@ class TestOpeningAnAttach:
         A client inheriting a bare TERM renders in the wrong capability set,
         which looks like an application bug rather than an environment one.
         """
-        with patch.object(host_attach, "attach_command", lambda branch: ["pwd"]):
+        with patch.object(host_attach, "attach_command", lambda branch, scope="": ["pwd"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1234)
                 host_attach.open_attach("api")
@@ -1239,3 +1377,266 @@ def test_the_pump_always_hangs_up() -> None:
 
     assert "finally:" in pump
     assert "session.hangup()" in pump
+
+
+class TestGlobalMissionControlIsReachable:
+    """
+    The watch lane must be able to express `drone @prax monitor run` — bare.
+
+    @baud measured this on the live host: the charset fence refused an empty
+    string and monitor_command always appended a target, so the desktop's own
+    default pane — global mission control, every branch at once — could not be
+    opened through this socket at all. They shipped the phone's door DISABLED
+    rather than quietly pointing it at one branch's monitor, which would have
+    rendered perfectly and been a lie. That call is why this is a small fix and
+    not an incident.
+    """
+
+    def test_no_target_drops_the_argument_entirely(self) -> None:
+        """The desktop's argv, character for character — nothing trailing."""
+        assert host_attach.monitor_command("") == ["drone", "@prax", "monitor", "run"]
+
+    def test_a_named_target_still_rides_last(self) -> None:
+        """The other half. One change must not cost the form that worked."""
+        assert host_attach.monitor_command("seedgo") == ["drone", "@prax", "monitor", "run", "seedgo"]
+
+    def test_the_synonym_is_deliberately_not_used(self) -> None:
+        """
+        @prax documents `run all` for the same thing. This lane mirrors the
+        DESKTOP's argv, not the synonym: if those two paths ever diverge on
+        @prax's side, the phone must diverge with the desk.
+        """
+        assert "all" not in host_attach.monitor_command("")
+
+    def test_the_charset_fence_is_still_a_faithful_mirror(self) -> None:
+        """
+        `valid_monitor_target` is mirrored from @baud's pty.rs character for
+        character, so it still refuses the empty string. Absence is asked ABOUT
+        somewhere else — folding "" into the fence would have been the shorter
+        diff and would have broken the mirror this lane's safety rests on.
+        """
+        assert not host_attach.valid_monitor_target("")
+
+    def test_the_global_watch_actually_opens(self, quiet: Any, tmp_path: Path) -> None:
+        """End to end through open_monitor, with no target at all."""
+        with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
+            session = host_attach.open_monitor(cwd=tmp_path)
+
+        try:
+            assert session.read_only
+            assert session.room == host_attach.GLOBAL_WATCH_LABEL
+        finally:
+            session.hangup()
+
+    def test_a_targetless_watch_is_named_not_blank(self, quiet: Any, tmp_path: Path) -> None:
+        """
+        'watch-' with nothing after it reads as a truncated name. A watch over
+        everything has a name of its own so a log line says what it was.
+        """
+        with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
+            session = host_attach.open_monitor("", cwd=tmp_path)
+
+        try:
+            assert session.room == "watch-all"
+            assert session.branch == "watch-all"
+        finally:
+            session.hangup()
+
+    @pytest.mark.parametrize(
+        "garbage",
+        ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all"],
+    )
+    def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str) -> None:
+        """
+        Making absence reachable must not make anything ELSE reachable.
+
+        The phone picks targets off the fleet snapshot; it never composes a
+        command line. These all still die in front of the PTY.
+        """
+        with patch.object(host_attach.subprocess, "Popen") as spawn:
+            with pytest.raises(host_attach.AttachRefused):
+                host_attach.open_monitor(garbage)
+
+        spawn.assert_not_called()
+
+    def test_whitespace_is_absence_not_a_target(self, quiet: Any, tmp_path: Path) -> None:
+        """A target of spaces is nobody named, which is the global form."""
+        with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
+            session = host_attach.open_monitor("   ", cwd=tmp_path)
+
+        try:
+            assert session.room == host_attach.GLOBAL_WATCH_LABEL
+        finally:
+            session.hangup()
+
+
+@fastapi_required
+class TestAWatchIsNotAnchorTooling:
+    """
+    The parked external-watch refusal, ruled against and measured out.
+
+    I refused an external project's watch on the reasoning that "a watch is
+    anchor tooling — @prax monitors the repo it lives in". Patrick's ruling
+    ("I run more watchers, in aipass or external projects") sent me to measure
+    it instead of arguing it, and the measurement killed the fence outright:
+
+      drone @prax monitor run baud   ->  "Live — scoped to BAUD, all levels"
+      drone @prax monitor run vera   ->  "Live — scoped to VERA, all levels"
+                                          "Branch scope: VERA is not a known
+                                           branch — nothing will be shown for
+                                           it. Check the spelling, or run
+                                           without a branch list to see
+                                           everything."
+
+    Both from the anchor, both from the project's own root — identical output,
+    so cwd was never the variable I believed it was. @prax refuses nothing and
+    already says exactly what it can and cannot show, ON THE SCREEN THE
+    OPERATOR IS LOOKING AT. My refusal was strictly worse than theirs: it
+    blocked the tenant case that works, and for the external case it would have
+    replaced an accurate live warning with a guess.
+    """
+
+    def test_a_tenant_project_watch_is_not_refused(self, quiet: Any, tmp_path: Path) -> None:
+        """BAUD lives in projects/ and @prax scopes to it. Measured, not assumed."""
+        with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
+            session = host_attach.open_monitor("baud", cwd=tmp_path)
+
+        try:
+            assert session.room == "watch-baud"
+        finally:
+            session.hangup()
+
+    def test_the_refusal_sentence_is_gone_from_the_socket_lane(self) -> None:
+        """
+        Grep-shaped because this fence lived in exactly one branch of one route
+        and the reasoning that justified it was measured false.
+
+        The phrase "anchor tooling" survives in a COMMENT explaining why the
+        fence was wrong, which is worth keeping — so this pins the refusal's
+        own distinctive words instead, and would fail if anyone re-raised it.
+        """
+        source = Path(host_server.__file__).read_text(encoding="utf-8")
+
+        assert "@prax monitors the seat, not" not in source
+
+    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any) -> None:
+        """
+        The parked refusal, through the real socket.
+
+        A read token is enough — a watch has no keyboard — and the project
+        rides along without being checked against the seat.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="read")
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_attach, "open_monitor") as spawn:
+                spawn.side_effect = host_attach.AttachUnavailable("stop here, the fence is what is under test")
+                client = TestClient(host_server.create_app())
+
+                with client.websocket_connect(
+                    "/v1/room/attach?kind=watch&branch=vera&project=VERA-STUDIO",
+                    subprotocols=["aipass.bearer", raw],
+                ) as socket:
+                    closed = socket.receive()
+
+        # Reaching the spawn AT ALL is the assertion: before this, the route
+        # refused on the project and open_monitor was never called.
+        spawn.assert_called_once()
+        assert "anchor tooling" not in closed["reason"]
+
+    def test_no_allowlist_of_watchable_projects_is_built_here(self) -> None:
+        """
+        @prax keeps the ruling on what it can monitor.
+
+        A second model of that would drift from @prax the first time they
+        changed it, and it would be answering a question this server has no way
+        to know. The watch lane reaches no census at all.
+        """
+        source = Path(host_attach.__file__).read_text(encoding="utf-8")
+
+        assert "resolve_branch" not in source
+
+
+@fastapi_required
+class TestTheOneSeatHostsAnyProjectsRoom:
+    """
+    Attach under the one-terminal ruling: any census-known project, tenant or
+    external. Written as part of the operate-lane un-fence, and the finding is
+    recorded here rather than smoothed over — this lane ALREADY did it. The
+    external door shipped with the attach train and resolves through
+    @baud's census; there was no seat check on it to remove.
+
+    So these are regression pins, not a fix. They exist because the ruling made
+    this behaviour load-bearing, and a lane nobody tested for it is one edit
+    away from losing it quietly.
+    """
+
+    def test_an_external_projects_room_reaches_the_spawn(self, store: Any) -> None:
+        """The census resolves it; the seat never gets a vote."""
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_server.host_fleet, "resolve_branch") as census:
+                census.return_value = {"name": "vera", "path": "/projects/vera/src/vera"}
+                with patch.object(host_attach, "open_attach") as spawn:
+                    spawn.side_effect = host_attach.AttachUnavailable("stop here, resolution is what is under test")
+                    client = TestClient(host_server.create_app())
+
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=vera&project=VERA-STUDIO",
+                        subprotocols=["aipass.bearer", raw],
+                    ) as socket:
+                        socket.receive()
+
+        census.assert_called_once_with("VERA-STUDIO", "vera")
+        assert spawn.call_args.kwargs["cwd"] == Path("/projects/vera/src/vera")
+
+    def test_the_room_carries_the_projects_scope(self, store: Any) -> None:
+        """
+        @baud's rule, their learning 22: an external room is namespaced by its
+        project, so a phone attach and a desktop attach cannot end up in two
+        different rooms for one card.
+        """
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_server.host_fleet, "resolve_branch") as census:
+                census.return_value = {"name": "vera", "path": "/projects/vera/src/vera"}
+                with patch.object(host_attach, "open_attach") as spawn:
+                    spawn.side_effect = host_attach.AttachUnavailable("stop here")
+                    client = TestClient(host_server.create_app())
+
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=vera&project=VERA-STUDIO",
+                        subprotocols=["aipass.bearer", raw],
+                    ) as socket:
+                        socket.receive()
+
+        assert spawn.call_args.kwargs["scope"] == "vera-studio"
+
+    def test_an_unknown_branch_in_a_known_project_still_refuses(self, store: Any) -> None:
+        """Widening which projects are reachable is not widening to nobody."""
+        from fastapi.testclient import TestClient
+
+        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
+            with patch.object(host_server.host_fleet, "resolve_branch", return_value=None):
+                with patch.object(host_attach, "open_attach") as spawn:
+                    client = TestClient(host_server.create_app())
+
+                    with client.websocket_connect(
+                        "/v1/room/attach?branch=nope&project=VERA-STUDIO",
+                        subprotocols=["aipass.bearer", raw],
+                    ) as socket:
+                        closed = socket.receive()
+
+        spawn.assert_not_called()
+        assert closed["code"] == 1008
+        assert "no branch named" in closed["reason"]

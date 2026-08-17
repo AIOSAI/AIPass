@@ -28,11 +28,6 @@ Projects from the AIPass family that chose to go public:
 | **Earmark** | Read code and docs aloud in VS Code with local Piper TTS — pause, resume, pick up where you left off. Ear + bookmark: the plan is notes anchored to where you paused. First public AIPass project. | [AIOSAI/earmark](https://github.com/AIOSAI/earmark) |
 | **aipass-site** | The [aipass.ai](https://aipass.ai) website — AIPass's front door on the web. | [AIOSAI/aipass-site](https://github.com/AIOSAI/aipass-site) |
 
-Projects in residence (private, not yet published):
-
-| Project | What it is |
-|---|---|
-| **Speakeasy** | System-wide voice-to-text: press a hotkey, speak, text lands at your cursor in any app. Local Whisper (faster-whisper), VAD, zero cloud. The voice-IN half of the loop Earmark's voice-OUT completes. Repo moved from ~/Projects/Speakeasy 2026-07-21, own git history intact. |
 
 ## Creating one
 

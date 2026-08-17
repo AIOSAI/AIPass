@@ -347,3 +347,78 @@ class TestUpdateDataMetrics:
         """Return value is True on success."""
         result = json_handler.update_data_metrics("metmod4", status="ok")
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: read-modify-write cycles must not lose updates
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentReadModifyWrite:
+    """log_operation / increment_counter / update_data_metrics all read a
+    document, change it in memory, and write the whole thing back. Without a
+    lock across that cycle, two callers each write back a copy missing the
+    other's change and the loser's entry is gone — silently, with both calls
+    returning True.
+
+    Not theoretical here: prax fires `startup` on the first log call of EVERY
+    process, and startup_log.json measured ~14 writes/min from concurrent
+    short-lived processes (S79). @api found the same defect in their own
+    json_handler (6cd8f22c, 2026-08-16) and named five more branches carrying
+    it; checking my own paths found it here too. Measured on the unfixed
+    handler: 100 appends asked, 62 on disk, 38 lost.
+
+    atomic_write_json already makes each individual write crash-safe. Atomic is
+    not the same as serialised — it stops a torn file, not a lost update.
+    """
+
+    WORKERS = 4
+    PER_WORKER = 25
+
+    def _run(self, target):
+        import threading
+
+        threads = [threading.Thread(target=target, args=(n,)) for n in range(self.WORKERS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    def test_concurrent_log_operations_lose_no_entries(self, json_handler, tmp_path):
+        """Every append asked for is on disk when the writers finish."""
+
+        def worker(n):
+            for i in range(self.PER_WORKER):
+                json_handler.log_operation(f"op_{n}_{i}", module_name="racetest")
+
+        self._run(worker)
+
+        log = json.loads((tmp_path / "racetest_log.json").read_text(encoding="utf-8"))
+        assert len({entry["operation"] for entry in log}) == self.WORKERS * self.PER_WORKER
+
+    def test_concurrent_increment_counter_reaches_full_total(self, json_handler, tmp_path):
+        """The classic lost update: N increments must total N."""
+
+        def worker(_n):
+            for _ in range(self.PER_WORKER):
+                json_handler.increment_counter("racecount", "hits", 1)
+
+        json_handler.ensure_module_jsons("racecount")
+        self._run(worker)
+
+        data = json.loads((tmp_path / "racecount_data.json").read_text(encoding="utf-8"))
+        assert data["hits"] == self.WORKERS * self.PER_WORKER
+
+    def test_concurrent_metric_writers_keep_every_key(self, json_handler, tmp_path):
+        """Distinct keys written concurrently all survive."""
+
+        def worker(n):
+            for i in range(self.PER_WORKER):
+                json_handler.update_data_metrics("racemetrics", **{f"k_{n}_{i}": i})
+
+        json_handler.ensure_module_jsons("racemetrics")
+        self._run(worker)
+
+        data = json.loads((tmp_path / "racemetrics_data.json").read_text(encoding="utf-8"))
+        written = [k for k in data if k.startswith("k_")]
+        assert len(written) == self.WORKERS * self.PER_WORKER

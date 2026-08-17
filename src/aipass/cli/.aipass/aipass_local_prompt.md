@@ -39,8 +39,9 @@ cli/
 │   │   ├── display.py    # header, success, error, warning, fatal, section, exit codes
 │   │   └── templates.py  # operation_start, operation_complete
 │   └── handlers/
-│       └── json/         # JSON lifecycle (CRUD, validation, rotation)
-└── tests/                # 141 tests across 7 files (140 pass, 1 skip)
+│       ├── json/         # JSON lifecycle (CRUD, validation, atomic writes, rotation)
+│       └── cli/          # help_flags.py — whole-sequence help detection
+└── tests/                # 177 tests across 10 files (185 pass, 1 skip at runtime)
 ```
 
 Two-tier design: `apps/modules/` is the public API. `apps/handlers/` is internal — don't import directly. See README for full tree.
@@ -48,7 +49,10 @@ Two-tier design: `apps/modules/` is the public API. `apps/handlers/` is internal
 # Critical Rules
 
  - `apps/modules/` must not import `aipass.prax` — circular dependency (prax depends on cli). Bypassed in `.seedgo/bypass.json`.
- - `json_handler.py` must not import prax either — same circular chain. Callers log via prax.
+ - `json_handler.py` must not import prax either — same circular chain. Callers log via prax. Its failed writes RAISE rather than log.
+ - Every json_handler write goes through `_atomic_write_json()` (mkstemp in the target dir + `os.replace`). Never `open(path, "w")` — that truncates first, and the regenerate path turns a torn read into data loss.
+ - Help gates scan the WHOLE arg sequence via `wants_help(None, args)` — never `args[0]` alone.
+ - Display tests assert VISIBLE characters, never raw bytes. Build captures with `make_capture_console()` from `tests/conftest.py`; its `get_output()` strips ANSI. A raw-bytes assert makes the suite a function of the shell (`FORCE_COLOR=3` bolds numbers, so `created: 5` is not literally present).
  - Import json_handler as module: `from aipass.cli.apps.handlers.json import json_handler` then `json_handler.log_operation(...)`. Seedgo AST checker matches this exact pattern.
  - `error()` suggestion param must not include "Try:" prefix — `display.py` adds it automatically.
  - `handle_command()` lives in `display.py` and `templates.py`, not `cli.py` — `route_command()` dispatches to them. Both are in `SERVICE_MODULES`, so bare `drone @cli` lists them under Services, not Discovered Modules (0 is correct, not a bug).

@@ -443,8 +443,13 @@ class TestLogVolume:
 
         assert not [c for c in mock_logger.info.call_args_list if c.args and "complete:" in c.args[0]]
 
-    def test_warnings_and_errors_are_never_suppressed(self, mock_logger, monkeypatch):
-        """Blocks stay loud at default verbosity — that is the whole point."""
+    def test_blocks_are_never_suppressed(self, mock_logger, monkeypatch):
+        """Blocks stay RECORDED at default verbosity — that is the whole point.
+
+        The level dropped to INFO (a gate that blocks is the gate working), but
+        the record must still land. INFO here is a direct logger.info, NOT the
+        _verbose helper, so the verbosity switch cannot swallow it.
+        """
         monkeypatch.delenv("AIPASS_HOOKS_VERBOSE_LOG", raising=False)
         config = {
             "hooks_enabled": True,
@@ -462,7 +467,59 @@ class TestLogVolume:
             }
             dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
 
-        assert [c for c in mock_logger.warning.call_args_list if c.args and "BLOCKED" in c.args[0]]
+        assert [c for c in mock_logger.info.call_args_list if c.args and "blocked by" in c.args[0]]
+
+
+class TestBlockSeverity:
+    """A gate BLOCK is chosen, working behavior — it must not log at a level that
+    escalates. Verified against the live log before reclassing, per compass #277:
+    373 blocks spread over all 10 logged days, every working day, not one stuck
+    session. The crash path beside it stays ERROR, which is the real signal."""
+
+    CONFIG = {
+        "hooks_enabled": True,
+        "PreToolUse": {"gate": {"enabled": True, "command": "block", "matcher": ""}},
+    }
+
+    def _dispatch(self, stdout: str):
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 2, "stdout": stdout, "stderr": "", "elapsed_ms": 1}
+            return dispatch("PreToolUse", '{"tool_name":"Edit"}', self.CONFIG)
+
+    def test_intentional_block_does_not_log_at_warning(self, mock_logger):
+        """The reclass itself: 390 lifetime WARNINGs and 6 digests for the gate working."""
+        self._dispatch(json.dumps({"decision": "block", "reason": "nope"}))
+        assert not [c for c in mock_logger.warning.call_args_list if c.args and "block" in c.args[0].lower()]
+
+    def test_intentional_block_still_records_at_info(self, mock_logger):
+        """Reclass must not delete the evidence — INFO is retained in the log file."""
+        self._dispatch(json.dumps({"decision": "block", "reason": "nope"}))
+        assert [c for c in mock_logger.info.call_args_list if c.args and "blocked by" in c.args[0]]
+
+    def test_block_line_carries_the_reason(self, mock_logger):
+        """Neither severity is diagnostic without knowing WHAT was blocked."""
+        self._dispatch(json.dumps({"decision": "block", "reason": "Direct writes to inbox.json are blocked."}))
+        calls = [c for c in mock_logger.info.call_args_list if c.args and "blocked by" in c.args[0]]
+        assert any("inbox.json" in str(c.args[-1]) for c in calls)
+
+    def test_block_line_uses_only_the_first_reason_line(self, mock_logger):
+        """Gate reasons are multi-line; a log line is not a place to dump them."""
+        self._dispatch(json.dumps({"decision": "block", "reason": "first line\nsecond line\nthird"}))
+        calls = [c for c in mock_logger.info.call_args_list if c.args and "blocked by" in c.args[0]]
+        assert calls and all("second line" not in str(c.args[-1]) for c in calls)
+
+    def test_block_without_reason_does_not_crash(self, mock_logger):
+        """A gate may block with no reason field — the engine still records it."""
+        self._dispatch(json.dumps({"decision": "block"}))
+        assert [c for c in mock_logger.info.call_args_list if c.args and "blocked by" in c.args[0]]
+
+    def test_crash_at_exit_2_stays_error(self, mock_logger):
+        """GUARD: the reclass must not soften a genuine crash. Non-block exit=2."""
+        self._dispatch("not json at all")
+        assert [c for c in mock_logger.error.call_args_list if c.args and "CRASHED" in c.args[0]]
 
 
 class TestCompletionCount:

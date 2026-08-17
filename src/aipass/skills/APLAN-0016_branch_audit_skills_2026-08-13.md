@@ -49,7 +49,7 @@ files out of 101.
 ### Summary
 - 101 Python files / 31k lines: `apps/` 20 files / 2.3k, `lib/` 63 files / 26k, `tests/` 18 files / 2.7k.
 - The branch is small; the **telegram skill is 84% of the code** and carries the only live external surface.
-- 6 skills discovered: branch_health, drone_commands, github, inbox_check, system_status, telegram.
+- 7 skills discovered: branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram (screen_lock added S106).
 - Every documented command was run live this session, including error and refusal paths.
 
 ### Architecture
@@ -63,7 +63,7 @@ the swallowed exit code below was a real, scriptable defect and not cosmetic.
 - All 3 scaffold tiers produce valid skills; invalid name, duplicate target and unknown template each refuse correctly.
 - The telegram handler refuses unknown actions instead of falling through — the safe pattern.
 - `/suspend` is grounded and stays grounded: `_suspend_enabled()` (base_bot.py:2473) gates it, and a disabled bot answers with a refusal instead of suspending the machine. Verified present this session. **Never live-test `/suspend` without Patrick** — the config flag is the brake, not a convention.
-- Suite is large and fast (1351 tests, ~2m40s) and has caught real regressions three sessions running.
+- Suite is large and fast (1391 tests, ~2m15s as of S107) and has caught real regressions three sessions running.
 
 ## Issues Found
 
@@ -79,6 +79,9 @@ the swallowed exit code below was a real, scriptable defect and not cosmetic.
 - [ ] **`user_message_relay` blocks the prompt path for nothing** (raised by @hooks 2026-08-14, measured: 0 stdout on 18/18 runs). Verified independently in my own file: no `print(`/`sys.stdout` anywhere, so it cannot inject — yet it is registered as a UserPromptSubmit *injector* and does `urlopen(..., timeout=10)` at line 119. If Telegram is slow, every prompt in a TG branch waits before the model sees anything, and a hook that dies just injects nothing, so nobody would notice. Fix shape agreed: keep the dedupe decision in the parent, move the send to a detached child (@memory's `auto_process.py:140` is the reference; no lock needed since the parent decides before sending). **Mapped in full at S103 as DPLAN-0299** (dispatch 74a136dd, MAP ONLY — no code touched). That map adds two things the brief lacked: line 209 returns `"sound": "user message relay"`, a real foreground contribution that is success-gated, and the dedupe hash is success-gated too — so a detached child converts both semantics. Build blocked on Patrick's ruling on the sound. Not built yet — needs its own FPLAN.
 
 ### Resolved
+
+- [x] **Torn writes in `apps/handlers/json/json_handler.py`** (S107, fleet defect 90c9e40d axis 1, dispatch 138467c4 — handler v1.0.0 → v1.1.0). `open(path, "w")` truncated in place at BOTH write sites, and one of them is the regenerate path that answers an unreadable document with a template — so a torn read became permanent data loss. **Measured here before touching it**, 2 writers + 2 readers, three runs: 86.9% / 90.2% / 91.4% of concurrent reads empty or unparseable (fleet spread: @api 23%, @cli 58%, @commons 80%, @daemon 92.5%). Every write now routes through `_atomic_write_json` (mkstemp in the target's own dir → `os.replace`, staged file unlinked in a `finally` if it never landed, raises on failure). Same probe after: 0 unusable across 1,187 reads. 22 red-first tests in `tests/test_json_durability.py`. Callers unchanged — both sites keep their bool contract, pinned by two new tests.
+- [x] **The fleet's source-guard regex was blind to a real offender** (S107). The `[^)]*?` guard every branch carries stops at the first `)`, so `open(get_json_path(...), "w")` — a nested call before the mode — reads as clean. Found by planting exactly that line in the handler and watching the guard stay GREEN. Mine now allows one level of balanced parens and collapses whitespace first (multi-line calls), re-proved by a control run that goes red on the planted line and green after revert. **Reported to @devpulse for the other branches** — their guards still carry the hole.
 
 - [x] **Bare `/start` spawned an interactive ghost in @aipass's home** (S103 — root-caused by @aipass's APLAN-0018, fixed here). `branch_arg or "aipass"` meant the `/start` every Telegram client sends on opening a chat defaulted to @aipass, then spawned `claude -c || claude` detached and interactive in that branch's directory. The ghost tripped wake.py's occupancy gate, so @aipass's real headless wake was REFUSED — 6 measured occurrences 07-29 to 08-11, which Patrick had been killing by hand. Bare `/start` now spawns nothing and answers with usage; `/start <branch>` unchanged.
 - [x] **Bare `/kill` would have killed @aipass's session** (S103) — same `or "aipass"` default one line below, not in the brief. A destructive verb must never pick its own target. Bare `/kill` now refuses. Found by reading the neighbouring line, confirmed by a test whose captured log showed a real `kill-session -t aipass-aipass`.

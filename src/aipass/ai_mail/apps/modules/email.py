@@ -258,10 +258,16 @@ def handle_view(args: List[str]) -> bool:
         # primary read surface: it must survive any content a sender can type.
         console.print(f"\n{email_data.get('message', '')}", markup=False)
         console.print("=" * 70)
-        console.print(f"[dim]Status: opened | ID: {args[0]}[/dim]")
-        console.print(f'[dim]To reply: drone @ai_mail reply {args[0]} "your message"[/dim]')
-        console.print(f"[dim]To close: drone @ai_mail close {args[0]}[/dim]")
-        json_handler.log_operation("email_viewed", {"message_id": args[0]})
+        # Echo the message's OWN id, never args[0] — `view latest` printed
+        # "ID: latest", and a lookup by sent_id would otherwise print the
+        # sender's id back as though it were this mailbox's name for it.
+        resolved_id = email_data.get("id", message_id)
+        sent_id = email_data.get("sent_id")
+        origin = f" | sender's id: {sent_id}" if sent_id else ""
+        console.print(f"[dim]Status: opened | ID: {resolved_id}{origin}[/dim]")
+        console.print(f'[dim]To reply: drone @ai_mail reply {resolved_id} "your message"[/dim]')
+        console.print(f"[dim]To close: drone @ai_mail close {resolved_id}[/dim]")
+        json_handler.log_operation("email_viewed", {"message_id": resolved_id})
         return True
     except BrokenPipeError as e:
         logger.warning("[email] view broken pipe: %s", e)

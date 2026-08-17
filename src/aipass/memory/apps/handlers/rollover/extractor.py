@@ -251,15 +251,44 @@ def _extract_tail_excess(
 
     reason = "numbered above head" if not date_guard else "dated today or numbered above head"
     archivable = []
+    refused: list = []
     for entry in candidate_tail:
         if _is_misplaced_entry(entry, head_number, date_guard=date_guard):
-            logger.warning(
-                f"[extractor] {branch_key}/{array_name}: refusing to archive misplaced entry "
-                f"({reason} #{head_number}) — treating as a fresh "
-                f"write, not oldest history: {entry}"
+            refused.append(entry)
+            # Per-entry detail at DEBUG: recoverable when someone is actually
+            # debugging, without a wall of it on every routine run.
+            logger.debug(
+                f"[extractor] {branch_key}/{array_name}: refused misplaced entry ({reason} #{head_number}): {entry}"
             )
         else:
             archivable.append(entry)
+
+    # ONE line per array per run, not one per entry. The valve refusing is
+    # normal and can be routine at scale; a warning PER refusal turns a healthy
+    # refusal into a runaway log (2026-08-16: 97 lines in a single second, each
+    # carrying a full ~800-byte entry, for one external branch writing its
+    # entries at the wrong end). The count is the signal; the entries are DEBUG.
+    if refused:
+        drained = len(archivable)
+        summary = (
+            f"[extractor] {branch_key}/{array_name}: held back {len(refused)} of "
+            f"{len(candidate_tail)} candidates as misplaced ({reason} #{head_number}) "
+            f"— treating them as fresh writes, not oldest history"
+        )
+        if drained:
+            logger.warning(summary)
+        else:
+            # Nothing drained and something was refused: the array is over its
+            # limit, so the detector will re-fire on this same file forever and
+            # refuse the same entries again. That is a skip loop, and it is the
+            # one thing in here worth alarming on — it used to be invisible,
+            # buried inside the per-entry wall it caused.
+            logger.warning(
+                f"{summary}. NOTHING DRAINED — this file is over its limit and no "
+                f"candidate is archivable, so rollover will re-fire and refuse the same "
+                f"entries every run. Newest entries are at the tail: the array is not "
+                f"newest-first, or its entries carry no usable 'number'."
+            )
     return archivable
 
 

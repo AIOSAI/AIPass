@@ -190,7 +190,7 @@ def wake_branch(branch: str, project: str, message: str = "", fresh: bool = Fals
         VerbUnavailable: The door itself could not be reached.
     """
     require_project(project)
-    target = citizen_address(branch)
+    target = citizen_address(branch, project)
 
     if len(message) > MAX_MESSAGE_CHARS:
         raise VerbRefused(f"Message is {len(message)} characters, over the {MAX_MESSAGE_CHARS} character cap")
@@ -263,7 +263,7 @@ def kill_room(branch: str, project: str) -> Dict[str, Any]:
         VerbUnavailable: The switch is closed, or @baud's door could not be run.
     """
     require_project(project)
-    target = citizen_address(branch)
+    target = citizen_address(branch, project)
 
     if not KILL_SEAM_READY:
         # Checked before the exec, not after — the point of a kill switch is
@@ -373,23 +373,28 @@ def require_project(project: str) -> None:
 
     @baud's rule, paid for with a killed session: a room name carries its
     project scope, and resolving it against anything else names a DIFFERENT
-    room. Stricter than the read lane on purpose — reading the wrong project
-    returns the wrong bytes, while ending or attaching to a session in it
-    reaches somebody else's work.
+    room.
+
+    WHICH project is no longer this function's business — Patrick's
+    one-terminal ruling (2026-08-16): "the flow is ONE terminal; it hosts the
+    agent I choose, no matter where I spawn it... Baud is an aipass tenant in
+    projects/, vera is outside, external - that should NOT matter. When you
+    block you create friction." So the seat comparison is gone and any project
+    @baud's census knows is reachable.
+
+    THAT THE PROJECT WAS NAMED AT ALL IS STILL ENFORCED, and widening the
+    reachable set makes that stricter rather than looser: when only one project
+    could be meant, an inferred seat was merely sloppy. Now that any project can
+    be meant, an inferred one would silently pick the wrong room.
 
     Args:
         project: Project name from the request.
 
     Raises:
-        VerbRefused: Empty, or a project this server does not serve.
+        VerbRefused: No project named.
     """
     if not project or not project.strip():
         raise VerbRefused("A project is required on this verb — it is never inferred from the server's seat")
-
-    if project.strip().lower() != host_reads.seated_project().lower():
-        raise VerbRefused(
-            f"This server is seated in {host_reads.seated_project()!r} and does not serve project {project!r}"
-        )
 
 
 # ==============================================
@@ -413,19 +418,28 @@ def _sentence(text: Any) -> str:
     return str(text or "").strip()
 
 
-def citizen_address(branch: str) -> str:
+def citizen_address(branch: str, project: str = "") -> str:
     """
     Validate a branch name and return its citizen address.
 
+    Existence is checked through the READ lane's resolver, which is the one
+    implementation of where a branch lives: the seated citizen registry for the
+    seat, @baud's census for any other project. That door grew its foreign half
+    earlier the same evening, so the operate lane inherited cross-project
+    resolution rather than growing a second copy of it.
+
     Args:
         branch: Caller-supplied branch name or email.
+        project: The branch's project. Empty means the seat.
 
     Returns:
         The address form, e.g. '@memory'.
 
     Raises:
-        VerbRefused: Empty, or not a registered citizen.
-        VerbUnavailable: The registry could not be read.
+        VerbRefused: Empty, not a registered citizen, or a project that has no
+            branch by that name.
+        VerbUnavailable: The registry or the census could not be read — an
+            unknown project arrives here in @baud's own words.
     """
     if not branch or not branch.strip():
         # No verb in this lane picks its own target. Purchased with an incident:
@@ -433,7 +447,7 @@ def citizen_address(branch: str) -> str:
         raise VerbRefused("A branch name is required — this lane has no default target")
 
     try:
-        host_reads.resolve_branch_root(branch)
+        host_reads.resolve_branch_root(branch, project)
     except host_reads.ReadRefused as e:
         raise VerbRefused(str(e)) from e
     except host_reads.ReadUnavailable as e:

@@ -1492,3 +1492,97 @@ class TestUpdateAllMemoryFiles:
 
         assert result["success"] is True
         assert result["failed"] >= 1
+
+
+# ===========================================================================
+# The safety valve must not become a runaway log (incident 2026-08-16)
+# ===========================================================================
+
+
+class TestValveLoggingIsBounded:
+    """@trigger raised memory_extractor.log CRITICAL at 634 lines/min.
+
+    The valve was correct — it was refusing entries an external branch had
+    written at the wrong end of the array — but it logged one WARNING per
+    refused entry, each carrying the entire entry (~800 bytes). One rollover
+    pass over one file produced 97 warning lines in a single second.
+
+    A refusal is normal and can be routine at scale, so it gets ONE summary
+    line per array per run. The per-entry detail drops to DEBUG, where it is
+    recoverable while debugging without flooding a routine run.
+    """
+
+    @staticmethod
+    def _run(entries, limit, head):
+        """Substitute the extractor's logger and read the calls off it.
+
+        Neither caplog nor a real logging.Handler works here: the suite runs
+        with prax mocked, so `extractor.logger` is not a live Logger and
+        addHandler silently does nothing — a capture-based assertion would
+        pass vacuously, reading zero emitted lines as zero warnings. Replacing
+        the logger measures the calls the code actually made.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from aipass.memory.apps.handlers.rollover import extractor
+
+        fake = MagicMock()
+        with patch.object(extractor, "logger", fake):
+            kept = extractor._extract_tail_excess(entries, limit, head, "key_learnings", "victim")
+
+        warnings = [c.args[0] for c in fake.warning.call_args_list]
+        debugs = [c.args[0] for c in fake.debug.call_args_list]
+        return kept, warnings, debugs
+
+    @staticmethod
+    def _misplaced(n):
+        """n entries that all trip the valve: dated today, numbered above head."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        return [{"number": 1000 + i, "date": today, "value": "x" * 800} for i in range(n)]
+
+    def test_one_warning_per_array_not_one_per_entry(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert len(warnings) == 1
+
+    def test_the_refused_count_is_in_the_summary(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert "82 of 82" in warnings[0]
+
+    def test_per_entry_detail_survives_at_debug(self):
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, _warnings, debugs = self._run(entries, 15, 65)
+        assert len(debugs) == 82
+
+    def test_nothing_drained_names_the_skip_loop(self):
+        """The alarm worth having: over limit + nothing archivable = the
+        detector re-fires on this file forever. It used to be invisible,
+        buried in the very wall of lines it produced."""
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        _kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert "NOTHING DRAINED" in warnings[0]
+
+    def test_a_partial_refusal_is_not_called_a_skip_loop(self):
+        """Some drained means the lane still moves — warn, but do not alarm."""
+        old = [{"number": 60 - i, "date": "2026-01-01", "value": "old"} for i in range(40)]
+        # Misplaced entries at the very END so they land inside the candidate
+        # tail alongside genuinely-old ones — the mixed case.
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + old + self._misplaced(5)
+        kept, warnings, _debugs = self._run(entries, 15, 65)
+        assert kept
+        assert len(warnings) == 1
+        assert "NOTHING DRAINED" not in warnings[0]
+
+    def test_no_refusals_logs_nothing(self):
+        entries = [{"number": 100 - i, "date": "2026-01-01", "value": "v"} for i in range(40)]
+        kept, warnings, debugs = self._run(entries, 15, 100)
+        assert kept
+        assert not warnings
+        assert not debugs
+
+    def test_the_valve_still_holds_every_misplaced_entry_back(self):
+        """Log volume changed; the protection must not have."""
+        entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + self._misplaced(96)
+        kept, _warnings, _debugs = self._run(entries, 15, 65)
+        assert kept == []

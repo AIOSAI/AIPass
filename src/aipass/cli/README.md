@@ -5,9 +5,9 @@
 **Purpose:** Display and output formatting service for all AIPass branches. Provides consistent terminal output — headers, success/error/warning messages, section breaks, and operation templates — so every branch looks the same without duplicating Rich formatting code.
 **Module:** `aipass.cli`
 **Version:** 2.1.0
-**Seedgo:** 98%
-**Tests:** 159 tests across 8 files — 167 passing, 1 skipped at runtime (parametrized cases expand)
-**Last Updated:** 2026-08-13
+**Seedgo:** 100%
+**Tests:** 177 tests across 10 files — 185 passing, 1 skipped at runtime (parametrized cases expand)
+**Last Updated:** 2026-08-16
 
 ## Quick Start
 
@@ -118,10 +118,14 @@ cli/
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 141 tests across 7 files (140 pass, 1 skip)
-│   ├── test_display.py         # 55 tests — display functions + routing + exit codes
+├── tests/                      # 177 tests across 10 files (185 pass, 1 skip at runtime)
+│   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
+│   ├── test_display.py         # 59 tests — display functions + routing + exit codes + help flags
 │   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
-│   ├── test_templates.py       # 28 tests — operation templates + routing
+│   ├── test_templates.py       # 31 tests — operation templates + routing + help flags
+│   ├── test_help_flags.py      # 11 tests — whole-sequence help detection
+│   ├── test_json_durability.py # 10 tests — atomic writes, torn-read race
+│   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
 │   ├── test_handler_guard.py   # 8 tests — cross-branch import guard
 │   ├── test_integration.py     # 6 tests — main() flow, entry points
 │   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
@@ -131,6 +135,13 @@ cli/
 └── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__)
 ```
 
+**Testing display output:** never assert on raw captured bytes. Build the console with
+`make_capture_console()` from `tests/conftest.py` and assert through its `get_output()`,
+which strips ANSI. Rich decides whether to emit escapes by probing the environment, so a
+raw-bytes assert makes the suite a function of the shell — `FORCE_COLOR=3` renders
+`created: 5` as `created: \x1b[1m5\x1b[0m` and a plain substring check fails on output a
+human reads as correct. Assert what is VISIBLE.
+
 **Two-tier design:**
 - `apps/modules/` — Public API. Import from here.
 - `apps/handlers/` — Internal implementation. Don't import directly.
@@ -138,6 +149,12 @@ cli/
 ## JSON Handler
 
 Manages the three-file JSON pattern (config, data, log) for any module:
+
+Every write goes through `_atomic_write_json()` — staged in the target directory, then
+`os.replace()`d into place. A reader always sees the whole old document or the whole new
+one, never a truncated file. This matters because `ensure_json_exists()` answers an
+unreadable file by regenerating a template over it, so a torn read would have become
+data loss.
 
 ```python
 from aipass.cli.apps.handlers.json import json_handler

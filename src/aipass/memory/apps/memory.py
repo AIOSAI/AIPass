@@ -121,7 +121,10 @@ def print_help():
     table.add_row("rollover status", "Show rollover statistics")
     table.add_row("rollover check", "Dry run — check what needs rollover")
     table.add_row("rollover sync-lines", "Update line count metadata")
-    table.add_row("rollover push", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
+    table.add_row("rollover push [--json]", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
+    table.add_row("config get [@branch] [--json]", "Show effective rollover limits (defaults + deviations)")
+    table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
+    table.add_row("config set-default <type> <n> [--json]", "Set a global default rollover limit")
     table.add_row("search <query>", "Semantic search across all branch memories")
     # PARKED 2026-08-14 (Patrick's ruling) — row kept so the command still explains
     # itself instead of reading as an unknown command. Active curated-truth piece:
@@ -178,9 +181,11 @@ def print_help():
     console.print()
 
     console.print(
-        "Commands: search, rollover \\[run|status|check|sync-lines|push], lint,"
+        "Commands: search, rollover \\[run|status|check|sync-lines|push],"
+        " config \\[get|set|set-default], lint,"
         " pool \\[process|status], templates, verify, watch"
     )
+    console.print("[dim]--json: machine output on config get|set|set-default and rollover push[/dim]")
     console.print("[dim]Parked: symbolic (2026-08-14) — see drone @devpulse compass[/dim]")
     console.print()
 

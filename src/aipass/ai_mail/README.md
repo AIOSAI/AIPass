@@ -9,7 +9,7 @@
 
 ---
 
-**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1083 pass | **Battle Tested:** S62
+**Status:** Operational | **Seedgo:** 100% (99% with every bypass rule off) | **Tests:** 1116 pass | **Battle Tested:** S62
 
 ## Quick Start
 
@@ -110,6 +110,36 @@ both work. The outcome comes back as `email_data["upsert_action"]`
 (`"created"` / `"updated"`), so a caller can log the difference without
 re-reading the inbox.
 
+## Message Ids: Two Names, One Message
+
+A delivered message has **two ids**, and they are not the same string:
+
+| Field | Whose | Where it lives |
+|-------|-------|----------------|
+| `id` | the recipient's | minted at delivery, unique in *their* mailbox |
+| `sent_id` | the sender's | copied from the sender's `sent/` record |
+
+`id` is authoritative — it is what `inbox` lists, what `view` prints back, and
+what `reply`/`close` expect. `sent_id` is a back-reference so the two sides can
+be matched.
+
+**Why both.** The recipient's id must be unique within their inbox no matter
+what any sender chose, so delivery mints it. But without `sent_id` the two
+copies shared no identifier at all: holding a sender's id, you could not prove
+their message ever arrived. On 2026-08-16 that untraceability was read as a
+delivery outage — @seedgo's reply (`de0cef3e` in their `sent/`) was sitting in
+@devpulse's inbox as `361cefd6`, correctly delivered and unfindable.
+
+**Both ids resolve.** `view`, `reply` and `close` accept either, through one
+shared resolver (`inbox_ops.find_message`) rather than a fallback per command.
+Inbox ids are checked before any `sent_id`, so a sender cannot shadow a
+recipient's message with a colliding id, and resolution never depends on
+message order. `view` prints `sender's id: <sent_id>` when present.
+
+`sent_id` is omitted, never invented, when a producer stamps no id — some
+callers (`@trigger`) deliver directly without a `sent/` record, and a
+placeholder would point at a sent record that does not exist.
+
 ## Notification Feed
 
 Desktop toasts are retired (Patrick's ruling, 2026-08-11) — no D-Bus, no
@@ -136,6 +166,45 @@ line : {"ts": ISO8601, "kind": "mail"|"wake"|"dispatch"|"system",
   recent events; older ones have no reader.
 - **Fail honest** — a failed feed write is logged and returns `False`. Nothing
   falls back to a toast.
+
+### Locating the feed
+
+```python
+from aipass.ai_mail import feed_path   # callable, resolves at call time
+from aipass.ai_mail import FEED_PATH   # the import-time value, for existing callers
+```
+
+Import these from the package, never from `apps.handlers.notify` — reaching
+into another branch's handlers layer is an encapsulation violation, and
+restating the path as your own constant is worse: it goes stale the day the
+feed moves, and the symptom is a bell showing nothing with no error logged
+anywhere. Both names resolve lazily, so `import aipass.ai_mail` costs no prax
+import. `FEED_PATH` reads through to the live module attribute, so a consumer's
+test suite can redirect the feed the same way this branch's conftest does.
+
+### Reading the feed: cursors go stale, key on `ts`
+
+The trim is a read-modify-write that **replaces the file**, and lines carry no
+id. Two consequences for every reader:
+
+- **A line's position is not its identity.** After a trim, line 5 is a different
+  event than the line 5 you last read. Any cursor held as a line index or byte
+  offset silently points at the wrong place — no error, just wrong or skipped
+  events. Byte offsets fare worse: the inode is new, so a `seek()` past the new
+  end yields nothing at all and the feed looks permanently empty.
+- **Resume on `ts`, and say when you lost ground.** Keep the last `ts` you
+  served, re-open the file by path each poll, and take lines newer than it.
+  If that `ts` is older than the feed's own first line the trim ate the gap;
+  serve what remains and flag it rather than implying continuity. @api's
+  `/v1/feed` does exactly this — ts-cursor clamped both ends with a gap flag.
+
+Timestamps: every line `notify.py` writes is offset-aware
+(`datetime.now().astimezone().isoformat()`), and all 216 lines in the live feed
+were offset-aware when last measured (2026-08-16). But the contract says only
+ISO8601, which does not require an offset, and hand-seeded lines have been naive
+before — S130 filled this file from two writers with different shapes. Parse
+defensively; comparing a naive `ts` against an aware one raises, and a reader
+that crashes on the cursor comparison stops serving the feed entirely.
 
 Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: four
 call sites write feed lines as a side effect, and an unguarded suite run
@@ -564,7 +633,7 @@ ai_mail/
 │       ├── paths.py            # Shared find_repo_root() utility
 │       ├── notify.py           # Notification feed writer (JSONL, BAUD reads)
 │       └── central_writer.py   # Central inbox stats aggregation
-└── tests/                      # 1083 tests across 37 test files
+└── tests/                      # 1116 tests across 40 test files
     ├── conftest.py             # Shared fixtures (mock_logger, mock_json_handler)
     ├── test_daemon.py          # Daemon config, state, kill switch, dispatch check
     ├── test_dispatch_monitor.py # Monitor safety features, env stripping
@@ -585,6 +654,9 @@ ai_mail/
     ├── test_refused_sends.py   # Refused-send records + handled-vs-worked routing (25 tests)
     ├── test_help_flag_safety.py # Whole-sequence help detection, 3 modules (21 tests)
     ├── test_cross_scope_addressing.py # Honest refusal of hosted-project addresses (8 tests)
+    ├── test_public_surface.py  # Package-level feed_path door + lazy import (12 tests)
+    ├── test_message_correlation.py # sent_id back-reference + shared id resolver (12 tests)
+    ├── test_live_mailbox_hygiene.py # Guard: no test fixtures in real mailboxes (4 tests)
     └── test_paths.py           # find_repo_root() utility
 ```
 

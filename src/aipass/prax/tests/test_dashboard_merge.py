@@ -149,7 +149,10 @@ class TestForeignKeysSurviveEveryWriter:
 # Finding 2 — a flow-shaped section must not raise
 # ---------------------------------------------------------------------------
 
-# flow writes active_plans as a list of plan dicts; active_count holds the int.
+# The LEGACY flow shape: active_plans as a list of plan dicts, active_count as
+# the int. Retired by @flow's module 2.0.0 (2026-08-16) — both writers now publish
+# an int — but dashboards written before that date carry this on disk until their
+# next write, so the tolerance must survive.
 FLOW_LIST_SECTION = {
     "flow": {
         "managed_by": "flow",

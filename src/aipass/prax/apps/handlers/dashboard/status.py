@@ -72,10 +72,14 @@ def _read_mail_counts(branch_path: Path) -> tuple:
 def count_active_plans(flow_section: Dict) -> int:
     """Read a plan count out of the flow section, whichever shape it arrived in.
 
-    @flow writes ``active_plans`` as a LIST of plan dicts (``active_count`` holds
-    the int); prax's own refresh writes it as an int. Comparing the list against
-    0 raises TypeError, which `update_section` swallows into a silent no-op —
-    reported by @flow 2026-08-12.
+    Both writers now publish ``active_plans`` as an INT — @flow's module 2.0.0
+    (2026-08-16, Patrick's ruling) dropped the full open-plan list from the
+    section, and ``active_count`` no longer ships at all.
+
+    The list branch stays for the dashboards written before that date: they carry
+    the old shape on disk until their next write, and comparing a list against 0
+    raises TypeError, which `update_section` swallows into a silent no-op
+    (reported by @flow 2026-08-12).
     """
     raw = flow_section.get("active_plans", 0)
     if isinstance(raw, list):

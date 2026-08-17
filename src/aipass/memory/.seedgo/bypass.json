@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-08-13"
+    "last_updated": "2026-08-16"
   },
   "bypass": [
     {
@@ -568,6 +568,16 @@
       "file": "apps/handlers/intake/auto_process.py",
       "standard": "unused_function",
       "reason": "spawn_background() has no in-branch caller BY CONTRACT: the caller is @hooks' lifecycle/auto_process.py, which reaches it cross-branch via importlib.import_module('aipass.memory.apps.handlers.intake.auto_process').spawn_background() - the invocation string is in this file's HOOK ENGINE CONTRACT docstring. Measured 2026-08-13 (DPLAN-0295 item 1): grepped the whole repo for the symbol; the only call site is that hook shell, which @memory may not edit. Same class as the pre-existing 'handlers' rule on this file. Re-verify by grepping spawn_background across src/ - if @hooks' half ships and the symbol has an in-branch caller (e.g. a CLI kick), DELETE this rule."
+    },
+    {
+      "file": "apps/modules/health.py",
+      "standard": "unused_function",
+      "reason": "Cross-branch public API — get_branch_health() wraps detector.check_single_file (entry-count) + lint_handler.run_lint (entry-size) into one function @daemon imports from its modules/ layer, because seedgo blocks handler-to-other-branch-handler imports. THE CALLER HAS LANDED (verified 2026-08-16, DPLAN-0302): daemon/apps/modules/activity_report.py:208 imports it inside _render_entry_health, with daemon/tests/test_activity_report.py:256 patching the same symbol. The earlier version of this rule promised deletion once that happened; that promise was written on a wrong assumption and is retracted. unused_function_check.py declares AUDIT_SCOPE = 'branch_level' and collects .py files with rglob over the BRANCH root only, so it structurally cannot see a caller in another branch — deleting the rule costs 1% forever and teaches nothing. Same permanent class as the 'governance.py' and 'tab_renderer.py' rules above, whose cross-branch callers also exist and are equally invisible. Re-verify by grepping get_branch_health across src/: if the only hits are this branch, the function is genuinely dead and the rule (and the function) should go."
+    },
+    {
+      "file": "apps/handlers/cli/json_flag.py",
+      "standard": "json_structure",
+      "reason": "Pure argument-inspection predicate -- no I/O, no state, no branch imports by design, the --json sibling of help_flags.py above. Runs on every command invocation, so log_operation() here would write a line per CLI call and drown the operation log."
     }
   ],
   "notes": {

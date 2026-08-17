@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 
 # Patterns to skip during template copy.
@@ -72,7 +73,7 @@ def copy_template(template_dir, target_dir, replacements):
             try:
                 content = item.read_text(encoding="utf-8")
                 content = replace_placeholders(content, replacements)
-                dest.write_text(content, encoding="utf-8")
+                atomic_write_text(dest, content)
                 copied.append(str(dest_rel))
             except (UnicodeDecodeError, UnicodeEncodeError) as e:
                 logger.warning(f"[spawn] Text read/write failed for {dest_rel}, falling back to binary copy: {e}")
@@ -223,7 +224,4 @@ def regenerate_template_registry(target_dir):
         "directories": directories,
     }
 
-    registry_file.write_text(
-        json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_text(registry_file, json.dumps(registry, indent=2, ensure_ascii=False) + "\n")

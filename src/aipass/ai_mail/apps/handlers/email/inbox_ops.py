@@ -17,7 +17,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -41,6 +41,40 @@ def _get_inbox_lock():
 
         _inbox_lock = inbox_lock
     return _inbox_lock
+
+
+def find_message(messages: List[Dict], message_id: str) -> Optional[Dict]:
+    """Resolve a user-supplied id against a message list.
+
+    A delivered message has TWO names: the id the recipient's mailbox minted
+    (authoritative — it is what view/reply/close print back) and ``sent_id``,
+    the id in the sender's ``sent/`` record. An operator holding either one
+    means the same message, so both must resolve.
+
+    The inbox id wins outright: every inbox id is checked before any sent_id,
+    so resolution never depends on message order. A sender cannot shadow a
+    recipient's message by choosing a colliding id.
+
+    This is the single resolution site for all three commands. Bolting a
+    fallback onto each of them separately is how S143's outage was built —
+    two resolvers for one question, disagreeing under load.
+
+    Args:
+        messages: Inbox message dicts
+        message_id: Either the recipient's inbox id or the sender's sent_id
+
+    Returns:
+        The matching message dict, or None
+    """
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("id") == message_id:
+            return msg
+
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("sent_id") == message_id:
+            return msg
+
+    return None
 
 
 def load_inbox(inbox_file: Path) -> Dict:

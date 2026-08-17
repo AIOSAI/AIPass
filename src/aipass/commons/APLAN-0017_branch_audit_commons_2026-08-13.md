@@ -19,13 +19,13 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-13 |
-| **Open items** | 14 (7 fixed this session) |
-| **Tests** | 461 pass, 0 fail, 1 skip (462 collected) |
+| **Last verified** | 2026-08-16 |
+| **Open items** | 14 (7 fixed 08-13; torn-write fixed 08-16) |
+| **Tests** | 472 pass, 0 fail, 1 skip (was 461 — +11 durability) |
 | **Seedgo** | **100% with bypasses / 97% without** (44 standards) |
-| **Bypass entries** | 75 (was 122 — 47 dead rules pruned this session) |
+| **Bypass entries** | 75 (was 122 — 47 dead rules pruned 2026-08-13) |
 | **CLI score** | Not measured — no Nav/Output scorer found in the aipass pack |
-| **Ruff** | clean (check + format, 106 files) |
+| **Ruff** | clean (check + format) |
 | **Type errors** | 0 |
 
 **Why YELLOW, not GREEN:** every headline number is green. The two things
@@ -137,6 +137,7 @@ Imports 97, Introspection 61, Naming 88. All other 38 standards 100% unaided.
 
 ### Resolved
 
+- [x] **Torn-write `json_handler.py` (fleet defect, error 90c9e40d)** — both write sites opened the live document with `"w"`, truncating before the new bytes landed; `ensure_json_exists` then answered the unreadable file by writing template defaults over it, converting a transient race into permanent data loss (S23 — measured on my own unfixed copy with 2 writers + 2 readers: **1,038 of 1,297 reads unusable, 80.03%** — 553 empty, 485 partial. Fixed via `_atomic_write_json` (`tempfile.mkstemp` in the target dir → `os.replace`, staged file unlinked on failure); both sites routed through it. Re-measured after: **0 of 1,368 unusable, 0.00%**. v1.0.0 → v1.1.0, +11 red-first tests in `tests/test_json_durability.py`).
 - [x] `.trinity/README.md` was missing — the single template item failing Architecture (S21 — created from `spawn/templates/aipass_framework`; Architecture 96→100 unaided, and the branch-wide `architecture` bypass it justified is now deleted).
 - [x] 47 dead bypass rules pruned, 122 → 75 (S21 — measured by emptying `bypass.json` and re-running `--full`, not by advisory list; 3 pointed at files that no longer exist. Control: full re-scan after pruning still 100%, so no live rule was removed).
 - [x] `tools/backfill_fts.py:20` imported `backfill_fts_index` from `apps.modules.search`, which never exported it — `ImportError` at module load, so the tool could not run at all (S21 — repointed to `apps.handlers.search`, import proven to resolve).
@@ -174,6 +175,7 @@ Imports 97, Introspection 61, Naming 88. All other 38 standards 100% unaided.
 | Date | Action | Result |
 |------|--------|--------|
 | 2026-08-13 | Fleet audit round DPLAN-0291 (devpulse) | YELLOW. 461 pass/1 skip, 100% with bypasses / 97% without, 47 dead bypasses pruned, 6 fixes landed, 14 open items |
+| 2026-08-16 | Fix torn-write json_handler, axis 1 (devpulse, error 90c9e40d) | Fixed. Own race measured 80.03% unusable unfixed → 0.00% after. 472 pass/1 skip (+11), seedgo 100%, ruff clean, handler v1.1.0. No commits — rides the parked train |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round)

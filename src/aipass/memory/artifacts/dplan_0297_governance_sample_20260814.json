@@ -1,0 +1,1968 @@
+{
+  "metadata": {
+    "artifact_id": "dplan_0297_governance_sample_20260814",
+    "purpose": "Durable capture of the 28-day governance surfacing sample DPLAN-0297's Part 2 derivation table (threshold, max_surfaces_per_session, min_messages_between, cooldown_seconds analysis) is based on, taken before log rotation ages logs/engine.log.1 out. Captured per @devpulse's review of DPLAN-0297: this action was endorsed to run now, independent of the plan's execution hold.",
+    "source_files": [
+      "logs/engine.log",
+      "logs/engine.log.1"
+    ],
+    "capture_date": "2026-08-16",
+    "date_range_covered": {
+      "start": "2026-07-16",
+      "end": "2026-08-14",
+      "inclusive": true
+    },
+    "total_surfacing_lines_captured": 278,
+    "dplan_0297_reported_count": 273,
+    "count_matches_dplan": false,
+    "count_discrepancy_note": "Captured 278 surfacing lines for the full inclusive window 2026-07-16..2026-08-14, 5 more than DPLAN-0297's stated 273. Root cause identified: DPLAN-0297 was authored and saved at 2026-08-14 07:37 ('Measured this morning' per its Current State section), so its snapshot was taken intraday on 2026-08-14, not at end-of-day. There are 7 surfacing lines on 2026-08-14 total; only the first 2 (01:39:06, 06:30:59) precede DPLAN-0297's save time. The remaining 5 lines on 2026-08-14 (2026-08-14 08:47:38, 2026-08-14 10:14:07, 2026-08-14 19:28:55, 2026-08-14 20:33:43, 2026-08-14 23:00:23) were logged after the plan's measurement was taken. 5 == the exact gap (278 - 273 = 5), confirming this is the sole cause: no lines are missing or double-counted, DPLAN-0297's figure is simply an earlier snapshot within the same final day."
+  },
+  "records": [
+    {
+      "timestamp": "2026-07-16 22:34:33",
+      "item_id": "test",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-16 22:39:08",
+      "item_id": "x",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-16 22:41:44",
+      "item_id": "115",
+      "score": 0.8,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 16:07:30",
+      "item_id": "153",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 16:08:07",
+      "item_id": "40",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 16:11:07",
+      "item_id": "85",
+      "score": 0.88,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 17:44:34",
+      "item_id": "79",
+      "score": 0.9,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 18:56:20",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 18:59:22",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 19:20:21",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 20:17:44",
+      "item_id": "19",
+      "score": 0.83,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 20:22:25",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 20:42:35",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 21:25:06",
+      "item_id": "85",
+      "score": 0.89,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 22:02:43",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 22:44:49",
+      "item_id": "103",
+      "score": 0.9,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 22:46:54",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 23:20:31",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-20 23:42:38",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 02:21:44",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 03:06:15",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 12:02:46",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 15:38:08",
+      "item_id": "86",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 18:08:09",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 18:08:49",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 19:02:44",
+      "item_id": "85",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 19:34:29",
+      "item_id": "112",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 19:59:42",
+      "item_id": "112",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 20:13:39",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 21:45:09",
+      "item_id": "125",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-21 23:10:48",
+      "item_id": "160",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 11:37:29",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 11:48:26",
+      "item_id": "112",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 12:00:36",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 13:30:24",
+      "item_id": "160",
+      "score": 0.67,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 14:52:36",
+      "item_id": "6",
+      "score": 0.8,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 16:57:21",
+      "item_id": "165",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-22 20:58:05",
+      "item_id": "2",
+      "score": 0.5,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 08:53:51",
+      "item_id": "165",
+      "score": 0.8,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 11:39:49",
+      "item_id": "112",
+      "score": 0.5,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 16:12:11",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 16:20:11",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 17:37:11",
+      "item_id": "137",
+      "score": 0.5,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 18:47:55",
+      "item_id": "54",
+      "score": 0.5,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-23 20:53:53",
+      "item_id": "4",
+      "score": 0.5,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 15:03:37",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 15:17:19",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 16:07:22",
+      "item_id": "40",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 16:56:47",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 17:29:30",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 18:28:11",
+      "item_id": "116",
+      "score": 0.5,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 18:37:05",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 20:02:12",
+      "item_id": "91",
+      "score": 0.88,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 20:45:14",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 21:05:38",
+      "item_id": "65",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 21:19:08",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 22:38:13",
+      "item_id": "158",
+      "score": 0.8,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-27 22:44:03",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 00:06:11",
+      "item_id": "19",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 01:08:33",
+      "item_id": "36",
+      "score": 0.75,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 09:58:17",
+      "item_id": "65",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 10:20:12",
+      "item_id": "65",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 16:35:12",
+      "item_id": "45",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-28 21:01:08",
+      "item_id": "171",
+      "score": 0.67,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 16:19:37",
+      "item_id": "17",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 16:28:36",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 16:37:09",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 16:42:40",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 17:05:49",
+      "item_id": "65",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 17:12:22",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 18:08:35",
+      "item_id": "85",
+      "score": 0.86,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 21:28:58",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 21:38:47",
+      "item_id": "106",
+      "score": 0.75,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 22:47:22",
+      "item_id": "180",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 22:59:13",
+      "item_id": "112",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-29 23:21:42",
+      "item_id": "32",
+      "score": 0.86,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-30 22:48:16",
+      "item_id": "111",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-30 23:22:35",
+      "item_id": "82",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 00:00:32",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 00:02:35",
+      "item_id": "151",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 00:21:05",
+      "item_id": "196",
+      "score": 0.8,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 00:32:39",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 00:51:25",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 01:54:44",
+      "item_id": "36",
+      "score": 0.83,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 10:51:54",
+      "item_id": "79",
+      "score": 0.75,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 12:47:32",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 12:47:56",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 12:48:19",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 13:26:15",
+      "item_id": "115",
+      "score": 0.8,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 15:36:21",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 18:09:25",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 18:10:08",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 18:39:57",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 21:00:31",
+      "item_id": "75",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 21:09:31",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 21:18:10",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 21:51:05",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 21:52:17",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 22:04:39",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 22:34:00",
+      "item_id": "19",
+      "score": 0.86,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 23:21:10",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-07-31 23:22:57",
+      "item_id": "85",
+      "score": 0.8,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 00:14:16",
+      "item_id": "91",
+      "score": 0.86,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 01:03:32",
+      "item_id": "145",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 02:04:13",
+      "item_id": "21",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 11:11:50",
+      "item_id": "108",
+      "score": 0.8,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 12:05:37",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 12:06:12",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 12:27:20",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 12:35:15",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 12:42:36",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 13:35:11",
+      "item_id": "120",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 17:31:40",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 17:33:20",
+      "item_id": "212",
+      "score": 0.67,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 18:10:54",
+      "item_id": "2",
+      "score": 0.5,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-01 19:30:48",
+      "item_id": "189",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 01:05:16",
+      "item_id": "78",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 01:27:23",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 01:58:31",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 02:07:56",
+      "item_id": "32",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 12:23:48",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 12:28:45",
+      "item_id": "195",
+      "score": 0.8,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 12:58:30",
+      "item_id": "48",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 13:07:25",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 13:57:48",
+      "item_id": "156",
+      "score": 0.67,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 14:47:01",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 14:54:57",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 15:32:42",
+      "item_id": "27",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 16:57:41",
+      "item_id": "53",
+      "score": 0.8,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 19:28:20",
+      "item_id": "86",
+      "score": 0.8,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 19:31:01",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 19:57:04",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 20:21:32",
+      "item_id": "204",
+      "score": 0.88,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-02 22:35:59",
+      "item_id": "91",
+      "score": 0.86,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-04 16:05:27",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-04 16:49:41",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-04 19:18:18",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-04 19:40:50",
+      "item_id": "180",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 10:08:40",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 10:12:30",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 10:14:52",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 15:29:02",
+      "item_id": "8",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 15:33:14",
+      "item_id": "17",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 16:29:00",
+      "item_id": "19",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 16:40:43",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 16:45:53",
+      "item_id": "202",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 16:50:08",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 17:07:06",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 17:22:26",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 17:38:55",
+      "item_id": "19",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 18:53:24",
+      "item_id": "4",
+      "score": 0.8,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 19:32:22",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 19:32:42",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 19:33:09",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 19:33:33",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 19:54:03",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-07 20:06:12",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 17:42:35",
+      "item_id": "234",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 18:46:47",
+      "item_id": "85",
+      "score": 0.8,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 19:04:31",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 19:25:51",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:04:14",
+      "item_id": "101",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:08:13",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:30:44",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:33:10",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:39:55",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 20:54:36",
+      "item_id": "232",
+      "score": 0.67,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 21:20:06",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 21:41:06",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-08 23:51:46",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 11:00:40",
+      "item_id": "111",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 11:03:53",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 11:39:51",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 12:14:18",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 12:16:59",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 13:09:48",
+      "item_id": "240",
+      "score": 0.75,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 13:20:44",
+      "item_id": "67",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 14:42:20",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 14:42:54",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 14:45:37",
+      "item_id": "204",
+      "score": 0.5,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:11:55",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:12:25",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:12:59",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:38:35",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:39:02",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 15:39:41",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 16:17:47",
+      "item_id": "245",
+      "score": 0.67,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 17:04:33",
+      "item_id": "35",
+      "score": 0.5,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 17:45:49",
+      "item_id": "198",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 17:48:32",
+      "item_id": "245",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 18:11:40",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 18:23:37",
+      "item_id": "44",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 18:32:58",
+      "item_id": "105",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 19:21:18",
+      "item_id": "154",
+      "score": 0.75,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 19:47:18",
+      "item_id": "85",
+      "score": 0.75,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-09 20:26:29",
+      "item_id": "137",
+      "score": 0.67,
+      "surfaces": 5,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 17:06:43",
+      "item_id": "224",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 17:17:56",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 17:37:43",
+      "item_id": "19",
+      "score": 0.83,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 17:47:37",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 18:45:24",
+      "item_id": "138",
+      "score": 0.5,
+      "surfaces": 3,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 20:04:09",
+      "item_id": "35",
+      "score": 0.5,
+      "surfaces": 4,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 20:21:00",
+      "item_id": "245",
+      "score": 0.5,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 21:26:47",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 21:48:41",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 22:02:12",
+      "item_id": "85",
+      "score": 0.75,
+      "surfaces": 2,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 22:05:19",
+      "item_id": "66",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log.1"
+    },
+    {
+      "timestamp": "2026-08-10 22:19:46",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-10 23:18:59",
+      "item_id": "203",
+      "score": 0.88,
+      "surfaces": 2,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-10 23:42:34",
+      "item_id": "142",
+      "score": 0.67,
+      "surfaces": 3,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 10:52:09",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 10:52:46",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 10:53:33",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 11:16:41",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 11:21:41",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 11:22:07",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 17:49:13",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 17:54:36",
+      "item_id": "204",
+      "score": 0.86,
+      "surfaces": 5,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 18:38:37",
+      "item_id": "170",
+      "score": 0.67,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 19:29:23",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 20:02:31",
+      "item_id": "258",
+      "score": 0.86,
+      "surfaces": 2,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 20:30:41",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 20:54:43",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 20:55:21",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 21:12:30",
+      "item_id": "85",
+      "score": 0.89,
+      "surfaces": 3,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 22:06:10",
+      "item_id": "130",
+      "score": 0.75,
+      "surfaces": 4,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 22:07:54",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 22:36:15",
+      "item_id": "88",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-11 22:36:52",
+      "item_id": "88",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:08:49",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:09:15",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:29:41",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:30:17",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:34:30",
+      "item_id": "230",
+      "score": 0.83,
+      "surfaces": 5,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 01:54:57",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 07:13:41",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 08:46:37",
+      "item_id": "180",
+      "score": 0.8,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 08:47:06",
+      "item_id": "235",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 08:47:14",
+      "item_id": "241",
+      "score": 0.86,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 14:14:36",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 14:15:12",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 14:34:14",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 15:27:47",
+      "item_id": "85",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 16:28:08",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-12 22:59:01",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 00:06:55",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 05:37:40",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 05:38:05",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 06:05:53",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 06:06:24",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 06:25:24",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 06:55:09",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:13:33",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:13:59",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:32:34",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:39:21",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:47:44",
+      "item_id": "180",
+      "score": 0.8,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 08:53:43",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 09:17:50",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 09:18:17",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 09:43:49",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 09:44:25",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 10:06:20",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 10:06:55",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 10:51:16",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 11:18:08",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 12:01:42",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 12:54:27",
+      "item_id": "235",
+      "score": 0.75,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 21:23:33",
+      "item_id": "255",
+      "score": 0.88,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 22:55:30",
+      "item_id": "237",
+      "score": 0.89,
+      "surfaces": 2,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-13 23:59:20",
+      "item_id": "83",
+      "score": 0.86,
+      "surfaces": 3,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 01:39:06",
+      "item_id": "91",
+      "score": 0.83,
+      "surfaces": 4,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 06:30:59",
+      "item_id": "85",
+      "score": 0.88,
+      "surfaces": 5,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 08:47:38",
+      "item_id": "272",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 10:14:07",
+      "item_id": "272",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 19:28:55",
+      "item_id": "272",
+      "score": 0.83,
+      "surfaces": 1,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 20:33:43",
+      "item_id": "228",
+      "score": 0.75,
+      "surfaces": 2,
+      "source_file": "logs/engine.log"
+    },
+    {
+      "timestamp": "2026-08-14 23:00:23",
+      "item_id": "189",
+      "score": 0.67,
+      "surfaces": 2,
+      "source_file": "logs/engine.log"
+    }
+  ]
+}

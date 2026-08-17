@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-14 (S77) |
-| **Open items** | 12 (2 closed S76/S77, 1 added awaiting @hooks) |
-| **Tests** | 1029 pass, 0 fail (957 → 962 audit → 977 coercion → 1015 help-flag → 1020 sole-owner → 1029 twin) |
+| **Last verified** | 2026-08-16 (S80) |
+| **Open items** | 12 (3 closed S76/S77/S80) |
+| **Tests** | 1032 pass, 0 fail (957 → 1015 help-flag → 1020 sole-owner → 1029 twin → 1032 rmw-lock) |
 | **Seedgo** | 100% with bypasses / 98% without (44 standards), 0 type errors |
 | **Bypass entries** | 26 — 25 measured live in-audit, +1 for the new help-flag predicate, 0 dead, 0 `tests/*` rules |
 | **Live command sweep** | 37 CLI paths + 14 event types fired, incl. 14 error paths |
@@ -165,6 +165,20 @@ trio filenames. Two log watchers (branch logs, system logs) feed one registry.
   `system_logs/trigger_probe.log` has no branch-log counterpart, so it tested the
   observer's absence and nothing else. devpulse (`e9d92ed2`) found the twin still being
   minted at 00:44-00:46, after the restart. Real cause below.
+- [x] **RESOLVED S80 — `json_handler`'s read-modify-write cycles were losing 38% of
+  their updates, silently.** `log_operation`, `increment_counter` and
+  `update_data_metrics` each read a document, changed it in memory and wrote it back
+  with no lock. Both writers return `True`; the loser's entry is simply gone. Measured
+  before touching anything, 4 processes x 25 appends: **100 asked, 62 on disk, 38 lost**.
+  After wrapping each cycle in `config.json_file_lock` (`json_handler.py:203`, `:253`,
+  `:275`): 100 of 100, and 1.05ms per call. 3 tests red-first, each mutation-checked to
+  its own lock (removing the log lock reds exactly 1, removing the data lock reds exactly
+  the other 2). **The README claimed "All read-modify-write cycles wrapped in
+  json_file_lock" the whole time** — corrected in place with the measurement attached.
+  Root of the blind spot: I had `atomic_write_json` on both write sites, and having the
+  atomic helper is precisely what made the gap look closed. Atomic stops a torn file, not
+  a lost update. Found by checking my own paths against @api's report of the same defect
+  class in theirs (`6cd8f22c`) — they never named me.
 - [x] **RESOLVED S77 — one line, written twice by prax, is now counted once**
   (devpulse `e9d92ed2`). Every prax call lands in BOTH
   `src/aipass/<branch>/logs/<module>.log` and `system_logs/<branch>_<module>.log`, and
@@ -349,6 +363,7 @@ trio filenames. Two log watchers (branch logs, system logs) feed one registry.
 | 2026-08-13 | Fix round to 100: `help_flag_safety` on 6 modules (S74) | 100% / 98%, 1015 green, 12 red first |
 | 2026-08-14 | Night shift item 6: system_logs sole owner (S76) | Built, 1020 green, live-proven attributed |
 | 2026-08-14 | Twin follow-up: prax dual-write counted once (S77) | Built, 1029 green, live-proven 1 signature / 2 lines |
+| 2026-08-16 | json_handler RMW lock, found via @api's report (S80) | Built, 1032 green, 38 lost updates -> 0, cross-process proven |
 | 2026-08-14 | Night shift item 4: severity reclass | **Spec sent** — label is emitter-side (@hooks), not mine |
 
 ## Relationships

@@ -1076,6 +1076,43 @@ broke. Quietening it would have hidden a ten hour outage instead of a noisy log.
 
 Last verified 2026-08-14.
 
+## 2026-08-16 — the torn write, and a second look at a warning
+
+The fleet found a defect that every branch shares: the code that saves a JSON file opens it for
+writing, which empties it first and fills it afterwards. Anything reading in that gap gets an empty
+file. My handler answers an unreadable file by writing a fresh blank template over it, so the gap is
+not a failed read, it is the document being destroyed. Before changing anything I raced two writers
+against two readers on my own unfixed code and counted: fifty seven percent of reads came back
+unusable, three runs in a row, mostly empty rather than half written. Writes now go to a staged file
+in the same folder and are moved into place in a single step the operating system cannot interrupt.
+
+The brief named two places in my file that needed this. There were three. The third writes the trust
+registry, which is the file that decides whether hooks are enrolled at all, and the persistent alerts
+beside it. A torn log entry costs a log entry; a torn registry takes every hook in the project dark,
+which I have already lived through once. Nobody had missed it out of carelessness, it simply sits
+under a different function name than the two the search found.
+
+The second item was another request to quieten a warning, and this time the answer was yes, which is
+worth recording next to last week's no. The engine shouts every time a gate refuses an edit, three
+hundred and seventy three times in the log. Last time the same shape turned out to be one stuck
+session hammering all night. So I checked the same way before agreeing: these were spread across
+every working day of the ten I have logs for, which is a gate doing its job, not something stuck. It
+now records at the quieter level, which still writes to the log file but no longer escalates. That
+distinction mattered enough to verify rather than assume, because if the quieter level had been
+dropped from the files entirely, agreeing would have deleted the only evidence.
+
+Two things came out of looking that I was not asked for. Forty three percent of those refusals arrive
+in bursts of three or more within two minutes, and that did not improve after I fixed the
+unsatisfiable gate in August. Either agents are legitimately fixing one error at a time, or they are
+still walking into a wall, and the log line cannot tell the difference because it never said what was
+blocked. It does now. The other is that the number in that line was never the gate's cost. It is
+every hook that ran before the refusal, added up. The gate itself takes four milliseconds in the
+middle of the range. The three second sample that prompted the escalation was real waiting time, but
+attributing it to the gate would have sent someone optimising the wrong thing, so the line now says
+so in words.
+
+Last verified 2026-08-16.
+
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-14*
+*Updated: 2026-08-16*

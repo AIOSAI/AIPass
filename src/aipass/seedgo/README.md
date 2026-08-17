@@ -133,7 +133,7 @@ seedgo/
 │       ├── json/                    # JSON tracking (json_handler)
 │       ├── readme/                  # README generator + branch resolution
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 46 test files, 1500 tests
+├── tests/                           # 51 test files, 1691 tests
 ├── .trinity/                        # Identity + memory
 ├── .seedgo/                         # Self-bypass rules
 ├── .ai_mail.local/                  # Mailbox
@@ -248,7 +248,7 @@ Provider settings route all events through the bridge (`claude.py`), which dispa
 
 ## Tests
 
-- **46 test files, 1502 tests**, all passing
+- **51 test files, 1691 tests**, all passing
 - **0 type errors** (pyright)
 - Key test areas: standards audit, checklist, bypass, JSON handler, hooks snapshot, permissions, proof, README, diagnostics, line coverage (plugin integrity, diagnostics, audit display, branch audit, architecture, checklist)
 

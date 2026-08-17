@@ -8,16 +8,16 @@
 
 """Integration tests for CLI main() entry point."""
 
-from io import StringIO
 from unittest.mock import patch
 
 import pytest
-from rich.console import Console
 
 from aipass.cli import cli_entry
 from aipass.cli.apps import cli as cli_module
 from aipass.cli.apps.cli import main
 from aipass.cli.apps.modules import display
+
+from .conftest import make_capture_console
 
 
 # =============================================================================
@@ -28,15 +28,10 @@ from aipass.cli.apps.modules import display
 def _make_capture_console():
     """Return (console, get_output) for capturing Rich output.
 
-    Uses no_color=True so assertions can match plain text without ANSI escapes.
+    Console pinned against FORCE_COLOR/NO_COLOR/TERM; get_output() returns only
+    the VISIBLE characters, so assertions never depend on the calling shell.
     """
-    buf = StringIO()
-    cons = Console(file=buf, no_color=True, width=120, highlight=False)
-
-    def get_output() -> str:
-        return buf.getvalue()
-
-    return cons, get_output
+    return make_capture_console(highlight=False)
 
 
 # =============================================================================

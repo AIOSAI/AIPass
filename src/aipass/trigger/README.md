@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-14
+**Last Updated:** 2026-08-16
 
 ## Quick Start
 
@@ -349,7 +349,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1029 tests across 27 modules
+├── tests/                          # 1032 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -388,7 +388,8 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 ## Data Safety
 
 - **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then `os.replace()` for atomic rename. No partial writes on crash.
-- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` using `fcntl.flock` with `.lock` sidecar files. Prevents concurrent corruption from watcher + CLI.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` using `fcntl.flock` with `.lock` sidecar files (no-op on Windows). Prevents concurrent corruption from watcher + CLI.
+  This line said "all" from the day it was written and was **not true until 2026-08-16**: `json_handler`'s own `log_operation`, `increment_counter` and `update_data_metrics` read a document, changed it in memory and wrote it back with no lock at all. Atomic is not serialised — `atomic_write_json` stops a *torn* file, not a *lost* one, and having the atomic helper is exactly what made the gap look closed. Measured on the unfixed handler across 4 processes: **100 appends asked, 62 on disk, 38 lost silently, every call returning `True`.** After the fix, 100 of 100. Found by checking my own paths against a defect @api reported in theirs (`6cd8f22c`), not by anyone auditing this claim.
 - **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the Architecture section.
 
@@ -406,7 +407,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-1029 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
+1032 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -429,7 +430,7 @@ The largest single deduction is `handlers` on `handlers/escalation.py`: its five
 
 ---
 
-*Last Updated: 2026-08-14*
+*Last Updated: 2026-08-16*
 
 ---
 [← Back to AIPass](../../../README.md)

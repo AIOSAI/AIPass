@@ -48,6 +48,7 @@ PATCH_VERBS_DRONE = "aipass.api.apps.handlers.host.verbs.drone"
 PATCH_VERBS_FLEET = "aipass.api.apps.handlers.host.verbs.host_fleet"
 PATCH_RESOLVE = "aipass.api.apps.handlers.host.verbs.host_reads.resolve_branch_root"
 PATCH_SEATED = "aipass.api.apps.handlers.host.verbs.host_reads.seated_project"
+PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
 # @baud sends the project on every target-bearing verb, in their own casing.
 # Pinned here as a mismatched case on purpose: their wire log says AIPASS, the
@@ -202,11 +203,6 @@ class TestTheProjectAlwaysTravels:
         """The destructive one. Same rule, and this is the one it was bought for."""
         with pytest.raises(host_verbs.VerbRefused):
             host_verbs.kill_room("memory", "")
-
-    def test_a_project_this_server_does_not_serve_is_refused(self, quiet: Any) -> None:
-        """A wrong project is named as wrong, never quietly treated as ours."""
-        with pytest.raises(host_verbs.VerbRefused):
-            host_verbs.wake_branch("memory", "some-other-project")
 
     def test_the_project_comparison_ignores_case(self, routed: Any) -> None:
         """
@@ -995,3 +991,144 @@ class TestTheClientIsNeverTrusted:
         argv = _argv(door)
         assert not any("admin" in str(part).lower() for part in argv)
         assert not any("confirm" in str(part).lower() for part in argv)
+
+
+class TestOneTerminalReachesAnyAgent:
+    """
+    Patrick's one-terminal ruling, 2026-08-16: "the flow is ONE terminal; it
+    hosts the agent I choose, no matter where I spawn it. The terminal is not
+    linked to a project... Baud is an aipass tenant in projects/, vera is
+    outside, external - that should NOT matter. When you block you create
+    friction."
+
+    The read lanes followed this ruling earlier the same evening. These are the
+    operate verbs following it: the ruling widens WHO can be reached and never
+    what a request may contain, so the project is STILL required, still never
+    inferred, and a garbage target still dies in front of the mechanism.
+    """
+
+    @pytest.fixture
+    def census(self, quiet: Any, tmp_path: Path):
+        """
+        @baud's census, standing in for a branch in another project.
+
+        Patched in TWO places on purpose, and the reason is the design: kill
+        calls verbs' own module-level `host_fleet` for end_room, while branch
+        resolution goes through the READ lane, which imports the census off the
+        package inside the function. One mock behind both names, so a test can
+        never pass because it happened to patch the door that was not used.
+        """
+        with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_HOST_FLEET, door):
+            door.FleetUnavailable = host_fleet.FleetUnavailable
+            # A REAL directory: the resolver checks that the census's path
+            # exists, so a made-up one would fail for the wrong reason and hide
+            # whether the census was consulted at all.
+            elsewhere = tmp_path / "projects" / "baud" / "src" / "baud"
+            elsewhere.mkdir(parents=True)
+            door.resolve_branch.return_value = {"name": "baud", "path": str(elsewhere)}
+            door.end_room.return_value = {
+                "project": "BAUD",
+                "branch": "baud",
+                "room": "baud-baud",
+                "ended": True,
+                "detail": "ended 'baud-baud'",
+                "error": None,
+            }
+            yield door
+
+    def test_wake_reaches_a_branch_in_another_project(self, census: Any) -> None:
+        """
+        The unambiguous half of the ruling: a sleeping agent must be able to
+        appear in the one seat, wherever it lives.
+        """
+        with patch(PATCH_VERBS_DRONE) as door:
+            door.route_command.return_value = MagicMock(exit_code=0, stdout="woken", stderr="")
+            result = host_verbs.wake_branch("baud", "BAUD")
+
+        assert result["ok"] is True
+        assert result["project"] == "BAUD"
+
+    def test_a_foreign_branch_is_resolved_through_the_census(self, census: Any) -> None:
+        """
+        Two doors, same discipline as the read lane. The seated registry does
+        not know a tenant's branches at all — drone.get_branch_info('baud')
+        raises BranchNotFound — so this is the only door that can answer.
+        """
+        with patch(PATCH_VERBS_DRONE) as door:
+            door.route_command.return_value = MagicMock(exit_code=0, stdout="woken", stderr="")
+            host_verbs.wake_branch("baud", "BAUD")
+
+        census.resolve_branch.assert_called_once_with("BAUD", "baud")
+
+    def test_the_seat_never_pays_for_a_census(self, routed: Any, census: Any) -> None:
+        """
+        The local registry stays the fast path for the project we stand in.
+
+        Same reason as the read lane: routing the seat through the census puts
+        @baud's snapshot gate in front of every verb the phone sends.
+        """
+        host_verbs.wake_branch("memory", PROJECT_AS_SENT)
+
+        census.resolve_branch.assert_not_called()
+
+    def test_an_unknown_branch_in_a_known_project_is_still_refused(self, census: Any) -> None:
+        """Widening WHO can be reached is not widening to nobody in particular."""
+        census.resolve_branch.return_value = None
+
+        with pytest.raises(host_verbs.VerbRefused) as exc:
+            host_verbs.wake_branch("nosuch", "BAUD")
+
+        assert "BAUD" in str(exc.value) and "nosuch" in str(exc.value)
+
+    def test_an_unknown_project_carries_the_census_sentence(self, census: Any) -> None:
+        """
+        Unavailable, not refused, and phrased by the branch that knows.
+
+        @baud's census already says "no project named X" — the most actionable
+        words this failure has, and not mine to paraphrase.
+        """
+        census.resolve_branch.side_effect = host_fleet.FleetUnavailable("no project named 'nope' in BAUD's census")
+
+        with pytest.raises(host_verbs.VerbUnavailable) as exc:
+            host_verbs.wake_branch("baud", "nope")
+
+        assert "no project named 'nope'" in str(exc.value)
+
+    def test_kill_reaches_another_projects_room(self, census: Any) -> None:
+        """
+        The counterpart of attach on the same card.
+
+        My read of the ruling, stated so it can be overruled: if the phone
+        shows BAUD's cards and can attach to them, a kill button that refuses
+        "not my project" is the friction Patrick named. The mechanism was
+        always safe for it — @baud's door takes the project and resolves the
+        room itself, so this server never names a room.
+        """
+        with patch.object(host_verbs, "KILL_SEAM_READY", True):
+            result = host_verbs.kill_room("baud", "BAUD")
+
+        assert result["ok"] is True
+        census.end_room.assert_called_once_with("baud", "BAUD")
+
+    def test_the_project_is_still_required_on_every_verb(self, quiet: Any) -> None:
+        """
+        The rule that did NOT change, and the one bought with a killed session.
+
+        Resolving a room name against the wrong project names a different room.
+        Widening which projects are reachable makes an inferred seat MORE
+        dangerous, not less.
+        """
+        for verb in (host_verbs.wake_branch, host_verbs.kill_room):
+            with pytest.raises(host_verbs.VerbRefused):
+                verb("memory", "")
+
+    def test_no_verb_says_it_does_not_serve_the_project(self) -> None:
+        """
+        The sentence is gone from this lane.
+
+        Grep-shaped on purpose: one helper carried it for both verbs, so a
+        future editor restoring it anywhere puts the friction back on both.
+        """
+        source = Path(host_verbs.__file__).read_text(encoding="utf-8")
+
+        assert "does not serve project" not in source

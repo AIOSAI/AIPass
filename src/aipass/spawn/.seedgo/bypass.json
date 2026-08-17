@@ -79,6 +79,11 @@
       "file": "apps/handlers/registry.py",
       "standard": "unused_function",
       "reason": "backfill_owner_and_registry_id() is a migration function for TDPLAN-0012 \u2014 called manually to backfill existing registries. is_owner() is part of the frozen interface contract (TDPLAN-0012) \u2014 consumed by @ai_mail and @devpulse via direct import."
+    },
+    {
+      "file": "apps/handlers/atomic_write.py",
+      "standard": "json_structure",
+      "reason": "Pure I/O primitive \u2014 stage/fsync/os.replace only, same species as json_ops.py above. Nothing to log: it is the write mechanism every other handler's log_operation call ultimately rides on, and logging each atomic write would emit an entry per passport/registry swap. Verified load-bearing in BOTH lanes 2026-08-16 (checklist [FAIL] json_structure; audit 97%/overall 99% with it lifted)."
     }
   ],
   "notes": {

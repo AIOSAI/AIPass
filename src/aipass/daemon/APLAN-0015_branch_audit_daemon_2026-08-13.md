@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | YELLOW |
-| **Last verified** | 2026-08-13 (S34, DPLAN-0291 fleet audit round) |
-| **Open items** | 8 |
-| **Tests** | 411 pass, 0 fail (406 at session start, +5 written this audit) |
+| **Last verified** | 2026-08-16 (S36, fleet torn-write round; S35 memory-health round; S34 audit) |
+| **Open items** | 6 |
+| **Tests** | 439 pass, 0 fail (411 at audit close, +9 memory health S35, +19 durability S36) |
 | **Seedgo** | **100%** with bypasses / **99%** with the bypass list emptied (44 standards) |
 | **Bypass entries** | 22 (pruned from 26) |
 | **CLI score** | Nav 5/5 — all 12 documented commands route and all 12 `--help` paths render. Output 4/5 — `update` digest reads empty against live data |
@@ -76,16 +76,6 @@ project `projects/<name>/*`), each against its own registry.
 
 ### Open
 
-- [ ] **Memory health is fleet-wide noise (highest impact).** `memory_health.validate_memory_structure()`
-      requires a `limits` field inside `document_metadata`. The `.trinity` schema (3.0.0) dropped it —
-      caps now live in @memory's `memory.config.json` and surface as `*_meta` lines. **Measured: 0 of 17**
-      branches carry the field, so `branch-health` reports **17/17 WARNING permanently**, including
-      branches whose memory was updated 3 minutes earlier. A genuinely broken `.trinity` is
-      indistinguishable from the noise. Not fixed here: what replaces the check is @memory's schema
-      call, not daemon's.
-- [ ] **The tests pin the dead schema** (rule D instance, fleet count +1). `test_memory_health.py`
-      builds a synthetic fixture that *does* carry `limits`, so the suite is green while the real
-      world is 0-for-17. The suite proves code matches test; it never proved test matches reality.
 - [ ] **`update` digest reads empty.** Shows 0 messages / 0 sessions / focus None against a live
       inbox and 30+ recorded sessions — `data_loader` reads different paths than `.trinity/local.json`.
       Long-standing, previously documented, re-confirmed live this session.
@@ -107,10 +97,37 @@ project `projects/<name>/*`), each against its own registry.
 - [ ] **`queue` can display a `next_run` in the past.** `_calc_next_run` stamps the next slot from
       `now` at write time and ignores the once-per-day rule, so a daily job run manually at 08:47
       records "today 09:00" — a slot that will never fire. Display-only; the fire path is unaffected.
-- [ ] **`todos_meta` describes a `todos` array that does not exist** in `.trinity/local.json`.
-      Benign (there genuinely are no open todos) but the schema is inconsistent.
 
 ### Resolved
+
+- [x] **Torn writes in `json_handler` — fleet defect 90c9e40d, axis 1** (S36, 2026-08-16, devpulse
+      dispatch). Every write opened the target with `"w"`, truncating it before the new bytes
+      landed. Worse than a bad read here: `ensure_json_exists` answers an unreadable document by
+      writing a template over it, so a torn read became permanent data loss — and as the scheduler
+      this branch reads configs while branches write them. **Measured first, unfixed, on my own
+      file** (2 writers + 2 readers, 13,103 reads): 74.6% empty, 17.9% unparseable, **92.5%
+      unusable** — the worst signature reported this round (@api 23%, @cli 58%, @commons 80%).
+      Fix: `_atomic_write_json` stages via `tempfile.mkstemp` in the *target's own* directory,
+      `os.replace`s it into place, unlinks the staged file on failure and raises rather than
+      swallowing. Both write sites routed, including the regenerate path. Same probe after:
+      **0 of 1,410 reads unusable**. 19 tests in a new `tests/test_json_durability.py` (12 red
+      before the fix), including a source guard proving no truncating `open()` returns —
+      mutation-checked against `"w"`, `"a"` and `"w+"`, and silent on the `os.fdopen` in the fix.
+      Handler v1.2.0 → v1.3.0.
+- [x] **Memory health is fleet-wide noise** (S35, 2026-08-15) — was the highest-impact open item.
+      @memory's schema call: do not restore the `limits` field and do not read their config either
+      (caps are defaults deep-merged with per-branch overrides; re-implementing that merge is how
+      the two branches end up disagreeing about "over cap"). `validate_memory_structure()` now asks
+      whether the file is *usable*: metadata section, readable `schema_version`, and the entry
+      containers for its filename. Before: **17/17 WARNING**. After: **17/17 clean**, while a real
+      pre-3.0.0 file (`projects/speakeasy`) still flags with three concrete reasons — noise gone,
+      teeth kept. Entry-count and entry-size health stay @memory's to answer.
+- [x] **The tests pinned the dead schema** (S35) — `test_memory_health.py` now pins three tests
+      against the **live** `.trinity` files, not only the synthetic fixture. They went red on the
+      first run, which is the whole point.
+- [x] **`todos_meta` described a `todos` array that did not exist** (S35) — caught by those very
+      real-file tests, not by inspection. Container added; the branch's own memory file was the
+      first thing the new check flagged.
 
 - [x] **A `--help` in any non-first position executed the verb instead of printing help**
       (S34 — rule E, confirmed on this branch). Each module guarded `args[0]`, so the documented
@@ -203,18 +220,27 @@ verified live.
 The second fix stopped the status digest from crying wolf. It wrote escalations needed to the error
 stream on every single run, even when it went on to report that everything was clear.
 
-The biggest open problem is memory health. The checker still requires a field called limits that the
-memory schema removed some time ago. Zero of seventeen branches have it, so every branch is reported
-as warning forever, even one updated three minutes ago. That means a branch with genuinely broken
-memory would be invisible. Daemon did not fix this because deciding what a healthy memory file looks
-like now belongs to the memory branch, not the scheduler. Notably the unit tests hide this completely,
-because they build a fake file that does have the field.
+Two rounds since have closed the biggest items. On August fifteenth the memory branch answered the
+memory health question, and the checker now asks whether a memory file is usable rather than
+demanding a field the schema deleted. Seventeen of seventeen branches went from permanent warning to
+clean, while a genuinely outdated file elsewhere still gets flagged with three specific reasons. The
+tests now read the real memory files instead of only a fake one, and the very first run caught this
+branch's own file missing a container it claimed to have.
 
-Also open: a module called wakeup ops that nothing imports and no command reaches, an orphaned plugin
-system, and eighteen bypass rules that still need proper measurement.
+On August sixteenth, a fleet dispatch: every write in the json handler truncated the file before
+writing it, so any reader arriving mid write saw an empty file, and this handler answers an
+unreadable file by writing a blank template over it. That is data loss, not a bad read. Measured
+before fixing, with two writers and two readers: ninety two and a half percent of thirteen thousand
+reads were unusable, the worst score reported in the fleet this round. After routing every write
+through a staged file and an atomic rename, the same probe scored zero. Four hundred and thirty nine
+tests now pass.
 
-Last verified 2026-08-13.
+Still open: the status digest that reads empty against live data, a module called wakeup ops that
+nothing imports and no command reaches, an orphaned plugin system, and eighteen bypass rules that
+still need proper measurement.
+
+Last verified 2026-08-16.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-13*
+*Updated: 2026-08-16*

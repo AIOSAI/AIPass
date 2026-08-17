@@ -736,3 +736,286 @@ class TestFleetRoutes:
 
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "fleet_unavailable"
+
+
+# ============================================================================
+# The roster lane — `baud --roster`, DPLAN-0300 (spec relayed 2026-08-16)
+# ============================================================================
+
+# @baud's roster envelope: the same BranchStatus rows as a snapshot, but
+# spanning EVERY project, and with no project/root/live_agent_sessions keys
+# because the answer is not seated anywhere.
+ROSTER = {
+    "branches": [
+        {
+            "name": "api",
+            "project": "AIPASS",
+            "path": "/home/patrick/Projects/AIPass/src/aipass/api",
+            "is_citizen": True,
+            "manager": False,
+            "dispatched": True,
+            "interactive": False,
+            "has_history": True,
+            "resume_id": None,
+            "has_room": True,
+            "outside_room": None,
+            "subagents": 0,
+            "new_mail": 1,
+            "opened_mail": 0,
+            "active_plans": 3,
+            "todo_count": 8,
+            "summary": "1 new emails, 3 active plans, 8 todos",
+            "last_updated": "2026-08-16T09:55:09.000000",
+        },
+        {
+            "name": "baud",
+            "project": "BAUD",
+            "path": "/home/patrick/Projects/AIPass/projects/baud/src/baud/baud",
+            "is_citizen": True,
+            "manager": False,
+            "dispatched": True,
+            "interactive": False,
+            "has_history": True,
+            "resume_id": None,
+            "has_room": True,
+            "outside_room": None,
+            "subagents": 1,
+            "new_mail": 0,
+            "opened_mail": 0,
+            "active_plans": 4,
+            "todo_count": 2,
+            "summary": "4 active plans, 2 todos",
+            "last_updated": "2026-08-16T09:41:02.000000",
+        },
+    ],
+    "generated_at": "2026-08-16T16:57:31Z",
+    "error": None,
+}
+
+EMPTY_ROSTER = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": None}
+
+
+class TestTheRosterIsOneSweepAcrossEveryProject:
+    """
+    The roster answers a question /v1/fleet structurally cannot.
+
+    A snapshot is SEATED — one project per read. The phone's live and dispatched
+    wheels span all of them, so aliasing the roster onto the fleet gave a wheel
+    that looks full and is wrong. This lane execs @baud's own sweep, one process
+    and one ranking behind both faces.
+    """
+
+    def test_the_invocation_carries_exactly_one_argument(self, ready: None, seated: Path) -> None:
+        """
+        `baud --roster`, nothing else.
+
+        The binary REFUSES a project on this verb (exit 2, empty stdout, stderr
+        naming the argument) — verified against the release build. Anything this
+        server appends is a usage error it inflicted on itself.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
+            host_fleet.read_roster()
+
+        assert run.call_args.args[0] == ["baud", "--roster"]
+
+    def test_the_exec_runs_from_the_repo_root(self, ready: None, seated: Path) -> None:
+        """BAUD walks UP from its CWD to find the tree. Same trap as the snapshot."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
+            host_fleet.read_roster()
+
+        assert run.call_args.kwargs["cwd"] == str(seated)
+
+    def test_the_payload_is_returned_unchanged(self, ready: None, seated: Path) -> None:
+        """D0: their shape, serialised. Rows stay byte-identical to a fleet row."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))):
+            result = host_fleet.read_roster()
+
+        assert result == ROSTER
+        assert set(result["branches"][0].keys()) == set(SNAPSHOT["branches"][0].keys())
+
+    def test_an_empty_roster_is_an_answer_not_a_failure(self, ready: None, seated: Path) -> None:
+        """
+        Nobody working anywhere is TRUE, and the wheels must be able to say it.
+
+        Turning it into an error would make the quietest state of the system
+        look like a broken lane.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROSTER))):
+            result = host_fleet.read_roster()
+
+        assert result == EMPTY_ROSTER
+
+    def test_the_gate_closes_this_lane_too(self, monkeypatch: pytest.MonkeyPatch, seated: Path) -> None:
+        """
+        The kill switch governs every exec of that binary, not just the snapshot.
+
+        The subprocess is mocked to a VALID envelope on purpose: without it,
+        removing the gate makes the lane exec a binary that is not on this
+        machine's PATH, which raises FleetUnavailable anyway — and the test
+        passes while guarding nothing. Mutation caught exactly that.
+        """
+        monkeypatch.setattr(host_fleet, "SNAPSHOT_READY", False)
+
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.read_roster()
+
+        run.assert_not_called()
+
+    def test_exit_one_carries_their_sentence(self, ready: None, seated: Path) -> None:
+        """
+        Their words reach the phone, not my paraphrase of them.
+
+        Exit 1 means BAUD ran and could not answer; the envelope holds the
+        reason and branches is empty.
+        """
+        failed = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": "registry is unreadable"}
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(failed))):
+            with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+                host_fleet.read_roster()
+
+        assert "registry is unreadable" in str(excinfo.value)
+
+    def test_an_empty_stdout_is_our_bug_not_theirs(self, ready: None, seated: Path) -> None:
+        """
+        Exit 2 with nothing on stdout is a usage error — this server called it wrong.
+
+        A distinct exception, because the honest status code differs: 503 says
+        'try later', and nothing about a malformed argv gets better with time.
+        """
+        rejected = _completed(2, "", "baud: unknown argument '--project'")
+        with patch.object(host_fleet.subprocess, "run", return_value=rejected):
+            with pytest.raises(host_fleet.FleetMisuse) as excinfo:
+                host_fleet.read_roster()
+
+        assert "--project" in str(excinfo.value)
+
+    def test_malformed_json_is_unavailable_not_empty(self, ready: None, seated: Path) -> None:
+        """Unparseable output is reported. An empty roster would be a lie."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, "{not json")):
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.read_roster()
+
+    def test_a_non_object_envelope_is_refused(self, ready: None, seated: Path) -> None:
+        """A JSON list parses fine and is still not an envelope."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, "[]")):
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.read_roster()
+
+    def test_a_missing_binary_is_unavailable(self, ready: None, seated: Path) -> None:
+        """Never an empty roster: absence of the binary is not absence of agents."""
+        with patch.object(host_fleet.subprocess, "run", side_effect=FileNotFoundError("no baud")):
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.read_roster()
+
+    def test_a_timeout_is_unavailable(self, ready: None, seated: Path) -> None:
+        """A sweep that never returns must not hold the request open forever."""
+        timeout = subprocess.TimeoutExpired(cmd="baud", timeout=30)
+        with patch.object(host_fleet.subprocess, "run", side_effect=timeout):
+            with pytest.raises(host_fleet.FleetUnavailable):
+                host_fleet.read_roster()
+
+
+@fastapi_required
+class TestTheRosterRoute:
+    """GET /v1/roster — read scope, no parameters, three honest status codes."""
+
+    def test_route_requires_a_token(self, client) -> None:
+        """The roster names every working agent in every project. Not public."""
+        assert client.get("/v1/roster").status_code == 401
+
+    def test_read_scope_is_enough(self, client, auth: dict, seated: Path) -> None:
+        """It is a read, exactly like /v1/fleet."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))):
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.status_code == 200
+
+    def test_the_envelope_arrives_verbatim(self, client, auth: dict, seated: Path) -> None:
+        """No adapter in the request path either — body.branches is their rows."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))):
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.json() == ROSTER
+
+    def test_an_empty_roster_is_200(self, client, auth: dict, seated: Path) -> None:
+        """The quiet answer is still an answer. 200, branches [], no error."""
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROSTER))):
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json()["branches"] == []
+        assert response.json()["error"] is None
+
+    def test_a_project_filter_is_refused_never_ignored(self, client, auth: dict, seated: Path) -> None:
+        """
+        THE point of the refusal: a dropped scope reads as a filter that worked.
+
+        A phone asking for one project's roster and silently receiving every
+        project's would show a wheel it believes is filtered. 400, naming it.
+        """
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
+            response = client.get("/v1/roster?project=AIPASS", headers=auth)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "roster_refused"
+        assert "project" in response.json()["error"]["message"]
+        assert run.call_count == 0, "the binary was executed for a request that should have been refused"
+
+    def test_any_parameter_is_refused_not_only_project(self, client, auth: dict, seated: Path) -> None:
+        """
+        The route takes NO parameters, so nothing is quietly dropped.
+
+        Naming only `project` would leave the next filter someone invents to be
+        ignored in silence — the same failure under a different key.
+        """
+        response = client.get("/v1/roster?branch=api", headers=auth)
+
+        assert response.status_code == 400
+        assert "branch" in response.json()["error"]["message"]
+
+    def test_the_gate_is_503_with_a_reason(
+        self,
+        client,
+        auth: dict,
+        seated: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """
+        A closed gate is unavailable, never a synthesized empty roster.
+
+        Mocked to a valid envelope for the same reason as the handler test: a
+        gate that stopped working must fail this, not fall through to a missing
+        binary and refuse for an unrelated reason.
+        """
+        monkeypatch.setattr(host_fleet, "SNAPSHOT_READY", False)
+
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "fleet_unavailable"
+        run.assert_not_called()
+
+    def test_their_failure_sentence_reaches_the_client(self, client, auth: dict, seated: Path) -> None:
+        """Exit 1: 503 carrying BAUD's own words."""
+        failed = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": "no project registry found"}
+        with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(failed))):
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.status_code == 503
+        assert "no project registry found" in response.json()["error"]["message"]
+
+    def test_a_usage_error_is_500_because_it_is_ours(self, client, auth: dict, seated: Path) -> None:
+        """
+        Exit 2 is this server's bug, and 503 would blame the wrong side.
+
+        503 tells a client to retry something that will fail identically every
+        time; 500 says the fault is here.
+        """
+        rejected = _completed(2, "", "baud: unknown argument '--project'")
+        with patch.object(host_fleet.subprocess, "run", return_value=rejected):
+            response = client.get("/v1/roster", headers=auth)
+
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "roster_misuse"

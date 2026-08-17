@@ -189,7 +189,7 @@ spawn/
 │           └── json_handler.py          # Standard JSON I/O, operation logging, 7 API functions
 ├── templates/
 │   └── aipass_framework/                # Full scaffold template (44 files, 23 dirs)
-├── tests/                               # 19 test files, 403 tests
+├── tests/                               # 20 test files, 456 tests
 ├── spawn_json/                          # JSON tracking directory
 ├── tools/                               # Branch verification utilities
 ├── docs/                                # Documentation

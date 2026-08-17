@@ -6,7 +6,7 @@
 **Module:** `aipass.daemon`
 **Created:** 2026-03-07
 **Citizen Class:** aipass_framework
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-16
 
 ---
 
@@ -145,7 +145,7 @@ drone @daemon <command> --help
 | `update` | Status digest of DAEMON activity | *(partial)* — reads inbox/sessions but data_loader paths return empty |
 | `queue` | Unified job queue view — Rich table or `--json` (frozen schema for @skills bot) | Operational |
 | `schedule` | *(retired)* Fire-and-forget follow-ups — superseded by `.daemon/schedule.json` | Retired |
-| `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` | Operational |
+| `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` (the last also renders entry health via @memory) | Operational |
 | `actions` | *(retired)* Action registry — superseded by `.daemon/schedule.json` | Retired |
 | `scheduler_ops` | *(archived)* Scheduler cron facade — went to `.archive/` with scheduler_cron.py | Archived |
 | `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
@@ -220,6 +220,49 @@ Scheduled daily at 09:00 from daemon's own `.daemon/schedule.json` (job id `inbo
 
 ---
 
+## Memory Entry Health (via @memory)
+
+`branch-health <BRANCH>` closes with an entry-health block sourced from @memory's public API,
+`get_branch_health(branch_name)` — entry-count (is a `.trinity` file over its rollover trigger)
+and entry-size (is any entry over its character cap).
+
+The call lives in `apps/modules/activity_report.py`, never in `apps/handlers/monitoring/memory_health.py`
+— seedgo blocks handler-to-other-branch imports, so the module layer is the only legal caller.
+
+Caps are **not** re-encoded on this side. They live in @memory's `memory.config.json`, where defaults
+are deep-merged with per-branch overrides; a copy here would be a snapshot that drifts.
+
+| Fact | Severity | Rendered |
+|------|----------|----------|
+| `should_rollover: True` | INFO — rollover being due is not a fault; it auto-fires at the next PreCompact | `[PENDING]` |
+| `total_violations > 0` | WARNING — a write got past the character-cap gate | `[!] WARNING` |
+| memory file absent | skipped, not an error | `[SKIP]` |
+| unknown branch / @memory not importable | named reason, never an empty section | `[!]` |
+
+Markers are uppercase deliberately: `console.print()` parses Rich markup, so a lowercase tag like
+`[ok]` reads as a style name and is silently swallowed — the marker vanishes on screen while a test
+asserting on the returned string still passes. `TestMarkersSurviveRichMarkup` renders through Rich
+to pin this.
+
+Those render-through-Rich tests name `force_terminal` **and** `color_system` explicitly, and strip
+ANSI before asserting. Both are load-bearing, and each was paid for:
+
+- Rich decides whether to emit escape codes from `is_terminal`, and `FORCE_COLOR` in the environment
+  makes even a `StringIO` count as one. `ReprHighlighter` then wraps every bracket and number in
+  **bold**, so a plain-substring assert fails while the marker is plainly visible. `no_color=True`
+  does not help — it strips colour, not attributes. This suite was green in the morning and red the
+  same evening on byte-identical code, and the reds blocked a fleet commit train.
+- `force_terminal=True` alone is still not deterministic: under `TERM=dumb` Rich resolves no colour
+  system and emits plain text regardless. An early draft of the fix passed under `FORCE_COLOR` and
+  failed under `TERM=dumb` — the same defect, one layer along.
+
+The suite is verified green under `FORCE_COLOR=3`, `TERM=dumb`, `NO_COLOR=1`, and
+`TERM=xterm-256color`. `TestSharedConsoleContract` separately pins the hazard behaviourally against
+the real `aipass.cli` console: it asserts a lowercase tag is still swallowed there, so a cli change
+surfaces here rather than blanking this report.
+
+---
+
 ## Integration Points
 
 ### Depends On
@@ -261,6 +304,16 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ### Resolved
 
+- ~~Torn writes in `json_handler`~~ (2026-08-16, fleet defect 90c9e40d axis 1) — every write opened
+  the target with `"w"`, truncating it before the new bytes landed; worse, `ensure_json_exists`
+  answers an unreadable document by writing a template over it, so a torn read became permanent
+  data loss. Measured here first, unfixed, 2 writers + 2 readers over 13,103 reads: **74.6% empty,
+  17.9% unparseable, 92.5% unusable**. Now every write site routes through `_atomic_write_json`
+  (staged via `tempfile.mkstemp` in the *target's own* directory, then `os.replace`; the staged
+  file is unlinked on failure and the helper raises rather than swallowing). Same probe after:
+  **0 of 1,410 reads unusable**. `tests/test_json_durability.py` holds the guards, including a
+  source check that no truncating `open()` returns — mutation-checked against `"w"`, `"a"` and
+  `"w+"` reintroductions.
 - ~~Memory health is fleet-wide noise~~ (2026-08-15) — `validate_memory_structure()` demanded a
   `limits` field that schema 3.0.0 dropped, so **0 of 17** branches passed and every one read
   WARNING forever. Per @memory's schema call the check now asks whether the file is *usable*:
@@ -288,11 +341,11 @@ remaining import is from an archived file. Scheduling is now decentralized: each
 
 ## Test Suite
 
-- **420 tests** across 18 test files
-- 10/10 modules covered, 44/50 public functions tested
+- **454 tests** across 19 test files
+- 10/10 modules covered, 46/50 public functions tested
 - Seedgo audit: **100%** with bypasses, **99%** with the bypass list emptied (22 entries)
 
-*Last Updated: 2026-08-15*
+*Last Updated: 2026-08-16*
 
 ---
 [← Back to AIPass](../../../README.md)

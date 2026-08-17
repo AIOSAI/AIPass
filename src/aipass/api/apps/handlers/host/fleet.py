@@ -113,7 +113,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
@@ -147,6 +147,16 @@ _NOT_READY = (
 
 class FleetUnavailable(Exception):
     """The fleet could not be read. Reported honestly, never faked as empty."""
+
+
+class FleetMisuse(Exception):
+    """
+    The binary refused the invocation itself — a usage error, and ours.
+
+    Separate from FleetUnavailable because the two deserve different status
+    codes. Unavailable says 'not right now'; this says 'this server built an
+    argv that binary does not accept', which no amount of retrying improves.
+    """
 
 
 def snapshot_binary() -> str:
@@ -253,6 +263,199 @@ def read_snapshot(project: str = "") -> Dict[str, Any]:
     )
 
     return envelope
+
+
+def list_projects() -> Dict[str, Any]:
+    """
+    Read BAUD's project census — the rows a switcher menu shows.
+
+    The census is BAUD's own discovery (anchor + sealed sibling registries),
+    reached the same way the snapshot is: by exec, never by re-implementing the
+    discovery here where it would drift from the desktop's.
+
+    Returns:
+        @baud's census envelope, unchanged: {projects, generated_at, error}.
+
+    Raises:
+        FleetUnavailable: The seam is gated, or BAUD could not produce a census.
+    """
+    if not SNAPSHOT_READY:
+        # Same gate as the snapshot — the census execs the same binary.
+        logger.info("[host_api] project census requested while the exec is gated")
+        raise FleetUnavailable(_NOT_READY)
+
+    command = [snapshot_binary(), "--list-projects"]
+    root = repo_root()
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=SNAPSHOT_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as e:
+        logger.error("[host_api] %s is not on PATH: %s", SNAPSHOT_BINARY, e)
+        raise FleetUnavailable(f"{SNAPSHOT_BINARY} is not available on PATH — the census routes through it") from e
+    except subprocess.TimeoutExpired as e:
+        logger.error("[host_api] project census timed out after %ss", SNAPSHOT_TIMEOUT_SECONDS)
+        raise FleetUnavailable(f"Project census timed out after {SNAPSHOT_TIMEOUT_SECONDS}s") from e
+
+    stdout = result.stdout or ""
+
+    if not stdout.strip():
+        # An old binary that predates --list-projects lands here (exit 2,
+        # empty stdout). The sentence names the likely fix rather than
+        # implying the caller got it wrong.
+        stderr = (result.stderr or "").strip()
+        logger.error(
+            "[host_api] census invocation rejected by %s (exit %s): %s",
+            SNAPSHOT_BINARY,
+            result.returncode,
+            stderr,
+        )
+        raise FleetUnavailable(
+            "Project census invocation was rejected — the baud binary may predate --list-projects; rebuild the release"
+        )
+
+    try:
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        logger.error("[host_api] project census was not valid JSON: %s", e)
+        raise FleetUnavailable(f"Project census could not be parsed: {e}") from e
+
+    if not isinstance(envelope, dict):
+        raise FleetUnavailable("Project census was not an object")
+
+    error = envelope.get("error")
+    if error:
+        # Their sentence, not our paraphrase.
+        logger.warning("[host_api] project census reported a failure: %s", error)
+        raise FleetUnavailable(str(error))
+
+    projects = envelope.get("projects") or []
+    json_handler.log_operation("host_api_project_census", {"projects": len(projects)})
+
+    return envelope
+
+
+def read_roster() -> Dict[str, Any]:
+    """
+    Read BAUD's cross-project roster — every working agent, everywhere.
+
+    A snapshot is SEATED: one project per read. The phone's live and dispatched
+    wheels span all projects, so this is the question /v1/fleet structurally
+    cannot answer. BAUD's agent_roster() already sweeps every project in one
+    /proc pass and one tmux round-trip, so it is reached by exec like everything
+    else here — a second sweep implemented in Python would be a second answer.
+
+    Returns:
+        @baud's roster envelope unchanged: {branches, generated_at, error}. The
+        rows are byte-identical in shape to a snapshot's, so neither side grows
+        a type. `branches` may be legitimately EMPTY — nobody working anywhere
+        is a true answer, and turning it into an error would make the quietest
+        state of the system look like a broken lane.
+
+    Raises:
+        FleetUnavailable: The seam is gated, or BAUD ran and could not answer.
+        FleetMisuse: The binary refused the invocation (exit 2, empty stdout).
+
+    Note:
+        The verb takes NO arguments — `baud --roster --project X` exits 2 with
+        stdout empty and 'unknown argument' on stderr, verified against the
+        release build. So an empty stdout here means this server assembled an
+        argv that binary does not accept, which is why it is FleetMisuse and
+        not FleetUnavailable. A release predating --roster lands in the same
+        branch; its stderr is carried through so the two are told apart by
+        reading the sentence rather than by guessing at the exit code.
+    """
+    if not SNAPSHOT_READY:
+        # The same gate as the snapshot: it execs the same binary.
+        logger.info("[host_api] roster requested while the exec is gated")
+        raise FleetUnavailable(_NOT_READY)
+
+    command = [snapshot_binary(), "--roster"]
+    root = repo_root()
+
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=SNAPSHOT_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as e:
+        logger.error("[host_api] %s is not on PATH: %s", SNAPSHOT_BINARY, e)
+        raise FleetUnavailable(f"{SNAPSHOT_BINARY} is not available on PATH — the roster routes through it") from e
+    except subprocess.TimeoutExpired as e:
+        logger.error("[host_api] roster sweep timed out after %ss", SNAPSHOT_TIMEOUT_SECONDS)
+        raise FleetUnavailable(f"Roster sweep timed out after {SNAPSHOT_TIMEOUT_SECONDS}s") from e
+
+    stdout = result.stdout or ""
+
+    if not stdout.strip():
+        stderr = (result.stderr or "").strip()
+        logger.error(
+            "[host_api] roster invocation rejected by %s (exit %s): %s",
+            SNAPSHOT_BINARY,
+            result.returncode,
+            stderr,
+        )
+        raise FleetMisuse(
+            f"The roster invocation was rejected by {SNAPSHOT_BINARY} (exit {result.returncode}): "
+            f"{stderr or 'no reason given'}"
+        )
+
+    try:
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        logger.error("[host_api] roster output was not valid JSON: %s", e)
+        raise FleetUnavailable(f"Roster could not be parsed: {e}") from e
+
+    if not isinstance(envelope, dict):
+        raise FleetUnavailable("Roster output was not an object")
+
+    error = envelope.get("error")
+    if error:
+        # Their sentence, not our paraphrase.
+        logger.warning("[host_api] roster reported a failure: %s", error)
+        raise FleetUnavailable(str(error))
+
+    branches = envelope.get("branches") or []
+    json_handler.log_operation("host_api_roster", {"branches": len(branches)})
+
+    return envelope
+
+
+def resolve_branch(project: str, branch: str) -> Optional[Dict[str, Any]]:
+    """
+    One branch's row from one project's snapshot — the attach lane's census.
+
+    The row carries the branch's real `path` (the cwd a created room starts
+    in) straight from BAUD's own discovery, so this server never composes a
+    filesystem path for a project it is not seated in. An unknown PROJECT
+    raises with the binary's own sentence; an unknown BRANCH in a known
+    project returns None — the caller's mistake, phrased by the caller.
+
+    Args:
+        project: Census name, case-sensitive, travelling verbatim.
+        branch: Branch name, with or without the leading '@'.
+
+    Returns:
+        The branch's snapshot row, or None when the project has no such branch.
+
+    Raises:
+        FleetUnavailable: The seam is gated, the binary failed, or the project
+            is not in BAUD's census.
+    """
+    wanted = branch.strip().lstrip("@")
+    envelope = read_snapshot(project)
+    for row in envelope.get("branches") or []:
+        if row.get("name") == wanted:
+            return row
+    return None
 
 
 def read_rooms(project: str = "") -> Dict[str, Any]:

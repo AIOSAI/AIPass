@@ -37,8 +37,8 @@ rather than skipped, because two events can share a microsecond and dropping one
 is worse than showing one twice. Clients dedupe on (ts, kind, title).
 
 The feed's location and field shape are @ai_mail's — this handler moves their
-data, it does not define it. See the note on FEED_RELATIVE for why the path is
-restated rather than imported.
+data, it does not define it. The location comes from their own published door,
+so if they move the file, this follows without an edit.
 
 Functions:
     read_feed() - Cursor-first window over the feed
@@ -52,29 +52,26 @@ from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 
-# @drone's public surface, for the repo root only.
-import aipass.drone as drone
-
-# @ai_mail owns this feed. Their notify.py publishes it as a CONTRACT — "path:
-# <repo root>/.aipass/notifications.jsonl ... ai_mail writes, BAUD reads" — so a
-# second reader is within the contract, not peeking at an internal.
-#
-# I would rather import their constant than restate it, but @ai_mail exposes no
-# modules/ or package-level door for it, and reaching into another branch's
-# handlers is the layering violation seedgo (rightly) flags. Restating the
-# documented path is the lesser of the two. Asked them to publish an entry point
-# so this comment can be replaced by an import.
-FEED_RELATIVE = Path(".aipass") / "notifications.jsonl"
+# @ai_mail owns this feed, and now owns the answer to where it is. This used to
+# restate their documented path as a constant, with a note asking them to publish
+# a door so the comment could become an import. They built it (2026-08-16), so
+# this is that import: one implementation of the location, on the side that gets
+# to move it.
+import aipass.ai_mail as ai_mail
 
 
 def feed_path() -> Path:
     """
     Locate @ai_mail's notification feed.
 
+    Thin by design. Their door is the authority; this wrapper exists only so the
+    seam stays patchable in tests and so a future change of theirs lands in one
+    place here rather than at every call site.
+
     Returns:
         Absolute path to the feed file.
     """
-    return Path(drone.get_registry_path()).parent / FEED_RELATIVE
+    return Path(ai_mail.feed_path())
 
 
 DEFAULT_LIMIT = 100
