@@ -2432,3 +2432,67 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         path = str(tmp_path / "system_logs" / "seedgo_audit.log")
 
         assert lw._detect_branch_from_path(path) == "SEEDGO"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- path classification is separator-agnostic (Windows CI, 70a10016)
+# ---------------------------------------------------------------------------
+
+
+class TestLogPathClassificationOnBothPlatforms:
+    """`_should_process` classified paths with `"/logs/" in file_path`, so every
+    Windows path — `...\\aipass\\hooks\\logs\\edit_gate.log` — fell through to
+    "foreign" and was dropped. Four tests went red on the first honest Windows
+    CI run (devpulse, 70a10016, 2026-08-18).
+
+    A separator string test cannot be fixed by normalising on one platform and
+    hoping; the classifier takes a PurePath, so these cases prove BOTH flavours
+    from either runner.
+    """
+
+    def test_windows_branch_log_is_a_branch_log(self):
+        """The exact path shape Windows CI reported."""
+        from pathlib import PureWindowsPath
+
+        lw = _import_log_watcher()
+        path = PureWindowsPath(r"C:\p\AIPass\src\aipass\hooks\logs\edit_gate.log")
+        assert lw._classify_log_path(path) == "branch"
+
+    def test_posix_branch_log_is_a_branch_log(self):
+        """The same answer from the other separator."""
+        from pathlib import PurePosixPath
+
+        lw = _import_log_watcher()
+        path = PurePosixPath("/p/AIPass/src/aipass/hooks/logs/edit_gate.log")
+        assert lw._classify_log_path(path) == "branch"
+
+    def test_windows_system_log_is_a_system_log(self):
+        """system_logs/ is recognised through backslashes too."""
+        from pathlib import PureWindowsPath
+
+        lw = _import_log_watcher()
+        path = PureWindowsPath(r"C:\p\AIPass\system_logs\telegram-bot-api.log")
+        assert lw._classify_log_path(path) == "system"
+
+    def test_posix_system_log_is_a_system_log(self):
+        """Same, forward slashes."""
+        from pathlib import PurePosixPath
+
+        lw = _import_log_watcher()
+        assert lw._classify_log_path(PurePosixPath("/p/system_logs/x.log")) == "system"
+
+    def test_unrelated_path_is_foreign_on_both(self):
+        """A log outside both trees stays foreign, either separator."""
+        from pathlib import PurePosixPath, PureWindowsPath
+
+        lw = _import_log_watcher()
+        assert lw._classify_log_path(PureWindowsPath(r"C:\tmp\random\output.log")) == "foreign"
+        assert lw._classify_log_path(PurePosixPath("/tmp/random/output.log")) == "foreign"
+
+    def test_aipass_without_a_logs_dir_is_not_a_branch_log(self):
+        """Both components are required, not either."""
+        from pathlib import PureWindowsPath
+
+        lw = _import_log_watcher()
+        path = PureWindowsPath(r"C:\p\src\aipass\drone\core.log")
+        assert lw._classify_log_path(path) == "foreign"

@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-16
+**Last Updated:** 2026-08-18
 
 ## Quick Start
 
@@ -228,6 +228,15 @@ roster held 11 names against 17 branches, so every `system_logs` file belonging 
 fault was the list, not the log. The static list survives as a floor for when the tree
 cannot be read. `UNKNOWN` now means what it says: nobody in the tree owns this log.
 
+**Path classification is separator-agnostic.** `_classify_log_path()` matches on
+`PurePath.parts` — `"aipass" in parts and "logs" in parts` for a branch log,
+`"system_logs" in parts` for a system log — not on `"/logs/" in path`. The string
+form only ever matched forward slashes, so on Windows every branch log classified
+as foreign and was silently skipped: the watcher would have run, reported healthy,
+and processed nothing. Pinned on both platforms from either one with
+`PureWindowsPath` and `PurePosixPath` (2026-08-18, reported by @devpulse from
+Windows CI).
+
 ```bash
 systemctl --user status trigger-log-watcher    # Check watcher service
 systemctl --user restart trigger-log-watcher   # Restart watcher
@@ -349,7 +358,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1032 tests across 27 modules
+├── tests/                          # 1047 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -387,9 +396,12 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Data Safety
 
-- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then `os.replace()` for atomic rename. No partial writes on crash.
-- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` using `fcntl.flock` with `.lock` sidecar files (no-op on Windows). Prevents concurrent corruption from watcher + CLI.
+- **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.
+  The rename goes through `config.replace_with_retry()`, not a bare `os.replace()`: on Windows an antivirus scanner or the search indexer can hold a transient handle on the destination and `os.replace` raises `PermissionError`. 40 attempts, 5ms apart, `PermissionError` only — any other `OSError` propagates on the first attempt, and exhaustion raises rather than reporting a write that did not happen. Fleet-canonical shape, matching `@commons`.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. Prevents concurrent corruption from watcher + CLI.
   This line said "all" from the day it was written and was **not true until 2026-08-16**: `json_handler`'s own `log_operation`, `increment_counter` and `update_data_metrics` read a document, changed it in memory and wrote it back with no lock at all. Atomic is not serialised — `atomic_write_json` stops a *torn* file, not a *lost* one, and having the atomic helper is exactly what made the gap look closed. Measured on the unfixed handler across 4 processes: **100 appends asked, 62 on disk, 38 lost silently, every call returning `True`.** After the fix, 100 of 100. Found by checking my own paths against a defect @api reported in theirs (`6cd8f22c`), not by anyone auditing this claim.
+- **The Windows lock was a silent no-op until 2026-08-18.** `json_file_lock` carried `if sys.platform == "win32": yield` with the comment "single-user typical" — on Windows the context manager returned having taken *nothing*, and every caller ran unserialised while the code read as locked. Windows has no blocking `flock`, so the fix polls: `msvcrt.locking(..., LK_NBLCK, 1)` on one byte of the sidecar, 100 attempts 50ms apart, and the final attempt is deliberately unguarded so the caller gets the OS's own `OSError` instead of running unlocked. The sidecar opens `"a+"`, not `"w"` — truncating a file another process byte-locks is a sharing violation on Windows. Proven **from Linux** by a fake `msvcrt` injected into `sys.modules` with `sys.platform` patched: acquires and releases, retries-then-succeeds (exactly 3 waits, 4 lock calls), and refuses rather than yielding unlocked. A source-inspection test pins that the words "single-user typical" never come back.
+
 - **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the Architecture section.
 
@@ -407,7 +419,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-1032 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
+1047 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -417,7 +429,7 @@ Test files: `test_core`, `test_errors`, `test_medic`, `test_error_registry`, `te
 
 ## Compliance
 
-Seedgo: **100% with bypasses, 98% without** (44 standards). Zero type errors. Both
+Seedgo: **100% with bypasses, 98% without** (46 standards). Zero type errors. Both
 numbers are published deliberately: 100% is the shielded score, and the 26 bypass
 rules behind it each suppress exactly one real violation — measured by running the
 audit with `bypass: []` and matching one rule to one surviving violation, with no
@@ -430,7 +442,7 @@ The largest single deduction is `handlers` on `handlers/escalation.py`: its five
 
 ---
 
-*Last Updated: 2026-08-16*
+*Last Updated: 2026-08-18*
 
 ---
 [← Back to AIPass](../../../README.md)

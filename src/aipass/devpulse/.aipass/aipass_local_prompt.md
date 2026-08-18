@@ -21,6 +21,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
  - **Watchdog EVERY dispatch, same breath:** `drone @devpulse watchdog agent @target` right after the dispatch command. Wake-back cannot wake a manager — without the watchdog the reply lands as silent mail and you wait forever. Patrick caught the silent wait TWICE on 2026-08-17 — the first day this seat ran a NEW model (fable, pinned in settings.local.json the day before). The old model's unwritten reflex was not inherited: a model change carries FILES across, never habits. This line is the durable copy — when the seat's model changes again, expect other unwritten reflexes to be missing too. **Refinement (Patrick, same night): parallel dispatches share ONE watchdog** — arm it on the longest job only, sweep every waiting inbox when it fires, re-arm one if anyone is still out. Three watchdog processes for one round was flagged as too much CPU on his machine.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
+ - **CPU cap (Patrick, 2026-08-18): max 2 citizen agents awake + max 4 sub-agents at once.** Count the live load before every dispatch/spawn; queue the rest and hand off on wake. Joins one-watchdog-per-round and no-panes as standing resource rules — his machine, his ceiling.
  - If a raw command is blocked, drone is the fix — not a workaround.
  - Lean on branches for expertise. Email the owner for architecture questions.
 

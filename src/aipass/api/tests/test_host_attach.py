@@ -1764,3 +1764,63 @@ class TestTheOneSeatHostsAnyProjectsRoom:
         spawn.assert_not_called()
         assert closed["code"] == 1008
         assert "no branch named" in closed["reason"]
+
+
+class TestThisModuleImportsWhereItCannotRun:
+    """
+    The Windows lane's 22 collection errors, and the one line that caused them.
+
+    A PTY is a Unix object and tmux does not run on Windows, so nothing in this
+    module can WORK there — which is fine and guarded by PTY_AVAILABLE. What is
+    not fine is the module failing to IMPORT, because `server` imports `attach`
+    and `host_api` imports `server`, so one AttributeError at import time takes
+    down every host test file on the platform. That is exactly what happened on
+    2026-08-18, the first time the Windows lane ran to completion: 22 collection
+    errors, all from `_setsid: Any = os.setsid` in a function signature.
+
+    A DEFAULT ARGUMENT IS EVALUATED AT IMPORT. That is the whole trap. The
+    three other POSIX-only names in that signature were already fetched with
+    getattr; this one was reached for directly, and the platform guard sitting
+    forty lines above it never got the chance to run.
+    """
+
+    def test_no_posix_only_default_is_reached_for_directly(self) -> None:
+        """
+        The structural pin, so the NEXT one is caught rather than shipped.
+
+        Read on AST, not on prose: every default in this signature must be a
+        getattr call or a plain constant. A bare `os.setsid` / `fcntl.ioctl` /
+        `termios.TIOCSCTTY` is an attribute access that runs at import time on
+        a platform that may not have the attribute, which is the defect this
+        class exists for.
+        """
+        tree = ast.parse(Path(host_attach.__file__).read_text(encoding="utf-8"))
+        hook = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_acquire_controlling_tty"
+        )
+
+        assert hook.args.defaults, "nothing is bound — the child would look it all up"
+        for default in hook.args.defaults:
+            reached_for = isinstance(default, ast.Attribute) and isinstance(default.value, ast.Name)
+            assert not reached_for, f"{ast.unparse(default)} is evaluated at import; use getattr with a default"
+
+    def test_a_platform_with_no_way_to_claim_a_tty_refuses(self) -> None:
+        """
+        What the getattr defaults become off POSIX, and what happens then.
+
+        No caller can reach this — every one is behind PTY_AVAILABLE — so this
+        is not a path anyone takes. It is here because the alternative to a
+        refusal is `None()`, and a TypeError raised inside a forked child is a
+        worse sentence than the true one.
+        """
+        with pytest.raises(host_attach.AttachUnavailable) as refusal:
+            host_attach._acquire_controlling_tty(
+                _setsid=None,
+                _login_tty=None,
+                _ioctl=None,
+                _tiocsctty=None,
+            )
+
+        assert "controlling tty" in str(refusal.value)

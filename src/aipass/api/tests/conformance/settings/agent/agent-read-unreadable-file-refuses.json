@@ -1,5 +1,5 @@
 {
-  "description": "The file exists and this process may not read it. Answering blank would let a later patch write a fresh document over settings that were only ever unreadable.",
+  "description": "The file exists and this process may not read it. Answering blank would let a later patch write a fresh document over settings that were only ever unreadable. PLATFORM: this state cannot be BUILT everywhere — chmod 000 is a no-op for root and only sets a read-only attribute on Windows, which still permits reading. A runner verifies it can deny itself the file and SKIPS with the reason when it cannot; it never passes the case.",
   "document": "agent",
   "expect": {
     "outcome": "unavailable"
@@ -15,6 +15,11 @@
   "notes": "Divergence 1. Both runtimes refuse; rust was fixed red-first the same night.",
   "operation": {
     "kind": "read"
+  },
+  "platform": {
+    "requires": [
+      "unreadable_files"
+    ]
   },
   "runtimes": {
     "python": "supported",

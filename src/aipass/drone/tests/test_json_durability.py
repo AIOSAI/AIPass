@@ -42,6 +42,7 @@ import errno
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -297,9 +298,24 @@ def test_concurrent_writers_never_expose_a_torn_document(json_dir):
     def reader():
         local = {"ok": 0, "empty": 0, "unparseable": 0}
         while not stop.is_set():
+            # Yield between polls — Windows share-mode semantics, not tuning.
+            # A zero-delay spin-reader holds the target open at near-100% duty
+            # cycle, and Python opens files without FILE_SHARE_DELETE, so on
+            # Windows an os.replace onto a handle a reader holds fails with
+            # WinError 5. Two spinning readers can then collide with every one
+            # of the writer's bounded retry attempts and starve a correct retry
+            # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
+            # models a real reader — no fleet workload spin-reads a config file
+            # — and weakens no content check below. At the top of the pass so
+            # the `continue` paths yield too: a refused open means a replace is
+            # in flight, exactly when re-spinning hurts most.
+            time.sleep(0.001)
             try:
                 raw = target.read_text(encoding="utf-8")
             except OSError:
+                # PermissionError lands here too: on Windows a concurrent
+                # os.replace refuses the open. A refused open is share-mode
+                # semantics — not a torn document, and not a read at all.
                 continue
             if raw.strip() == "":
                 local["empty"] += 1

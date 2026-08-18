@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-08-12
+# Modified: 2026-08-18
 # =============================================
 
 """Tests for handlers/security/edit_gate.py."""
@@ -502,18 +502,34 @@ class TestDiagnosticsStateModule:
             assert ds.revalidate(str(target)) is None
 
     def test_revalidate_returns_empty_list_for_a_clean_file(self, tmp_path: Path):
+        """Real pyright, three-state honest.
+
+        revalidate has THREE outcomes: [] clean, [...] findings, None could-not-tell.
+        This used to assert == [] flatly, which conflates could-not-tell with clean —
+        the exact confusion the contract exists to prevent. On the Windows runner
+        pyright exceeded its 15s budget (0.82s locally, ~18x headroom), revalidate
+        correctly answered None, and the test called that a failure. A longer budget
+        would have masked a slow runner instead of fixing a dishonest assertion.
+        """
         from aipass.hooks.apps.modules import diagnostics_state as ds
 
         target = tmp_path / "thing.py"
         target.write_text("x: int = 1\n", encoding="utf-8")
-        assert ds.revalidate(str(target)) == []
+        found = ds.revalidate(str(target))
+        if found is None:
+            pytest.skip("pyright could not answer here (missing or timed out) — a contract-legal outcome, not clean")
+        assert found == []
 
     def test_revalidate_reports_a_real_type_error(self, tmp_path: Path):
+        """Same three-state honesty. This one hid the flaw better: `assert found and ...`
+        reads None as falsy, so a timeout failed here too, just without saying why."""
         from aipass.hooks.apps.modules import diagnostics_state as ds
 
         target = tmp_path / "broken.py"
         target.write_text('x: int = "not an int"\n', encoding="utf-8")
         found = ds.revalidate(str(target))
+        if found is None:
+            pytest.skip("pyright could not answer here (missing or timed out) — a contract-legal outcome")
         assert found and any("int" in e["message"] for e in found)
 
     def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
@@ -633,3 +649,77 @@ class TestCapGateStatesItsReach:
         reason = self._reason()
         assert "2529/300" in reason
         assert "sessions" in reason
+
+
+def _pyright_result(diagnostics: list[dict]) -> object:
+    """A fake completed pyright run carrying *diagnostics* in its real output shape."""
+    from unittest.mock import MagicMock
+
+    completed = MagicMock()
+    completed.stdout = json.dumps({"generalDiagnostics": diagnostics})
+    return completed
+
+
+def _diag(message: str, line: int = 0, severity: str = "error") -> dict:
+    return {"severity": severity, "message": message, "range": {"start": {"line": line}}}
+
+
+class TestRevalidateParsesPyrightOutput:
+    """The parsing is MY code and deterministic; pyright's wall-clock is not.
+
+    The two real-pyright tests above are honest but can only skip when the tool is
+    slow, so on a runner where pyright never answers they assert nothing. These pin
+    the same logic hermetically, so the coverage does not evaporate on the platform
+    where it is hardest to get — which is exactly where the Windows lane went red.
+    """
+
+    def _revalidate(self, tmp_path: Path, diagnostics: list[dict]):
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        with patch.object(ds.subprocess, "run", return_value=_pyright_result(diagnostics)):
+            return ds.revalidate(str(target))
+
+    def test_clean_file_is_empty_list_not_none(self, tmp_path: Path):
+        """[] and None are different answers — this is the distinction that broke."""
+        found = self._revalidate(tmp_path, [])
+        assert found == []
+        assert found is not None
+
+    def test_error_is_parsed_into_line_and_message(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag('Type "str" is not assignable to "int"', line=7)])
+        assert found == [{"line": 7, "message": 'Type "str" is not assignable to "int"'}]
+
+    def test_non_error_severities_are_dropped(self, tmp_path: Path):
+        """A warning is not a reason to keep blocking an edit."""
+        found = self._revalidate(
+            tmp_path,
+            [_diag("just a warning", severity="warning"), _diag("real problem", line=2)],
+        )
+        assert found == [{"line": 2, "message": "real problem"}]
+
+    def test_findings_are_capped_at_ten(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag(f"error {i}", line=i) for i in range(25)])
+        assert found is not None and len(found) == 10
+
+    def test_long_messages_are_truncated(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [_diag("x" * 500)])
+        assert found is not None and len(found[0]["message"]) == 100
+
+    def test_missing_range_defaults_to_line_zero(self, tmp_path: Path):
+        found = self._revalidate(tmp_path, [{"severity": "error", "message": "no range given"}])
+        assert found == [{"line": 0, "message": "no range given"}]
+
+    def test_unparseable_output_is_could_not_tell(self, tmp_path: Path):
+        """Garbage on stdout must never read as clean."""
+        from unittest.mock import MagicMock
+
+        from aipass.hooks.apps.modules import diagnostics_state as ds
+
+        target = tmp_path / "thing.py"
+        target.write_text("x = 1\n", encoding="utf-8")
+        broken = MagicMock()
+        broken.stdout = "not json at all"
+        with patch.object(ds.subprocess, "run", return_value=broken):
+            assert ds.revalidate(str(target)) is None

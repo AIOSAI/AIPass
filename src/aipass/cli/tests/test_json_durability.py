@@ -13,6 +13,7 @@ file on disk parses as JSON and holds either the old document or the new one.
 import json
 import re
 import threading
+import time
 
 import pytest
 
@@ -152,19 +153,45 @@ class TestConcurrentReadsStayParseable:
         stop = threading.Event()
         unparseable = []
         empty = []
+        reads = []
+        failures = []
 
         def writer(worker):
-            for round_number in range(60):
-                if stop.is_set():
-                    return
-                json_handler.save_json("race", "log", [{"entry": round_number, "worker": worker}] * 40)
+            # A writer that dies silently leaves the content assertions below
+            # passing vacuously. On Windows an exhausted os.replace retry raises
+            # here, and that must read as a probe failure, not as a clean race.
+            try:
+                for round_number in range(60):
+                    if stop.is_set():
+                        return
+                    json_handler.save_json("race", "log", [{"entry": round_number, "worker": worker}] * 40)
+            except Exception as error:  # noqa: BLE001 - surfaced through failures below
+                failures.append(error)
 
         def reader():
             while not stop.is_set():
+                # Yield between polls — Windows share-mode semantics, not tuning.
+                # A zero-delay spin-reader holds the target open at near-100% duty
+                # cycle, and Python opens files without FILE_SHARE_DELETE, so on
+                # Windows an os.replace onto a handle a reader holds fails with
+                # WinError 5. Two spinning readers can then collide with every one
+                # of the writer's bounded retry attempts and starve a correct retry
+                # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
+                # models a real reader — no fleet workload spin-reads a config file
+                # — and weakens no content check below. At the top of the pass so
+                # the `continue` paths yield too: a refused open means a replace is
+                # in flight, exactly when re-spinning hurts most.
+                time.sleep(0.001)
                 try:
                     raw = path.read_text(encoding="utf-8")
+                except PermissionError:
+                    # Windows refuses the open while a concurrent os.replace is
+                    # in flight. A refused open is share-mode semantics — not a
+                    # torn document, and not counted as a read.
+                    continue
                 except FileNotFoundError:
                     continue
+                reads.append(1)
                 if raw == "":
                     empty.append(1)
                     continue
@@ -186,5 +213,7 @@ class TestConcurrentReadsStayParseable:
         for thread in threads[2:]:
             thread.join()
 
+        assert failures == [], f"a writer died mid-race: {failures[0]!r}"
+        assert reads, "readers never observed the document — the race proves nothing"
         assert unparseable == [], f"{len(unparseable)} torn reads: {unparseable[:3]}"
         assert empty == [], f"{len(empty)} reads saw a truncated (empty) file"

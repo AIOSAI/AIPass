@@ -72,8 +72,8 @@ genuinely be in — this is the half a prose spec always leaves vague.
 | `raw` | the file holds `given.raw` verbatim — for content that is not valid JSON, or is valid JSON of the wrong shape |
 | `unreadable` | the file holds `given.content` and is then made unreadable (mode `000`) |
 
-A runner that cannot produce a state (an `unreadable` file means nothing to
-root) **skips that case and says so**. It never passes it.
+A runner that cannot produce a state **skips that case and says so**. It never
+passes it — see `platform` below, which is how a case declares that.
 
 ### `operation`
 
@@ -121,6 +121,47 @@ differ **on purpose** — today that is file mode, where python stages through
 (measured at 664 under 0002, 644 under 0022 — not a constant, so it cannot be
 written as one).
 
+### `platform` (optional)
+
+A runtime difference is about the implementation. A **platform** difference is
+about the machine, and the two are not the same axis — python on Windows and
+rust on Windows hit the identical wall. This block is that second axis.
+
+```json
+"platform": {
+  "requires": ["unreadable_files"],
+  "expect_without": {
+    "posix_mode_bits": { "drop": ["mode"] },
+    "parent_is_a_file_is_distinguishable": { "outcome": "ok", "document": {} }
+  }
+}
+```
+
+- **`requires`** — capabilities the case needs in order to be BUILDABLE. If any
+  is absent, the runner **skips the case and names the capability**. The state
+  could not be constructed, so running it would measure the harness.
+- **`expect_without`** — for a capability the case survives without, the
+  expectation override to fold in when it is absent. `drop` removes keys from
+  the expectation; every other key replaces one.
+
+**Every capability is MEASURED, never read off a platform string.** A runner
+probes its own machine once, in a temporary directory:
+
+| capability | the probe | absent when |
+| --- | --- | --- |
+| `unreadable_files` | write a file, `chmod 000`, try to read it | running as root, or on Windows, where the mode only sets a read-only attribute |
+| `posix_mode_bits` | create with mode `0600`, read the mode back | Windows, which has no such semantics |
+| `parent_is_a_file_is_distinguishable` | put a **file** where a directory belongs, open a path through it, look at what was raised | any OS that reports it as `FileNotFoundError` — there, a missing-file-reads-blank rule cannot tell a broken tree from a fresh branch |
+
+That last one is a real, recorded semantic divergence rather than a
+convenience: on a platform that cannot distinguish, the read genuinely answers
+blank, and the corpus says so out loud instead of pretending both worlds refuse.
+
+Expectations fold in a fixed order, and a second runner must reproduce it:
+`expect`, then `expect_by_runtime[<runtime>]`, then every
+`expect_without[<capability>]` this machine lacks — platform last, because it
+describes the machine rather than the implementation.
+
 ## Writing a runner
 
 Three jobs, and nothing else:
@@ -135,6 +176,21 @@ Two guards are not optional, because their absence reports as success:
 
 - Fail if the corpus loads **zero** cases.
 - Verify every file against `manifest.json`'s digests, and fail on a mismatch.
+
+### The digest rule
+
+`sha256` of each file's bytes **with `\r\n` normalized to `\n` first**, recorded
+in the manifest's own `digest` field so a runner cannot get it wrong by
+guessing. This is not tidiness. git rewrites text files to CRLF on a Windows
+checkout under `core.autocrlf`, so a raw byte digest measures which OS ran the
+checkout rather than whether a case changed — it went red on the Windows lane
+on 2026-08-18 with nothing wrong. Line endings are not content of a JSON case.
+
+A scoped `.gitattributes` in this directory pins `eol=lf` as well, so the
+working tree stays byte-identical on all three platforms and a diff here is
+always a case that really changed. The normalization is the **contract**
+though, because a vendored copy in another repository carries its own checkout
+rules and cannot inherit ours.
 
 The python runner is `tests/test_settings_conformance.py` — about 200 lines,
 most of it the state builder.

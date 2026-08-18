@@ -689,7 +689,7 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
 
 
 def _acquire_controlling_tty(
-    _setsid: Any = os.setsid,
+    _setsid: Any = getattr(os, "setsid", None),
     _login_tty: Any = getattr(os, "login_tty", None),
     _ioctl: Any = getattr(fcntl, "ioctl", None),
     _tiocsctty: Any = getattr(termios, "TIOCSCTTY", None),
@@ -716,17 +716,37 @@ def _acquire_controlling_tty(
     allocation before exec — which is the standard mitigation, and the reason
     this function takes arguments nobody ever passes.
 
+    EVERY DEFAULT IS A getattr, INCLUDING os.setsid — that is not style. A bare
+    `os.setsid` in this signature is evaluated when the module is IMPORTED, and
+    the attribute does not exist on Windows, so it raised AttributeError before
+    any platform guard could run and took `attach` down, then `server`, then
+    `host_api`, then every test file that imports them. One line cost 22
+    collection errors on the Windows lane (2026-08-18). The POSIX-only names
+    are already fetched this way; this one was the exception and the exception
+    was the bug.
+
     Args:
-        _setsid: Bound at definition time. Never passed.
-        _login_tty: Bound at definition time. Never passed.
-        _ioctl: Bound at definition time. Never passed.
-        _tiocsctty: Bound at definition time. Never passed.
+        _setsid: Bound at definition time. Never passed. None off POSIX.
+        _login_tty: Bound at definition time. Never passed. None before 3.11.
+        _ioctl: Bound at definition time. Never passed. None off POSIX.
+        _tiocsctty: Bound at definition time. Never passed. None off POSIX.
+
+    Raises:
+        AttachUnavailable: This platform has no way to acquire a controlling
+            tty. No caller can reach it — every one of them is behind
+            PTY_AVAILABLE — so this refuses rather than pretending, and it
+            refuses in the CHILD, which subprocess reports to the parent.
     """
     if _login_tty is not None:
         # One C call doing setsid + TIOCSCTTY + the dup2s. Less Python running
         # in a forked child is strictly better here. Python 3.11+.
         _login_tty(0)
         return
+
+    if _setsid is None or _ioctl is None or _tiocsctty is None:
+        # Three identity comparisons: async-signal-safe, and nothing is
+        # allocated until the platform has already lost.
+        raise AttachUnavailable("This platform cannot acquire a controlling tty")
 
     _setsid()
     _ioctl(0, _tiocsctty, 0)

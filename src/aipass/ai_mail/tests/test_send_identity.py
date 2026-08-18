@@ -903,6 +903,50 @@ class TestCallerRegistryFallback:
         assert result["email"] == "@vera"
 
 
+# ─── _get_contact_info() staleness guard (contacts poisoning, 2026-08-16) ───
+
+
+class TestGetContactInfo:
+    """A contact row surviving after its branch directory is gone must not
+    be handed back as "verified" identity — devpulse traced a live outage
+    to exactly this: dead pytest/scratchpad rows in contacts.json were
+    resolved and trusted here, serving a fixture mailbox in place of a real
+    one.
+    """
+
+    def test_returns_none_when_branch_root_is_gone(self, clean_env, tmp_path):
+        """A stale row (branch dir no longer on disk) falls through, unverified."""
+        from aipass.ai_mail.apps.handlers.email.contacts import register_contact
+        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
+
+        dead_inbox = tmp_path / "gone" / ".ai_mail.local" / "inbox.json"
+        register_contact("ghost", "AIPass", str(dead_inbox))
+
+        assert _get_contact_info("ghost") is None
+
+    def test_returns_info_when_branch_root_exists(self, clean_env, tmp_path):
+        """A live row (branch dir present) still resolves normally."""
+        from aipass.ai_mail.apps.handlers.email.contacts import register_contact
+        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
+
+        branch_root = tmp_path / "live_branch"
+        (branch_root / ".ai_mail.local").mkdir(parents=True)
+        inbox = branch_root / ".ai_mail.local" / "inbox.json"
+        register_contact("alive", "AIPass", str(inbox))
+
+        result = _get_contact_info("alive")
+
+        assert result is not None
+        assert result["email"] == "@alive"
+        assert result["path"] == str(branch_root)
+
+    def test_no_contact_still_returns_none(self, clean_env):
+        """Baseline: an unknown branch name is None, same as before this guard."""
+        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
+
+        assert _get_contact_info("nobody-registered-this") is None
+
+
 # ─── Identity resolution observability (@aipass misattribution, 2026-08-07) ───
 
 

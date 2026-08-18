@@ -5,7 +5,7 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 99% (44/45 at 100%) | **Tests:** 1382 pass | **Functions:** 201 public (185 tested)
+**Seedgo:** 100% (45/45) | **Tests:** 1394 pass | **Functions:** 201 public (185 tested)
 **Last Updated:** 2026-08-18
 
 *The one checker under 100 is seedgo's new gateway_boundary, and it names a
@@ -111,7 +111,7 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1263 test functions across 44 files
+└── tests/                             # 1359 test functions across 46 files
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
@@ -827,9 +827,67 @@ drops unknown patch keys (both freeze-gated on their side), and file mode
 genuinely differs — python stages through `mkstemp` and lands `0600` whatever
 the umask is, rust inherits it.
 
+**A runtime difference and a platform difference are two axes, and 08-18 proved
+it.** Six cases went red the first time the corpus ran on Windows — python on
+Windows and rust on Windows hit the identical wall, so a per-runtime verdict
+cannot describe it. Cases now carry an optional `platform` block, and every
+capability in it is **measured on the machine**, never read off `sys.platform`:
+
+- `unreadable_files` — write a file, `chmod 000`, try to read it. Absent for
+  root and on Windows, where the mode only sets a read-only attribute. A case
+  that needs it is **skipped with the capability named**, because its starting
+  state could not be built and running it would measure the harness.
+- `posix_mode_bits` — create with `0600`, read the mode back. Absent on Windows,
+  so the mode expectation drops there and the rest of the case still counts.
+- `parent_is_a_file_is_distinguishable` — put a **file** where a directory
+  belongs and look at what opening through it raises. Where an OS reports it as
+  `FileNotFoundError`, the missing-file-reads-blank rule genuinely cannot tell a
+  broken tree from a fresh branch, and the read answers blank. That is a **real
+  per-platform semantic divergence**, recorded as the expectation for that
+  world rather than papered over — verified by feeding the door a
+  `FileNotFoundError` and watching it answer blank.
+
+**Digests normalize line endings before hashing, and the manifest says so in a
+`digest` field.** git rewrites text files to CRLF on a Windows checkout under
+`core.autocrlf`, so a raw byte digest measures which OS ran the checkout rather
+than whether a case changed — it went red on the Windows lane with nothing
+wrong. A scoped `.gitattributes` pins `eol=lf` as well, but the normalization is
+the contract, because a vendored copy in another repository carries its own
+checkout rules.
+
 The corpus guards itself, because the failure that matters reports as success: a
 manifest pins every case by digest and by count, so an empty corpus and a stale
-one are both loud. See its own README for the format.
+one are both loud. Two further guards were added when the platform axis landed —
+a capability probe that stops finding things would turn cases into *skips*,
+which read as green, so a POSIX machine that fails to measure all three is an
+error; and the skip path itself is exercised by taking the capabilities away by
+hand, because on a box that has them the whole block is unreachable and a
+mutation deleting it survived. See its own README for the format.
+
+### The module that must import where it cannot run
+
+`host/attach.py` hosts a PTY running a tmux client. A PTY is a Unix object and
+tmux does not run on Windows, so **nothing in that module can work there** —
+which is fine, guarded by `PTY_AVAILABLE`, and tested. Failing to **import** is
+a different failure, and on 08-18 it cost 22 collection errors on the Windows
+lane from one line: `_setsid: Any = os.setsid` in a function signature.
+
+A default argument is evaluated when the module is imported. The three other
+POSIX-only names in that same signature were already fetched with `getattr`;
+this one was reached for directly, so the platform guard forty lines above it
+never got the chance to run — and `server` imports `attach`, `host_api` imports
+`server`, so eleven host test files went down across two workers.
+
+Fixed at the line, then pinned two ways rather than one. An AST test asserts no
+default in that signature is a bare attribute access, so the *next* one is
+caught instead of shipped. And `tests/test_windows_import.py` imports **every**
+module under `apps/` in a disposable child interpreter with POSIX hidden — a
+`meta_path` finder refuses `fcntl`/`pty`/`termios`/`grp`/`pwd`/`resource`/`tty`
+and the POSIX-only `os` attributes are deleted. Verified to bite: restoring the
+old line reproduces the exact cascade, three failures from one character of
+syntax. The finder matters — patching `builtins.__import__` puts the test file
+into the import stack, where the fleet's cross-branch import gate reads it and
+blocks the sweep instead of measuring anything.
 
 ## Integration Contract System (DPLAN-0133)
 

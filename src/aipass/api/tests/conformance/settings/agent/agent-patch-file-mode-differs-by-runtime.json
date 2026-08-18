@@ -1,5 +1,5 @@
 {
-  "description": "A DOCUMENTED DIVERGENCE, not a target. Python stages through mkstemp and lands 0600 whatever the umask is; rust inherits the umask, which @baud measured at 664 under 0002 and 644 under 0022 — so it is not a constant on their side and cannot be written as one here.",
+  "description": "A DOCUMENTED DIVERGENCE, not a target. Python stages through mkstemp and lands 0600 whatever the umask is; rust inherits the umask, which @baud measured at 664 under 0002 and 644 under 0022 — so it is not a constant on their side and cannot be written as one here. PLATFORM: mode is a POSIX property. Windows has no 0600 semantics, so where the bits do not survive a round trip there is NO mode expectation — and the rest of the case (the document written, the view returned) still runs and still counts.",
   "document": "agent",
   "expect": {
     "file": {
@@ -30,6 +30,15 @@
     "kind": "patch",
     "patch": {
       "model": "opus"
+    }
+  },
+  "platform": {
+    "expect_without": {
+      "posix_mode_bits": {
+        "drop": [
+          "mode"
+        ]
+      }
     }
   },
   "runtimes": {

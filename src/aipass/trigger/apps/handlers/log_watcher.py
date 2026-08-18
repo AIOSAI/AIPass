@@ -29,7 +29,7 @@ import hashlib
 import time
 import threading
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Dict, Set, Optional, Callable
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
@@ -380,6 +380,31 @@ def _known_branch_names() -> tuple:
     return resolved
 
 
+def _classify_log_path(path: PurePath) -> str:
+    """
+    Say which tree a log file belongs to, from its path components.
+
+    Components, never separators: this used to test `"/logs/" in file_path`,
+    so every Windows path — `...\\aipass\\hooks\\logs\\edit_gate.log` — classified
+    as foreign and was silently dropped. Four tests went red the first time
+    Windows CI ran this tree to completion (2026-08-18). Taking a PurePath
+    means either separator is answered correctly from either runner.
+
+    Args:
+        path: The log file path, parsed by whichever flavour produced it.
+
+    Returns:
+        "branch" for src/aipass/<branch>/logs/, "system" for system_logs/,
+        "foreign" for anything else.
+    """
+    parts = path.parts
+    if "aipass" in parts and "logs" in parts:
+        return "branch"
+    if "system_logs" in parts:
+        return "system"
+    return "foreign"
+
+
 def _system_log_branch_twin(log_path: str) -> Optional[Path]:
     """
     Find the branch log holding the same lines as this system_logs file.
@@ -630,9 +655,10 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         filename = Path(file_path).name
         if filename.lower() in _EXCLUDED_LOG_FILES_LOWER:
             return False
-        if "/aipass/" in file_path and "/logs/" in file_path:
+        kind = _classify_log_path(Path(file_path))
+        if kind == "branch":
             return True
-        if "/system_logs/" not in file_path:
+        if kind != "system":
             return False
         # Prax writes the same line to the branch's own logs/ dir and to
         # system_logs/. Reading both counts one event twice, and the copy to

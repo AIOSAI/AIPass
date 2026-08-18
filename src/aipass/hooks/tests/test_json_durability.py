@@ -21,6 +21,7 @@ document.
 import json
 import re
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -205,30 +206,55 @@ class TestConcurrentReadsStayUsable:
 
         stop = threading.Event()
         failures: list = []
+        write_failures: list = []
         reads = [0]
         lock = threading.Lock()
 
         def writer(tag: int) -> None:
-            for i in range(150):
-                json_handler.save_json(
-                    module,
-                    "data",
-                    {
-                        "module_name": module,
-                        "created": "2026-08-16",
-                        "last_updated": "2026-08-16",
-                        "writer": tag,
-                        "round": i,
-                        "filler": "x" * 4000,
-                    },
-                )
+            # A writer that dies silently leaves the content assertions below
+            # passing vacuously. On Windows an exhausted os.replace retry raises
+            # here, and that must read as a probe failure, not as a clean race.
+            try:
+                for i in range(150):
+                    json_handler.save_json(
+                        module,
+                        "data",
+                        {
+                            "module_name": module,
+                            "created": "2026-08-16",
+                            "last_updated": "2026-08-16",
+                            "writer": tag,
+                            "round": i,
+                            "filler": "x" * 4000,
+                        },
+                    )
+            except Exception as error:  # noqa: BLE001 - surfaced through write_failures below
+                with lock:
+                    write_failures.append(error)
 
         def reader() -> None:
             local_reads = 0
             local_failures = []
             while not stop.is_set():
+                # Yield between polls — Windows share-mode semantics, not tuning.
+                # A zero-delay spin-reader holds the target open at near-100% duty
+                # cycle, and Python opens files without FILE_SHARE_DELETE, so on
+                # Windows an os.replace onto a handle a reader holds fails with
+                # WinError 5. Two spinning readers can then collide with every one
+                # of the writer's bounded retry attempts and starve a correct retry
+                # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
+                # models a real reader — no fleet workload spin-reads a config file
+                # — and weakens no content check below. At the top of the pass so
+                # the `continue` paths yield too: a refused open means a replace is
+                # in flight, exactly when re-spinning hurts most.
+                time.sleep(0.001)
                 try:
                     raw = target.read_text(encoding="utf-8")
+                except PermissionError:
+                    # Windows refuses the open while a concurrent os.replace is
+                    # in flight. A refused open is share-mode semantics, not an
+                    # unusable document — it is not counted as a read at all.
+                    continue
                 except FileNotFoundError:
                     local_failures.append("missing")
                     continue
@@ -254,6 +280,7 @@ class TestConcurrentReadsStayUsable:
         for t in readers:
             t.join()
 
+        assert write_failures == [], f"a writer died mid-race: {write_failures[0]!r}"
         assert reads[0] > 0, "readers never ran — the test would pass vacuously"
         assert failures == [], f"{len(failures)} unusable reads of {reads[0]}"
 

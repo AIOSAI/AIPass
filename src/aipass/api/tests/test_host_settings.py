@@ -15,12 +15,60 @@ never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
+
+# Asked of @hooks' own module in a child process: where WOULD the flag go under
+# the environment this test just built? The answer has to come from there — a
+# copy of the rule computed here would agree with itself and prove nothing.
+WHERE_THE_FLAG_LIVES = "from aipass.hooks.apps import sound; print(sound.MUTE_FLAG)"
+
+
+def _where_the_door_would_write() -> Path:
+    """
+    Ask @hooks' own module, in a child that inherits this process's environment.
+
+    The answer has to come from THERE. Computing the path here would agree with
+    itself no matter what the environment says, which is precisely the failure
+    this exists to catch: `tempfile.gettempdir()` falls back to the machine's
+    real temp directory when TMPDIR points at a directory that does not exist,
+    silently, so a redirect can look applied and not be.
+
+    Returns:
+        The path the door's own process would write the mute flag to.
+    """
+    child = subprocess.run(
+        [sys.executable, "-c", WHERE_THE_FLAG_LIVES],
+        capture_output=True,
+        text=True,
+        timeout=host_settings.HOOKS_SOUND_TIMEOUT_SECONDS,
+    )
+
+    assert child.returncode == 0, child.stderr
+    return Path(child.stdout.strip())
+
+
+def _fingerprint(path: Path) -> tuple:
+    """
+    Enough of a file to notice it was touched at all.
+
+    Args:
+        path: The operator's real mute flag.
+
+    Returns:
+        (exists, size, mtime_ns) — absent files fingerprint as absent rather
+        than raising, because the flag not existing IS a legitimate state.
+    """
+    if not path.exists():
+        return (False, None, None)
+
+    stat = path.stat()
+    return (True, stat.st_size, stat.st_mtime_ns)
 
 
 def _ok() -> subprocess.CompletedProcess:
@@ -255,23 +303,129 @@ class TestHooksSound:
 
     def test_the_door_really_answers_to_this_command(self, tmp_path, monkeypatch) -> None:
         """
-        NOT hermetic, on purpose, and the only test here that is.
+        NOT hermetic, on purpose, and the only test here that is not.
 
         Every other test in this class mocks the subprocess, which pins what
         this lane SENDS and nothing about whether anyone is listening. If
         @hooks renames the verb tomorrow, those tests all still pass and the
-        phone's toggle silently stops working. This one runs the real command
-        with TMPDIR pointed at a directory of its own, so the flag it moves is
-        this test's flag and the machine's own is never touched.
+        phone's toggle silently stops working. This one runs the real command.
+
+        KEPT DELIBERATELY, with both of its costs paid rather than argued away.
+
+        COST ONE — it needs a live @hooks, and CI has none. The registry is
+        machine-managed and gitignored, so on a fresh runner drone answers
+        "Branch '@hooks' not found in registry" and exits 1; this test was red
+        on the Windows and ubuntu lanes for exactly that reason. The obvious
+        cure does not work here: a hand-built registry pointing at the real
+        @hooks is silently DROPPED by drone's own _validate_branch_path, which
+        discards any branch whose path escapes the registry file's directory —
+        measured, the branches map comes back empty. A registry in tmp can only
+        point at a tree in tmp, and a tmp tree is not the door this test exists
+        to reach. So it asks the door read-only first and SKIPS when there is
+        nobody home. A skip is honest; a mock would be this test pretending to
+        be the four above it.
+
+        COST TWO — it flips a real switch, so it must flip its own. TMPDIR is
+        redirected and @hooks' own constant with it, and neither is TRUSTED:
+        the redirect is verified in @hooks' own module, in a child process,
+        BEFORE anything is written. That guard is not hypothetical. While
+        investigating this defect I redirected TMPDIR to a directory that did
+        not exist yet, tempfile silently fell back to /tmp, and the probe wrote
+        to the operator's real flag. The verdict was unchanged and the mtime
+        was not, which is precisely what a fingerprint catches and a "did it
+        work" assertion does not.
         """
-        flag = tmp_path / "aipass-hooks-muted"
+        # @hooks' own declaration, read before it is redirected. Naming the
+        # path here instead would be the second copy of a truth this class
+        # already refuses to keep.
+        operator_flag = Path(str(host_settings.hooks_sound.MUTE_FLAG))
+        before = _fingerprint(operator_flag)
+
+        flag = tmp_path / operator_flag.name
         monkeypatch.setenv("TMPDIR", str(tmp_path))
         monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
 
-        assert host_settings.hooks_sound_set(False) is False
+        listening = subprocess.run(
+            list(host_settings.HOOKS_SOUND_DOOR),
+            capture_output=True,
+            text=True,
+            timeout=host_settings.HOOKS_SOUND_TIMEOUT_SECONDS,
+        )
+        if listening.returncode != 0:
+            pytest.skip(
+                "no live @hooks on this machine — the door said: "
+                f"{(listening.stderr or listening.stdout).strip()[:120]}"
+            )
+
+        # Where @hooks' OWN module says it would write, before a byte moves.
+        would_write = _where_the_door_would_write()
+        assert would_write == flag, (
+            "the redirect did not reach the door's own process — refusing to "
+            f"flip anything. It would have written {would_write}"
+        )
+
+        try:
+            assert host_settings.hooks_sound_set(False) is False
+            assert flag.exists()
+            assert host_settings.hooks_sound_set(True) is True
+            assert not flag.exists()
+        finally:
+            # The operator's switch, unmoved — existence, size AND mtime, so a
+            # rewrite that lands on the same state still fails this.
+            assert _fingerprint(operator_flag) == before
+
+
+class TestTheGuardsOnTheLiveDoorTest:
+    """
+    Two hermetic tests about the ONE non-hermetic test above it.
+
+    A deliberate live-door pin is only defensible while its isolation is
+    verified rather than assumed, and both of these exist because the assumption
+    failed in practice: while investigating this defect I pointed TMPDIR at a
+    directory I had not created yet, tempfile fell back to the machine's real
+    temp directory, and a probe wrote to the operator's own flag. The verdict was
+    unchanged and the mtime was not.
+    """
+
+    def test_the_redirect_check_asks_the_door_rather_than_computing_the_answer(self, tmp_path, monkeypatch) -> None:
+        """
+        The failure mode, reproduced, with no live @hooks needed.
+
+        TMPDIR points at a directory that does not exist. A guard that COMPUTED
+        the expected path from the environment would answer inside it and be
+        satisfied; the door's own module answers somewhere else entirely,
+        because gettempdir falls back and says nothing. That difference is the
+        guard, so it is asserted here rather than trusted.
+        """
+        doomed = tmp_path / "never-created"
+        monkeypatch.setenv("TMPDIR", str(doomed))
+
+        would_write = _where_the_door_would_write()
+
+        assert doomed not in would_write.parents, (
+            "tempfile no longer falls back on a missing TMPDIR — good news, but "
+            "the live test's guard was written for a platform where it does"
+        )
+
+    def test_the_fingerprint_notices_a_rewrite_that_changed_nothing(self, tmp_path) -> None:
+        """
+        Why the operator's flag is fingerprinted with its mtime and not just its state.
+
+        Muting an already-muted fleet is idempotent: the file is there before and
+        there after, same zero bytes. A check on existence alone would call that
+        untouched. The flag's whole job is to be a marker, so the honest question
+        is whether anything wrote to it at all.
+        """
+        flag = tmp_path / "aipass-hooks-muted"
+        flag.touch()
+        before = _fingerprint(flag)
+
+        # An idempotent re-write: same path, same (empty) content, later clock.
+        flag.touch()
+        os.utime(flag, ns=(before[2] + 1_000_000_000, before[2] + 1_000_000_000))
+
         assert flag.exists()
-        assert host_settings.hooks_sound_set(True) is True
-        assert not flag.exists()
+        assert _fingerprint(flag) != before
 
 
 class TestAnUnreadableFileIsNeverBlank:

@@ -1,0 +1,11 @@
+# The corpus is DATA, and its digests are a contract two runtimes check.
+#
+# git's core.autocrlf rewrites text files to CRLF on a Windows checkout, which
+# changes every byte digest without changing a single case. The manifest went
+# red on the Windows lane on 2026-08-18 for exactly that, with nothing wrong.
+#
+# The runner normalizes line endings before hashing, so this file is not what
+# makes the pin hold — it is what keeps the working tree byte-identical on all
+# three platforms, so a diff here is always a case that actually changed.
+*.json text eol=lf
+README.md text eol=lf

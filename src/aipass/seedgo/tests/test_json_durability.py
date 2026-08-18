@@ -22,6 +22,7 @@ import json
 import os
 import re
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -226,32 +227,55 @@ class TestConcurrentReadersSeeAWholeDocument:
         empty = 0
         unparseable = 0
         total = 0
+        write_failures: list = []
         lock = threading.Lock()
         stop = threading.Event()
 
         def write(tag: str) -> None:
-            for i in range(150):
-                json_handler.save_json(
-                    "race",
-                    "data",
-                    {
-                        "module_name": "race",
-                        "created": "2026-08-16",
-                        "last_updated": "2026-08-16",
-                        "writer": tag,
-                        "n": i,
-                        # Padding widens the truncate->write window the way a
-                        # real audit document (hundreds of violations) does.
-                        "padding": ["x" * 120 for _ in range(80)],
-                    },
-                )
+            # A writer that dies silently leaves the content assertions below
+            # passing vacuously. On Windows an exhausted os.replace retry raises
+            # here, and that must read as a probe failure, not as a clean race.
+            try:
+                for i in range(150):
+                    json_handler.save_json(
+                        "race",
+                        "data",
+                        {
+                            "module_name": "race",
+                            "created": "2026-08-16",
+                            "last_updated": "2026-08-16",
+                            "writer": tag,
+                            "n": i,
+                            # Padding widens the truncate->write window the way a
+                            # real audit document (hundreds of violations) does.
+                            "padding": ["x" * 120 for _ in range(80)],
+                        },
+                    )
+            except Exception as error:  # noqa: BLE001 - surfaced through write_failures below
+                with lock:
+                    write_failures.append(error)
 
         def read() -> None:
             nonlocal empty, unparseable, total
             while not stop.is_set():
+                # Yield between polls — Windows share-mode semantics, not tuning.
+                # A zero-delay spin-reader holds the target open at near-100% duty
+                # cycle, and Python opens files without FILE_SHARE_DELETE, so on
+                # Windows an os.replace onto a handle a reader holds fails with
+                # WinError 5. Two spinning readers can then collide with every one
+                # of the writer's bounded retry attempts and starve a correct retry
+                # into exhaustion (first full Windows CI run, 2026-08-18). 1ms
+                # models a real reader — no fleet workload spin-reads a config file
+                # — and weakens no content check below. At the top of the pass so
+                # the `continue` paths yield too: a refused open means a replace is
+                # in flight, exactly when re-spinning hurts most.
+                time.sleep(0.001)
                 try:
                     content = target.read_text(encoding="utf-8")
                 except (FileNotFoundError, OSError):
+                    # PermissionError lands here too: on Windows a concurrent
+                    # os.replace refuses the open. A refused open is share-mode
+                    # semantics — not a torn document, and not a read at all.
                     continue
                 with lock:
                     total += 1
@@ -275,6 +299,7 @@ class TestConcurrentReadersSeeAWholeDocument:
         for t in readers:
             t.join(timeout=5)
 
+        assert write_failures == [], f"a writer died mid-race: {write_failures[0]!r}"
         assert total > 0, "readers never observed the document — harness proves nothing"
         assert empty == 0, f"{empty} of {total} reads saw a truncated document"
         assert unparseable == 0, f"{unparseable} of {total} reads saw a partial document"

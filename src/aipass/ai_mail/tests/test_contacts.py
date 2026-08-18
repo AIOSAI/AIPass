@@ -166,3 +166,24 @@ def test_all_contacts_returns_all(isolated_contacts):
     assert "alpha" in result
     assert "beta" in result
     assert len(result) == 2
+
+
+# ---- conftest isolation guard --------------------------------
+
+
+def test_conftest_isolates_contacts_file_by_default():
+    """The autouse fixture in conftest.py must redirect CONTACTS_FILE.
+
+    Without it, every test exercising delivery's auto-register side effect
+    (test_deliver_auto_provisions_inbox, test_empty_upsert_key_is_treated_as_no_key,
+    etc.) upserts real rows into the live .ai_mail.local/contacts.json — 6 rows
+    leaked this way and were then trusted as "verified" identity (found live,
+    2026-08-16, @devpulse). This does not need `isolated_contacts`: the
+    autouse fixture must already apply here, same as in any other test.
+    """
+    from aipass.ai_mail.apps.handlers.paths import find_repo_root
+
+    live_path = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.json"
+
+    assert contacts_mod.CONTACTS_FILE != live_path
+    assert contacts_mod.CONTACTS_FILE.name == "contacts.json"
