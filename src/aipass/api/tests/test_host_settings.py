@@ -536,12 +536,32 @@ class TestTheCorpusForcedTwoFixes:
         has written settings yet. A FILE standing where a directory belongs
         means the tree is broken, and reading that as 'no settings yet' invites
         a patch to write a document into a path that cannot hold one.
+
+        Probed, not platform-stringed — the conformance corpus's own doctrine.
+        Where the OS reports a path THROUGH a file as merely missing (Windows
+        says FileNotFoundError, and did, on the lane's third run 2026-08-18),
+        no rule that reads missing-as-blank can tell the two apart, so blank is
+        the contract's own answer there and this test asserts THAT instead.
+        Either way the unit is measured faithfully relaying what its OS can
+        distinguish.
         """
         blocking = tmp_path / "claude-settings"
         blocking.write_text("I am a file, not a directory", encoding="utf-8")
+        target = blocking / "settings.local.json"
 
-        with pytest.raises(host_settings.SettingsUnavailable):
-            host_settings.read_object(blocking / "settings.local.json")
+        try:
+            target.read_bytes()
+            pytest.fail("the blocking file did not block — this fixture is broken")
+        except FileNotFoundError:
+            world_distinguishes_the_fault = False
+        except OSError:
+            world_distinguishes_the_fault = True
+
+        if world_distinguishes_the_fault:
+            with pytest.raises(host_settings.SettingsUnavailable):
+                host_settings.read_object(target)
+        else:
+            assert host_settings.read_object(target) == {}
 
     def test_a_negative_window_reads_as_null_not_as_a_negative(self, tmp_path) -> None:
         """
