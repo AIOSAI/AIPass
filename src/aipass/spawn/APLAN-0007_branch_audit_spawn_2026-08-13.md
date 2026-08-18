@@ -33,12 +33,16 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN |
-| **Last verified** | 2026-08-17 (S120) |
-| **Open items** | 1 (escalated, not mine to rule -- cert `id`/`citizen_number` has no authoritative source) |
-| **Tests** | 475 pass, 1 skipped, 0 fail |
+| **Last verified** | 2026-08-17 (S121) |
+| **Open items** | 0 mine (1 PARKED BY PATRICK on devpulse's ledger -- cert `id`/`citizen_number`) |
+| **Tests** | 483 pass, 1 skipped, 0 fail |
 | **Seedgo** | 100% (44 standards) |
-| **Bypass entries** | 16 (+1 S119: `atomic_write.py`/`json_structure`, measured load-bearing in both lanes before adding) |
+| **Bypass entries** | 17 (+1 S119 `atomic_write.py`, +1 S121 `mint_verify.py` -- both `json_structure`, both lift-and-measured in BOTH lanes before adding) |
 | **Live command sweep** | unknown-class refusal live-verified S118 (`create wizard` -> exit 1, no branch made) |
+
+**S121 note:** the `project_agent` template was shipping 6 of 18 files short to
+every fresh clone (gitignored, never negated) and the mint exited 0 anyway. Both
+halves fixed -- see Resolved. Mint now refuses rather than half-registering.
 
 **S118 closed all 4 remaining open items** from the S117 audit: the unknown-class
 refusal for `create`, the `.ai_mail.local/` never-update exclusion (devpulse
@@ -50,8 +54,8 @@ item was already covered by unit tests at S117 and needed no further action.
 
 ### Summary
 - Agent factory + branch lifecycle manager: create, update, delete, sync, repair, grant-admin.
-- 23 modules/handlers, 19 test files, 436 tests collected.
-- Two template classes: `aipass_framework` (45 files, 23 dirs), `project_agent` (17 files, 9 dirs).
+- 25 modules/handlers, 21 test files, 484 tests collected.
+- Two template classes: `aipass_framework` (46 files, 24 dirs), `project_agent` (18 files, 10 dirs) -- BOTH now ship complete to a fresh clone (S121).
 - `admin` permanently refused as class/template at the door, before argparse (DPLAN-0288).
 
 ### Architecture
@@ -86,11 +90,54 @@ class helpers for that reason.
   `"devpulse"` on devpulse. spawn's own cert therefore renders "Citizen
   #7087bb93". I did NOT normalize these (out of scope, and any scheme is a fleet
   ruling) and did NOT fabricate numbers for the 5 fresh mints -- omitted the field
-  so honest-absence renders nothing rather than a false record. Needs: a ruling on
-  whether to renumber fleet-wide from registry `created` order, or drop the field.
+  so honest-absence renders nothing rather than a false record.
+  **RULED 2026-08-17 (Patrick, via devpulse 1653d27a): PARKED.** Verbatim -- "we
+  can circle back on these, they seem inconsistent tbh". No renumber, no retire;
+  the field stays as-is INCLUDING my honest omissions on the 5 new mints. Ruling
+  comes at a later sitting and sits on devpulse's ledger, not mine. Nothing for
+  @spawn to do -- do not re-escalate this, and do not "helpfully" backfill numbers.
+  Same reply also accepted the finding-3 overturn; the phone's Passport No. relabel
+  (render the registry ENTRY id, not the project id) is queued on baud's side.
 
 ### Resolved
 
+- [x] **`project_agent` template shipped INCOMPLETE to every fresh clone, and the
+  mint hid it by exiting 0** (S121, devpulse dispatch 86cf4a70, CI run
+  32094572478). CI showed 2 reds -- both my new `TestBirthCertificateSchema` tests
+  from S120, both the `[project_agent]` param, both `FileNotFoundError` on the
+  minted `artifacts/birth_certificate.json`; the `[aipass_framework]` params passed
+  and everything passed locally.
+  ROOT CAUSE: root `.gitignore` blanket-ignores `.ai_mail.local/` (29-30),
+  `DASHBOARD.local.json` (32), `logs/` (48) and `artifacts/` (49).
+  `aipass_framework` got EIGHT explicit negations; `project_agent` got exactly ONE
+  (`.spawn/`). Measured: aipass_framework 0 untracked of 46, **project_agent 6
+  untracked of 18** -- `DASHBOARD.local.json`, `logs/README.md`,
+  `artifacts/README.md`, `artifacts/birth_certificate.json`,
+  `.ai_mail.local/inbox.json`, `.ai_mail.local/README.md`. So a fresh clone minting
+  a project_agent citizen produced one with **no birth certificate AND no mailbox**.
+  THE WORSE HALF: I reproduced it by stripping those 6 files from a template copy
+  and minting -- `create` **exited 0**, printed "Agent created / Files: 11 /
+  Registry: updated", and REGISTERED the citizen, with an empty `artifacts/` and an
+  empty `.ai_mail.local/`. A citizen with no `inbox.json` cannot receive mail at
+  all. Silent-success on missing state, against spawn's own "fail honestly".
+  FIX (both halves): `.gitignore` negations added for the 4 categories
+  project_agent actually carries, so the template ships complete; and new
+  `apps/handlers/mint_verify.py` + guard at `core.py:319-338` verifying every file
+  the TEMPLATE'S OWN manifest (`.spawn/.template_registry.json`) declares actually
+  landed. Verification sits BEFORE the registry write, so a citizen that cannot be
+  born never enters the registry -- no rollback path to fail. Red-first (3 tests
+  red first: reported success, got registered, exited 0). The manifest half is the
+  load-bearing half: it is tracked, so it survives a truncated clone and keeps
+  naming files the clone no longer has -- a disk-only walk sees nothing wrong,
+  which is exactly how this stayed silent.
+  Re-verified by me against the original repro: same command now exits 1, names all
+  6 missing files, diagnoses the gitignore cause in words, and creates no registry
+  entry; a COMPLETE template still mints clean with cert + mailbox present.
+  483 pass 1 skip, seedgo 100%. Reproduced CI's own invocation
+  (`-n auto --dist loadscope` from repo root) -- green, no xdist ordering flakiness.
+  The 2 CI tests were KEPT as-is rather than mocked hermetic: they are a genuine
+  canary that caught a real shipping defect, proven to pass in a simulated
+  fresh-clone tree once the template is complete.
 - [x] **Birth-certificate paperwork repaired fleet-wide + old schema killed at the
   template** (S120, devpulse dispatch eb8354a2, Patrick-ruled). Before: 12 certs
   populated, 6 carried `metadata.template`, 6 carried old `metadata.citizen_class`,
@@ -258,6 +305,7 @@ silently dropped.
 | 2026-08-15 | Closed all 4 open items per devpulse's mail ruling (bfba4f0a) | GREEN -- 0 open, 11 resolved |
 | 2026-08-16 | Torn-write template+live fix (devpulse dispatch bc4e48f9, error 90c9e40d) | GREEN -- templates already clean, 6 live sites fixed, 38%->0% unusable |
 | 2026-08-17 | Birth cert + passport repair round (devpulse dispatch eb8354a2) | GREEN -- 12->17 certs, 6->17 template key, registry_id ruled deliberate, 1 escalated |
+| 2026-08-17 | CI red on my S120 tests (devpulse dispatch 86cf4a70) | GREEN -- project_agent template was shipping 6/18 files short; silent mint now refuses |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0288 (admin ceremony)
@@ -328,6 +376,28 @@ authoritative source for it exists anywhere in the system. Honest-absence render
 nothing; an invented number would render as provenance. Also refused to normalize
 the existing corrupt ids -- any numbering scheme is a fleet ruling, not mine.
 
+**S121 (2026-08-17):** CI red on my own S120 tests, and they were right. The
+`project_agent` template had been shipping 6 of 18 files short to every fresh
+clone since whenever the negations were written -- `aipass_framework` got eight
+`.gitignore` negations, `project_agent` got one. My tests did not break CI; they
+were the first thing to ever LOOK at project_agent's minted output on a clean
+machine, and they found a citizen born with no birth certificate and no mailbox.
+Kept them as-is rather than mocking them hermetic: a test that only passes where
+the state happens to exist is the thing that let this hide.
+
+The deeper bug was mine to own: the mint exited 0 on an incomplete template,
+printed "Agent created", and REGISTERED the citizen. Verified by stripping a
+template copy and running the real path. Now it verifies against the template's
+own manifest before the registry write and refuses loudly. The manifest is the
+load-bearing half -- it is tracked, so it survives a truncated clone and still
+names what is missing, where a disk-walk sees nothing wrong because the files are
+absent from the source too.
+
+Also corrected my OWN branch prompt, which is injected every turn and had gone
+stale: it advertised `drone @spawn passport` (retired, archived) and named the
+citizen classes as "builder, birthright" when they are `aipass_framework` and
+`project_agent`. A sub-agent caught it correcting a premise I had stated as fact.
+
 ## Listen (TTS-friendly summary)
 
 Spawn's audit is signed yellow. Every number is green: four hundred thirty five tests
@@ -397,8 +467,27 @@ made up number would read as a record. That needs a ruling, and it is escalated.
 Devpulse's certificate was never touched. It carries a signed grant that one changed
 byte would break, and its checksum is identical before and after.
 
+Update at session one twenty one: continuous integration went red on two tests I
+wrote this morning, and the tests were right. One of my two branch templates had
+been shipping incomplete to every fresh copy of the repository. Six of its eighteen
+files were being ignored by version control, because the other template was given
+eight exemptions and this one was given a single exemption years apart. Nobody had
+noticed, because on this machine the files exist. My new tests were the first thing
+to ever look at that template's output on a clean machine.
+
+The worse half was mine. When the template was incomplete, creating a branch
+reported success, exited cleanly, and registered the new citizen anyway, while
+producing a citizen with no birth certificate and no mailbox. A citizen without a
+mailbox cannot receive mail at all. I reproduced it deliberately before fixing it.
+Creating a branch now checks what the template itself claims to contain, refuses
+out loud when anything is missing, and registers nothing.
+
+I kept the two failing tests exactly as they were rather than making them pass
+artificially. A test that only passes where the state happens to exist is precisely
+what let this hide for so long.
+
 Last verified 2026-08-17.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-17*
+*Updated: 2026-08-17 (S121)*

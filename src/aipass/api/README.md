@@ -5,13 +5,16 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 99% (42/44 at 100%) | **Tests:** 1298 pass | **Functions:** 201 public (179 tested)
+**Seedgo:** 100% (44/44) | **Tests:** 1308 pass | **Functions:** 202 public (183 tested)
 **Last Updated:** 2026-08-17
 
-*The two categories under 100% are both in the host lane and both known:
-`server.py`'s attach route is genuinely deeply nested (a PTY pump inside a
-WebSocket handler inside the app factory), and `settings.py` is in-flight work
-carrying three silent catches. Neither is bypassed — a bypass would hide them.*
+*Back to 100 with nothing bypassed. The two long-standing exceptions are gone
+rather than documented: the attach route's nesting went when the room
+resolution and the PTY pump moved out of the app factory — both already took
+everything they used as arguments, so there was never a closure holding them
+in — and `settings.py`'s silent catches went when each one was given the
+honest answer it was hiding (an unreadable settings file is a fault, not a
+blank document).*
 
 ---
 
@@ -94,14 +97,15 @@ api/
 │   │   ├── auth/env.py, keys.py, secrets.py
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
-│   │   ├── host/config.py, tokens.py, server.py, feed.py, reads.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
+│   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
+│   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the git surface), remotes.py (where a repo points)
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py
 │   │   ├── openrouter/caller.py, client.py, models.py, provision.py
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1240 test functions across 43 files
+└── tests/                             # 1250 test functions across 43 files
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -336,6 +340,13 @@ would paint it clean when nothing was measured.
 
 ### The git surface (DPLAN-0303)
 
+*Where it lives: `git_reads.py`. The read lane started as one module and the
+git surface grew until it crossed the 1500-line cap, so it split along the seam
+that was already there — repository reads in `git_reads.py`, files and
+directories and the name fence in `reads.py`, and the remote in `remotes.py`
+because that lane shells nothing at all. The dependency runs one way: the
+repository reads lean on the resolution, never the reverse.*
+
 Patrick, on the phone's git screen: *"git diffs are pretty much useless. we need
 a real diff setup."* The wall of text was one 308KB response. Tapping one file
 in the same repository is now 5.8KB — **53× less**, measured on a real tree.
@@ -408,6 +419,8 @@ it always did, and untracked names leaking into the tracked list is the precise
 disagreement this lane exists to avoid. Ignored paths are in no list at all.
 
 ### The remote lane (DPLAN-0303 phase 4)
+
+*Where it lives: `remotes.py`.*
 
 Phase 4 goes links-first — zero-auth link-cards out to GitHub, built from
 constructible URLs — so the face has to be told the repository's remote.

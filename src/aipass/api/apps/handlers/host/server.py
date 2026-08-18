@@ -114,6 +114,8 @@ from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import reads as host_reads
+from aipass.api.apps.handlers.host import git_reads as host_git
+from aipass.api.apps.handlers.host import remotes as host_remotes
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import uploads as host_uploads
@@ -490,6 +492,211 @@ def _face_file_route(filename: str):
     return _serve_file
 
 
+# THE PUMP AND ITS CONTROL FRAMES, at module level rather than inside the app
+# factory. They were nested there from the first cut and never needed to be:
+# both take everything they touch as arguments, so there was no closure holding
+# them in — only the factory's indentation, which was also the branch's last
+# deep-nesting violation. Out here they read at their own depth.
+async def _pump(websocket: Any, session: Any) -> None:
+    """
+    Run the bidirectional pump until either side goes away.
+
+    The PTY read is blocking, so it lives on a thread executor rather than
+    the event loop — a blocking read on the loop would freeze every other
+    request this server is serving, which on a single-worker uvicorn means
+    the whole phone.
+
+    Args:
+        websocket: The accepted connection.
+        session: The live AttachSession.
+    """
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+
+    async def room_to_socket() -> None:
+        """PTY output → client. Binary frames: the room emits escape
+        sequences and partial UTF-8 across chunk boundaries, and decoding
+        here would corrupt both."""
+        while not stop.is_set():
+            data = await loop.run_in_executor(None, session.read)
+            if not data:
+                break
+            await websocket.send_bytes(data)
+        stop.set()
+
+    async def socket_to_room() -> None:
+        """Client input → PTY. Bytes forwarded UNCHANGED — the key bar
+        sends real control bytes, exactly as a keyboard would, so there is
+        nothing here to interpret."""
+        while not stop.is_set():
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            if message.get("bytes") is not None:
+                try:
+                    session.write(message["bytes"])
+                except host_attach.AttachRefused as e:
+                    # A read-only watch was typed into. The session's own
+                    # refusal (the layer that counts) ends the attach with
+                    # the sentence — a client that types into a watch has
+                    # broken the contract, and pretending the bytes landed
+                    # would be the silent fallback this house refuses.
+                    logger.warning("[host_api] input refused on %s: %s", session.room, e)
+                    await websocket.close(code=1008, reason=str(e))
+                    break
+                continue
+
+            text = message.get("text")
+            if text:
+                _handle_control(session, text)
+        stop.set()
+
+    tasks = [asyncio.ensure_future(room_to_socket()), asyncio.ensure_future(socket_to_room())]
+
+    try:
+        # FIRST_COMPLETED, not gather. Waiting for BOTH deadlocks on a quiet
+        # room: the phone closes the sheet, socket_to_room ends, and
+        # room_to_socket is still parked in a blocking os.read that will not
+        # return until the room happens to print something. The detach — and
+        # the SIGHUP with it — would wait on output that may never come, and
+        # the executor thread would stay parked with it.
+        #
+        # Either direction ending means the attach is over, so the first one
+        # to finish is the signal.
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        # Always, and FIRST: hangup closes the descriptor, which is what
+        # breaks the blocked reader out of os.read. Cancelling the task
+        # alone would not — a thread sitting in a syscall does not notice
+        # an asyncio cancellation.
+        session.hangup()
+
+        for task in tasks:
+            task.cancel()
+
+        # Let the unblocked reader finish rather than leaving it to be
+        # collected mid-flight, which logs a 'task was destroyed but it is
+        # pending' at whoever reads the server log next.
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _handle_control(session: Any, text: str) -> None:
+    """
+    Handle a control frame from the client.
+
+    Text frames are CONTROL, binary frames are KEYSTROKES. That split is
+    what lets a resize travel on the same socket without a resize message
+    ever being mistaken for something the operator typed.
+
+    Args:
+        session: The live AttachSession.
+        text: The JSON control message.
+    """
+    try:
+        message = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("[host_api] ignoring an unparseable control frame on %s", session.room)
+        return
+
+    if not isinstance(message, dict) or message.get("type") != "resize":
+        logger.warning("[host_api] ignoring an unknown control frame on %s", session.room)
+        return
+
+    try:
+        session.resize(message.get("cols"), message.get("rows"))
+    except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError) as e:
+        # Never fatal: a bad resize should not drop a live session the
+        # operator is working in.
+        logger.warning("[host_api] resize refused on %s: %s", session.room, e)
+
+
+def _room_for(branch: str, project: str, external: bool, shell: bool, seated: str) -> Any:
+    """
+    Work out WHICH room a socket is asking for, before anything is opened.
+
+    Pulled out of the attach route rather than left inline: the route was the
+    branch's last two deep-nesting violations, and this was the whole reason —
+    a three-way resolution tree sitting inside a try, inside a WebSocket
+    handler, inside the app factory. Out here it reads at its own depth, and
+    what it decides is now something that can be reasoned about on its own.
+
+    Resolution ONLY. Nothing is spawned here, which keeps the route's single
+    spawn site single — the property test_the_session_is_created_once_per_socket
+    pins by counting that one call.
+
+    Args:
+        branch: The branch named on the socket, or empty.
+        project: The project named on the socket, or empty for the seat.
+        external: True when that project is not the one this server sits in.
+        shell: True when the caller asked for a shell rather than an agent room.
+        seated: The seat's own project name, for naming a room that omits one.
+
+    Returns:
+        (target, cwd, scope, room) — the room's human name, the directory to
+        open it in, the project scope, and the room name. An empty room name
+        means "the agent naming rule decides", which is what an agent room
+        wants; a shell always names its own, because the agent rule would land
+        it in the agent's session.
+
+    Raises:
+        AttachRefused: No branch and no shell asked for (this lane has no
+            default room — key learning #22), an unknown branch in a foreign
+            project, or a census that reports no root to open a shell in.
+    """
+    room = ""
+
+    if branch:
+        if external:
+            row = host_fleet.resolve_branch(project, branch)
+            if row is None:
+                raise host_attach.AttachRefused(f"Project {project!r} has no branch named {branch!r}")
+            target = f"@{branch} ({project})"
+            cwd = Path(str(row.get("path", "")))
+            scope = project.strip().lower()
+        else:
+            target = host_verbs.citizen_address(branch)
+            cwd = host_reads.resolve_branch_root(branch)
+            scope = ""
+
+        if shell:
+            room = host_attach.shell_room_name(project or seated, branch)
+            target = f"shell {target}"
+
+        return target, cwd, scope, room
+
+    if shell:
+        # The one door with no branch: a shell at the project's root.
+        cwd = Path(_census_root(project)) if external else host_reads.repo_root()
+        return f"shell ({project or seated})", cwd, "", host_attach.shell_room_name(project or seated)
+
+    raise host_attach.AttachRefused("A branch name is required — this lane has no default room")
+
+
+def _census_root(project: str) -> str:
+    """
+    The directory a foreign project's shell opens in, per @baud's census.
+
+    Args:
+        project: The foreign project's name.
+
+    Returns:
+        The project's root directory as the census reports it.
+
+    Raises:
+        AttachRefused: The census answered but named no root. Refused in words
+            rather than opening a shell in whatever the process happened to be
+            standing in.
+    """
+    root = str(host_fleet.read_snapshot(project).get("root", "")).strip()
+
+    if not root:
+        raise host_attach.AttachRefused(f"Census for {project!r} reports no root to open a shell in")
+
+    return root
+
+
 def create_app() -> Any:
     """
     Build the FastAPI application.
@@ -660,7 +867,7 @@ def create_app() -> Any:
     ) -> dict:
         """One patch: a working tree, a whole repository, or one commit."""
         try:
-            return host_reads.read_diff(
+            return host_git.read_diff(
                 branch=branch,
                 staged=staged,
                 project=project,
@@ -682,7 +889,7 @@ def create_app() -> Any:
     ) -> dict:
         """Changed files — @baud's card contract at branch grain, the repo's at repo."""
         try:
-            return host_reads.read_git_changes(branch=branch, project=project, grain=grain)
+            return host_git.read_git_changes(branch=branch, project=project, grain=grain)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -692,12 +899,12 @@ def create_app() -> Any:
     async def git_log(
         branch: str,
         project: str = "",
-        limit: int = host_reads.DEFAULT_LOG_COMMITS,
+        limit: int = host_git.DEFAULT_LOG_COMMITS,
         record: dict = Depends(require_scope("read")),
     ) -> dict:
         """The repository's recent commits. The branch names WHICH repository."""
         try:
-            return host_reads.read_git_log(branch=branch, project=project, limit=limit)
+            return host_git.read_git_log(branch=branch, project=project, limit=limit)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -711,7 +918,7 @@ def create_app() -> Any:
     ) -> dict:
         """The repository's remote — what the face's link-cards are built from."""
         try:
-            return host_reads.read_git_remote(branch=branch, project=project)
+            return host_remotes.read_git_remote(branch=branch, project=project)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -726,7 +933,7 @@ def create_app() -> Any:
     ) -> dict:
         """One commit's facts and per-file stats. Its patch rides on /v1/diff."""
         try:
-            return host_reads.read_commit(branch=branch, ref=ref, project=project)
+            return host_git.read_commit(branch=branch, ref=ref, project=project)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -1136,41 +1343,7 @@ def create_app() -> Any:
                     target = "watch (every branch)"
                 session = host_attach.open_monitor(branch, cwd=host_reads.repo_root())
             else:
-                # Empty for agent rooms; a shell names its room itself, because the
-                # agent naming rule would land it in the agent's session.
-                room = ""
-                if branch:
-                    if external:
-                        row = host_fleet.resolve_branch(project, branch)
-                        if row is None:
-                            raise host_attach.AttachRefused(f"Project {project!r} has no branch named {branch!r}")
-                        target = f"@{branch} ({project})"
-                        cwd = Path(str(row.get("path", "")))
-                        scope = project.strip().lower()
-                    else:
-                        target = host_verbs.citizen_address(branch)
-                        cwd = host_reads.resolve_branch_root(branch)
-                        scope = ""
-                    if shell:
-                        room = host_attach.shell_room_name(project or seated, branch)
-                        target = f"shell {target}"
-                elif shell:
-                    # The one door with no branch: a shell at the project's root.
-                    if external:
-                        envelope = host_fleet.read_snapshot(project)
-                        root = str(envelope.get("root", "")).strip()
-                        if not root:
-                            raise host_attach.AttachRefused(
-                                f"Census for {project!r} reports no root to open a shell in"
-                            )
-                        cwd = Path(root)
-                    else:
-                        cwd = host_reads.repo_root()
-                    scope = ""
-                    room = host_attach.shell_room_name(project or seated)
-                    target = f"shell ({project or seated})"
-                else:
-                    raise host_attach.AttachRefused("A branch name is required — this lane has no default room")
+                target, cwd, scope, room = _room_for(branch, project, external, shell, seated)
                 # ONE spawn site, whichever lane resolved it — a per-poll spawn
                 # here is the leak test_the_session_is_created_once_per_socket
                 # pins by counting this very call.
@@ -1222,119 +1395,6 @@ def create_app() -> Any:
             "host_api_socket_refused",
             {"peer": getattr(client, "host", "") or "unknown", "reason": reason, "route": "/v1/room/attach"},
         )
-
-    async def _pump(websocket: Any, session: Any) -> None:
-        """
-        Run the bidirectional pump until either side goes away.
-
-        The PTY read is blocking, so it lives on a thread executor rather than
-        the event loop — a blocking read on the loop would freeze every other
-        request this server is serving, which on a single-worker uvicorn means
-        the whole phone.
-
-        Args:
-            websocket: The accepted connection.
-            session: The live AttachSession.
-        """
-        loop = asyncio.get_running_loop()
-        stop = asyncio.Event()
-
-        async def room_to_socket() -> None:
-            """PTY output → client. Binary frames: the room emits escape
-            sequences and partial UTF-8 across chunk boundaries, and decoding
-            here would corrupt both."""
-            while not stop.is_set():
-                data = await loop.run_in_executor(None, session.read)
-                if not data:
-                    break
-                await websocket.send_bytes(data)
-            stop.set()
-
-        async def socket_to_room() -> None:
-            """Client input → PTY. Bytes forwarded UNCHANGED — the key bar
-            sends real control bytes, exactly as a keyboard would, so there is
-            nothing here to interpret."""
-            while not stop.is_set():
-                message = await websocket.receive()
-
-                if message.get("type") == "websocket.disconnect":
-                    break
-
-                if message.get("bytes") is not None:
-                    try:
-                        session.write(message["bytes"])
-                    except host_attach.AttachRefused as e:
-                        # A read-only watch was typed into. The session's own
-                        # refusal (the layer that counts) ends the attach with
-                        # the sentence — a client that types into a watch has
-                        # broken the contract, and pretending the bytes landed
-                        # would be the silent fallback this house refuses.
-                        logger.warning("[host_api] input refused on %s: %s", session.room, e)
-                        await websocket.close(code=1008, reason=str(e))
-                        break
-                    continue
-
-                text = message.get("text")
-                if text:
-                    _handle_control(session, text)
-            stop.set()
-
-        tasks = [asyncio.ensure_future(room_to_socket()), asyncio.ensure_future(socket_to_room())]
-
-        try:
-            # FIRST_COMPLETED, not gather. Waiting for BOTH deadlocks on a quiet
-            # room: the phone closes the sheet, socket_to_room ends, and
-            # room_to_socket is still parked in a blocking os.read that will not
-            # return until the room happens to print something. The detach — and
-            # the SIGHUP with it — would wait on output that may never come, and
-            # the executor thread would stay parked with it.
-            #
-            # Either direction ending means the attach is over, so the first one
-            # to finish is the signal.
-            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            # Always, and FIRST: hangup closes the descriptor, which is what
-            # breaks the blocked reader out of os.read. Cancelling the task
-            # alone would not — a thread sitting in a syscall does not notice
-            # an asyncio cancellation.
-            session.hangup()
-
-            for task in tasks:
-                task.cancel()
-
-            # Let the unblocked reader finish rather than leaving it to be
-            # collected mid-flight, which logs a 'task was destroyed but it is
-            # pending' at whoever reads the server log next.
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-    def _handle_control(session: Any, text: str) -> None:
-        """
-        Handle a control frame from the client.
-
-        Text frames are CONTROL, binary frames are KEYSTROKES. That split is
-        what lets a resize travel on the same socket without a resize message
-        ever being mistaken for something the operator typed.
-
-        Args:
-            session: The live AttachSession.
-            text: The JSON control message.
-        """
-        try:
-            message = json.loads(text)
-        except json.JSONDecodeError:
-            logger.warning("[host_api] ignoring an unparseable control frame on %s", session.room)
-            return
-
-        if not isinstance(message, dict) or message.get("type") != "resize":
-            logger.warning("[host_api] ignoring an unknown control frame on %s", session.room)
-            return
-
-        try:
-            session.resize(message.get("cols"), message.get("rows"))
-        except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError) as e:
-            # Never fatal: a bad resize should not drop a live session the
-            # operator is working in.
-            logger.warning("[host_api] resize refused on %s: %s", session.room, e)
 
     @app.get("/", include_in_schema=False)
     async def face_entry() -> Any:

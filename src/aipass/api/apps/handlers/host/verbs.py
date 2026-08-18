@@ -190,10 +190,17 @@ def wake_branch(branch: str, project: str, message: str = "", fresh: bool = Fals
         VerbUnavailable: The door itself could not be reached.
     """
     require_project(project)
-    target = citizen_address(branch, project)
 
+    # THE CAP IS CHECKED BEFORE ANYTHING IS RESOLVED. It used to sit under the
+    # address lookup, which made an oversized message answer VerbUnavailable
+    # whenever the registry was out of reach — a payload the caller controls
+    # coming back as an infrastructure fault, and the refusal it deserves only
+    # if the machine happened to be healthy. Malformed input is refused on its
+    # own terms, before any door is knocked on.
     if len(message) > MAX_MESSAGE_CHARS:
         raise VerbRefused(f"Message is {len(message)} characters, over the {MAX_MESSAGE_CHARS} character cap")
+
+    target = citizen_address(branch, project)
 
     # Positional order matters: @ai_mail reads the branch first and the message
     # second. An empty string is omitted rather than sent, because a blank

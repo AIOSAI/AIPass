@@ -30,7 +30,7 @@ Tests — handlers/host/feed.py (design call D3):
 - read_feed: unreadable feed raises FeedUnavailable rather than faking empty
 - read_feed: a real trim (400->200) leaves an old cursor flagged, not silent
 
-Tests — handlers/host/reads.py (the name fence):
+Tests — handlers/host/reads.py, git_reads.py and remotes.py (the name fence):
 - _fence: absolute path refused
 - _fence: '..' component refused
 - _fence: nested '..' refused
@@ -77,6 +77,8 @@ import pytest
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
+from aipass.api.apps.handlers.host import git_reads as host_git
+from aipass.api.apps.handlers.host import remotes as host_remotes
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -94,6 +96,14 @@ PATCH_FEED_JSON = "aipass.api.apps.handlers.host.feed.json_handler"
 PATCH_READS_LOGGER = "aipass.api.apps.handlers.host.reads.logger"
 PATCH_READS_JSON = "aipass.api.apps.handlers.host.reads.json_handler"
 PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"
+
+# The read surface is three modules since the split, and each keeps its own
+# logger and audit door. Patching one silences one — a test that names the
+# wrong module writes a real audit record for a fake read.
+PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
+PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
+PATCH_REMOTES_LOGGER = "aipass.api.apps.handlers.host.remotes.logger"
+PATCH_REMOTES_JSON = "aipass.api.apps.handlers.host.remotes.json_handler"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
@@ -156,7 +166,15 @@ def fake_repo(tmp_path: Path):
 
     fake_drone.get_branch_info.side_effect = _info
 
-    with patch(PATCH_READS_DRONE, fake_drone), patch(PATCH_READS_LOGGER), patch(PATCH_READS_JSON):
+    with (
+        patch(PATCH_READS_DRONE, fake_drone),
+        patch(PATCH_READS_LOGGER),
+        patch(PATCH_READS_JSON),
+        patch(PATCH_GIT_LOGGER),
+        patch(PATCH_GIT_JSON),
+        patch(PATCH_REMOTES_LOGGER),
+        patch(PATCH_REMOTES_JSON),
+    ):
         yield {"root": root, "branch": branch, "registry": registry, "drone": fake_drone}
 
 
@@ -482,7 +500,7 @@ class TestReadDiff:
     def test_routes_through_drone_not_raw_git(self, fake_repo: dict) -> None:
         """The house rule holds here: never a raw git subprocess."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_diff("demo")
+            host_git.read_diff("demo")
 
         command = mock_run.call_args[0][0]
         assert command[:3] == ["drone", "@git", "diff"]
@@ -490,14 +508,14 @@ class TestReadDiff:
     def test_staged_flag_passed_through(self, fake_repo: dict) -> None:
         """--staged reaches drone rather than being reinterpreted here."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_diff("demo", staged=True)
+            host_git.read_diff("demo", staged=True)
 
         assert "--staged" in mock_run.call_args[0][0]
 
     def test_runs_in_the_branch_directory(self, fake_repo: dict) -> None:
         """drone's git lane is CWD-scoped, so the cwd IS the branch selection."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_diff("demo")
+            host_git.read_diff("demo")
 
         assert mock_run.call_args.kwargs["cwd"] == str(fake_repo["branch"].resolve())
 
@@ -505,29 +523,29 @@ class TestReadDiff:
         """No drone on PATH is an honest 503, not an empty diff."""
         with patch.object(subprocess, "run", side_effect=FileNotFoundError("no drone")):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_diff("demo")
+                host_git.read_diff("demo")
 
     def test_timeout_raises_unavailable(self, fake_repo: dict) -> None:
         """A hung diff must not hang the request forever."""
         with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_diff("demo")
+                host_git.read_diff("demo")
 
     def test_non_zero_exit_raises_unavailable(self, fake_repo: dict) -> None:
         """A failed diff is reported, never returned as empty output."""
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1)):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_diff("demo")
+                host_git.read_diff("demo")
 
     def test_oversized_diff_truncates_and_says_so(self, fake_repo: dict) -> None:
         """Generated output may be capped — but the cap is REPORTED."""
-        huge = "x" * (host_reads.MAX_DIFF_BYTES + 100)
+        huge = "x" * (host_git.MAX_DIFF_BYTES + 100)
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout=huge)):
-            result = host_reads.read_diff("demo")
+            result = host_git.read_diff("demo")
 
         assert result["truncated"] is True
-        assert len(result["diff"]) <= host_reads.MAX_DIFF_BYTES
+        assert len(result["diff"]) <= host_git.MAX_DIFF_BYTES
 
 
 # @drone's real `git status` rendering, which is `f"  {status:>2} {path}"` per
@@ -564,7 +582,7 @@ class TestGitChangesMatchesTheDesktopCard:
     def test_the_shape_is_files_and_count(self, fake_repo: dict) -> None:
         """Their two fields, spelled their way, with count agreeing with files."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert isinstance(result["files"], list)
         assert result["count"] == len(result["files"])
@@ -578,7 +596,7 @@ class TestGitChangesMatchesTheDesktopCard:
         would be the one that was wrong, because @baud owns this question.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert "brand_new.py" not in result["files"]
         assert result["count"] == 3
@@ -594,7 +612,7 @@ class TestGitChangesMatchesTheDesktopCard:
         reported beside the contract rather than thrown away.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert result["untracked"] == 1
 
@@ -607,7 +625,7 @@ class TestGitChangesMatchesTheDesktopCard:
         part that differs off a phone screen.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert "hello.txt" in result["files"]
         assert "nested/deep.txt" in result["files"]
@@ -622,7 +640,7 @@ class TestGitChangesMatchesTheDesktopCard:
         for a file whose name contains ' -> '.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert "new_name.py" in result["files"]
         assert not any("->" in path for path in result["files"])
@@ -630,7 +648,7 @@ class TestGitChangesMatchesTheDesktopCard:
     def test_the_header_and_footer_are_not_files(self, fake_repo: dict) -> None:
         """drone frames the list with prose. Prose is not a changed file."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert not any("file(s) changed" in path for path in result["files"])
         assert not any("showing demo scope" in path for path in result["files"])
@@ -640,7 +658,7 @@ class TestGitChangesMatchesTheDesktopCard:
         clean = "0 file(s) changed under src/aipass/demo\n(showing demo scope — use --all for full repo)"
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout=clean)):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert result == {
             "branch": "demo",
@@ -669,14 +687,14 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
     def test_routes_through_drone_not_raw_git(self, fake_repo: dict) -> None:
         """The command is drone's, never git's."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_git_changes("demo")
+            host_git.read_git_changes("demo")
 
         assert mock_run.call_args[0][0] == ["drone", "@git", "status"]
 
     def test_runs_in_the_branch_directory(self, fake_repo: dict) -> None:
         """drone's git lane is CWD-scoped, so the cwd IS the branch selection."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_git_changes("demo")
+            host_git.read_git_changes("demo")
 
         assert mock_run.call_args.kwargs["cwd"] == str(fake_repo["branch"].resolve())
 
@@ -684,13 +702,13 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         """No drone on PATH is an honest 503, not a badge reading zero."""
         with patch.object(subprocess, "run", side_effect=FileNotFoundError("no drone")):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_changes("demo")
+                host_git.read_git_changes("demo")
 
     def test_timeout_raises_unavailable(self, fake_repo: dict) -> None:
         """A hung status must not hang the request forever."""
         with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_changes("demo")
+                host_git.read_git_changes("demo")
 
     def test_a_failed_status_is_never_read_as_a_clean_tree(self, fake_repo: dict) -> None:
         """
@@ -705,7 +723,7 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
             return_value=self._completed(stdout="", returncode=1, stderr="git status error: bad object HEAD"),
         ):
             with pytest.raises(host_reads.ReadUnavailable) as excinfo:
-                host_reads.read_git_changes("demo")
+                host_git.read_git_changes("demo")
 
         assert "bad object HEAD" in str(excinfo.value)
 
@@ -728,7 +746,7 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1, stderr=refusal)):
             with pytest.raises(host_reads.ReadUnavailable) as excinfo:
-                host_reads.read_git_changes("demo")
+                host_git.read_git_changes("demo")
 
         assert "cannot verify caller" in str(excinfo.value)
 
@@ -744,14 +762,14 @@ class TestGitChangesFollowsTheReadDoctrine:
         """Refused before spawn, exactly like the file and diff lanes."""
         with patch.object(subprocess, "run") as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_git_changes("ghost")
+                host_git.read_git_changes("ghost")
 
         mock_run.assert_not_called()
 
     def test_a_missing_branch_name_is_refused(self, fake_repo: dict) -> None:
         """There is no current branch to infer from a phone."""
         with pytest.raises(host_reads.ReadRefused):
-            host_reads.read_git_changes("")
+            host_git.read_git_changes("")
 
 
 # =============================================
@@ -1053,7 +1071,7 @@ class TestReadLaneRoutes:
 
         mock_run.assert_not_called()
         assert response.status_code == 400
-        assert str(host_reads.MAX_LOG_COMMITS) in response.json()["error"]["message"]
+        assert str(host_git.MAX_LOG_COMMITS) in response.json()["error"]["message"]
 
     def test_commit_requires_auth(self, client: Any, fake_repo: dict) -> None:
         """Read scope, like every other lane here."""
@@ -1266,8 +1284,8 @@ class TestReadsFollowTheFleetLane:
         completed.stdout = "diff --git a/x b/x"
         completed.stderr = ""
 
-        with patch.object(host_reads.subprocess, "run", return_value=completed) as run:
-            result = host_reads.read_diff("baud", project="BAUD")
+        with patch.object(host_git.subprocess, "run", return_value=completed) as run:
+            result = host_git.read_diff("baud", project="BAUD")
 
         assert result["diff"] == "diff --git a/x b/x"
         assert run.call_args.kwargs["cwd"] == str(foreign["root"])
@@ -1351,8 +1369,8 @@ class TestGitChangesInAForeignProject:
             "(showing vera scope — use --all for full repo)"
         )
 
-        with patch.object(host_reads.subprocess, "run", return_value=self._completed(stdout)):
-            result = host_reads.read_git_changes("vera", project="VERA-STUDIO")
+        with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
+            result = host_git.read_git_changes("vera", project="VERA-STUDIO")
 
         assert result["files"] == ["CLAUDE.md", ".aipass/local_system_prompt.md"]
         assert not any(path.startswith("src/") for path in result["files"])
@@ -1361,8 +1379,8 @@ class TestGitChangesInAForeignProject:
         """The seat resolved correctly before and must keep doing so."""
         stdout = "1 file(s) changed under src/aipass/demo\n   M src/aipass/demo/hello.txt"
 
-        with patch.object(host_reads.subprocess, "run", return_value=self._completed(stdout)):
-            result = host_reads.read_git_changes("demo")
+        with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
+            result = host_git.read_git_changes("demo")
 
         assert result["files"] == ["hello.txt"]
 
@@ -1396,8 +1414,8 @@ class TestGitChangesInAForeignProject:
         stdout = "1 file(s) changed under src/tenant/tenant\n   M src/tenant/tenant/lib.rs"
 
         with patch(PATCH_HOST_FLEET, census):
-            with patch.object(host_reads.subprocess, "run", return_value=self._completed(stdout)):
-                result = host_reads.read_git_changes("tenant", project="TENANT")
+            with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
+                result = host_git.read_git_changes("tenant", project="TENANT")
 
         assert result["files"] == ["lib.rs"]
 
@@ -1421,8 +1439,8 @@ class TestGitChangesInAForeignProject:
         stdout = "1 file(s) changed under src/thing/br\n   M src/thing/br/main.py"
 
         with patch(PATCH_HOST_FLEET, census):
-            with patch.object(host_reads.subprocess, "run", return_value=self._completed(stdout)):
-                result = host_reads.read_git_changes("br", project="WT")
+            with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
+                result = host_git.read_git_changes("br", project="WT")
 
         assert result["files"] == ["main.py"]
 
@@ -1442,8 +1460,8 @@ class TestGitChangesInAForeignProject:
         stdout = "1 file(s) changed under whatever\n   M whatever/file.py"
 
         with patch(PATCH_HOST_FLEET, census):
-            with patch.object(host_reads.subprocess, "run", return_value=self._completed(stdout)):
-                result = host_reads.read_git_changes("br", project="LOOSE")
+            with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
+                result = host_git.read_git_changes("br", project="LOOSE")
 
         assert result["files"] == ["whatever/file.py"]
 
@@ -1523,23 +1541,23 @@ class TestRepoGrainChanges:
     def test_repo_grain_asks_drone_for_the_whole_repo(self, fake_repo: dict) -> None:
         """--all is what makes drone target the repo root instead of the branch."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_git_changes("demo", grain="repo")
+            host_git.read_git_changes("demo", grain="repo")
 
         assert "--all" in mock_run.call_args[0][0]
 
     def test_branch_grain_never_asks_for_the_whole_repo(self, fake_repo: dict) -> None:
         """The card's question is unchanged — no --all leaks into the old grain."""
         with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_STDOUT)) as mock_run:
-            host_reads.read_git_changes("demo")
+            host_git.read_git_changes("demo")
 
         assert "--all" not in mock_run.call_args[0][0]
 
     def test_the_answer_names_its_own_grain(self, fake_repo: dict) -> None:
         """Both grains say which they are, so a client cannot mistake them."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            wide = host_reads.read_git_changes("demo", grain="repo")
+            wide = host_git.read_git_changes("demo", grain="repo")
         with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_STDOUT)):
-            narrow = host_reads.read_git_changes("demo")
+            narrow = host_git.read_git_changes("demo")
 
         assert wide["grain"] == "repo"
         assert narrow["grain"] == "branch"
@@ -1551,7 +1569,7 @@ class TestRepoGrainChanges:
         eat the part that distinguishes one branch's file from another's.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo", grain="repo")
+            result = host_git.read_git_changes("demo", grain="repo")
 
         assert "src/aipass/demo/hello.txt" in result["files"]
         assert "src/aipass/other/thing.py" in result["files"]
@@ -1559,7 +1577,7 @@ class TestRepoGrainChanges:
     def test_repo_grain_reaches_beyond_the_anchor_branch(self, fake_repo: dict) -> None:
         """The whole point: files from branches other than the anchor arrive."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo", grain="repo")
+            result = host_git.read_git_changes("demo", grain="repo")
 
         assert result["count"] == 3
         assert any("third" in name for name in result["files"])
@@ -1567,7 +1585,7 @@ class TestRepoGrainChanges:
     def test_untracked_still_rides_as_a_count_at_repo_grain(self, fake_repo: dict) -> None:
         """One doctrine, both grains — tracked core, untracked additive."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo", grain="repo")
+            result = host_git.read_git_changes("demo", grain="repo")
 
         assert result["untracked"] == 1
         assert not any("brand_new" in name for name in result["files"])
@@ -1580,7 +1598,7 @@ class TestRepoGrainChanges:
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused) as caught:
-                host_reads.read_git_changes("demo", grain="everything")
+                host_git.read_git_changes("demo", grain="everything")
 
         assert "branch" in str(caught.value) and "repo" in str(caught.value)
 
@@ -1588,7 +1606,7 @@ class TestRepoGrainChanges:
         """Garbage is refused before spawn — the standing rule on every lane."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_git_changes("demo", grain="REPOSITORY")
+                host_git.read_git_changes("demo", grain="REPOSITORY")
 
         assert mock_run.call_count == 0
 
@@ -1633,7 +1651,7 @@ class TestStatusPerRow:
     def test_every_changed_row_carries_its_status(self, fake_repo: dict) -> None:
         """The field that did not exist before this rider."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert self._rows(result)["modified.txt"] == " M"
 
@@ -1644,7 +1662,7 @@ class TestStatusPerRow:
         letter — which is what made a new file look like an edited one.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            rows = self._rows(host_reads.read_git_changes("demo"))
+            rows = self._rows(host_git.read_git_changes("demo"))
 
         assert rows["staged_new.py"] == "A "
         assert rows["modified.txt"] == " M"
@@ -1653,7 +1671,7 @@ class TestStatusPerRow:
     def test_both_columns_survive_when_both_are_set(self, fake_repo: dict) -> None:
         """Staged AND unstaged changes to one file is one row with two codes."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            rows = self._rows(host_reads.read_git_changes("demo"))
+            rows = self._rows(host_git.read_git_changes("demo"))
 
         assert rows["both.py"] == "MM"
 
@@ -1663,7 +1681,7 @@ class TestStatusPerRow:
         whose name it had never been told.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert self._rows(result)["untracked.py"] == "??"
 
@@ -1674,7 +1692,7 @@ class TestStatusPerRow:
         or the phone starts disagreeing with the desktop again.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert "untracked.py" not in result["files"]
         assert result["count"] == len(result["files"]) == 5
@@ -1683,7 +1701,7 @@ class TestStatusPerRow:
     def test_ignored_files_are_in_no_list_at_all(self, fake_repo: dict) -> None:
         """Ignored is not a change. It was never in files; it is not a row either."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert "ignored.log" not in self._rows(result)
         assert "ignored.log" not in result["files"]
@@ -1694,7 +1712,7 @@ class TestStatusPerRow:
         phone tapping the row asks for a file that cannot exist.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            rows = self._rows(host_reads.read_git_changes("demo"))
+            rows = self._rows(host_git.read_git_changes("demo"))
 
         assert rows["new.py"] == "R "
         assert not any(" -> " in path for path in rows)
@@ -1705,7 +1723,7 @@ class TestStatusPerRow:
         is a row, and every row that is not untracked is a tracked file.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         tracked_rows = [r["path"] for r in result["rows"] if r["status"].strip() != "??"]
         assert sorted(tracked_rows) == sorted(result["files"])
@@ -1716,7 +1734,7 @@ class TestStatusPerRow:
         as well — one parser, so there is no second place for them to drift.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo", grain="repo")
+            result = host_git.read_git_changes("demo", grain="repo")
 
         rows = self._rows(result)
         assert rows["src/aipass/demo/staged_new.py"] == "A "
@@ -1729,7 +1747,7 @@ class TestStatusPerRow:
         second answer to a question git has already answered.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_changes("demo")
+            result = host_git.read_git_changes("demo")
 
         assert all(len(row["status"]) == 2 for row in result["rows"])
 
@@ -1756,7 +1774,7 @@ class TestPerFileDiff:
     def test_a_path_returns_only_that_files_patch(self, fake_repo: dict) -> None:
         """The tap-a-file contract: one file in, one file's changes out."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", path="src/aipass/demo/hello.txt")
+            result = host_git.read_diff("demo", path="src/aipass/demo/hello.txt")
 
         assert "hello world" in result["diff"]
         assert "thing.py" not in result["diff"]
@@ -1767,7 +1785,7 @@ class TestPerFileDiff:
         the change kind. Handing it a bare hunk would strip the file's identity.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", path="src/aipass/other/thing.py")
+            result = host_git.read_diff("demo", path="src/aipass/other/thing.py")
 
         assert result["diff"].startswith("diff --git a/src/aipass/other/thing.py")
         assert "@@" in result["diff"]
@@ -1775,14 +1793,14 @@ class TestPerFileDiff:
     def test_the_answer_names_the_path_it_answered_for(self, fake_repo: dict) -> None:
         """The response says which file it is, never leaving it to be inferred."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", path="src/aipass/demo/hello.txt")
+            result = host_git.read_diff("demo", path="src/aipass/demo/hello.txt")
 
         assert result["path"] == "src/aipass/demo/hello.txt"
 
     def test_no_path_returns_the_whole_diff_unchanged(self, fake_repo: dict) -> None:
         """The live lane keeps its contract — the phone reads it right now."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo")
+            result = host_git.read_diff("demo")
 
         assert result["diff"] == TWO_FILE_DIFF
         assert result["path"] == ""
@@ -1794,7 +1812,7 @@ class TestPerFileDiff:
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused) as caught:
-                host_reads.read_diff("demo", path="src/aipass/demo/never_touched.py")
+                host_git.read_diff("demo", path="src/aipass/demo/never_touched.py")
 
         assert "never_touched.py" in str(caught.value)
 
@@ -1806,7 +1824,7 @@ class TestPerFileDiff:
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_diff("demo", path="demo/hello.txt")
+                host_git.read_diff("demo", path="demo/hello.txt")
 
     def test_an_oversized_single_file_is_refused_not_trimmed(self, fake_repo: dict) -> None:
         """
@@ -1818,14 +1836,14 @@ class TestPerFileDiff:
             "diff --git a/src/aipass/demo/big.txt b/src/aipass/demo/big.txt\n"
             "--- a/src/aipass/demo/big.txt\n+++ b/src/aipass/demo/big.txt\n@@ -1 +1 @@\n"
             + "+x\n"
-            * host_reads.MAX_DIFF_BYTES
+            * host_git.MAX_DIFF_BYTES
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(huge)):
             with pytest.raises(host_reads.ReadRefused) as caught:
-                host_reads.read_diff("demo", path="src/aipass/demo/big.txt")
+                host_git.read_diff("demo", path="src/aipass/demo/big.txt")
 
-        assert str(host_reads.MAX_DIFF_BYTES) in str(caught.value)
+        assert str(host_git.MAX_DIFF_BYTES) in str(caught.value)
 
     def test_removed_content_that_looks_like_a_header_is_not_read_as_one(self, fake_repo: dict) -> None:
         """
@@ -1845,7 +1863,7 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_reads.read_diff("demo", path="doc.md")
+            result = host_git.read_diff("demo", path="doc.md")
 
         assert result["path"] == "doc.md"
         assert "decoy" in result["diff"]
@@ -1863,7 +1881,7 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_reads.read_diff("demo", path="img/logo.png")
+            result = host_git.read_diff("demo", path="img/logo.png")
 
         assert "Binary files" in result["diff"]
 
@@ -1878,14 +1896,14 @@ class TestPerFileDiff:
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
-            result = host_reads.read_diff("demo", path="odd b/name.bin")
+            result = host_git.read_diff("demo", path="odd b/name.bin")
 
         assert "Binary files differ" in result["diff"]
 
     def test_repo_grain_diff_asks_for_the_whole_repo(self, fake_repo: dict) -> None:
         """The app's file list is repo grain, so its taps must be too."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_diff("demo", path="src/aipass/other/thing.py", grain="repo")
+            host_git.read_diff("demo", path="src/aipass/other/thing.py", grain="repo")
 
         assert "--all" in mock_run.call_args[0][0]
 
@@ -1893,7 +1911,7 @@ class TestPerFileDiff:
         """One vocabulary across the lanes, one refusal for breaking it."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_diff("demo", grain="sideways")
+                host_git.read_diff("demo", grain="sideways")
 
         assert mock_run.call_count == 0
 
@@ -1911,7 +1929,7 @@ class TestCommitPatch:
     def test_a_ref_routes_through_drones_show_door(self, fake_repo: dict) -> None:
         """show is the measured door that carries a commit's patch."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_diff("demo", ref="7edf8c2d")
+            host_git.read_diff("demo", ref="7edf8c2d")
 
         command = mock_run.call_args[0][0]
         assert command[:2] == ["drone", "@git"]
@@ -1924,7 +1942,7 @@ class TestCommitPatch:
         first file a phantom named "commit".
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", ref="7edf8c2d")
+            result = host_git.read_diff("demo", ref="7edf8c2d")
 
         assert result["diff"].startswith("diff --git ")
         assert "AIOSAI" not in result["diff"]
@@ -1932,7 +1950,7 @@ class TestCommitPatch:
     def test_a_ref_and_a_path_together_give_one_file_of_one_commit(self, fake_repo: dict) -> None:
         """The deepest tap in the app: this file, in this commit."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", ref="7edf8c2d", path="src/aipass/other/thing.py")
+            result = host_git.read_diff("demo", ref="7edf8c2d", path="src/aipass/other/thing.py")
 
         assert "add two" in result["diff"]
         assert "hello world" not in result["diff"]
@@ -1940,14 +1958,14 @@ class TestCommitPatch:
     def test_the_answer_names_the_ref(self, fake_repo: dict) -> None:
         """Which commit this patch came from is part of the answer."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", ref="7edf8c2d")
+            result = host_git.read_diff("demo", ref="7edf8c2d")
 
         assert result["ref"] == "7edf8c2d"
 
     def test_a_commit_is_always_repo_wide_and_says_so(self, fake_repo: dict) -> None:
         """drone's show door is repo-wide by design, so the grain reports repo."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_diff("demo", ref="7edf8c2d")
+            result = host_git.read_diff("demo", ref="7edf8c2d")
 
         assert result["grain"] == "repo"
 
@@ -1958,7 +1976,7 @@ class TestCommitPatch:
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused) as caught:
-                host_reads.read_diff("demo", ref="7edf8c2d", grain="branch")
+                host_git.read_diff("demo", ref="7edf8c2d", grain="branch")
 
         assert "repo" in str(caught.value)
 
@@ -1966,7 +1984,7 @@ class TestCommitPatch:
         """A commit has no staging area — the combination is meaningless."""
         with patch.object(subprocess, "run", return_value=self._completed()):
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_diff("demo", ref="7edf8c2d", staged=True)
+                host_git.read_diff("demo", ref="7edf8c2d", staged=True)
 
     def test_a_ref_shaped_like_a_flag_is_refused_before_spawn(self, fake_repo: dict) -> None:
         """
@@ -1975,7 +1993,7 @@ class TestCommitPatch:
         """
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_diff("demo", ref="--upload-pack=evil")
+                host_git.read_diff("demo", ref="--upload-pack=evil")
 
         assert mock_run.call_count == 0
 
@@ -1983,7 +2001,7 @@ class TestCommitPatch:
         """No shell is used, but a ref outside git's own vocabulary is garbage."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_diff("demo", ref="HEAD; wipe everything")
+                host_git.read_diff("demo", ref="HEAD; wipe everything")
 
         assert mock_run.call_count == 0
 
@@ -1994,7 +2012,7 @@ class TestCommitPatch:
         """
         for ref in ("HEAD", "HEAD~3", "HEAD^", "work/api", "v1.2.3", "b47462b7"):
             with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-                host_reads.read_diff("demo", ref=ref)
+                host_git.read_diff("demo", ref=ref)
 
             assert mock_run.call_count == 1, f"{ref} should have been allowed"
 
@@ -2017,7 +2035,7 @@ class TestGitLog:
     def test_routes_through_drone_not_raw(self, fake_repo: dict) -> None:
         """Git is drone-only, and history is no exception."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_git_log("demo")
+            host_git.read_git_log("demo")
 
         assert mock_run.call_args[0][0][:2] == ["drone", "@git"]
 
@@ -2027,7 +2045,7 @@ class TestGitLog:
         number more. Splitting once is what keeps a colon-heavy message intact.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_log("demo")
+            result = host_git.read_git_log("demo")
 
         assert result["commits"][0]["sha"] == "b47462b7"
         assert result["commits"][0]["subject"] == "feat(fleet): the newest one"
@@ -2035,14 +2053,14 @@ class TestGitLog:
     def test_the_list_is_newest_first_as_drone_gives_it(self, fake_repo: dict) -> None:
         """Order is git's, not re-sorted here on a guess about what a phone wants."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_log("demo")
+            result = host_git.read_git_log("demo")
 
         assert [c["sha"] for c in result["commits"]] == ["b47462b7", "7edf8c2d", "cb4afb12"]
 
     def test_count_agrees_with_the_list(self, fake_repo: dict) -> None:
         """One number, derived from the list, never counted twice."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_log("demo")
+            result = host_git.read_git_log("demo")
 
         assert result["count"] == len(result["commits"]) == 3
 
@@ -2053,14 +2071,14 @@ class TestGitLog:
         grain here would be a straight lie.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_git_log("demo")
+            result = host_git.read_git_log("demo")
 
         assert result["grain"] == "repo"
 
     def test_the_limit_reaches_drone(self, fake_repo: dict) -> None:
         """The cap is enforced at the door, not by trimming a longer answer here."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_git_log("demo", limit=5)
+            host_git.read_git_log("demo", limit=5)
 
         assert "5" in mock_run.call_args[0][0]
 
@@ -2071,16 +2089,16 @@ class TestGitLog:
         """
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused) as caught:
-                host_reads.read_git_log("demo", limit=500)
+                host_git.read_git_log("demo", limit=500)
 
-        assert str(host_reads.MAX_LOG_COMMITS) in str(caught.value)
+        assert str(host_git.MAX_LOG_COMMITS) in str(caught.value)
         assert mock_run.call_count == 0
 
     def test_a_limit_below_one_is_refused(self, fake_repo: dict) -> None:
         """drone's own door exits 1 on count below one; refusing here says why."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_git_log("demo", limit=0)
+                host_git.read_git_log("demo", limit=0)
 
         assert mock_run.call_count == 0
 
@@ -2088,13 +2106,13 @@ class TestGitLog:
         """Same 503 as every other lane that routes through drone."""
         with patch.object(subprocess, "run", side_effect=FileNotFoundError("no drone")):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_log("demo")
+                host_git.read_git_log("demo")
 
     def test_a_failed_log_is_reported_not_returned_empty(self, fake_repo: dict) -> None:
         """An empty commit list would read as a repo with no history."""
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1)):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_log("demo")
+                host_git.read_git_log("demo")
 
     def test_prose_lines_are_not_commits(self, fake_repo: dict) -> None:
         """
@@ -2104,7 +2122,7 @@ class TestGitLog:
         noisy = "Recent commits in the repository:\n" + GIT_LOG_STDOUT + "\n(showing 3 of many)"
 
         with patch.object(subprocess, "run", return_value=self._completed(noisy)):
-            result = host_reads.read_git_log("demo")
+            result = host_git.read_git_log("demo")
 
         assert result["count"] == 3
 
@@ -2126,7 +2144,7 @@ class TestCommitDetail:
     def test_routes_through_drones_show_door(self, fake_repo: dict) -> None:
         """Git is drone-only here too."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
-            host_reads.read_commit("demo", ref="7edf8c2d")
+            host_git.read_commit("demo", ref="7edf8c2d")
 
         assert mock_run.call_args[0][0][:2] == ["drone", "@git"]
 
@@ -2136,7 +2154,7 @@ class TestCommitDetail:
         detail is a separate lane rather than a richer list.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert result["author"] == "AIOSAI <aipass.system@gmail.com>"
         assert result["date"] == "Sat Aug 15 10:15:22 2026 -0700"
@@ -2144,7 +2162,7 @@ class TestCommitDetail:
     def test_the_full_sha_is_reported_alongside_the_ref_asked_for(self, fake_repo: dict) -> None:
         """A caller who asked with HEAD~3 still learns which commit that was."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert result["sha"] == "7edf8c2dfcccbc1ce1b04d8420405f98e212a474"
         assert result["ref"] == "7edf8c2d"
@@ -2152,7 +2170,7 @@ class TestCommitDetail:
     def test_the_subject_is_the_first_line_of_the_message(self, fake_repo: dict) -> None:
         """Git's own convention, and what a list row shows."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert result["subject"] == "feat(demo): the subject line"
 
@@ -2162,7 +2180,7 @@ class TestCommitDetail:
         through would paint every commit body as a code block on the phone.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert "And a second paragraph of body." in result["message"]
         assert "\n    And a second" not in result["message"]
@@ -2173,7 +2191,7 @@ class TestCommitDetail:
         plus and minus line starts, which is structure.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         rows = {row["path"]: row for row in result["files"]}
         assert rows["src/aipass/demo/hello.txt"]["additions"] == 1
@@ -2188,7 +2206,7 @@ class TestCommitDetail:
         addition and one phantom deletion to every file in every commit.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         total = sum(row["additions"] + row["deletions"] for row in result["files"])
         assert total == 5
@@ -2196,7 +2214,7 @@ class TestCommitDetail:
     def test_context_lines_count_as_neither(self, fake_repo: dict) -> None:
         """A space-prefixed line is unchanged context, not a change."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         rows = {row["path"]: row for row in result["files"]}
         assert rows["src/aipass/other/thing.py"]["additions"] == 2
@@ -2204,7 +2222,7 @@ class TestCommitDetail:
     def test_count_agrees_with_the_file_list(self, fake_repo: dict) -> None:
         """One number, derived."""
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert result["count"] == len(result["files"]) == 2
 
@@ -2214,7 +2232,7 @@ class TestCommitDetail:
         lane's job, per file, precisely so a phone never loads a whole commit.
         """
         with patch.object(subprocess, "run", return_value=self._completed()):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert "diff" not in result
 
@@ -2222,7 +2240,7 @@ class TestCommitDetail:
         """One fence, shared with the diff lane."""
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             with pytest.raises(host_reads.ReadRefused):
-                host_reads.read_commit("demo", ref="-x")
+                host_git.read_commit("demo", ref="-x")
 
         assert mock_run.call_count == 0
 
@@ -2232,7 +2250,7 @@ class TestCommitDetail:
 
         with patch.object(subprocess, "run", return_value=failed):
             with pytest.raises(host_reads.ReadUnavailable) as caught:
-                host_reads.read_commit("demo", ref="deadbeef")
+                host_git.read_commit("demo", ref="deadbeef")
 
         assert "bad object" in str(caught.value)
 
@@ -2244,7 +2262,7 @@ class TestCommitDetail:
         header_only = "\n".join(GIT_SHOW_STDOUT.splitlines()[:6]) + "\n"
 
         with patch.object(subprocess, "run", return_value=self._completed(header_only)):
-            result = host_reads.read_commit("demo", ref="7edf8c2d")
+            result = host_git.read_commit("demo", ref="7edf8c2d")
 
         assert result["files"] == []
         assert result["count"] == 0
@@ -2289,7 +2307,15 @@ def remote_repo(tmp_path: Path):
 
     configure('[remote "origin"]\n\turl = https://github.com/AIOSAI/AIPass.git\n')
 
-    with patch(PATCH_READS_DRONE, fake_drone), patch(PATCH_READS_LOGGER), patch(PATCH_READS_JSON):
+    with (
+        patch(PATCH_READS_DRONE, fake_drone),
+        patch(PATCH_READS_LOGGER),
+        patch(PATCH_READS_JSON),
+        patch(PATCH_GIT_LOGGER),
+        patch(PATCH_GIT_JSON),
+        patch(PATCH_REMOTES_LOGGER),
+        patch(PATCH_REMOTES_JSON),
+    ):
         yield {"root": root, "branch": branch, "configure": configure}
 
 
@@ -2309,7 +2335,7 @@ class TestGitRemote:
 
     def test_the_configured_remote_comes_back(self, remote_repo: dict) -> None:
         """The whole point of the lane."""
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["url"] == "https://github.com/AIOSAI/AIPass.git"
 
@@ -2318,7 +2344,7 @@ class TestGitRemote:
         What the face actually links. `/pulls` appended to a URL ending in the
         clone suffix is a 404 on every forge there is.
         """
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
 
@@ -2328,14 +2354,14 @@ class TestGitRemote:
         open. Two fields because they are two facts, and collapsing them would
         make the lane lie about one of them.
         """
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["url"].endswith(".git")
         assert not answer["web"].endswith(".git")
 
     def test_it_names_which_remote_answered(self, remote_repo: dict) -> None:
         """A repository may have several. Which one spoke is part of the answer."""
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["remote"] == "origin"
 
@@ -2344,7 +2370,7 @@ class TestGitRemote:
         Same vocabulary as the log and commit lanes: the branch names WHICH
         repository, never a scope inside it.
         """
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["grain"] == "repo"
 
@@ -2355,7 +2381,7 @@ class TestGitRemote:
             '[remote "origin"]\n\turl = https://github.com/AIOSAI/AIPass.git\n'
         )
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["remote"] == "origin"
         assert "AIPass" in answer["url"]
@@ -2368,7 +2394,7 @@ class TestGitRemote:
         """
         remote_repo["configure"]('[remote "upstream"]\n\turl = https://github.com/other/thing.git\n')
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["remote"] == "upstream"
         assert answer["web"] == "https://github.com/other/thing"
@@ -2381,7 +2407,7 @@ class TestGitRemote:
         remote_repo["configure"]("[core]\n\tbare = false\n")
 
         with pytest.raises(host_reads.ReadRefused) as caught:
-            host_reads.read_git_remote("demo")
+            host_remotes.read_git_remote("demo")
 
         assert "remote" in str(caught.value)
 
@@ -2399,7 +2425,7 @@ class TestGitRemote:
 
         with patch(PATCH_HOST_FLEET, census):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_remote("br", project="LOOSE")
+                host_remotes.read_git_remote("br", project="LOOSE")
 
     def test_no_subprocess_is_ever_spawned_on_this_lane(self, remote_repo: dict) -> None:
         """
@@ -2408,7 +2434,7 @@ class TestGitRemote:
         carved into "git is drone-only" without anyone deciding to carve it.
         """
         with patch.object(subprocess, "run") as mock_run:
-            host_reads.read_git_remote("demo")
+            host_remotes.read_git_remote("demo")
 
         mock_run.assert_not_called()
 
@@ -2422,7 +2448,7 @@ class TestRemoteURLForms:
 
     def _web(self, remote_repo: dict, url: str) -> Any:
         remote_repo["configure"]('[remote "origin"]\n\turl = %s\n' % url)
-        return host_reads.read_git_remote("demo")["web"]
+        return host_remotes.read_git_remote("demo")["web"]
 
     def test_the_scp_short_form_becomes_browsable(self, remote_repo: dict) -> None:
         """The form every forge offers by default."""
@@ -2452,7 +2478,7 @@ class TestRemoteURLForms:
         """
         remote_repo["configure"]('[remote "origin"]\n\turl = /srv/mirrors/aipass.git\n')
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["web"] is None
         assert answer["url"] == "/srv/mirrors/aipass.git"
@@ -2484,7 +2510,7 @@ class TestRemoteCredentialsNeverTravel:
         """The secret never leaves this process, in any field."""
         remote_repo["configure"](self.WITH_SECRET)
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert "ghp_supersecret" not in json.dumps(answer)
 
@@ -2495,13 +2521,13 @@ class TestRemoteCredentialsNeverTravel:
         """
         remote_repo["configure"](self.WITH_SECRET)
 
-        assert host_reads.read_git_remote("demo")["redacted"] is True
+        assert host_remotes.read_git_remote("demo")["redacted"] is True
 
     def test_the_url_keeps_its_shape_so_it_is_still_recognisable(self, remote_repo: dict) -> None:
         """Redacted, not deleted — the operator should still know which remote this is."""
         remote_repo["configure"](self.WITH_SECRET)
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert "aiosai" in answer["url"]
         assert "github.com/AIOSAI/AIPass" in answer["url"]
@@ -2510,7 +2536,7 @@ class TestRemoteCredentialsNeverTravel:
         """A browsable link needs no identity in it, so it is given none."""
         remote_repo["configure"](self.WITH_SECRET)
 
-        answer = host_reads.read_git_remote("demo")
+        answer = host_remotes.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
         assert "@" not in answer["web"]
@@ -2523,7 +2549,7 @@ class TestRemoteCredentialsNeverTravel:
         """
         remote_repo["configure"]('[remote "origin"]\n\turl = git@github.com:AIOSAI/AIPass.git\n')
 
-        assert host_reads.read_git_remote("demo")["redacted"] is False
+        assert host_remotes.read_git_remote("demo")["redacted"] is False
 
 
 class TestRemoteInAWorktree:
@@ -2561,8 +2587,16 @@ class TestRemoteInAWorktree:
         (tree / ".git").write_text("gitdir: %s\n" % (main / ".git" / "worktrees" / "wt"), encoding="utf-8")
 
         fake_drone = self._wire(tree, branch)
-        with patch(PATCH_READS_DRONE, fake_drone), patch(PATCH_READS_LOGGER), patch(PATCH_READS_JSON):
-            answer = host_reads.read_git_remote("demo")
+        with (
+            patch(PATCH_READS_DRONE, fake_drone),
+            patch(PATCH_READS_LOGGER),
+            patch(PATCH_READS_JSON),
+            patch(PATCH_GIT_LOGGER),
+            patch(PATCH_GIT_JSON),
+            patch(PATCH_REMOTES_LOGGER),
+            patch(PATCH_REMOTES_JSON),
+        ):
+            answer = host_remotes.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
 
@@ -2574,6 +2608,65 @@ class TestRemoteInAWorktree:
         (tree / ".git").write_text("gitdir: %s\n" % (tmp_path / "gone"), encoding="utf-8")
 
         fake_drone = self._wire(tree, branch)
-        with patch(PATCH_READS_DRONE, fake_drone), patch(PATCH_READS_LOGGER), patch(PATCH_READS_JSON):
+        with (
+            patch(PATCH_READS_DRONE, fake_drone),
+            patch(PATCH_READS_LOGGER),
+            patch(PATCH_READS_JSON),
+            patch(PATCH_GIT_LOGGER),
+            patch(PATCH_GIT_JSON),
+            patch(PATCH_REMOTES_LOGGER),
+            patch(PATCH_REMOTES_JSON),
+        ):
             with pytest.raises(host_reads.ReadUnavailable):
-                host_reads.read_git_remote("demo")
+                host_remotes.read_git_remote("demo")
+
+
+class TestWhichRepositoryADirectoryIsIn:
+    """
+    repository_of() — private until the split, public now that both halves ask.
+
+    It is the answer the change list strips row paths against and the answer the
+    remote lane looks for a configuration beside, so it gets pinned directly
+    rather than only through the two lanes that lean on it.
+    """
+
+    def test_the_nearest_ancestor_carrying_the_marker_wins(self, tmp_path) -> None:
+        """Not the outermost repository — the one this directory actually sits in."""
+        outer = tmp_path / "outer"
+        inner = outer / "vendor" / "inner"
+        deep = inner / "src" / "aipass" / "api"
+        deep.mkdir(parents=True)
+        (outer / ".git").mkdir()
+        (inner / ".git").mkdir()
+
+        assert host_reads.repository_of(deep) == inner
+
+    def test_a_marker_that_is_a_FILE_still_counts(self, tmp_path) -> None:
+        """
+        A worktree keeps a file where a clone keeps a directory.
+
+        Checking is_dir() here would read every worktree as "not a repository"
+        and silently un-strip every path inside it — the shape that has already
+        bitten one lane on this surface.
+        """
+        worktree = tmp_path / "checked-out-elsewhere"
+        inside = worktree / "src"
+        inside.mkdir(parents=True)
+        (worktree / ".git").write_text("gitdir: /somewhere/else\n", encoding="utf-8")
+
+        assert host_reads.repository_of(inside) == worktree
+
+    def test_no_repository_above_it_answers_None_not_a_guess(self, tmp_path) -> None:
+        """Absent is a real answer here; callers branch on it rather than assume."""
+        loose = tmp_path / "just" / "some" / "directories"
+        loose.mkdir(parents=True)
+
+        assert host_reads.repository_of(loose) is None
+
+    def test_a_directory_that_is_itself_the_repository_answers_itself(self, tmp_path) -> None:
+        """The walk starts at the directory, not at its parent."""
+        repository = tmp_path / "seat"
+        repository.mkdir()
+        (repository / ".git").mkdir()
+
+        assert host_reads.repository_of(repository) == repository

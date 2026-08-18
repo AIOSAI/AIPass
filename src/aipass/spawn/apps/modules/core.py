@@ -41,6 +41,7 @@ from aipass.spawn.apps.handlers.file_ops import (
     ensure_directory,
 )
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
+from aipass.spawn.apps.handlers.mint_verify import verify_mint
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
     add_to_registry,
@@ -314,6 +315,26 @@ def _spawn_agent(
     if template_registry:
         branch_meta = generate_branch_meta(target, template_registry)
         save_branch_meta(target, branch_meta)
+
+    # Step 3c: The mint must have delivered what the template claims — refuse
+    # loudly if not. Deliberately placed BEFORE the registry write: a citizen
+    # that cannot be born must not exist in the registry at all, and refusing
+    # first means there is nothing to roll back (a rollback that itself fails
+    # leaves the half-citizen this guard is here to prevent). The partial tree
+    # is left on disk on purpose — spawn refuses, it does not delete a
+    # directory the caller may want to inspect.
+    missing = verify_mint(template, target, replacements, branch_lower)
+    if missing:
+        json_handler.log_operation("mint_refused", data={"branch": branch_upper, "missing": missing})
+        shown = ", ".join(missing[:12])
+        if len(missing) > 12:
+            shown += f", +{len(missing) - 12} more"
+        return _error(
+            f"INCOMPLETE MINT: {len(missing)} file(s) the template claims never landed in {target}: {shown}. "
+            f"Template: {template}. The usual cause is an incomplete template on disk — a fresh clone whose "
+            f"template files are gitignored ships fewer files than the template's own manifest declares. "
+            f"Nothing was registered; the partial tree is left at {target} for inspection."
+        )
 
     # Step 4: Register in project registry
     # Store path relative to registry location (works for both AIPass and external projects)

@@ -47,6 +47,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import attach as host_attach
+from aipass.api.apps.handlers.host import verbs as host_verbs
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -58,6 +59,9 @@ PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
 PATCH_ATTACH_JSON = "aipass.api.apps.handlers.host.attach.json_handler"
 PATCH_ATTACH_LOGGER = "aipass.api.apps.handlers.host.attach.logger"
 PATCH_SERVER_JSON = "aipass.api.apps.handlers.host.server.json_handler"
+# The project this server is seated in, as the registry names it.
+SEAT = "AIPass"
+
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 
 pty_required = pytest.mark.skipif(
@@ -84,6 +88,63 @@ def store(tmp_path: Path):
     with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
             yield tmp_path
+
+
+@pytest.fixture
+def seated(tmp_path: Path, monkeypatch: Any):
+    """
+    A citizen registry of this test's own, so the seat resolves to a KNOWN name.
+
+    THE CI RED THIS FIXES (PR #734, run 32094572478): the attach route asks
+    which project it is seated in before it opens anything, and that answer
+    comes from drone's citizen registry. The live registry is machine-managed
+    and ignored by version control, so a fresh runner has none — the ubuntu job
+    installs the package and runs pytest, nothing more. Six tests here were
+    therefore leaning on whatever this developer's machine happened to contain,
+    and on CI the refusal fired at registry resolution BEFORE the contract under
+    test was ever reached: close code 1011 where 1008 was expected, the tmux
+    sentence replaced by a registry one, and empty resize and write lists
+    downstream because the pump never started.
+
+    None of those six tests are about registry resolution. A test that needs a
+    registry brings its own, and then it is testing the thing it claims to.
+
+    AIPASS_REGISTRY is drone's OWN documented door (priority 2 of 3 in
+    get_registry_path, behind only an explicit set_registry_path), so the
+    resolution under test stays drone's real one end to end — path normalising,
+    credential check and all. Nothing here reaches for the live registry, and
+    monkeypatch puts the environment back on the way out.
+
+    The root is named for the real seat so the seat-versus-external branch of
+    the route lands the same way here as it does on the developer machine.
+    """
+    root = tmp_path / SEAT
+    branch_dir = root / "src" / "aipass" / "api"
+    branch_dir.mkdir(parents=True)
+
+    registry = root / "AIPASS_REGISTRY.json"
+    registry.write_text(
+        json.dumps(
+            {
+                # No metadata.id ON PURPOSE: drone only compares registries
+                # against a passport when BOTH carry an id, so leaving it out
+                # keeps this fixture from arguing with the citizen running it.
+                "metadata": {"description": "hermetic registry for the attach tests"},
+                "branches": [
+                    {
+                        "name": "API",
+                        "path": "src/aipass/api",
+                        "email": "@api",
+                        "status": "active",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("AIPASS_REGISTRY", str(registry))
+    yield root
 
 
 @pytest.fixture
@@ -1035,7 +1096,7 @@ class TestTheSocketRefusesBeforeItSpawns:
 
                 assert not spawn.called
 
-    def test_an_authenticated_caller_gets_a_readable_refusal(self, store: Any) -> None:
+    def test_an_authenticated_caller_gets_a_readable_refusal(self, store: Any, seated: Any) -> None:
         """
         A refusal the operator can ACT on has to reach the screen.
 
@@ -1063,7 +1124,7 @@ class TestTheSocketRefusesBeforeItSpawns:
         assert closed["code"] == 1008
         assert "Unknown branch" in closed["reason"]
 
-    def test_a_server_side_failure_closes_on_its_own_code(self, store: Any) -> None:
+    def test_a_server_side_failure_closes_on_its_own_code(self, store: Any, seated: Any) -> None:
         """
         1011 is 'ours', 1008 is 'yours' — the same split the HTTP lanes make
         between 503 and 400, so the phone can tell the operator whether to fix
@@ -1109,6 +1170,61 @@ class TestTheSocketRefusesBeforeItSpawns:
 
         assert accepted == host_attach.BEARER_SUBPROTOCOL
         assert accepted != raw
+
+
+def server_source_of(name: str) -> str:
+    """
+    The source of ONE function in server.py, cut on structure not on neighbours.
+
+    Four tests in this file read the source, because the properties they pin are
+    about shape rather than behaviour — an except clause that must exist, a call
+    that must come before another. They used to slice between two literal names,
+    and that broke the moment the pump moved out to module level: the end anchor
+    was still findable, hundreds of lines further down, so the slice swallowed
+    code the test was never about and failed for the wrong reason. Three of the
+    four went on passing on borrowed luck, which is the worse half of it.
+
+    Same lesson this branch keeps relearning on the other side of the wire: cut
+    on structure, never on the prose that happens to sit next to it.
+
+    Args:
+        name: The function's name in server.py.
+
+    Returns:
+        Exactly that function's source.
+    """
+    source = Path(host_server.__file__).read_text(encoding="utf-8")
+
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            segment = ast.get_source_segment(source, node)
+            if segment is not None:
+                return segment
+
+    raise AssertionError(f"server.py has no function named {name!r}")
+
+
+def detach_and_wait(socket: Any, session: Any, timeout: float = 10.0) -> None:
+    """
+    Close the sheet, then wait for the SERVER to finish detaching.
+
+    NOT the same as letting the context manager close it. The test client's
+    teardown cancels the app task and then reads that task's result, so a
+    server still finishing when teardown runs comes back as a CancelledError
+    instead of as whatever it was actually doing. On an idle machine the server
+    always wins that race; under load it does not — reproduced 3 runs in 4 at
+    -n 8 on a 4-core box, and a CI runner is exactly that kind of machine. The
+    two tests that flaked were the two that asserted on teardown.
+
+    The hangup is also the honest thing to wait on: it IS the detach these
+    tests are about, so waiting for it makes the timing assertion measure the
+    server's real teardown rather than the moment the client stopped caring.
+    """
+    socket.close()
+
+    deadline = time.monotonic() + timeout
+    while session.hangups == 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
 
 
 class StubSession:
@@ -1182,7 +1298,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
     the test could parse JSON.
     """
 
-    def test_every_bad_frame_is_dropped_and_the_room_survives_all_of_them(self, store: Any) -> None:
+    def test_every_bad_frame_is_dropped_and_the_room_survives_all_of_them(self, store: Any, seated: Any) -> None:
         """
         Thirteen malformed frames down one socket, then a good one.
 
@@ -1213,11 +1329,13 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     while not session.resizes and time.monotonic() < deadline:
                         time.sleep(0.01)
 
+                    detach_and_wait(socket, session)
+
         assert session.resizes == [(72, 44)]
         assert session.writes == []
         assert session.hangups == 1
 
-    def test_a_bad_frame_does_not_stop_the_keystrokes_that_follow_it(self, store: Any) -> None:
+    def test_a_bad_frame_does_not_stop_the_keystrokes_that_follow_it(self, store: Any, seated: Any) -> None:
         """
         Recovery on the OTHER channel.
 
@@ -1244,9 +1362,11 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
                     while len(session.writes) < 2 and time.monotonic() < deadline:
                         time.sleep(0.01)
 
+                    detach_and_wait(socket, session)
+
         assert session.writes == [b"echo still-listening", b"\r"]
 
-    def test_a_disconnect_on_a_SILENT_room_still_detaches_promptly(self, store: Any) -> None:
+    def test_a_disconnect_on_a_SILENT_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
         """
         The bug this file found, pinned so it cannot come back.
 
@@ -1272,8 +1392,10 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
             with patch.object(host_attach, "open_attach", return_value=session):
                 client = TestClient(host_server.create_app())
                 started = time.monotonic()
-                with client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]):
-                    pass
+                with client.websocket_connect(
+                    "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
+                ) as socket:
+                    detach_and_wait(socket, session)
                 elapsed = time.monotonic() - started
 
         assert session.hangups == 1
@@ -1288,8 +1410,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         would reintroduce the hang, and the timing test above would only catch
         it as a mysterious slow test.
         """
-        source = Path(host_server.__file__).read_text(encoding="utf-8")
-        pump = source[source.index("async def _pump(") : source.index("def _handle_control(")]
+        pump = server_source_of("_pump")
 
         assert "return_when=asyncio.FIRST_COMPLETED" in pump
         # hangup comes FIRST in the finally: closing the descriptor is what
@@ -1307,8 +1428,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
         frame and a detached operator, so removing it fails here loudly rather
         than only through a timing-dependent socket test.
         """
-        source = Path(host_server.__file__).read_text(encoding="utf-8")
-        handler = source[source.index("def _handle_control(") : source.index('@app.get("/", include_in_schema=False)')]
+        handler = server_source_of("_handle_control")
 
         assert "except (host_attach.AttachRefused, host_attach.AttachUnavailable, OSError)" in handler
         assert "raise" not in handler
@@ -1346,8 +1466,7 @@ def test_the_control_frame_is_json_and_resize_is_the_only_verb() -> None:
     message ever being mistaken for something the operator typed — and it is why
     an unparseable control frame is ignored rather than written to the room.
     """
-    source = Path(host_server.__file__).read_text(encoding="utf-8")
-    handler = source[source.index("def _handle_control(") : source.index('@app.get("/", include_in_schema=False)')]
+    handler = server_source_of("_handle_control")
 
     assert 'message.get("type") != "resize"' in handler
     assert "session.write" not in handler
@@ -1372,8 +1491,7 @@ def test_the_pump_always_hangs_up() -> None:
     Otherwise the room keeps a client attached to a socket nobody is holding,
     and the operator's next attach lands in a session with a ghost in it.
     """
-    source = Path(host_server.__file__).read_text(encoding="utf-8")
-    pump = source[source.index("async def _pump(") : source.index("def _handle_control(")]
+    pump = server_source_of("_pump")
 
     assert "finally:" in pump
     assert "session.hangup()" in pump
@@ -1519,7 +1637,7 @@ class TestAWatchIsNotAnchorTooling:
 
         assert "@prax monitors the seat, not" not in source
 
-    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any) -> None:
+    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any) -> None:
         """
         The parked refusal, through the real socket.
 
@@ -1530,16 +1648,22 @@ class TestAWatchIsNotAnchorTooling:
 
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
 
+        # The existence gate is stubbed, and ONLY it. A named branch in a
+        # foreign project is looked up in the fleet census — a live machine
+        # fact, absent on a fresh runner, and not the thing this test claims to
+        # check. What is under test is that no project fence stands in front of
+        # the spawn; the gate itself has its own tests next door.
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
-            with patch.object(host_attach, "open_monitor") as spawn:
-                spawn.side_effect = host_attach.AttachUnavailable("stop here, the fence is what is under test")
-                client = TestClient(host_server.create_app())
+            with patch.object(host_verbs, "citizen_address", return_value="@vera"):
+                with patch.object(host_attach, "open_monitor") as spawn:
+                    spawn.side_effect = host_attach.AttachUnavailable("stop here, the fence is what is under test")
+                    client = TestClient(host_server.create_app())
 
-                with client.websocket_connect(
-                    "/v1/room/attach?kind=watch&branch=vera&project=VERA-STUDIO",
-                    subprotocols=["aipass.bearer", raw],
-                ) as socket:
-                    closed = socket.receive()
+                    with client.websocket_connect(
+                        "/v1/room/attach?kind=watch&branch=vera&project=VERA-STUDIO",
+                        subprotocols=["aipass.bearer", raw],
+                    ) as socket:
+                        closed = socket.receive()
 
         # Reaching the spawn AT ALL is the assertion: before this, the route
         # refused on the project and open_monitor was never called.

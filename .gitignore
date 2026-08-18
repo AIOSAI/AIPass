@@ -144,6 +144,23 @@ src/aipass/memory/artifacts/*
 !src/aipass/spawn/templates/project_agent/.spawn/
 !src/aipass/spawn/templates/project_agent/.spawn/**
 
+# project_agent template completeness (2026-08-17, found by a CI red). Same
+# species as the aipass_framework negations above: the blanket .ai_mail.local/
+# (line 29), DASHBOARD.local.json (line 32), logs/ (line 48) and artifacts/
+# (line 49) rules swallowed 6 of this template's 18 files, so a fresh clone got
+# the template INCOMPLETE — and the mint copies what it finds, so every citizen
+# born from a fresh clone came out with no birth certificate and no inbox.json
+# (unable to receive mail at all). A template must ship whole or the hospital
+# only works on the machine that authored it. Scoped to what project_agent
+# actually contains — it has no dropbox/, tools/, docs.local/ or *_json/.
+!src/aipass/spawn/templates/project_agent/.ai_mail.local/
+!src/aipass/spawn/templates/project_agent/.ai_mail.local/**
+!src/aipass/spawn/templates/project_agent/artifacts/
+!src/aipass/spawn/templates/project_agent/artifacts/**
+!src/aipass/spawn/templates/project_agent/logs/
+!src/aipass/spawn/templates/project_agent/logs/**
+!src/aipass/spawn/templates/project_agent/DASHBOARD.local.json
+
 # Commons artifacts subsystem — real source code (craft/trade/capsule), NOT a
 # runtime dir. Collides with the blanket `artifacts/` ignore (line 49); *.py-only
 # negation keeps the logs/ + __pycache__/ subdirs ignored. Without this the

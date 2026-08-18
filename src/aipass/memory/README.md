@@ -378,9 +378,62 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** 1070 passed, 0 failures, 5 skipped (2026-08-16). The 5 skips are the parked symbolic-fragments tier and its embedder — see `.archive/parked_symbolic_20260814/`.
+- **Tests:** 1081 passed, 0 failures, 5 skipped (2026-08-17). The 5 skips are the parked symbolic-fragments tier and its embedder — see `.archive/parked_symbolic_20260814/`. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (see below).
 - **Seedgo:** 100%. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
 - **Bypass registry:** 113 rules, all pointing at files that exist. Verified 2026-08-13 by pulling rules and re-running the checklist lane per file.
+
+### A suite that needs this machine is not a suite (2026-08-17)
+
+PR #734 ran this branch's tests on a fresh ubuntu runner for the first time (an
+unrelated `httpx` fix stopped killing whole suites at collection). 156 of the
+repo's 165 CI failures were mine, identical on 3.11/3.12/3.13 — deterministic,
+not flake. Every one of them was the suite depending on state that exists only
+where AIPass has already run.
+
+Four species, all fixed by making the fixtures mint their own state:
+
+1. **The fixture copied the live operator config.** `memory.config.json` lives
+   under `memory_json/custom_config/` and is gitignored — present on every dev
+   machine, absent on a clone. 77 setup errors. The config is now built from
+   `config_loader.DEFAULT_CONFIG` (the in-tree regeneration seed) and written by
+   the real `_write_config_file`, so the fixture cannot drift from the shape the
+   engine produces, and a hand-formatted copy cannot make the byte-identity
+   tests assert against the test file's formatting instead of the writer's.
+2. **The verbs resolve branches through `AIPASS_REGISTRY.json`**, also
+   machine-managed and gitignored. Every branch-addressed test got
+   `Unknown branch: @memory`. The registry is now minted in `tmp_path`, and
+   **both** doors are shut: `detector._REPO_ROOT` *and*
+   `_find_caller_registries`, which otherwise walks up from the caller's CWD and
+   quietly finds the fleet's own registry whenever the suite runs inside a
+   checkout. A test pins that the reachable registry holds exactly the three
+   minted branches.
+3. **Rich width is an environment variable.** Refusal sentences carry a tmp
+   path; under an xdist worker that path is long enough that an 80-column
+   console folds a newline *into* the sentence. Green on a wide terminal, red on
+   a runner with none. `COLUMNS` was the old defence and it is still the
+   environment deciding — both shared consoles are now pinned via `_width`
+   (not the public `width` setter, which monkeypatch would restore by writing
+   back the number it read, leaving the shared object pinned for the next
+   suite). Long path assertions additionally compare whitespace-free, the only
+   form that survives a fold landing mid-token. Removing both defences at
+   `COLUMNS=40` turns 33 tests red — 29 more than CI had reached.
+4. **A MagicMock standing in for a package has no `__path__`.**
+   `test_rollover.py` mocks `handlers.cli` and registered only `help_flags`; a
+   `json_flag` import added on 08-16 then resolved out of `sys.modules` **by
+   accident**, because some earlier test in the same process had imported the
+   real one. On a worker running that file first, all 18 tests died at import.
+   Now both submodules are imported and registered, and a test reads
+   `rollover.py`'s own import lines so the *next* submodule added to that
+   package fails here instead of on a runner three days later.
+
+Verified three ways: the branch suite as usual, the repo-root
+`-n auto --dist loadscope` invocation, and a fresh-runner simulation — a pytest
+plugin that makes `os.stat` and `open()` raise `FileNotFoundError` for exactly
+the gitignored paths a clone does not carry, so nothing on this machine is moved
+aside. Under the strongest combination (fresh-clone simulation, repo root, 8
+workers, loadscope): 1080 passed, 6 skipped. The sixth skip is the health test
+that deliberately reads real `.trinity/` files, and it says so out loud — a skip
+that names its reason is honest; a pass that needed this machine is not.
 
 ### Dead code, archived not deleted (2026-08-13)
 

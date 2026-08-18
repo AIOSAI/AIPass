@@ -13,6 +13,7 @@ never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
 """
 
 import json
+import os
 
 import pytest
 
@@ -133,3 +134,81 @@ class TestHooksSound:
         assert host_settings.hooks_sound_set(True, flag) is True
         assert host_settings.hooks_sound_set(True, flag) is True
         assert not flag.exists()
+
+
+class TestAnUnreadableFileIsNeverBlank:
+    """
+    The module docstring's own rule, now held all the way down.
+
+    read_object used to answer {} for EVERY OSError. Two very different
+    situations were arriving at the same answer: a branch that has no settings
+    yet, and a settings file this process is not allowed to read. The first is
+    ordinary; the second is a fault, and reading it as blank invites a patch to
+    write a fresh document over settings that were only ever unreadable.
+    """
+
+    def test_a_branch_with_no_settings_still_reads_as_blank(self, tmp_path) -> None:
+        """The no-fault case, unchanged: absent means absent."""
+        assert host_settings.read_object(tmp_path / "settings.local.json") == {}
+
+    def test_a_missing_parent_directory_also_reads_as_blank(self, tmp_path) -> None:
+        """Nothing on the way to the file exists either — still just absent."""
+        assert host_settings.read_object(tmp_path / "nope" / "settings.local.json") == {}
+
+    def test_a_directory_where_the_file_should_be_is_a_fault(self, tmp_path) -> None:
+        """Something IS there and it cannot be read as settings. Say so."""
+        occupied = tmp_path / "settings.local.json"
+        occupied.mkdir()
+
+        with pytest.raises(host_settings.SettingsUnavailable) as refusal:
+            host_settings.read_object(occupied)
+
+        assert "settings.local.json" in str(refusal.value)
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads everything; the mode says nothing to it")
+    def test_a_file_we_may_not_read_is_a_fault_not_a_blank(self, tmp_path) -> None:
+        """The one that would have cost real settings: unreadable, not empty."""
+        secret = tmp_path / "settings.local.json"
+        secret.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+        secret.chmod(0o000)
+
+        try:
+            with pytest.raises(host_settings.SettingsUnavailable):
+                host_settings.read_object(secret)
+        finally:
+            secret.chmod(0o600)
+
+
+class TestAFailedWriteLeavesNothingBehind:
+    """The staged file is cleanup, and cleanup that fails is still reported."""
+
+    def test_the_staged_file_does_not_survive_a_failed_write(self, tmp_path) -> None:
+        path = tmp_path / "settings.local.json"
+
+        with pytest.raises(TypeError):
+            host_settings.write_atomically(path, {"unserialisable": object()})
+
+        assert not path.exists()
+        assert list(tmp_path.iterdir()) == []
+
+    def test_a_cleanup_that_itself_fails_is_logged_not_swallowed(self, tmp_path, monkeypatch) -> None:
+        """
+        Losing the temp file is survivable; losing the FACT is not. The original
+        failure still travels — cleanup never overwrites the reason.
+        """
+        path = tmp_path / "settings.local.json"
+        complaints = []
+
+        def refuse_to_unlink(_target):
+            raise OSError("the staged file cannot be removed either")
+
+        monkeypatch.setattr(host_settings.os, "unlink", refuse_to_unlink)
+        monkeypatch.setattr(
+            host_settings.logger, "warning", lambda *a, **k: complaints.append(a[0] % a[1:] if len(a) > 1 else a[0])
+        )
+
+        with pytest.raises(TypeError):
+            host_settings.write_atomically(path, {"unserialisable": object()})
+
+        assert complaints, "a failed cleanup left no trace at all"
+        assert any("staged" in line for line in complaints)

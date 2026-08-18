@@ -87,8 +87,24 @@ def read_object(path: Path) -> Dict[str, Any]:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
+        # Nothing is there yet. That is a fresh branch, not a fault, and it is
+        # the ONLY OSError that reads as blank — see below.
+        #
+        # Said out loud even so. It is the one branch here that answers with a
+        # document nobody wrote, and when a face shows every dial at absent the
+        # first question is always whether the file was missing or unread. Debug
+        # because it is the ordinary case, not because it does not matter.
+        logger.debug("[host_api] no settings file at %s yet — reading as blank", path)
         return {}
+    except OSError as e:
+        # Everything else means something IS there and this process could not
+        # read it: a permission bit, a directory in the file's place, a mount
+        # that went away. Answering {} here would be the module docstring's own
+        # forbidden move — a patch would then write a fresh document over
+        # settings that were merely unreadable, and the loss would be silent.
+        logger.error("[host_api] could not read settings at %s: %s", path, e)
+        raise SettingsUnavailable(f"Could not read '{path.name}': {e}") from e
     if not raw.strip():
         return {}
     try:
@@ -98,6 +114,42 @@ def read_object(path: Path) -> Dict[str, Any]:
     if not isinstance(document, dict):
         raise SettingsRefused(f"'{path}' is not a JSON object — refusing to touch it")
     return document
+
+
+def _discard(staged: str) -> None:
+    """
+    Remove a staged file that never made it into place.
+
+    Called only while another exception is travelling, so this one is REPORTED
+    rather than raised: a lost temp file is survivable, and re-raising here
+    would replace the reason the write actually failed with a footnote about
+    the cleanup. What must not happen is losing the fact — a stray temp file in
+    .claude/ reads as somebody's lost config, and an operator seeing one
+    deserves the line that explains it.
+    """
+    try:
+        os.unlink(staged)
+    except OSError as e:
+        logger.warning("[host_api] staged settings file %s could not be removed: %s", staged, e)
+
+
+def _replace_through_a_staged_file(directory: Path, path: Path, document: Dict[str, Any]) -> None:
+    """
+    Write the document beside its destination, then rename it over.
+
+    BaseException, not Exception: a KeyboardInterrupt or a MemoryError mid-write
+    leaves the same orphan on disk as a plain failure does, and the staged file
+    must never survive either way.
+    """
+    descriptor, staged = tempfile.mkstemp(dir=str(directory), prefix=".baud-settings-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+        os.replace(staged, path)
+    except BaseException:
+        _discard(staged)
+        raise
 
 
 def write_atomically(path: Path, document: Dict[str, Any]) -> None:
@@ -113,20 +165,7 @@ def write_atomically(path: Path, document: Dict[str, Any]) -> None:
     directory = path.parent
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        descriptor, staged = tempfile.mkstemp(dir=str(directory), prefix=".baud-settings-")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(document, handle, indent=2, ensure_ascii=False)
-                handle.write("\n")
-            os.replace(staged, path)
-        except BaseException:
-            # The staged file must never survive a failed write — a stray
-            # temp file in .claude/ reads as somebody's lost config.
-            try:
-                os.unlink(staged)
-            except OSError:
-                pass
-            raise
+        _replace_through_a_staged_file(directory, path, document)
     except OSError as e:
         logger.error("[host_api] could not write settings at %s: %s", path, e)
         raise SettingsUnavailable(f"Could not write '{path.name}': {e}") from e
@@ -254,10 +293,10 @@ def hooks_sound_set(active: bool, flag: Optional[Path] = None) -> bool:
     target = flag or hooks_mute_flag()
     try:
         if active:
-            try:
-                target.unlink()
-            except FileNotFoundError:
-                pass
+            # missing_ok says the idempotence outright instead of catching it
+            # after the fact: unmuting an unmuted fleet is the intended answer,
+            # not an error that happens to be ignored.
+            target.unlink(missing_ok=True)
         else:
             target.touch()
     except OSError as e:

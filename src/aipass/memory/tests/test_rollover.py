@@ -71,13 +71,24 @@ def _prepare_rollover_mocks(monkeypatch):
     rollover_pkg = MagicMock()
     rollover_pkg.orchestrator = mock_orchestrator
 
-    # help_flags is pure argument inspection with no dependencies — mocking it
-    # would only hide whether the routing guard actually holds, so use the real one.
+    # help_flags and json_flag are pure argument inspection with no
+    # dependencies — mocking them would only hide whether the routing guards
+    # actually hold, so use the real ones.
+    #
+    # EVERY module the rollover module imports from this package has to be
+    # listed here AND in sys.modules below. cli_pkg is a MagicMock, so the
+    # package it stands in for has no __path__: `from ...cli.json_flag import
+    # x` then resolves out of sys.modules or not at all. It resolved on a dev
+    # machine only because some earlier test in the same process had already
+    # imported the real one; on a fresh CI worker running this file first, all
+    # 18 tests in this class died at import with "cli is not a package".
     import importlib
 
     real_help_flags = importlib.import_module("aipass.memory.apps.handlers.cli.help_flags")
+    real_json_flag = importlib.import_module("aipass.memory.apps.handlers.cli.json_flag")
     cli_pkg = MagicMock()
     cli_pkg.help_flags = real_help_flags
+    cli_pkg.json_flag = real_json_flag
 
     handlers_pkg = MagicMock()
     handlers_pkg.monitor = monitor_pkg
@@ -86,6 +97,7 @@ def _prepare_rollover_mocks(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli", cli_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.help_flags", real_help_flags)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.json_flag", real_json_flag)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers", handlers_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
@@ -133,6 +145,62 @@ def _import_rollover(monkeypatch):
     from aipass.memory.apps.modules import rollover
 
     return rollover, mocks
+
+
+# ===========================================================================
+# Tests: the mocked cli package covers every submodule the code imports
+# ===========================================================================
+
+
+class TestMockedCliPackageIsComplete:
+    """The fixture stands a MagicMock in for handlers.cli. A MagicMock has no
+    __path__, so `from ...cli.<name> import x` can only resolve out of
+    sys.modules -- and on a dev machine it resolves by accident, because some
+    earlier test in the same process already imported the real one. On a fresh
+    CI worker running this file first, it does not resolve at all.
+
+    That is exactly how a `json_flag` import added on 08-16 turned all 18
+    TestHandleCommand tests red on ubuntu while staying green here. This test
+    reads rollover.py's own import lines, so the NEXT submodule added to that
+    package fails here instead of on a runner three days later.
+    """
+
+    def _imported_cli_submodules(self):
+        import re
+        from pathlib import Path as _Path
+
+        source = _Path(rollover_module_path()).read_text(encoding="utf-8")
+        return set(re.findall(r"from aipass\.memory\.apps\.handlers\.cli\.(\w+) import", source))
+
+    def test_at_least_one_is_imported(self, monkeypatch):
+        """Guard the guard: a regex that matched nothing would assert nothing."""
+        assert self._imported_cli_submodules()
+
+    def test_every_imported_submodule_is_registered_real(self, monkeypatch):
+        _import_rollover(monkeypatch)
+        for name in self._imported_cli_submodules():
+            key = f"aipass.memory.apps.handlers.cli.{name}"
+            assert key in sys.modules, f"{key} imported by rollover.py but not registered by the fixture"
+            assert not isinstance(sys.modules[key], MagicMock), f"{key} must be the real module, not a mock"
+
+    def test_reimport_survives_a_cold_submodule_cache(self, monkeypatch):
+        """Drop every cli submodule from the cache first -- the CI condition.
+
+        Without the fixture registering them, this is the exact
+        ModuleNotFoundError the runner reported.
+        """
+        for name in self._imported_cli_submodules():
+            sys.modules.pop(f"aipass.memory.apps.handlers.cli.{name}", None)
+        rollover, _mocks = _import_rollover(monkeypatch)
+        assert rollover.handle_command("rollover", ["check"]) is True
+
+
+def rollover_module_path():
+    """Path to the rollover module's source, without importing it."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("aipass.memory.apps.modules.rollover")
+    return spec.origin
 
 
 # ===========================================================================

@@ -84,6 +84,11 @@
       "file": "apps/handlers/atomic_write.py",
       "standard": "json_structure",
       "reason": "Pure I/O primitive \u2014 stage/fsync/os.replace only, same species as json_ops.py above. Nothing to log: it is the write mechanism every other handler's log_operation call ultimately rides on, and logging each atomic write would emit an entry per passport/registry swap. Verified load-bearing in BOTH lanes 2026-08-16 (checklist [FAIL] json_structure; audit 97%/overall 99% with it lifted)."
+    },
+    {
+      "file": "apps/handlers/mint_verify.py",
+      "standard": "json_structure",
+      "reason": "Pure read-only predicate \u2014 reads the template's manifest and walks its tree to return the list of files a mint failed to deliver. Same species as placeholders.py/class_registry.py above: no mutation, no operation of its own to log. The operational event IS logged, at the decision point where it belongs: core._spawn_agent emits json_handler.log_operation('mint_refused', ...) on the refusal, beside the existing 'branch_created' record. Verified load-bearing in BOTH lanes 2026-08-17 (checklist [FAIL] json_structure; audit Json_Structure 97% / overall 99% with it lifted)."
     }
   ],
   "notes": {

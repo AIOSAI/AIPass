@@ -37,8 +37,10 @@ tests write limits; a suite that edited the fleet config would be the exact
 accident these verbs exist to prevent.
 """
 
+import copy
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,8 +48,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# The live operator config -- read (copied) here, NEVER written by this suite.
-_LIVE_CONFIG = Path(__file__).resolve().parents[1] / "memory_json" / "custom_config" / "memory.config.json"
+# The registry these tests address, MINTED per test in tmp_path.
+# AIPASS_REGISTRY.json is machine-managed and gitignored: on a fresh clone it
+# does not exist at all, so a suite that read the live one proved only that
+# THIS machine had already run AIPass. Mixed casing is deliberate -- the real
+# registry carries lowercase and UPPERCASE names side by side, and
+# case-insensitive branch matching is one of the things under test.
+_REGISTRY_BRANCHES = [
+    {"name": "memory", "path": "src/aipass/memory", "status": "active"},
+    {"name": "DEVPULSE", "path": "src/aipass/devpulse", "status": "active"},
+    {"name": "DAEMON", "path": "src/aipass/daemon", "status": "active"},
+]
+
+# Wide enough that no sentence in this file can reach it. See _pin_console_width.
+_CONSOLE_WIDTH = 300
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 _HANDLER_MODULES = (
     "aipass.memory.apps.handlers.json",
@@ -61,41 +77,91 @@ _HANDLER_MODULES = (
 # ---------------------------------------------------------------------------
 
 
+def _pin_console_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix both shared Rich consoles at a known width.
+
+    Rich resolves its width from the ENVIRONMENT -- a real terminal if there
+    is one, else COLUMNS, else 80. These tests assert refusal sentences that
+    carry a tmp path, and under an xdist worker that path is long enough that
+    an 80-column console folds a newline INTO the sentence: the assertion then
+    fails on output that is perfectly correct. Green on a dev machine with a
+    wide terminal, red on a runner with none. @daemon paid for this twice on
+    08-16 one layer along -- name the rendering explicitly, never let the shell
+    decide it.
+
+    `_width` and not the public `width` setter: these are module-global console
+    objects shared with every other suite, and monkeypatch would restore
+    `width` by writing back the number it read (80), leaving the console pinned
+    for whoever ran next. `_width` starts as None and restores as None, and it
+    is the attribute Console.size honours last.
+    """
+    display = importlib.import_module("aipass.cli.apps.modules.display")
+    for console_obj in (display.CONSOLE, display.err_console):
+        monkeypatch.setattr(console_obj, "_width", _CONSOLE_WIDTH)
+
+
 @pytest.fixture
 def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """Real config_loader + rollover module wired to a copy of the live config.
+    """Real config_loader + rollover module wired to a MINTED config and registry.
+
+    Hermetic on purpose: nothing here reads state that exists only on a machine
+    someone has already run AIPass on.
+
+      * The config is built from config_loader.DEFAULT_CONFIG -- the in-tree
+        regeneration seed, kept in lockstep with the operator file by S193
+        doctrine -- and written by the real _write_config_file. A hand-formatted
+        copy would make the no-op-set byte-identity test assert against this
+        file's formatting instead of the writer's.
+      * per_branch is filled by the real materialize_per_branch() reading the
+        minted registry, so the fixture and the engine cannot disagree about
+        the seeded shape.
+      * BOTH registry doors are shut. detector._read_registry reads
+        _REPO_ROOT/AIPASS_REGISTRY.json and then walks up from the caller's CWD
+        for any other *_REGISTRY.json -- run from a checkout, that second door
+        finds the fleet's own registry and the suite goes quietly non-hermetic.
 
     conftest replaces the handlers.json package with a MagicMock, which would
     make the lazy `from ... import config_loader` inside the module return a
     mock instead of the code under test. Popping it forces a real import.
     """
-    # Rich wraps at the detected width; long refusal sentences carry a tmp path,
-    # so widen the console or the exact-sentence assertions test line wrapping.
-    monkeypatch.setenv("COLUMNS", "300")
-
     for name in _HANDLER_MODULES:
         sys.modules.pop(name, None)
     config_loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
 
+    # Captured BEFORE the repoint: the guard in TestOperatorConfigIsolation
+    # needs to know where the real file would have been.
+    operator_config_path = config_loader._CONFIG_PATH
+
     config_path = tmp_path / "custom_config" / "memory.config.json"
     config_path.parent.mkdir(parents=True)
-    config_path.write_bytes(_LIVE_CONFIG.read_bytes())
-
     monkeypatch.setattr(config_loader, "_CONFIG_PATH", config_path)
     monkeypatch.setattr(config_loader, "json_handler", MagicMock())
+
+    registry_path = tmp_path / "AIPASS_REGISTRY.json"
+    registry_path.write_text(json.dumps({"branches": _REGISTRY_BRANCHES}, indent=2), encoding="utf-8")
+    monkeypatch.setattr(config_loader, "_find_repo_root", lambda: tmp_path)
+
+    detector = importlib.import_module("aipass.memory.apps.handlers.monitor.detector")
+    monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+    monkeypatch.setattr(detector, "config_loader", config_loader)
+
+    config = copy.deepcopy(config_loader.DEFAULT_CONFIG)
+    config["rollover"]["per_branch"] = config_loader.materialize_per_branch()
+    assert config_loader._write_config_file(config), "fixture could not write its own config"
 
     sys.modules.pop("aipass.memory.apps.modules.rollover", None)
     rollover = importlib.import_module("aipass.memory.apps.modules.rollover")
     monkeypatch.setattr(rollover, "json_handler", MagicMock())
 
-    detector = importlib.import_module("aipass.memory.apps.handlers.monitor.detector")
-    monkeypatch.setattr(detector, "config_loader", config_loader)
+    _pin_console_width(monkeypatch)
 
     return SimpleNamespace(
         rollover=rollover,
         loader=config_loader,
         detector=detector,
         path=config_path,
+        operator_path=operator_config_path,
     )
 
 
@@ -110,9 +176,36 @@ def _run(verbs: SimpleNamespace, *args: str) -> bool:
 
 
 def _streams(capsys: pytest.CaptureFixture) -> str:
-    """Both streams joined -- refusals go to stderr, displays to stdout."""
+    """Both streams joined and ANSI-stripped -- refusals to stderr, displays to stdout.
+
+    Stripping is not cosmetic. FORCE_COLOR makes Rich emit attributes into a
+    captured non-terminal stream, so `assert "[DEFAULT]" in out` passes in one
+    shell and fails in the next on byte-identical code (@daemon, 08-16).
+    """
     captured = capsys.readouterr()
-    return captured.out + captured.err
+    return _ANSI.sub("", captured.out + captured.err)
+
+
+def _unwrapped(text: str) -> str:
+    """All whitespace removed -- the only comparison that survives ANY wrap.
+
+    A Rich fold can land mid-token (`custom_config` arrives as `custom_con` +
+    newline + `fig`), so collapsing runs of whitespace is not enough. Used for
+    the refusal sentences that carry a tmp path; the console width is pinned
+    as well, and this is the belt to that pair of braces.
+    """
+    return "".join(text.split())
+
+
+def _snapshot(path: Path) -> bytes | None:
+    """Bytes if the file is there, None if it is not -- absence IS a state.
+
+    On a dev machine the operator's config exists and the guard is about its
+    bytes. On a fresh clone it does not exist, and the same guard then says the
+    suite did not CREATE it. Reading it unconditionally is what turned this
+    file's isolation tests into CI errors.
+    """
+    return path.read_bytes() if path.exists() else None
 
 
 def _run_rollover(verbs: SimpleNamespace, *args: str) -> bool:
@@ -295,13 +388,13 @@ class TestUnreadableConfigRefusal:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
         _run(verbs, "set", "@memory", "sessions", "25")
         expected = f"Config at {verbs.path} is unreadable — fix or move it aside, then try again"
-        assert expected in _streams(capsys)
+        assert _unwrapped(expected) in _unwrapped(_streams(capsys))
 
     def test_message_on_set_default(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
         _run(verbs, "set-default", "sessions", "25")
         expected = f"Config at {verbs.path} is unreadable — fix or move it aside, then try again"
-        assert expected in _streams(capsys)
+        assert _unwrapped(expected) in _unwrapped(_streams(capsys))
 
     def test_bytes_unchanged(self, verbs) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
@@ -314,7 +407,7 @@ class TestUnreadableConfigRefusal:
         verbs.path.write_text('["a", "list"]', encoding="utf-8")
         before = verbs.path.read_bytes()
         _run(verbs, "set", "@memory", "sessions", "25")
-        assert "is unreadable — fix or move it aside, then try again" in _streams(capsys)
+        assert _unwrapped("is unreadable — fix or move it aside, then try again") in _unwrapped(_streams(capsys))
         assert verbs.path.read_bytes() == before
 
 
@@ -698,24 +791,40 @@ class TestIntrospectionAndHelp:
 # ===========================================================================
 
 
-class TestLiveConfigIsolation:
-    """A test that edited the fleet config would be the accident, not the guard."""
+class TestOperatorConfigIsolation:
+    """A test that edited the fleet config would be the accident, not the guard.
 
-    def test_config_path_is_repointed(self, verbs) -> None:
-        assert verbs.loader._CONFIG_PATH != _LIVE_CONFIG
+    The operator's file is gitignored: present on every dev machine, absent on
+    a fresh clone. The guard therefore compares SNAPSHOTS rather than bytes --
+    "still absent" is as much a pass as "unchanged", and neither is a skip.
+    """
 
-    def test_live_config_bytes_unchanged_by_a_set(self, verbs) -> None:
-        before = _LIVE_CONFIG.read_bytes()
+    def test_config_path_is_repointed(self, verbs, tmp_path) -> None:
+        assert verbs.loader._CONFIG_PATH != verbs.operator_path
+        assert tmp_path in verbs.loader._CONFIG_PATH.parents
+
+    def test_operator_config_unchanged_by_a_set(self, verbs) -> None:
+        before = _snapshot(verbs.operator_path)
         _run(verbs, "set", "@memory", "sessions", "25")
         _run(verbs, "set-default", "sessions", "40")
-        assert _LIVE_CONFIG.read_bytes() == before
+        assert _snapshot(verbs.operator_path) == before
 
-    def test_live_config_bytes_unchanged_by_json_mode(self, verbs) -> None:
-        before = _LIVE_CONFIG.read_bytes()
+    def test_operator_config_unchanged_by_json_mode(self, verbs) -> None:
+        before = _snapshot(verbs.operator_path)
         _run(verbs, "set", "@memory", "sessions", "25", "--json")
         _run(verbs, "set-default", "sessions", "40", "--json")
         _run_rollover(verbs, "push", "--json")
-        assert _LIVE_CONFIG.read_bytes() == before
+        assert _snapshot(verbs.operator_path) == before
+
+    def test_no_registry_of_this_machine_is_reachable(self, verbs, tmp_path) -> None:
+        """The second registry door: _find_caller_registries walks up from CWD.
+
+        Left open, a run started inside a checkout picks up the fleet's own
+        AIPASS_REGISTRY.json and the suite passes for a reason that has
+        nothing to do with the code under test.
+        """
+        names = {b["name"] for b in verbs.detector._read_registry()}
+        assert names == {"memory", "DEVPULSE", "DAEMON"}
 
 
 # ===========================================================================
@@ -1018,7 +1127,7 @@ class TestJsonUnreadableConfigRefusal:
         payload = _payload(verbs, capsys, "set-default", "sessions", "25", "--json")
         capsys.readouterr()
         _run(verbs, "set-default", "sessions", "25")
-        assert payload["error"] in _streams(capsys)
+        assert _unwrapped(payload["error"]) in _unwrapped(_streams(capsys))
 
     def test_bytes_unchanged(self, verbs, capsys) -> None:
         self._break_the_file(verbs)
