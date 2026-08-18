@@ -1,0 +1,34 @@
+{
+  "description": "Top level only. Keys the patch does not name are left exactly as they were.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "theme": "dark",
+      "zoom": 2
+    },
+    "file": {
+      "theme": "dark",
+      "zoom": 2
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "content": {
+      "theme": "dark",
+      "zoom": 1
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-patch-shallow-merges-a-top-level-key",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "zoom": 2
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

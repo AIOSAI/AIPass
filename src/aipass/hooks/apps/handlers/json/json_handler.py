@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: JSON auto-creating handler for hooks data files
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-15
-# Modified: 2026-08-16
+# Modified: 2026-08-18
 # =============================================
 
 """JSON auto-creating handler for hooks data files."""
@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,37 @@ if sys.platform == "win32":
 _BRANCH_ROOT = Path(__file__).resolve().parents[3]
 _BRANCH_NAME = _BRANCH_ROOT.name
 JSON_DIR = _BRANCH_ROOT / f"{_BRANCH_NAME}_json"
+
+
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
 
 
 def _atomic_write_json(target_path: Path, data: Any, ensure_ascii: bool = False) -> None:
@@ -50,8 +82,11 @@ def _atomic_write_json(target_path: Path, data: Any, ensure_ascii: bool = False)
         unfixed handler: 587 of 1023 concurrent reads unusable (57.4%), three
         runs 56.7-57.5%. The staged file is created in the TARGET's directory so
         os.replace stays a same-filesystem rename, which is atomic on POSIX and
-        on Windows. Mirrors @api v1.2.0, @cli v1.2.0, @commons v1.1.0,
-        @daemon v1.3.0, @skills v1.1.0.
+        on Windows. On Windows it can still raise PermissionError while a
+        reader holds the target open, so the move goes through
+        _replace_with_retry — bounded, then raises (proven by the Windows CI
+        hang of 2026-08-18). Mirrors @api v1.3.0, @cli v1.3.0,
+        @commons v1.2.0, @daemon v1.4.0, @skills v1.2.0.
     """
     descriptor, temporary = tempfile.mkstemp(dir=str(target_path.parent), prefix=target_path.stem, suffix=".tmp")
     succeeded = False
@@ -59,7 +94,7 @@ def _atomic_write_json(target_path: Path, data: Any, ensure_ascii: bool = False)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             json.dump(data, stream, indent=2, ensure_ascii=ensure_ascii)
             stream.write("\n")
-        os.replace(temporary, str(target_path))
+        _replace_with_retry(temporary, str(target_path))
         succeeded = True
     finally:
         if not succeeded and Path(temporary).exists():

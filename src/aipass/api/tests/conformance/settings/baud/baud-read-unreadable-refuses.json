@@ -1,0 +1,22 @@
+{
+  "description": "Unreadable is a fault on both documents, for the same reason on both.",
+  "document": "baud",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "content": {
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "unreadable"
+  },
+  "id": "baud-read-unreadable-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

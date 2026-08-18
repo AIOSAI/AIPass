@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_json_durability.py
 # Description: Torn-write durability tests for spawn's JSON/text write paths
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-08-18
 # =============================================
 
 """Durability tests for every spawn write path that touches a live file.
@@ -702,6 +702,131 @@ class TestAtomicWriteHelper:
             atomic_write_text(target, "bad \ud800 surrogate")
 
         assert not target.exists()
+        assert _stray_temps(tmp_path) == []
+
+
+# =============================================================================
+# 6b. THE WINDOWS SHARING-VIOLATION RETRY
+# =============================================================================
+
+
+class TestReplaceRetriesThroughSharingViolations:
+    """os.replace is atomic, but on Windows it is not always *available*.
+
+    Windows gives no FILE_SHARE_DELETE on Python's open, so os.replace raises
+    PermissionError for as long as ANY reader holds the target open. Readers
+    hold those handles for microseconds, so a short bounded retry converges —
+    but an unretried swap simply dies, and on 2026-08-18 one stuck swap starved
+    a whole CI run into 45-minute cancels.
+
+    Linux never produces that error on an open file, so every test here injects
+    it. The injection is the only cross-platform proof the retry path exists —
+    and a standards audit found _replace_with_retry had ZERO tests fleet-wide
+    before this sweep, so these are the first eyes on it.
+    """
+
+    def test_helper_exists_and_is_bounded(self):
+        import aipass.spawn.apps.handlers.atomic_write as aw
+
+        assert hasattr(aw, "_replace_with_retry"), (
+            "_replace_with_retry missing — a sharing violation still kills the write"
+        )
+        assert aw._REPLACE_ATTEMPTS > 1, "a single attempt is not a retry"
+        assert aw._REPLACE_BACKOFF_SECONDS > 0, "a zero backoff spins instead of waiting"
+
+    def test_retries_through_a_transient_sharing_violation(self, tmp_path, monkeypatch):
+        """Two sharing violations then success — the write still lands."""
+        import os as _os
+        import aipass.spawn.apps.handlers.atomic_write as aw
+
+        calls = {"count": 0}
+        real_replace = _os.replace
+
+        def flaky(src, dst):
+            calls["count"] += 1
+            if calls["count"] <= 2:
+                raise PermissionError(13, "sharing violation", str(dst))
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(aw.os, "replace", flaky)
+        target = tmp_path / "out.json"
+        target.write_text("old\n", encoding="utf-8")
+
+        aw.atomic_write_text(target, "new\n")
+
+        assert target.read_text(encoding="utf-8") == "new\n"
+        assert calls["count"] == 3, "retry path never engaged"
+        assert _stray_temps(tmp_path) == []
+
+    def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
+        """A swap that never unblocks raises instead of retrying forever."""
+        import aipass.spawn.apps.handlers.atomic_write as aw
+
+        calls = {"count": 0}
+
+        def blocked(src, dst):
+            calls["count"] += 1
+            raise PermissionError(13, "sharing violation", str(dst))
+
+        monkeypatch.setattr(aw.os, "replace", blocked)
+        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
+        target = tmp_path / "out.json"
+        target.write_text("old\n", encoding="utf-8")
+
+        with pytest.raises(PermissionError):
+            aw.atomic_write_text(target, "new\n")
+
+        assert calls["count"] == aw._REPLACE_ATTEMPTS, "bound not honoured"
+        assert target.read_text(encoding="utf-8") == "old\n", "the live file was damaged"
+        assert _stray_temps(tmp_path) == []
+
+    def test_retry_waits_between_attempts(self, tmp_path, monkeypatch):
+        """The backoff is used, not just declared.
+
+        Deleting the sleep leaves a busy spin that passes every other pin in
+        this class: it still retries, still bounds, still raises. But 40
+        immediate attempts finish inside a microsecond and never outlast the
+        reader handle the retry exists to wait out — the retry stops being a fix
+        and becomes decoration. It survived a mutation run on 2026-08-18.
+        Counting the sleeps pins the wait without asserting on wall-clock time,
+        which would be flaky on a loaded runner.
+        """
+        import aipass.spawn.apps.handlers.atomic_write as aw
+
+        sleeps = []
+        monkeypatch.setattr(aw.time, "sleep", lambda seconds: sleeps.append(seconds))
+        monkeypatch.setattr(
+            aw.os,
+            "replace",
+            lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
+        )
+        target = tmp_path / "out.json"
+        target.write_text("old\n", encoding="utf-8")
+
+        with pytest.raises(PermissionError):
+            aw.atomic_write_text(target, "new\n")
+
+        # One wait between each pair of attempts — never after the last, which raises.
+        assert sleeps == [aw._REPLACE_BACKOFF_SECONDS] * (aw._REPLACE_ATTEMPTS - 1)
+
+    def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
+        """A cross-device rename will not fix itself in 200ms — do not wait it out."""
+        import aipass.spawn.apps.handlers.atomic_write as aw
+
+        calls = {"count": 0}
+
+        def broken(src, dst):
+            calls["count"] += 1
+            raise OSError(errno.EXDEV, "invalid cross-device link")
+
+        monkeypatch.setattr(aw.os, "replace", broken)
+        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
+
+        with pytest.raises(OSError) as caught:
+            aw.atomic_write_text(tmp_path / "out.json", "new\n")
+
+        assert caught.value.errno == errno.EXDEV
+        assert calls["count"] == 1, "a non-sharing failure was retried"
         assert _stray_temps(tmp_path) == []
 
 

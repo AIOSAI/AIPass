@@ -1,0 +1,28 @@
+{
+  "description": "A patch is a set of top-level keys. An array has none to merge.",
+  "document": "baud",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-patch-that-is-not-an-object-refuses",
+  "operation": {
+    "kind": "patch",
+    "patch": [
+      1,
+      2,
+      3
+    ]
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

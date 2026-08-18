@@ -1,0 +1,20 @@
+{
+  "description": "The broken-tree case, on the second document.",
+  "document": "baud",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "state": "parent_is_a_file"
+  },
+  "id": "baud-read-parent-is-a-file-refuses",
+  "notes": "Divergence 2, second document.",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

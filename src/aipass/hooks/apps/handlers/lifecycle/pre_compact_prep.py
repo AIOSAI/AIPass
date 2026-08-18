@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-08-18
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -132,16 +132,25 @@ def _inbox_unread(branch_dir: Path) -> int | None:
         return None
 
 
-def _summary_cap(repo_root: Path | None) -> int:
-    if repo_root is None:
-        return _DEFAULT_SUMMARY_CAP
-    config_path = repo_root / "src" / "aipass" / "memory" / "memory_json" / "custom_config" / "memory.config.json"
+def _summary_cap(branch: str) -> int:
+    """Sessions cap for *branch*, read through @memory's supported door.
+
+    Note:
+        This used to read memory.config.json by hardcoded path and take the
+        global default, which had two faults: it broke silently if @memory
+        moved or reshaped the file, and it ignored per_branch overrides
+        entirely — so a branch with its own cap would have been stamped
+        against somebody else's. load_entry_limits does the per-branch merge.
+        edit_gate.py already used this door; this was the last consumer in the
+        fleet going around it.
+    """
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-        cap = data["entry_limits"]["entry_types"]["sessions"]["max_chars"]
+        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        limits = el.load_entry_limits(branch)
+        cap = limits["entry_types"]["sessions"]["max_chars"]
         if isinstance(cap, int) and cap > 0:
             return cap
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (ImportError, KeyError, TypeError) as exc:
         logger.info("[HOOKS] pre_compact_prep: entry_limits read failed, using default: %s", exc)
     return _DEFAULT_SUMMARY_CAP
 
@@ -233,7 +242,7 @@ def handle(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
 
         repo_root = _find_repo_root(branch_dir)
-        cap = _summary_cap(repo_root)
+        cap = _summary_cap(branch_dir.name)
         snapshot = _build_snapshot(hook_data, branch_dir, repo_root)
 
         stamped = _stamp_session_entry(branch_dir, snapshot, cap)

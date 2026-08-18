@@ -3,6 +3,7 @@
   "autoCompactWindow": 350000,
   "enabledMcpjsonServers": [],
   "model": "fable",
+  "teammateMode": "in-process",
   "permissions": {
     "allow": [],
     "ask": [],

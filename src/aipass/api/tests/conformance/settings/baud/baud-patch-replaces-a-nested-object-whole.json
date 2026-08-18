@@ -1,0 +1,43 @@
+{
+  "description": "SHALLOW, and this is the case that says so. A nested object in the patch REPLACES its counterpart rather than merging into it, so a caller can always state exactly what a subtree should become. A deep merge would make removing a nested key impossible.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "panes": {
+        "left": 30
+      },
+      "theme": "dark"
+    },
+    "file": {
+      "panes": {
+        "left": 30
+      },
+      "theme": "dark"
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "content": {
+      "panes": {
+        "left": 40,
+        "right": 60
+      },
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-patch-replaces-a-nested-object-whole",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "panes": {
+        "left": 30
+      }
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

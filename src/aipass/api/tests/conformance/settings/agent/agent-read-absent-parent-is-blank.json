@@ -1,0 +1,24 @@
+{
+  "description": "Nothing on the way to the file exists either. Still just absent, one level deeper.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": null
+    }
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "absent_parent"
+  },
+  "id": "agent-read-absent-parent-is-blank",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

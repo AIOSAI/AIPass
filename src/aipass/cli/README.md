@@ -6,8 +6,8 @@
 **Module:** `aipass.cli`
 **Version:** 2.1.0
 **Seedgo:** 100%
-**Tests:** 177 tests across 10 files — 185 passing, 1 skipped at runtime (parametrized cases expand)
-**Last Updated:** 2026-08-16
+**Tests:** 188 tests across 9 files — 197 passing, 0 skipped (parametrized cases expand at runtime)
+**Last Updated:** 2026-08-18
 
 ## Quick Start
 
@@ -118,21 +118,20 @@ cli/
 │   │   └── templates/          # Scaffold placeholder
 │   ├── integrations/           # Scaffold placeholder
 │   └── plugins/                # Required by spawn builder template
-├── tests/                      # 177 tests across 10 files (185 pass, 1 skip at runtime)
+├── tests/                      # 188 tests across 9 files (197 pass, 0 skip)
 │   ├── conftest.py             # make_capture_console() + strip_ansi() — the ONE capture helper
-│   ├── test_display.py         # 59 tests — display functions + routing + exit codes + help flags
+│   ├── test_display.py         # 60 tests — display functions + routing + exit codes + help flags
 │   ├── test_json_handler.py    # 39 tests — CRUD, validation, rotation
 │   ├── test_templates.py       # 31 tests — operation templates + routing + help flags
 │   ├── test_help_flags.py      # 11 tests — whole-sequence help detection
 │   ├── test_json_durability.py # 10 tests — atomic writes, torn-read race
 │   ├── test_output_capture.py  # 8 tests — capture is environment-proof (ANSI strip, 4 shells)
-│   ├── test_handler_guard.py   # 8 tests — cross-branch import guard
+│   ├── test_handler_guard.py   # 19 tests — cross-branch import guard contract
 │   ├── test_integration.py     # 6 tests — main() flow, entry points
-│   ├── test_init_provisioning.py # 4 tests — JSON provisioning on first run
-│   └── test_scaffold.py        # 1 test — skipped, superseded by the real suite
+│   └── test_init_provisioning.py # 4 tests — JSON provisioning on first run
 ├── cli_json/                   # Auto-created JSON (config, data, log)
 ├── logs/                       # Branch-level logs
-└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__)
+└── .archive/                   # Archived stubs (extensions/, json_templates/, drone_adapter, __main__, test_scaffold)
 ```
 
 **Testing display output:** never assert on raw captured bytes. Build the console with
@@ -191,7 +190,7 @@ json_handler.ensure_module_jsons("cli")  # Create all 3 if missing
 
 ---
 
-*Last Updated: 2026-08-13*
+*Last Updated: 2026-08-18*
 
 ---
 [← Back to AIPass](../../../README.md)

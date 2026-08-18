@@ -1,0 +1,24 @@
+{
+  "description": "Read-then-error-then-write. A file that does not parse refuses the write before a single byte moves — the alternative is overwriting a document nobody could read first.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "raw": "{ this is not json",
+    "state": "raw"
+  },
+  "id": "agent-patch-onto-an-unparseable-file-refuses-before-writing",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "model": "opus"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

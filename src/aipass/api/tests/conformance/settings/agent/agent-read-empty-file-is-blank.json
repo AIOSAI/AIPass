@@ -1,0 +1,24 @@
+{
+  "description": "Zero bytes is not a parse failure. An empty file reads as no settings.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": null
+    }
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "empty"
+  },
+  "id": "agent-read-empty-file-is-blank",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

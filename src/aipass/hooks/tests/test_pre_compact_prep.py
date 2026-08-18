@@ -10,7 +10,8 @@
 """Tests for handlers/lifecycle/pre_compact_prep.py."""
 
 import json
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -209,3 +210,89 @@ class TestInboxUnread:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestSummaryCapUsesSupportedDoor:
+    """@memory owns the cap. Reading their config file by hardcoded path broke
+    silently if they moved it AND ignored per_branch overrides entirely."""
+
+    def test_reads_through_load_entry_limits(self):
+        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _summary_cap
+
+        el = MagicMock()
+        el.load_entry_limits.return_value = {"entry_types": {"sessions": {"max_chars": 512}}}
+        with patch("importlib.import_module", return_value=el):
+            assert _summary_cap("widget") == 512
+        el.load_entry_limits.assert_called_once_with("widget")
+
+    def test_passes_the_branch_so_per_branch_overrides_apply(self):
+        """The hardcoded read took the global default and would have stamped one
+        branch against another branch's cap."""
+        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _summary_cap
+
+        el = MagicMock()
+        el.load_entry_limits.side_effect = lambda b: {
+            "entry_types": {"sessions": {"max_chars": 999 if b == "special" else 300}}
+        }
+        with patch("importlib.import_module", return_value=el):
+            assert _summary_cap("special") == 999
+            assert _summary_cap("ordinary") == 300
+
+    def test_falls_back_when_memory_is_unavailable(self):
+        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _DEFAULT_SUMMARY_CAP, _summary_cap
+
+        with patch("importlib.import_module", side_effect=ImportError("no memory")):
+            assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
+
+    def test_falls_back_on_reshaped_config(self):
+        from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import _DEFAULT_SUMMARY_CAP, _summary_cap
+
+        el = MagicMock()
+        el.load_entry_limits.return_value = {"entry_types": {}}
+        with patch("importlib.import_module", return_value=el):
+            assert _summary_cap("widget") == _DEFAULT_SUMMARY_CAP
+
+    def test_no_hardcoded_memory_config_path_survives(self):
+        """Source guard on CODE, not prose.
+
+        KNOWN TRAP: a plain substring guard fires on the docstring that explains
+        the fix, so this walks the AST and inspects only real string literals —
+        docstrings excluded. Same lesson as the json_handler guard exempting
+        os.fdopen: a guard that trips on its own explanation gets deleted.
+        """
+        import ast
+
+        from aipass.hooks.apps.handlers.lifecycle import pre_compact_prep
+
+        tree = ast.parse(Path(pre_compact_prep.__file__).read_text(encoding="utf-8"))
+        docstrings = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc is not None:
+                    docstrings.add(doc)
+
+        literals = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        code_literals = [v for v in literals if v not in docstrings]
+
+        for forbidden in ("memory.config.json", "memory_json", "custom_config"):
+            assert not [v for v in code_literals if forbidden in v], f"{forbidden} is back in code"
+
+    def test_guard_catches_a_reintroduced_hardcoded_path(self):
+        """MUTATION-CHECK: prove the AST guard still bites when the path returns."""
+        import ast
+
+        mutated = ast.parse(
+            '''
+"""memory_json docstring mentioning the path is fine."""
+def f(root):
+    return root / "src" / "aipass" / "memory" / "memory_json" / "custom_config" / "memory.config.json"
+'''
+        )
+        docstrings = {ast.get_docstring(mutated, clean=False)}
+        code_literals = [
+            n.value
+            for n in ast.walk(mutated)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value not in docstrings
+        ]
+        assert [v for v in code_literals if "memory_json" in v]

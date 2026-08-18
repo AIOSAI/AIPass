@@ -29,6 +29,7 @@ it, guard the source against a truncating ``open`` returning, and measure a
 """
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -263,10 +264,20 @@ def test_concurrent_writers_never_expose_a_torn_document(json_dir):
     lock = threading.Lock()
     iterations = 150
 
+    failures = []
+
     def writer(filler):
-        for _ in range(iterations):
-            json_handler_mod.save_json(module_name, "data", _valid_data(filler=filler))
-        stop.set()
+        # stop.set() must fire even if a write raises — a dead writer that
+        # never releases the readers hangs the whole suite, not just this
+        # test (Windows CI sat 1h45m exactly this way on 2026-08-18).
+        try:
+            for _ in range(iterations):
+                json_handler_mod.save_json(module_name, "data", _valid_data(filler=filler))
+        except Exception as error:  # noqa: BLE001 - re-raised via failures below
+            with lock:
+                failures.append(error)
+        finally:
+            stop.set()
 
     def reader():
         local = {"ok": 0, "empty": 0, "unparseable": 0}
@@ -296,8 +307,86 @@ def test_concurrent_writers_never_expose_a_torn_document(json_dir):
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=60)
+    stuck = [thread.name for thread in threads if thread.is_alive()]
+    assert not stuck, f"threads never finished: {stuck}"
 
+    assert not failures, f"a writer died mid-race: {failures[0]!r}"
     assert counts["ok"] > 0, "probe never observed a readable document"
     assert counts["empty"] == 0, f"{counts['empty']} readers saw an empty document"
     assert counts["unparseable"] == 0, f"{counts['unparseable']} readers saw a partial document"
+
+
+def test_replace_retries_through_a_transient_sharing_violation(json_dir, monkeypatch):
+    """
+    A PermissionError from os.replace is retried, and the write still lands.
+
+    Windows raises this whenever a reader holds the target open at the moment
+    of the move — the exact interleaving the concurrent probe above produces
+    constantly. Linux never produces it natively, so the injection here is the
+    only cross-platform proof the retry path exists at all.
+    """
+    calls = {"count": 0}
+    real_replace = os.replace
+
+    def flaky_replace(source, destination):
+        calls["count"] += 1
+        if calls["count"] <= 2:
+            raise PermissionError(13, "sharing violation", destination)
+        real_replace(source, destination)
+
+    monkeypatch.setattr(json_handler_mod.os, "replace", flaky_replace)
+    json_handler_mod.save_json("durability", "data", _valid_data(filler="retry"))
+
+    target = Path(json_handler_mod.get_json_path("durability", "data"))
+    written = json.loads(target.read_text(encoding="utf-8"))
+    expected = _valid_data(filler="retry")
+    # save_json stamps last_updated with today's date; the stamp is its
+    # business, the payload surviving the retry is this test's.
+    written.pop("last_updated", None)
+    expected.pop("last_updated", None)
+    assert written == expected, "document differs from what was saved"
+    assert calls["count"] == 3, "retry path never engaged"
+
+
+def test_replace_retry_is_bounded_and_raises(json_dir, monkeypatch):
+    """A replace that never unblocks raises instead of retrying forever."""
+    calls = {"count": 0}
+
+    def blocked_replace(source, destination):
+        calls["count"] += 1
+        raise PermissionError(13, "sharing violation", destination)
+
+    monkeypatch.setattr(json_handler_mod.os, "replace", blocked_replace)
+    monkeypatch.setattr(json_handler_mod, "_REPLACE_BACKOFF_SECONDS", 0)
+
+    with pytest.raises(PermissionError):
+        json_handler_mod.save_json("durability", "data", _valid_data(filler="x"))
+    assert calls["count"] == json_handler_mod._REPLACE_ATTEMPTS, "bound not honoured"
+
+
+def test_retry_waits_between_attempts(tmp_path, monkeypatch):
+    """
+    The backoff is used, not just declared.
+
+    Deleting the sleep leaves a busy spin that passes every other pin here: it
+    still retries, still bounds, still raises. But 40 immediate attempts finish
+    inside a microsecond and never outlast the reader handle the retry exists to
+    wait out. The retry stops being a fix and becomes decoration, and nothing
+    else in this file would say so — it survived a mutation run on 2026-08-18.
+    Counting the sleeps pins the wait without asserting on wall-clock time,
+    which would be flaky on a loaded runner.
+    """
+    sleeps = []
+    monkeypatch.setattr(json_handler_mod.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(
+        json_handler_mod.os,
+        "replace",
+        lambda source, destination: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(destination))),
+    )
+
+    with pytest.raises(PermissionError):
+        json_handler_mod._replace_with_retry(str(tmp_path / "staged.tmp"), str(tmp_path / "live.json"))
+
+    # One wait between each pair of attempts — never after the last, which raises.
+    assert sleeps == [json_handler_mod._REPLACE_BACKOFF_SECONDS] * (json_handler_mod._REPLACE_ATTEMPTS - 1)

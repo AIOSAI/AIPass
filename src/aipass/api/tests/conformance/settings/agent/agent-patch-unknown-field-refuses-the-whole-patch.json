@@ -1,0 +1,28 @@
+{
+  "description": "The allowlist IS the contract. A typo'd key is refused whole rather than dropped, because a caller who misspelled a field believes they set it.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-unknown-field-refuses-the-whole-patch",
+  "notes": "Divergence 4. Rust silently drops unknown keys today; their fix is freeze-gated.",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "model": "sonnet",
+      "modle": "haiku"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "pending"
+  }
+}

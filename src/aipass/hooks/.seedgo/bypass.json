@@ -4,7 +4,7 @@
     "created": "2026-05-18",
     "updated": "2026-05-28",
     "description": "Standards bypass configuration for this branch",
-    "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported \u2014 seedgo's dead_code/unused_function checks are false positives for this architecture."
+    "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — seedgo's dead_code/unused_function checks are false positives for this architecture."
   },
   "bypass": [
     {
@@ -14,17 +14,17 @@
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "dead_code",
-      "reason": "Bridge called externally by provider settings subprocess \u2014 no internal import. Verified wired in ~/.claude/settings.json hook entries."
+      "reason": "Bridge called externally by provider settings subprocess — no internal import. Verified wired in ~/.claude/settings.json hook entries."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from provider settings \u2014 never statically imported."
+      "reason": "main() called as subprocess entry point from provider settings — never statically imported."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "handlers",
-      "reason": "Bridges import engine module by design \u2014 that is their entire purpose."
+      "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/claude.py",
@@ -39,27 +39,27 @@
     {
       "file": "apps/handlers/bridges/claude.py",
       "standard": "imports",
-      "reason": "Bridge imports engine module by design \u2014 sole purpose."
+      "reason": "Bridge imports engine module by design — sole purpose."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "dead_code",
-      "reason": "Bridge called externally by Codex hook settings subprocess \u2014 no internal import. Wired in .codex/hooks.json."
+      "reason": "Bridge called externally by Codex hook settings subprocess — no internal import. Wired in .codex/hooks.json."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "unused_function",
-      "reason": "main() called as subprocess entry point from Codex hook settings \u2014 never statically imported."
+      "reason": "main() called as subprocess entry point from Codex hook settings — never statically imported."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "handlers",
-      "reason": "Bridges import engine module by design \u2014 that is their entire purpose."
+      "reason": "Bridges import engine module by design — that is their entire purpose."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "json_structure",
-      "reason": "Thin entry point using stdlib json for Codex protocol envelope \u2014 no JSON file ops needing json_handler."
+      "reason": "Thin entry point using stdlib json for Codex protocol envelope — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/bridges/codex.py",
@@ -69,12 +69,12 @@
     {
       "file": "apps/handlers/bridges/codex.py",
       "standard": "imports",
-      "reason": "Bridge imports engine module by design \u2014 sole purpose."
+      "reason": "Bridge imports engine module by design — sole purpose."
     },
     {
       "file": "apps/handlers/prompt/identity.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.identity.handle' \u2014 not statically imported by design. Verified wired in UserPromptSubmit.identity_injector + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.identity.handle' — not statically imported by design. Verified wired in UserPromptSubmit.identity_injector + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/prompt/identity.py",
@@ -84,12 +84,12 @@
     {
       "file": "apps/handlers/prompt/identity.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.loads to read passport.json \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.loads to read passport.json — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/prompt/branch_loader.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.branch_loader.handle' \u2014 not statically imported by design. Verified wired in UserPromptSubmit.branch_prompt + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.prompt.branch_loader.handle' — not statically imported by design. Verified wired in UserPromptSubmit.branch_prompt + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/prompt/branch_loader.py",
@@ -99,7 +99,7 @@
     {
       "file": "apps/handlers/prompt/branch_loader.py",
       "standard": "json_structure",
-      "reason": "No JSON operations \u2014 reads markdown files and outputs text."
+      "reason": "No JSON operations — reads markdown files and outputs text."
     },
     {
       "file": "apps/handlers/prompt/tier0_kernel.py",
@@ -139,22 +139,22 @@
     {
       "file": "apps/modules/grounding_content.py",
       "standard": "json_structure",
-      "reason": "Shared loader for kernel/navmap/branch/identity content (DPLAN-0276) \u2014 uses stdlib json.loads to read passport.json and reads markdown files. No JSON file ops needing json_handler, same profile as identity.py/tier0_kernel.py/navmap.py/branch_loader.py which it consolidates."
+      "reason": "Shared loader for kernel/navmap/branch/identity content (DPLAN-0276) — uses stdlib json.loads to read passport.json and reads markdown files. No JSON file ops needing json_handler, same profile as identity.py/tier0_kernel.py/navmap.py/branch_loader.py which it consolidates."
     },
     {
       "file": "apps/modules/grounding_content.py",
       "standard": "modules",
-      "reason": "Shared content-loading service consumed by 4 UserPromptSubmit handlers (identity, tier0_kernel, navmap, branch_loader) and the PostToolUse post_compact_regrounding backstop \u2014 module IS the loader service, same pattern as cadence.py."
+      "reason": "Shared content-loading service consumed by 4 UserPromptSubmit handlers (identity, tier0_kernel, navmap, branch_loader) and the PostToolUse post_compact_regrounding backstop — module IS the loader service, same pattern as cadence.py."
     },
     {
       "file": "apps/handlers/lifecycle/post_compact_regrounding.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.dumps for hookSpecificOutput.additionalContext hook protocol responses \u2014 same profile as auto_watchdog.py \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.dumps for hookSpecificOutput.additionalContext hook protocol responses — same profile as auto_watchdog.py — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.edit_gate.handle' \u2014 not statically imported by design. Verified wired in PreToolUse.pre_edit_gate + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.edit_gate.handle' — not statically imported by design. Verified wired in PreToolUse.pre_edit_gate + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/security/edit_gate.py",
@@ -164,12 +164,12 @@
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/git_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.git_gate.handle' \u2014 not statically imported by design. Verified wired in PreToolUse.git_gate + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.git_gate.handle' — not statically imported by design. Verified wired in PreToolUse.git_gate + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/security/git_gate.py",
@@ -179,12 +179,12 @@
     {
       "file": "apps/handlers/security/git_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.rm_gate.handle' \u2014 not statically imported by design. Wired in PreToolUse.rm_gate."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.rm_gate.handle' — not statically imported by design. Wired in PreToolUse.rm_gate."
     },
     {
       "file": "apps/handlers/security/rm_gate.py",
@@ -194,12 +194,12 @@
     {
       "file": "apps/handlers/security/rm_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.subagent_gate.handle' \u2014 not statically imported by design. Verified wired in SubagentStop.subagent_stop_gate + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.subagent_gate.handle' — not statically imported by design. Verified wired in SubagentStop.subagent_stop_gate + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -209,17 +209,17 @@
     {
       "file": "apps/handlers/security/subagent_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
       "standard": "open_encoding",
-      "reason": "NamedTemporaryFile creates binary wav for Piper TTS \u2014 encoding not applicable to binary audio."
+      "reason": "NamedTemporaryFile creates binary wav for Piper TTS — encoding not applicable to binary audio."
     },
     {
       "file": "apps/handlers/security/registry_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.registry_gate.handle' \u2014 not statically imported by design. Wired in PreToolUse.registry_gate."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.registry_gate.handle' — not statically imported by design. Wired in PreToolUse.registry_gate."
     },
     {
       "file": "apps/handlers/security/registry_gate.py",
@@ -229,7 +229,7 @@
     {
       "file": "apps/handlers/security/registry_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "tests/test_registry_gate.py",
@@ -254,17 +254,17 @@
     {
       "file": "tests/test_registry_gate.py",
       "standard": "hardcoded_path",
-      "reason": "Test fixture CWD string and bash command strings contain paths as test input data \u2014 not real filesystem operations."
+      "reason": "Test fixture CWD string and bash command strings contain paths as test input data — not real filesystem operations."
     },
     {
       "file": "tests/test_registry_gate.py",
       "standard": "windows_compat",
-      "reason": "Test fixture bash command strings contain /tmp paths as scanner input \u2014 not real filesystem operations. The handler itself is platform-agnostic (string scanning only)."
+      "reason": "Test fixture bash command strings contain /tmp paths as scanner input — not real filesystem operations. The handler itself is platform-agnostic (string scanning only)."
     },
     {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_fix.handle' \u2014 not statically imported by design. Verified wired in PostToolUse.auto_fix_diagnostics + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_fix.handle' — not statically imported by design. Verified wired in PostToolUse.auto_fix_diagnostics + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/lifecycle/auto_fix.py",
@@ -274,12 +274,12 @@
     {
       "file": "apps/handlers/lifecycle/auto_fix.py",
       "standard": "json_structure",
-      "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file \u2014 no JSON file ops needing json_handler."
+      "reason": "Diagnostics handler uses stdlib json for hook protocol responses and state file — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/auto_watchdog.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle' \u2014 not statically imported by design. Verified wired in PostToolUse.auto_watchdog + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle' — not statically imported by design. Verified wired in PostToolUse.auto_watchdog + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/lifecycle/auto_watchdog.py",
@@ -289,42 +289,42 @@
     {
       "file": "apps/handlers/lifecycle/auto_watchdog.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.dumps to produce additionalContext output \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.dumps to produce additionalContext output — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.compact.handle' \u2014 not statically imported by design. Verified wired in PreCompact.pre_compact (PreCompact events are rare \u2014 fires only during context compaction)."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.compact.handle' — not statically imported by design. Verified wired in PreCompact.pre_compact (PreCompact events are rare — fires only during context compaction)."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact \u2014 fires during compaction events."
+      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact — fires during compaction events."
     },
     {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.loads for local.json reading \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.loads for local.json reading — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.rollover.handle' \u2014 not statically imported by design. Verified wired in PreCompact.pre_compact_rollover (PreCompact events are rare \u2014 fires only during context compaction)."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.rollover.handle' — not statically imported by design. Verified wired in PreCompact.pre_compact_rollover (PreCompact events are rare — fires only during context compaction)."
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",
       "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact_rollover \u2014 fires during compaction events."
+      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. Wired in PreCompact.pre_compact_rollover — fires during compaction events."
     },
     {
       "file": "apps/handlers/lifecycle/rollover.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.loads for registry and memory file checks \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.loads for registry and memory file checks — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/auto_process.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_process.handle' \u2014 not statically imported by design. Wired in UserPromptSubmit.auto_process + PreCompact.auto_process."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.auto_process.handle' — not statically imported by design. Wired in UserPromptSubmit.auto_process + PreCompact.auto_process."
     },
     {
       "file": "apps/handlers/lifecycle/auto_process.py",
@@ -334,12 +334,12 @@
     {
       "file": "apps/handlers/lifecycle/auto_process.py",
       "standard": "json_structure",
-      "reason": "Delegates to @memory's auto_process() via importlib \u2014 no direct JSON file ops needing json_handler."
+      "reason": "Delegates to @memory's auto_process() via importlib — no direct JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.session_start.handle' \u2014 not statically imported by design. Wired in SessionStart.cadence_reset."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.lifecycle.session_start.handle' — not statically imported by design. Wired in SessionStart.cadence_reset."
     },
     {
       "file": "apps/handlers/lifecycle/session_start.py",
@@ -349,12 +349,12 @@
     {
       "file": "apps/handlers/lifecycle/session_start.py",
       "standard": "json_structure",
-      "reason": "Delegates to cadence.reset_counter() via importlib \u2014 no direct JSON file ops needing json_handler."
+      "reason": "Delegates to cadence.reset_counter() via importlib — no direct JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "dead_code",
-      "reason": "Cadence module \u2014 should_fire() called from tier0_kernel.py, navmap.py, and branch_loader.py guard lines; reset_counter() called from compact.py PreCompact handler. Not statically discoverable because callers are themselves dynamically dispatched."
+      "reason": "Cadence module — should_fire() called from tier0_kernel.py, navmap.py, and branch_loader.py guard lines; reset_counter() called from compact.py PreCompact handler. Not statically discoverable because callers are themselves dynamically dispatched."
     },
     {
       "file": "apps/modules/cadence.py",
@@ -364,12 +364,12 @@
     {
       "file": "apps/modules/cadence.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for /tmp state file (turn counter) and hooks_json/custom_config/cadence_config.json config loading \u2014 lightweight ephemeral state, not branch data storage."
+      "reason": "Uses stdlib json for /tmp state file (turn counter) and hooks_json/custom_config/cadence_config.json config loading — lightweight ephemeral state, not branch data storage."
     },
     {
       "file": "apps/handlers/notification/announce.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.announce.handle' \u2014 not statically imported by design. Verified wired in Notification.notification_sound + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.announce.handle' — not statically imported by design. Verified wired in Notification.notification_sound + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/notification/announce.py",
@@ -379,12 +379,12 @@
     {
       "file": "apps/handlers/notification/announce.py",
       "standard": "json_structure",
-      "reason": "Sound handler \u2014 no JSON operations, plays WAV files."
+      "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/notification/email.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.email.handle' \u2014 not statically imported by design. Verified wired in UserPromptSubmit.email_notification + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.email.handle' — not statically imported by design. Verified wired in UserPromptSubmit.email_notification + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/notification/email.py",
@@ -394,12 +394,12 @@
     {
       "file": "apps/handlers/notification/email.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.loads for inbox parsing \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.loads for inbox parsing — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/handlers/notification/stop_sound.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.stop_sound.handle' \u2014 not statically imported by design. Verified wired in Stop.stop_sound + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.stop_sound.handle' — not statically imported by design. Verified wired in Stop.stop_sound + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/notification/stop_sound.py",
@@ -409,12 +409,12 @@
     {
       "file": "apps/handlers/notification/stop_sound.py",
       "standard": "json_structure",
-      "reason": "Sound handler \u2014 no JSON operations, plays WAV files."
+      "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/notification/tool_sound.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.tool_sound.handle' \u2014 not statically imported by design. Verified wired in PreToolUse.tool_use_sound + fires in engine.jsonl."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.notification.tool_sound.handle' — not statically imported by design. Verified wired in PreToolUse.tool_use_sound + fires in engine.jsonl."
     },
     {
       "file": "apps/handlers/notification/tool_sound.py",
@@ -424,7 +424,7 @@
     {
       "file": "apps/handlers/notification/tool_sound.py",
       "standard": "json_structure",
-      "reason": "Sound handler \u2014 no JSON operations, plays WAV files."
+      "reason": "Sound handler — no JSON operations, plays WAV files."
     },
     {
       "file": "apps/handlers/config/trust_registry.py",
@@ -434,57 +434,57 @@
     {
       "file": "apps/handlers/config/loader.py",
       "standard": "json_structure",
-      "reason": "Config loader does $AIPASS_HOME variable expansion before JSON parse \u2014 json_handler does not support this."
+      "reason": "Config loader does $AIPASS_HOME variable expansion before JSON parse — json_handler does not support this."
     },
     {
       "file": "apps/handlers/config/diagnostics.py",
       "standard": "json_structure",
-      "reason": "JSONL append-only diagnostic log \u2014 different pattern from branch json_handler storage."
+      "reason": "JSONL append-only diagnostic log — different pattern from branch json_handler storage."
     },
     {
       "file": "apps/modules/engine.py",
       "standard": "json_structure",
-      "reason": "Engine uses JSONL diagnostic logging, not branch json_handler \u2014 different purpose."
+      "reason": "Engine uses JSONL diagnostic logging, not branch json_handler — different purpose."
     },
     {
       "file": "apps/modules/engine.py",
       "standard": "modules",
-      "reason": "dispatch() is the engine's core purpose \u2014 it IS the module's primary function, not a handler that belongs elsewhere. The engine exists to dispatch; moving dispatch to handlers/ would leave an empty module."
+      "reason": "dispatch() is the engine's core purpose — it IS the module's primary function, not a handler that belongs elsewhere. The engine exists to dispatch; moving dispatch to handlers/ would leave an empty module."
     },
     {
       "file": "apps/modules/hook_test.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.dumps to serialize mock event data for engine dispatch \u2014 no JSON file ops needing json_handler."
+      "reason": "Uses stdlib json.dumps to serialize mock event data for engine dispatch — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/hooksound.py",
       "standard": "json_structure",
-      "reason": "Sound mute toggle \u2014 touches /tmp/aipass-hooks-muted flag file only, no JSON operations or json_handler storage."
+      "reason": "Sound mute toggle — touches /tmp/aipass-hooks-muted flag file only, no JSON operations or json_handler storage."
     },
     {
-      "file": "apps/modules/hooksound.py",
+      "file": "apps/sound.py",
       "standard": "trigger",
-      "reason": "MUTE_FLAG.unlink() removes a /tmp mute flag file for sound toggle \u2014 not a tracked resource or production data deletion. Deliberate user action via 'drone @hooks hooksound on'."
+      "reason": "MUTE_FLAG.unlink(missing_ok=True) in unmute() removes a /tmp mute flag file for sound toggle — not a tracked resource or production data deletion. Deliberate user action via 'drone @hooks hooksound on' or an imported unmute() call. Moved here from apps/modules/hooksound.py when the write pair was exported so the flag has one writer."
     },
     {
       "file": "apps/modules/feedback.py",
       "standard": "trigger",
-      "reason": "sentinel.unlink() removes a .aipass/feedback_off toggle file \u2014 not a tracked resource. Deliberate user action via 'drone @hooks feedback on'."
+      "reason": "sentinel.unlink() removes a .aipass/feedback_off toggle file — not a tracked resource. Deliberate user action via 'drone @hooks feedback on'."
     },
     {
       "file": "apps/modules/hookstatus.py",
       "standard": "json_structure",
-      "reason": "Read-only config viewer \u2014 delegates JSON loading to config/loader.py, no direct JSON file ops."
+      "reason": "Read-only config viewer — delegates JSON loading to config/loader.py, no direct JSON file ops."
     },
     {
       "file": "apps/modules/wire_verify.py",
       "standard": "json_structure",
-      "reason": "Reads ~/.claude/settings.json (external provider settings) with stdlib json \u2014 not branch data storage needing json_handler."
+      "reason": "Reads ~/.claude/settings.json (external provider settings) with stdlib json — not branch data storage needing json_handler."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "modules",
-      "reason": "Cadence module reads /tmp state file and hooks_json/custom_config/cadence_config.json with stdlib json \u2014 lightweight ephemeral state (turn counter) + tunable config. json_handler is for persistent branch data, not /tmp session state or config knobs."
+      "reason": "Cadence module reads /tmp state file and hooks_json/custom_config/cadence_config.json with stdlib json — lightweight ephemeral state (turn counter) + tunable config. json_handler is for persistent branch data, not /tmp session state or config knobs."
     },
     {
       "file": "apps/hooks.py",
@@ -494,25 +494,25 @@
     {
       "file": "apps/sound.py",
       "standard": "unused_function",
-      "reason": "play() called by handler files (stop_sound.py, announce.py) that are dynamically dispatched via importlib \u2014 static analysis cannot trace the call chain from hooks.json \u2192 engine \u2192 handler \u2192 sound.play()."
+      "reason": "play() called by handler files (stop_sound.py, announce.py) that are dynamically dispatched via importlib — static analysis cannot trace the call chain from hooks.json → engine → handler → sound.play()."
     },
     {
       "file": "apps/sound.py",
       "standard": "open_encoding",
-      "reason": "NamedTemporaryFile creates binary WAV for Piper TTS \u2014 encoding not applicable to binary audio."
+      "reason": "NamedTemporaryFile creates binary WAV for Piper TTS — encoding not applicable to binary audio."
     },
     {
       "file": "apps/sound.py",
       "standard": "cli_flags",
-      "reason": "Shared utility module imported by handlers \u2014 not a CLI entry point. Has print_introspection() for drone discovery but no handle_command() or user-facing CLI."
+      "reason": "Shared utility module imported by handlers — not a CLI entry point. Has print_introspection() for drone discovery but no handle_command() or user-facing CLI."
     },
     {
       "standard": "json_handler",
-      "reason": "Hooks branch has no json_handler.py \u2014 hook engine uses its own JSONL diagnostic logging and stdlib json for hook protocol I/O. Does not follow the module JSON pattern by design."
+      "reason": "Hooks branch has no json_handler.py — hook engine uses its own JSONL diagnostic logging and stdlib json for hook protocol I/O. Does not follow the module JSON pattern by design."
     },
     {
       "standard": "test_quality",
-      "reason": "Hooks branch does not use json_handler \u2014 has its own JSONL diagnostic logging (diagnostics.py) and stdlib json for hook protocol I/O. json_handler coverage, mock_json_handler fixture, and exception_contracts (create_default_raises, save_invalid_raises, invalid_mode_raises) are all N/A for a hook dispatch engine architecture."
+      "reason": "Hooks branch does not use json_handler — has its own JSONL diagnostic logging (diagnostics.py) and stdlib json for hook protocol I/O. json_handler coverage, mock_json_handler fixture, and exception_contracts (create_default_raises, save_invalid_raises, invalid_mode_raises) are all N/A for a hook dispatch engine architecture."
     },
     {
       "file": "tests/conftest.py",
@@ -522,12 +522,12 @@
     {
       "file": "tests/conftest.py",
       "standard": "json_handler",
-      "reason": "Hooks branch does not use json_handler \u2014 has its own JSONL logging and stdlib json for hook protocol. mock_json_handler fixture is N/A."
+      "reason": "Hooks branch does not use json_handler — has its own JSONL logging and stdlib json for hook protocol. mock_json_handler fixture is N/A."
     },
     {
       "file": "tests/conftest.py",
       "standard": "exception_contracts",
-      "reason": "Hooks has no json_handler create_default/save_invalid/invalid_mode patterns \u2014 those contracts are N/A for a hook dispatch engine."
+      "reason": "Hooks has no json_handler create_default/save_invalid/invalid_mode patterns — those contracts are N/A for a hook dispatch engine."
     },
     {
       "file": "tests/test_engine.py",
@@ -552,7 +552,7 @@
     {
       "file": "tests/test_engine.py",
       "standard": "json_handler",
-      "reason": "Hooks branch does not use json_handler \u2014 has its own JSONL logging."
+      "reason": "Hooks branch does not use json_handler — has its own JSONL logging."
     },
     {
       "file": "tests/test_engine.py",
@@ -682,12 +682,12 @@
     {
       "file": "tests/test_auto_fix.py",
       "standard": "commented_logger",
-      "reason": "Test data contains '# logger.debug(msg)' as input to pattern checker under test \u2014 not a commented-out call."
+      "reason": "Test data contains '# logger.debug(msg)' as input to pattern checker under test — not a commented-out call."
     },
     {
       "file": "tests/test_auto_fix.py",
       "standard": "trigger",
-      "reason": "Test cleanup .unlink() removes temporary state files \u2014 not a production file deletion."
+      "reason": "Test cleanup .unlink() removes temporary state files — not a production file deletion."
     },
     {
       "file": "tests/test_identity.py",
@@ -977,47 +977,47 @@
     {
       "file": "apps/modules/sandbox.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json.dump to write ephemeral srt config to a NamedTemporaryFile \u2014 not a tracked JSON resource needing json_handler."
+      "reason": "Uses stdlib json.dump to write ephemeral srt config to a NamedTemporaryFile — not a tracked JSON resource needing json_handler."
     },
     {
       "file": "apps/modules/sandbox.py",
       "standard": "trigger",
-      "reason": "Path.unlink() removes an ephemeral NamedTemporaryFile (srt config) created seconds earlier in the same function \u2014 not a tracked resource or production data deletion."
+      "reason": "Path.unlink() removes an ephemeral NamedTemporaryFile (srt config) created seconds earlier in the same function — not a tracked resource or production data deletion."
     },
     {
       "file": "artifacts/sandbox_phase1_demo.py",
       "standard": "architecture",
-      "reason": "Live demo artifact for FPLAN-0250 Phase 1 acceptance \u2014 not production code, lives in artifacts/ per the phase brief."
+      "reason": "Live demo artifact for FPLAN-0250 Phase 1 acceptance — not production code, lives in artifacts/ per the phase brief."
     },
     {
       "file": "artifacts/sandbox_phase1_demo.py",
       "standard": "debug_print",
-      "reason": "Demo script uses print() for human-readable acceptance test output \u2014 not a module with CLI service."
+      "reason": "Demo script uses print() for human-readable acceptance test output — not a module with CLI service."
     },
     {
       "file": "artifacts/sandbox_phase1_demo.py",
       "standard": "imports",
-      "reason": "sys.path insert needed to run standalone demo from artifacts/ \u2014 not a pip-installed module entry point."
+      "reason": "sys.path insert needed to run standalone demo from artifacts/ — not a pip-installed module entry point."
     },
     {
       "file": "artifacts/sandbox_phase1_demo.py",
       "standard": "documentation",
-      "reason": "Demo helper function \u2014 docstrings omitted for brevity in a non-production artifact."
+      "reason": "Demo helper function — docstrings omitted for brevity in a non-production artifact."
     },
     {
       "file": "artifacts/sandbox_phase1_demo.py",
       "standard": "help_text",
-      "reason": "Demo run instructions reference python3 as the invocation command \u2014 this is a standalone script, not a drone-routed module."
+      "reason": "Demo run instructions reference python3 as the invocation command — this is a standalone script, not a drone-routed module."
     },
     {
       "file": "tests/test_sandbox.py",
       "standard": "architecture",
-      "reason": "Test file lives in tests/ per hooks convention \u2014 not a module or handler."
+      "reason": "Test file lives in tests/ per hooks convention — not a module or handler."
     },
     {
       "file": "tests/test_sandbox.py",
       "standard": "documentation",
-      "reason": "Test methods use descriptive names \u2014 docstrings redundant per hooks test convention."
+      "reason": "Test methods use descriptive names — docstrings redundant per hooks test convention."
     },
     {
       "file": "tests/test_sandbox.py",
@@ -1027,7 +1027,7 @@
     {
       "file": "apps/modules/sandbox.py",
       "standard": "modules",
-      "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation \u2014 not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
+      "reason": "Read-only passport.json check in _is_devpulse() to detect branch role for policy generation — not a file-write operation, not a handler-level concern. Module reads sibling passports to determine writable/RO map."
     },
     {
       "file": "apps/modules/sandbox.py",
@@ -1037,7 +1037,7 @@
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' \u2014 not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' — not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
     },
     {
       "file": "apps/handlers/security/presence_gate.py",
@@ -1047,17 +1047,17 @@
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/presence.py",
       "standard": "json_structure",
-      "reason": "Presence service uses stdlib json for .ai_central/PRESENCE.central.json \u2014 shared runtime namespace, not branch json_handler storage."
+      "reason": "Presence service uses stdlib json for .ai_central/PRESENCE.central.json — shared runtime namespace, not branch json_handler storage."
     },
     {
       "file": "apps/modules/presence.py",
       "standard": "unused_function",
-      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). Static analysis cannot trace hooks.json \u2192 engine \u2192 handler \u2192 presence module."
+      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). Static analysis cannot trace hooks.json → engine → handler → presence module."
     },
     {
       "file": "apps/handlers/notification/telegram_response.py",
@@ -1067,7 +1067,7 @@
     {
       "file": "apps/handlers/notification/telegram_response.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for JSONL transcript parsing and Telegram Bot API payloads \u2014 no branch data storage needing json_handler."
+      "reason": "Uses stdlib json for JSONL transcript parsing and Telegram Bot API payloads — no branch data storage needing json_handler."
     },
     {
       "file": "tests/test_telegram_response.py",
@@ -1092,17 +1092,17 @@
     {
       "file": "apps/modules/presence.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for .ai_central/PRESENCE.central.json shared runtime namespace \u2014 not branch data storage needing json_handler."
+      "reason": "Uses stdlib json for .ai_central/PRESENCE.central.json shared runtime namespace — not branch data storage needing json_handler."
     },
     {
       "file": "apps/modules/presence.py",
       "standard": "modules",
-      "reason": "Direct file ops on .ai_central/PRESENCE.central.json \u2014 a shared runtime namespace (gitignored, cross-branch). Not a handler-level concern; the module IS the presence service that owns this file."
+      "reason": "Direct file ops on .ai_central/PRESENCE.central.json — a shared runtime namespace (gitignored, cross-branch). Not a handler-level concern; the module IS the presence service that owns this file."
     },
     {
       "file": "apps/modules/presence.py",
       "standard": "dead_code",
-      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). handle_command() and print_introspection() called by drone routing. Static analysis cannot trace hooks.json \u2192 engine \u2192 handler \u2192 presence module."
+      "reason": "claim(), release(), refresh(), read_all() consumed by presence_gate.py handler (dynamically dispatched via engine). handle_command() and print_introspection() called by drone routing. Static analysis cannot trace hooks.json → engine → handler → presence module."
     },
     {
       "file": "apps/modules/presence.py",
@@ -1112,7 +1112,7 @@
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "dead_code",
-      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' \u2014 not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
+      "reason": "Invoked dynamically by engine via importlib from hooks.json handler path 'aipass.hooks.apps.handlers.security.presence_gate.handle' — not statically imported by design. Wired in UserPromptSubmit.presence_gate + Stop.presence_release."
     },
     {
       "file": "apps/handlers/security/presence_gate.py",
@@ -1122,7 +1122,7 @@
     {
       "file": "apps/handlers/security/presence_gate.py",
       "standard": "json_structure",
-      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses \u2014 no JSON file ops needing json_handler."
+      "reason": "Security gate uses stdlib json.dumps for hook protocol block responses — no JSON file ops needing json_handler."
     },
     {
       "file": "tests/test_presence.py",
@@ -1167,27 +1167,27 @@
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "json_structure",
-      "reason": "Reads CC-native ~/.claude/sessions/*.json (external files, not branch data) with stdlib json \u2014 no JSON file ops needing json_handler."
+      "reason": "Reads CC-native ~/.claude/sessions/*.json (external files, not branch data) with stdlib json — no JSON file ops needing json_handler."
     },
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "modules",
-      "reason": "Direct file ops on ~/.claude/sessions/*.json \u2014 external CC-native session files, not branch data. The module IS the CC session reader service; json_handler is for branch-managed JSON, not external platform files."
+      "reason": "Direct file ops on ~/.claude/sessions/*.json — external CC-native session files, not branch data. The module IS the CC session reader service; json_handler is for branch-managed JSON, not external platform files."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "json_structure",
-      "reason": "Boot wrapper has no JSON file ops \u2014 delegates to cc_sessions module for session reads. No json_handler needed."
+      "reason": "Boot wrapper has no JSON file ops — delegates to cc_sessions module for session reads. No json_handler needed."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "dead_code",
-      "reason": "Boot wrapper invoked via __main__ entry point from shell shim (tools/install_boot_shim.sh) \u2014 not engine-dispatched. boot() and main() called at process entry, not statically imported."
+      "reason": "Boot wrapper invoked via __main__ entry point from shell shim (tools/install_boot_shim.sh) — not engine-dispatched. boot() and main() called at process entry, not statically imported."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "unused_function",
-      "reason": "boot() and main() invoked via __main__ entry point from shell shim \u2014 not statically imported. _resolve_claude_binary(), _find_live_sessions(), _find_tmux(), etc. are internal helpers called by boot()."
+      "reason": "boot() and main() invoked via __main__ entry point from shell shim — not statically imported. _resolve_claude_binary(), _find_live_sessions(), _find_tmux(), etc. are internal helpers called by boot()."
     },
     {
       "file": "tests/test_cc_sessions.py",
@@ -1267,53 +1267,53 @@
     {
       "file": "tests/test_wire_verify.py",
       "standard": "help_text",
-      "reason": "Test fixture _BRIDGE_CMD contains 'python3' as part of a mock provider command string \u2014 not user-facing help text."
+      "reason": "Test fixture _BRIDGE_CMD contains 'python3' as part of a mock provider command string — not user-facing help text."
     },
     {
       "file": "apps/modules/context_window.py",
       "standard": "json_structure",
-      "reason": "Reads external state (session transcript JSONL via tail, branch .claude/settings.local.json) with stdlib json \u2014 not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
+      "reason": "Reads external state (session transcript JSONL via tail, branch .claude/settings.local.json) with stdlib json — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
     },
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "json_structure",
-      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus AIPASS_REGISTRY.json/inbox.json/memory.config.json reads (external system + other branches' state) \u2014 not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
+      "reason": "Uses stdlib json for .trinity/local.json read+stamp (own branch's memory file, DPLAN-0253) plus AIPASS_REGISTRY.json/inbox.json/memory.config.json reads (external system + other branches' state) — not this branch's own hooks_json/ triplet storage. Matches compact.py precedent (same local.json access)."
     },
     {
       "file": "apps/handlers/prompt/context_gauge.py",
       "standard": "json_structure",
-      "reason": "Delegates to context_window module for transcript/settings reads \u2014 no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
+      "reason": "Delegates to context_window module for transcript/settings reads — no direct JSON file ops needing json_handler. Same pattern as session_start.py delegating to cadence."
     },
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "handlers",
-      "reason": "Line 75: lazy cross-branch import of aipass.flow.apps.handlers.plan.get_open_plans \u2014 needed for the open-plan count in the AUTO-COMPACT SNAPSHOT. No module-layer equivalent exists to switch to: flow's own modules (close_plan.py) import this same handler directly rather than re-exporting it, and list_plans.py's module is a CLI display orchestrator, not a programmatic data source. Read-only cross-branch primitive read, same authorized pattern as ai_mail's dispatch_monitor.py broker-client import. Call is wrapped in try/except and degrades to None on any failure \u2014 never corrupts the snapshot."
+      "reason": "Line 75: lazy cross-branch import of aipass.flow.apps.handlers.plan.get_open_plans — needed for the open-plan count in the AUTO-COMPACT SNAPSHOT. No module-layer equivalent exists to switch to: flow's own modules (close_plan.py) import this same handler directly rather than re-exporting it, and list_plans.py's module is a CLI display orchestrator, not a programmatic data source. Read-only cross-branch primitive read, same authorized pattern as ai_mail's dispatch_monitor.py broker-client import. Call is wrapped in try/except and degrades to None on any failure — never corrupts the snapshot."
     },
     {
       "file": "apps/handlers/prompt/compass_recall.py",
       "standard": "handlers",
-      "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job \u2014 not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."
+      "reason": "Lines 49, 75, 84: lazy cross-branch imports of aipass.memory.apps.modules.governance and aipass.devpulse.apps.modules.compass. Surfacing other branches' rated decisions at prompt time IS this handler's job — not orchestration bleed but the designed integration point, same authorized cross-branch primitive pattern as ai_mail's dispatch_monitor.py. Whole handler wrapped in try/except and never blocks the prompt on failure."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "json_structure",
-      "reason": "Reads/writes the transient .diagnostics_state.json cache with stdlib json \u2014 the same file and profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is exactly the writer/reader drift this module exists to prevent."
+      "reason": "Reads/writes the transient .diagnostics_state.json cache with stdlib json — the same file and profile already bypassed on its writer, apps/handlers/lifecycle/auto_fix.py. Routing one end through json_handler and not the other is exactly the writer/reader drift this module exists to prevent."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "trigger",
-      "reason": "clear() unlinks the transient .diagnostics_state.json diagnostics cache \u2014 same profile as hooksound.py MUTE_FLAG.unlink() and feedback.py sentinel.unlink(). Not a tracked resource or production data; it is regenerated by auto_fix on the next edit."
+      "reason": "clear() unlinks the transient .diagnostics_state.json diagnostics cache — same profile as hooksound.py MUTE_FLAG.unlink() and feedback.py sentinel.unlink(). Not a tracked resource or production data; it is regenerated by auto_fix on the next edit."
     },
     {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
-      "reason": "Pure argument-inspection predicate \u2014 no I/O, no JSON, no disk. Measured: the only finding is the json_handler import, and importing it would give a help-flag check the power to log and block, which is exactly what the gate must not have. Fleet convention settled 2026-08-13 by @memory/@trigger/@drone/@ai_mail/@flow, all five carrying this same measured bypass (help_flag_safety)."
+      "reason": "Pure argument-inspection predicate — no I/O, no JSON, no disk. Measured: the only finding is the json_handler import, and importing it would give a help-flag check the power to log and block, which is exactly what the gate must not have. Fleet convention settled 2026-08-13 by @memory/@trigger/@drone/@ai_mail/@flow, all five carrying this same measured bypass (help_flag_safety)."
     }
   ],
   "notes": {
-    "removed_2026-05-19": "Stripped 4 illegitimate bypasses \u2014 hooks.py/cli, hooks.py/cli_flags, engine.py/modules, engine.py/introspection. Code fixed to meet standards instead.",
-    "dplan_0191_2026-05-28": "Added dead_code + unused_function bypasses for all 15 dynamically-dispatched handlers after verifying each is wired in .aipass/hooks.json AND fires in engine.jsonl. Root cause: engine._run_handler (engine.py:60-66) uses importlib.import_module + getattr on hooks.json handler strings \u2014 handlers are never statically imported. Follow-up for @seedgo: teach dead_code/unused_function about dynamic importlib dispatch patterns.",
-    "dplan_0253_2026-07-20": "Added json_structure bypasses for context_window.py, pre_compact_prep.py, context_gauge.py \u2014 same external-state-read profile as existing compact.py/cc_sessions.py/session_start.py bypasses.",
-    "dplan_0253_audit_catch_2026-07-21": "Seedgo's handlers checker went AST-based and caught two lazy cross-branch imports missed by the old text-matching version: pre_compact_prep.py (flow.get_open_plans) and compass_recall.py (memory.governance, devpulse.compass). Both bypassed rather than restructured \u2014 no clean module-layer alternative exists for the former, and the latter's whole purpose is surfacing cross-branch data at prompt time. Same authorized-primitive precedent as ai_mail dispatch_monitor.py."
+    "removed_2026-05-19": "Stripped 4 illegitimate bypasses — hooks.py/cli, hooks.py/cli_flags, engine.py/modules, engine.py/introspection. Code fixed to meet standards instead.",
+    "dplan_0191_2026-05-28": "Added dead_code + unused_function bypasses for all 15 dynamically-dispatched handlers after verifying each is wired in .aipass/hooks.json AND fires in engine.jsonl. Root cause: engine._run_handler (engine.py:60-66) uses importlib.import_module + getattr on hooks.json handler strings — handlers are never statically imported. Follow-up for @seedgo: teach dead_code/unused_function about dynamic importlib dispatch patterns.",
+    "dplan_0253_2026-07-20": "Added json_structure bypasses for context_window.py, pre_compact_prep.py, context_gauge.py — same external-state-read profile as existing compact.py/cc_sessions.py/session_start.py bypasses.",
+    "dplan_0253_audit_catch_2026-07-21": "Seedgo's handlers checker went AST-based and caught two lazy cross-branch imports missed by the old text-matching version: pre_compact_prep.py (flow.get_open_plans) and compass_recall.py (memory.governance, devpulse.compass). Both bypassed rather than restructured — no clean module-layer alternative exists for the former, and the latter's whole purpose is surfacing cross-branch data at prompt time. Same authorized-primitive precedent as ai_mail dispatch_monitor.py."
   }
 }

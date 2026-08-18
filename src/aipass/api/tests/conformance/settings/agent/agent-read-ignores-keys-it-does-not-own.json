@@ -1,0 +1,35 @@
+{
+  "description": "Claude's file belongs to the operator. Keys this door does not own are invisible to the view.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": "opus"
+    }
+  },
+  "given": {
+    "content": {
+      "hooks": {
+        "x": 1
+      },
+      "model": "opus",
+      "permissions": {
+        "allow": [
+          "Bash"
+        ]
+      }
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-read-ignores-keys-it-does-not-own",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

@@ -22,10 +22,11 @@ Two documents, one flag:
         what lets "leave it alone" and "unset it" coexist in one shape.
     <project>/.aipass/baud.settings.json   - BAUD's own document, stored
         OPAQUE: shallow merge, null removes, nested objects replace whole.
-    $TMPDIR/aipass-hooks-muted             - @hooks' own mute switch. A flag
-        FILE, not a setting: the file is the single source of truth and both
-        directions of the flip are idempotent, because two windows (or a
-        `drone @hooks` toggle) may race on it.
+    @hooks' mute switch                    - a flag FILE, not a setting, and
+        NOT this branch's to write. Where it lives and how it is flipped are
+        @hooks' knowledge; this lane asks their door and reads their answer.
+        Both directions stay idempotent because two windows (or an operator
+        at the CLI) may race on the same switch.
 
 Read-then-error-then-write everywhere: a file that exists but does not parse
 as a JSON object REFUSES both reads and writes before a single byte moves -
@@ -35,11 +36,17 @@ must never treat unreadable as blank (the desktop's own doctrine, kept).
 
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from aipass.prax import logger
+
+# @hooks' own module for the mute switch. Imported rather than mirrored: the
+# flag's location is declared once, in their tree, and a copy here would be a
+# second truth that goes stale the first time they move it.
+from aipass.hooks.apps import sound as hooks_sound
 from aipass.api.apps.handlers.json import json_handler
 
 # ==============================================
@@ -49,8 +56,13 @@ from aipass.api.apps.handlers.json import json_handler
 AGENT_SETTINGS_RELATIVE = Path(".claude") / "settings.local.json"
 BAUD_SETTINGS_RELATIVE = Path(".aipass") / "baud.settings.json"
 
-# @hooks' machine-wide mute switch — shared with the desktop and the CLI.
-HOOKS_MUTE_FLAG = "aipass-hooks-muted"
+# @hooks' door for the machine-wide mute switch. The registered command, the
+# same one an operator types — see the flip below for why its exit code is not
+# taken as evidence.
+HOOKS_SOUND_DOOR = ["drone", "@hooks", "hooksound"]
+HOOKS_SOUND_ON = "on"
+HOOKS_SOUND_OFF = "off"
+HOOKS_SOUND_TIMEOUT_SECONDS = 30
 
 # The three keys BAUD owns in claude's file — camelCase ON DISK (claude's own
 # spelling), snake_case in the API shape (this house's spelling).
@@ -87,9 +99,16 @@ def read_object(path: Path) -> Dict[str, Any]:
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
         # Nothing is there yet. That is a fresh branch, not a fault, and it is
         # the ONLY OSError that reads as blank — see below.
+        #
+        # NotADirectoryError used to be let through here too, and the
+        # conformance corpus ruled it out (FPLAN-0438 R3, divergence 2; rust
+        # already refused). A missing DIRECTORY on the way to the file means
+        # nobody has written settings yet. A FILE standing where a directory
+        # belongs means the tree is broken — reading that as 'no settings yet'
+        # invites a patch to write a document into a path that cannot hold one.
         #
         # Said out loud even so. It is the one branch here that answers with a
         # document nobody wrote, and when a face shows every dial at absent the
@@ -171,6 +190,33 @@ def write_atomically(path: Path, document: Dict[str, Any]) -> None:
         raise SettingsUnavailable(f"Could not write '{path.name}': {e}") from e
 
 
+def _reads_as_a_token_count(value: Any) -> bool:
+    """
+    Whether a stored value can be shown on the window dial.
+
+    The desktop reads this field with as_u64, so the mirror is UNSIGNED: a
+    negative is not a small number here, it is a value the other face declines
+    outright, and a view that passed -5 through would put a token count on a
+    dial that cannot mean one (FPLAN-0438 R3, divergence 5 — rust was the
+    strict side and this lane was not).
+
+    Zero stays readable on purpose. It is a representable u64, so a file
+    holding it reports it honestly; the refusal on zero belongs to the WRITE
+    path, where the value is being created rather than reported.
+
+    Args:
+        value: Whatever the file had under the window key.
+
+    Returns:
+        True when the dial can show it.
+
+    Note:
+        bool is excluded FIRST because a Python bool is also an int — without
+        that, `true` would arrive at the face as the number 1.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def agent_settings_view(document: Dict[str, Any]) -> Dict[str, Any]:
     """
     The three owned keys as the API shape. Wrong-typed values read as null —
@@ -182,10 +228,8 @@ def agent_settings_view(document: Dict[str, Any]) -> Dict[str, Any]:
     window = document.get(KEY_AUTO_COMPACT_WINDOW)
     return {
         "model": model if isinstance(model, str) else None,
-        # bool is checked FIRST below because a Python bool is also an int —
-        # without the order, `true` would leak into the window field's type.
         "auto_compact_enabled": enabled if isinstance(enabled, bool) else None,
-        "auto_compact_window": window if isinstance(window, int) and not isinstance(window, bool) else None,
+        "auto_compact_window": window if _reads_as_a_token_count(window) else None,
     }
 
 
@@ -273,32 +317,81 @@ def write_baud_settings(project_root: Path, patch: Dict[str, Any]) -> Dict[str, 
     return document
 
 
-def hooks_mute_flag() -> Path:
-    """Where @hooks keeps the machine-wide mute switch."""
-    return Path(tempfile.gettempdir()) / HOOKS_MUTE_FLAG
-
-
-def hooks_sound_get(flag: Optional[Path] = None) -> bool:
-    """Sounds are ACTIVE when the mute flag is ABSENT — inverted on purpose
-    so every face's toggle reads as 'hook sounds: on'."""
-    return not (flag or hooks_mute_flag()).exists()
-
-
-def hooks_sound_set(active: bool, flag: Optional[Path] = None) -> bool:
+def hooks_sound_get() -> bool:
     """
-    Flip the flag toward `active`. Both directions are idempotent — muting a
-    muted fleet and unmuting an unmuted one are no-ops, never errors, because
-    two faces may race on the same file.
+    Whether hook sounds are currently on.
+
+    Answered by @hooks' own is_muted(), not by this lane's idea of where their
+    flag lives. Reading is not writing, so no subprocess is spent on it — but
+    the KNOWLEDGE still comes from the owner, which is the half of the boundary
+    that a local path check would quietly break.
+
+    Inverted on purpose: sounds are ACTIVE when the flag is ABSENT, so every
+    face's toggle reads as "hook sounds: on" rather than as a double negative.
+
+    Returns:
+        True when sounds are active.
     """
-    target = flag or hooks_mute_flag()
+    return not hooks_sound.is_muted()
+
+
+def hooks_sound_set(active: bool) -> bool:
+    """
+    Flip hook sounds through @hooks' registered command.
+
+    THIS USED TO WRITE THE FLAG BY HAND — a touch and an unlink on a path this
+    module rebuilt for itself, while the docstring above named the door it was
+    bypassing. Patrick's ruling settled it: api is api. The switch belongs to
+    @hooks, so the flip is their command, the same one an operator types.
+
+    Idempotent in both directions, unchanged: muting a muted fleet and unmuting
+    an unmuted one are no-ops rather than errors, because two windows may race
+    on the same switch.
+
+    THE EXIT CODE IS NOT EVIDENCE, and that is measured rather than assumed:
+    "hooksound sideways" prints "Unknown command" and exits ZERO, exactly like a
+    real flip does. A lane that returned success on a zero would tell a face the
+    fleet was muted while it kept ringing. So the switch is read back afterwards
+    and a disagreement is a refusal — the only witness that cannot lie.
+
+    Args:
+        active: True to turn sounds on, False to mute.
+
+    Returns:
+        The state actually in force afterwards, read back from the flag.
+
+    Raises:
+        SettingsUnavailable: The door could not be run, took too long, refused,
+            or answered without changing anything. Never a fallback to writing
+            the flag here — becoming the thing this replaced, silently, is the
+            one outcome worse than refusing.
+    """
+    verb = HOOKS_SOUND_ON if active else HOOKS_SOUND_OFF
+    command = HOOKS_SOUND_DOOR + [verb]
+
     try:
-        if active:
-            # missing_ok says the idempotence outright instead of catching it
-            # after the fact: unmuting an unmuted fleet is the intended answer,
-            # not an error that happens to be ignored.
-            target.unlink(missing_ok=True)
-        else:
-            target.touch()
-    except OSError as e:
-        raise SettingsUnavailable(f"Could not flip the hooks mute flag: {e}") from e
-    return hooks_sound_get(target)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=HOOKS_SOUND_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.error("[host_api] hooks sound door failed: %s", e)
+        raise SettingsUnavailable(f"Could not reach the hooks sound door: {e}") from e
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise SettingsUnavailable(f"The hooks sound door refused: {detail}")
+
+    settled = hooks_sound_get()
+
+    if settled != active:
+        raise SettingsUnavailable(
+            f"The hooks sound door answered but hook sounds are still "
+            f"{'on' if settled else 'off'} — nothing was changed"
+        )
+
+    json_handler.log_operation("host_api_hooks_sound_set", {"active": active})
+
+    return settled

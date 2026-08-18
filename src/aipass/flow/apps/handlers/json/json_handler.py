@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Auto-Creating JSON Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2025-11-21
-# Modified: 2025-11-21
+# Modified: 2026-08-18
 # =============================================
 
 """
@@ -26,6 +26,7 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -109,17 +110,51 @@ def validate_json_structure(data: Any, json_type: str) -> bool:
     return False
 
 
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+
+
 def _atomic_write_json(target_path: Path, data: Any) -> None:
     """Write JSON data atomically via temp file + rename.
 
-    Prevents corruption from concurrent processes writing the same file.
+    Prevents corruption from concurrent processes writing the same file. The
+    rename goes through _replace_with_retry: on Windows a reader holding the
+    target open turns the move into a PermissionError, and one stuck move
+    starved a whole CI run (2026-08-18). Bounded, then it raises honestly.
     """
     fd, tmp_path = tempfile.mkstemp(dir=str(target_path.parent), suffix=".tmp", prefix=target_path.stem)
     succeeded = False
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, str(target_path))
+        _replace_with_retry(tmp_path, str(target_path))
         succeeded = True
     finally:
         if not succeeded and Path(tmp_path).exists():

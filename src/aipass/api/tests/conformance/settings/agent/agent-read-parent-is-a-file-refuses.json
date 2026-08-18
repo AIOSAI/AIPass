@@ -1,0 +1,20 @@
+{
+  "description": "A FILE standing where the parent directory belongs is a broken tree, not a fresh branch. Reading it blank would invite a patch to write into a path that cannot hold a document.",
+  "document": "agent",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "parent_is_a_file"
+  },
+  "id": "agent-read-parent-is-a-file-refuses",
+  "notes": "Divergence 2. Rust already refused; python read it blank until this corpus ruled on it.",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

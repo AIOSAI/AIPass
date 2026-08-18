@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: atomic_write.py
 # Description: Atomic file write helper — stage, fsync, os.replace
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-08-18
 # =============================================
 
 """Atomic text writes for every spawn handler that touches a live file.
@@ -36,9 +36,41 @@ and several of them already catch ``OSError``/``IOError`` and carry on.
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 __all__ = ["atomic_write_text"]
+
+
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
 
 
 def atomic_write_text(path, content: str, encoding: str = "utf-8") -> None:
@@ -56,6 +88,11 @@ def atomic_write_text(path, content: str, encoding: str = "utf-8") -> None:
 
     The target is left untouched whenever the write does not complete, and the
     staged temp file is removed on every failure path.
+
+    The swap goes through _replace_with_retry, not a bare os.replace: on
+    Windows a reader holding the target open turns the move into a
+    PermissionError, and one stuck move starved a whole CI run (2026-08-18).
+    Bounded, then it raises honestly.
     """
     path = Path(path)
 
@@ -66,7 +103,7 @@ def atomic_write_text(path, content: str, encoding: str = "utf-8") -> None:
         os.fsync(fd)
         os.close(fd)
         closed = True
-        os.replace(tmp_path, path)
+        _replace_with_retry(tmp_path, str(path))
     except BaseException:
         if not closed:
             os.close(fd)

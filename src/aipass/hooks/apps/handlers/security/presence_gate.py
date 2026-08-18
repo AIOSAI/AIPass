@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: presence_gate.py
-# Version: 3.0.1
+# Version: 3.1.0
 # Description: Single-session gate — blocks duplicate Claude runtimes per branch
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-07-21
+# Modified: 2026-08-18
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
@@ -129,15 +129,32 @@ def handle(hook_data: dict) -> dict:
         age = _format_session_age(occupant)
         age_str = f" · {age} old" if age else ""
 
+        # bg sessions have no per-job stop in the CLI — cc_sessions._stop_session
+        # says so itself and refuses to SIGTERM them (the daemon respawns them).
+        # Offering `sessions reclaim` against a bg occupant names a remedy that
+        # provably cannot work, and a gate must be satisfiable by an action it
+        # permits, or it only teaches people to route around it.
+        if occ_kind in ("bg", "background"):
+            remedy = "  This is a background session — `sessions reclaim` cannot stop it (no per-job stop in the CLI)."
+        else:
+            remedy = f"  Attach to that session, or run: drone @hooks sessions reclaim @{branch}"
+
         reason = (
             f"{branch} is already live: PID {occ_pid} · {occ_sid} · {occ_kind}{age_str}\n"
-            f"  Attach to that session, or run: drone @hooks sessions reclaim @{branch}\n"
+            f"{remedy}\n"
             f"  To disable this gate: set presence_gate.enabled=false in .aipass/hooks.json"
         )
 
         if _OBSERVE_ONLY:
-            logger.warning("[presence_gate] OBSERVE-ONLY would-block: %s", reason)
-            return {**_ALLOW, "sound": "presence gate"}
+            # INFO, and no sound: observe-only is the gate DECLINING to act, which is
+            # chosen behavior, not something going wrong — the same call banked in
+            # compass #277. Measured before reclassing: 26 would-blocks over 3.6h, all
+            # naming ONE occupant PID, so the WARNING was 26 alarms for one situation.
+            # INFO is retained on disk (verified in S155), so the evidence survives;
+            # it just stops escalating. The sound was worse than the log line — audio
+            # for a decision the gate is not making.
+            logger.info("[presence_gate] OBSERVE-ONLY would-block: %s", reason)
+            return _ALLOW
 
         logger.warning("[presence_gate] BLOCKED: %s", reason)
         return {

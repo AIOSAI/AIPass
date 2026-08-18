@@ -1,0 +1,34 @@
+{
+  "description": "A fresh branch can be configured. The parent directory is made on the way.",
+  "document": "agent",
+  "expect": {
+    "file": {
+      "autoCompactEnabled": true,
+      "autoCompactWindow": 40000,
+      "model": "opus"
+    },
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": true,
+      "auto_compact_window": 40000,
+      "model": "opus"
+    }
+  },
+  "given": {
+    "path": ".claude/settings.local.json",
+    "state": "missing"
+  },
+  "id": "agent-patch-creates-the-file-and-its-directory",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "auto_compact_enabled": true,
+      "auto_compact_window": 40000,
+      "model": "opus"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

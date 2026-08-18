@@ -599,3 +599,37 @@ class TestEditGateExternalProject:
                 }
             )
         assert result["exit_code"] == 0
+
+
+class TestCapGateStatesItsReach:
+    """RULING (third instance): this gate is PreToolUse Edit/Write only, so a write
+    made through Bash never reaches it. @baud drifted to 2529/300 for a week and
+    @api carried 12 sessions + 16 learnings over cap, both through that lane. It
+    cannot enforce there, so it must not imply it does — a gate with a documented
+    bypass that claims enforcement is what let the drift read as compliance."""
+
+    def _reason(self):
+        import json as _json
+        from unittest.mock import MagicMock
+
+        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
+
+        el = MagicMock()
+        el.changed_entries.return_value = [
+            {"entry_type": "sessions", "key": "s1", "length": 2529, "cap": 300, "over_by": 2229}
+        ]
+        block = _evaluate_limits({}, {}, {"enforce": True}, el)
+        assert block is not None
+        return _json.loads(block["stdout"])["reason"]
+
+    def test_message_names_the_unchecked_lane(self):
+        assert "Bash" in self._reason()
+
+    def test_message_names_the_lane_it_does_cover(self):
+        assert "Edit/Write" in self._reason()
+
+    def test_message_still_lists_the_offending_entries(self):
+        """GUARD: the honesty note must not displace the actual finding."""
+        reason = self._reason()
+        assert "2529/300" in reason
+        assert "sessions" in reason

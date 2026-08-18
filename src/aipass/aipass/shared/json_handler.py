@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_handler.py
 # Description: Shared JSON handler with injectable storage directory
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-06-10
+# Modified: 2026-08-18
 # =============================================
 
 """Shared JSON handler — auto-creating, self-healing JSON system.
@@ -12,6 +12,10 @@ Dependency-free: uses only stdlib. Importable before drone/prax exist.
 
 Each branch creates a JsonHandler instance with its own json_dir.
 Contract: save_json raises ValueError on validation failure.
+
+This module is the single write path behind the @spawn, @memory and @aipass
+json_handler shims, so its swap carries three branches at once — see
+_replace_with_retry.
 """
 
 import inspect
@@ -19,6 +23,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -26,6 +31,37 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 _JSON_TYPES: tuple[str, ...] = ("config", "data", "log")
+
+
+# os.replace on Windows raises PermissionError while ANY reader holds the
+# target open (no FILE_SHARE_DELETE on Python's open). Readers hold handles
+# for microseconds, so a short bounded retry converges; after the bound the
+# error raises honestly. POSIX never takes this path for open files, so a
+# genuine permission problem still surfaces — just ~200ms later.
+_REPLACE_ATTEMPTS = 40
+_REPLACE_BACKOFF_SECONDS = 0.005
+
+
+def _replace_with_retry(source: str, destination: str) -> None:
+    """
+    os.replace that tolerates Windows sharing violations, bounded.
+
+    Args:
+        source: Staged file to move into place.
+        destination: The live document being replaced.
+
+    Raises:
+        PermissionError: Still blocked after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
 
 
 class JsonHandler:
@@ -70,6 +106,14 @@ class JsonHandler:
 
         Returns:
             True on success, False on OS error.
+
+        Note:
+            The swap goes through _replace_with_retry, not a bare os.replace:
+            on Windows a reader holding the target open turns the move into a
+            PermissionError, and one stuck move starved a whole CI run
+            (2026-08-18). Bounded, then it raises — and a PermissionError is an
+            OSError, so the exhausted retry lands in the handler below and this
+            method answers False, its documented contract for an OS failure.
         """
         file_path = Path(file_path)
         try:
@@ -82,7 +126,7 @@ class JsonHandler:
                 os.fsync(fd)
                 os.close(fd)
                 closed = True
-                os.replace(tmp_path, file_path)
+                _replace_with_retry(tmp_path, str(file_path))
             except BaseException:
                 if not closed:
                     os.close(fd)

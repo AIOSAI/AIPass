@@ -1,0 +1,27 @@
+{
+  "description": "The boundary the negative rule must not overshoot. Zero is a representable u64, so a file holding it reports it honestly — the refusal on zero belongs to the write path.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": 0,
+      "model": null
+    }
+  },
+  "given": {
+    "content": {
+      "autoCompactWindow": 0
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-read-zero-window-reads-as-zero",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

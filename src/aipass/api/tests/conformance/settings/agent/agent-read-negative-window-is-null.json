@@ -1,0 +1,28 @@
+{
+  "description": "The mirror is UNSIGNED. A negative is not a small token count, it is a value the desktop's as_u64 declines outright, and a dial cannot mean minus five thousand tokens.",
+  "document": "agent",
+  "expect": {
+    "outcome": "ok",
+    "view": {
+      "auto_compact_enabled": null,
+      "auto_compact_window": null,
+      "model": null
+    }
+  },
+  "given": {
+    "content": {
+      "autoCompactWindow": -5
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-read-negative-window-is-null",
+  "notes": "Divergence 5. Rust was the strict side; python passed negatives through until this corpus.",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

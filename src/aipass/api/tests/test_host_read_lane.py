@@ -78,7 +78,6 @@ from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
-from aipass.api.apps.handlers.host import remotes as host_remotes
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -102,8 +101,6 @@ PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"
 # wrong module writes a real audit record for a fake read.
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
-PATCH_REMOTES_LOGGER = "aipass.api.apps.handlers.host.remotes.logger"
-PATCH_REMOTES_JSON = "aipass.api.apps.handlers.host.remotes.json_handler"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
@@ -172,8 +169,6 @@ def fake_repo(tmp_path: Path):
         patch(PATCH_READS_JSON),
         patch(PATCH_GIT_LOGGER),
         patch(PATCH_GIT_JSON),
-        patch(PATCH_REMOTES_LOGGER),
-        patch(PATCH_REMOTES_JSON),
     ):
         yield {"root": root, "branch": branch, "registry": registry, "drone": fake_drone}
 
@@ -551,12 +546,125 @@ class TestReadDiff:
 # @drone's real `git status` rendering, which is `f"  {status:>2} {path}"` per
 # file between a header line and a scope footer. Paths are REPO-relative there;
 # @baud's desktop card uses --relative and speaks branch-local names.
-GIT_STATUS_STDOUT = """4 file(s) changed under src/aipass/demo
-   M src/aipass/demo/hello.txt
-  ?? src/aipass/demo/brand_new.py
-   D src/aipass/demo/nested/deep.txt
-   R src/aipass/demo/old_name.py -> src/aipass/demo/new_name.py
-(showing demo scope — use --all for full repo)"""
+def status_document(rows: Any, scope: str = "branch", ok: bool = True, message: str = "changed") -> str:
+    """
+    drone's `status --json` document, as the door writes it to stdout.
+
+    Every fixture in this file is built through here on purpose. The lane used
+    to be fed hand-written RENDERED lines, and on 2026-08-18 that turned out to
+    be the bug rather than the fixture: drone right-aligns the porcelain code
+    for the screen, so 'A ' reaches a reader as ' A' and no test written by
+    hand ever saw it. Building from the two columns git actually reports means
+    a fixture cannot express a status drone could not have sent.
+
+    Args:
+        rows: (status, path) pairs, status being porcelain's two columns.
+        scope: branch or repo, as the door names its own scope.
+        ok: The verdict.
+        message: The door's own sentence.
+
+    Returns:
+        The document, serialised.
+    """
+    files = [{"status": status, "path": path, "index": status[:1], "worktree": status[1:2]} for status, path in rows]
+
+    return json.dumps(
+        {
+            "ok": ok,
+            "branch": "demo",
+            "scope": scope,
+            "files": files,
+            "total": len(files),
+            "message": message,
+        }
+    )
+
+
+def log_document(commits: Any, ok: bool = True) -> str:
+    """
+    drone's `log --json` document.
+
+    Args:
+        commits: (sha, subject) pairs, newest first.
+        ok: The verdict.
+
+    Returns:
+        The document, serialised.
+    """
+    rows = [{"sha": sha, "subject": subject} for sha, subject in commits]
+
+    return json.dumps({"ok": ok, "commits": rows, "count": len(rows), "message": f"{len(rows)} commit(s)"})
+
+
+def show_document(content: str, ref: str = "HEAD", ok: bool = True, message: str = "showed HEAD") -> str:
+    """
+    drone's `show --json` document.
+
+    MEASURED 2026-08-18: this one is an ENVELOPE. Its `content` is git show's
+    own text — header, then patch — so the fixtures below still carry raw text
+    inside it, and the commit lane still parses that text on structure.
+
+    Args:
+        content: The raw output git show produced.
+        ref: The revision asked for.
+        ok: The verdict.
+        message: The door's own sentence.
+
+    Returns:
+        The document, serialised.
+    """
+    return json.dumps({"ok": ok, "ref": ref, "path": None, "content": content, "message": message})
+
+
+def remote_document(url: str, name: str = "origin", redacted: bool = False, ok: bool = True) -> str:
+    """
+    drone's `remote --json` document, one remote.
+
+    Args:
+        url: The URL for both fetch and push.
+        name: Which remote.
+        redacted: Whether the door says it already redacted something.
+        ok: The verdict.
+
+    Returns:
+        The document, serialised.
+    """
+    return remotes_document([{"name": name, "fetch": url, "push": url, "redacted": redacted}], ok=ok)
+
+
+def remotes_document(remotes: Any, ok: bool = True, message: str = "") -> str:
+    """
+    drone's `remote --json` document, any number of remotes.
+
+    Args:
+        remotes: The rows, in the door's own order.
+        ok: The verdict.
+        message: The door's own sentence.
+
+    Returns:
+        The document, serialised.
+    """
+    return json.dumps(
+        {
+            "ok": ok,
+            "remotes": remotes,
+            "count": len(remotes),
+            "message": message or f"{len(remotes)} remote(s)",
+        }
+    )
+
+
+# The card's own fixture, in git's two columns. ' M' is an unstaged edit, '??'
+# a file git has never seen, ' D' an unstaged delete and 'R ' a staged rename.
+GIT_STATUS_STDOUT = status_document(
+    (
+        (" M", "src/aipass/demo/hello.txt"),
+        ("??", "src/aipass/demo/brand_new.py"),
+        (" D", "src/aipass/demo/nested/deep.txt"),
+        ("R ", "src/aipass/demo/old_name.py -> src/aipass/demo/new_name.py"),
+    ),
+    message="4 file(s) changed under src/aipass/demo",
+)
 
 
 class TestGitChangesMatchesTheDesktopCard:
@@ -655,7 +763,7 @@ class TestGitChangesMatchesTheDesktopCard:
 
     def test_a_clean_branch_is_zero_and_not_an_error(self, fake_repo: dict) -> None:
         """Nothing changed is an answer, and the commonest one."""
-        clean = "0 file(s) changed under src/aipass/demo\n(showing demo scope — use --all for full repo)"
+        clean = status_document((), message="0 file(s) changed under src/aipass/demo")
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout=clean)):
             result = host_git.read_git_changes("demo")
@@ -689,7 +797,7 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
             host_git.read_git_changes("demo")
 
-        assert mock_run.call_args[0][0] == ["drone", "@git", "status"]
+        assert mock_run.call_args[0][0] == ["drone", "@git", "status", "--json"]
 
     def test_runs_in_the_branch_directory(self, fake_repo: dict) -> None:
         """drone's git lane is CWD-scoped, so the cwd IS the branch selection."""
@@ -921,10 +1029,16 @@ class TestReadLaneRoutes:
             "count": 3,
             "untracked": 1,
             "rows": [
-                {"path": "hello.txt", "status": " M"},
-                {"path": "brand_new.py", "status": "??"},
-                {"path": "nested/deep.txt", "status": " D"},
-                {"path": "new_name.py", "status": " R"},
+                {"path": "hello.txt", "status": " M", "index": " ", "worktree": "M"},
+                {"path": "brand_new.py", "status": "??", "index": "?", "worktree": "?"},
+                {"path": "nested/deep.txt", "status": " D", "index": " ", "worktree": "D"},
+                # THE BUG, VISIBLE IN THE WIRE PIN. This row read ' R' until
+                # 2026-08-18 — an unstaged rename, which git does not emit. The
+                # rename is STAGED, the code is 'R ', and the old lane could not
+                # have said so: drone's rendered surface had already right-
+                # aligned the letter out of the index column before this server
+                # saw it. The contract was always right; the data now honours it.
+                {"path": "new_name.py", "status": "R ", "index": "R", "worktree": " "},
             ],
         }
 
@@ -1156,7 +1270,7 @@ class TestReadLaneRoutes:
         never an empty string it would render as a dead link.
         """
         api, raw = client
-        remote_repo["configure"]("[core]\n\tbare = false\n")
+        remote_repo["serve"](remotes_document([]))
 
         response = api.get(
             "/v1/git-remote",
@@ -1362,11 +1476,11 @@ class TestGitChangesInAForeignProject:
         branch is not this server's. The prefix to strip is that branch's own
         repository root, discovered rather than assumed.
         """
-        stdout = (
-            "2 file(s) changed under src/vera_studio/vera\n"
-            "   M src/vera_studio/vera/CLAUDE.md\n"
-            "   M src/vera_studio/vera/.aipass/local_system_prompt.md\n"
-            "(showing vera scope — use --all for full repo)"
+        stdout = status_document(
+            (
+                (" M", "src/vera_studio/vera/CLAUDE.md"),
+                (" M", "src/vera_studio/vera/.aipass/local_system_prompt.md"),
+            )
         )
 
         with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
@@ -1377,7 +1491,7 @@ class TestGitChangesInAForeignProject:
 
     def test_the_seated_branch_is_unaffected(self, fake_repo: dict) -> None:
         """The seat resolved correctly before and must keep doing so."""
-        stdout = "1 file(s) changed under src/aipass/demo\n   M src/aipass/demo/hello.txt"
+        stdout = status_document(((" M", "src/aipass/demo/hello.txt"),))
 
         with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
             result = host_git.read_git_changes("demo")
@@ -1411,7 +1525,7 @@ class TestGitChangesInAForeignProject:
         census.FleetUnavailable = host_fleet.FleetUnavailable
         census.resolve_branch.return_value = {"name": "tenant", "path": str(root)}
 
-        stdout = "1 file(s) changed under src/tenant/tenant\n   M src/tenant/tenant/lib.rs"
+        stdout = status_document(((" M", "src/tenant/tenant/lib.rs"),))
 
         with patch(PATCH_HOST_FLEET, census):
             with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
@@ -1436,7 +1550,7 @@ class TestGitChangesInAForeignProject:
         census.FleetUnavailable = host_fleet.FleetUnavailable
         census.resolve_branch.return_value = {"name": "br", "path": str(root)}
 
-        stdout = "1 file(s) changed under src/thing/br\n   M src/thing/br/main.py"
+        stdout = status_document(((" M", "src/thing/br/main.py"),))
 
         with patch(PATCH_HOST_FLEET, census):
             with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
@@ -1457,7 +1571,7 @@ class TestGitChangesInAForeignProject:
         census.FleetUnavailable = host_fleet.FleetUnavailable
         census.resolve_branch.return_value = {"name": "br", "path": str(loose)}
 
-        stdout = "1 file(s) changed under whatever\n   M whatever/file.py"
+        stdout = status_document(((" M", "whatever/file.py"),))
 
         with patch(PATCH_HOST_FLEET, census):
             with patch.object(host_git.subprocess, "run", return_value=self._completed(stdout)):
@@ -1470,15 +1584,19 @@ class TestGitChangesInAForeignProject:
 # THE GIT APP — repo grain, per-file, and history
 # =============================================
 
-# drone's `status --all` render. Same per-file shape, but the scope is the whole
-# repo and the paths already arrive repo-relative — so the branch-local prefix
-# stripping that the CARD needs would be actively wrong here.
-GIT_STATUS_ALL_STDOUT = """6 file(s) changed under the repository
-   M src/aipass/demo/hello.txt
-   M src/aipass/other/thing.py
-  ?? src/aipass/demo/brand_new.py
-   D src/aipass/third/gone.txt
-(showing full repo)"""
+# drone's `status --all` document. Same per-file shape, but the scope is the
+# whole repo and the paths already arrive repo-relative — so the branch-local
+# prefix stripping that the CARD needs would be actively wrong here.
+GIT_STATUS_ALL_STDOUT = status_document(
+    (
+        (" M", "src/aipass/demo/hello.txt"),
+        (" M", "src/aipass/other/thing.py"),
+        ("??", "src/aipass/demo/brand_new.py"),
+        (" D", "src/aipass/third/gone.txt"),
+    ),
+    scope="repo",
+    message="4 file(s) changed under the repository",
+)
 
 # Two files in one unified diff, in git's own machine-stable framing. The
 # per-file lane finds a file by its header, never by a heading or a footer.
@@ -1500,9 +1618,11 @@ index 3333333..4444444 100644
 +add two
 """
 
-# `drone @git show <ref>` — git's default --pretty=medium header, then the
-# patch. Measured against the real door on 2026-08-17.
-GIT_SHOW_STDOUT = (
+# What `drone @git show <ref>` puts in its document's `content` field: git's
+# default --pretty=medium header, then the patch. Measured against the real
+# door on 2026-08-17, and re-measured on 2026-08-18 when --json arrived — the
+# flag wrapped this text in an envelope and did not structure it.
+GIT_SHOW_TEXT = (
     """commit 7edf8c2dfcccbc1ce1b04d8420405f98e212a474
 Author: AIOSAI <aipass.system@gmail.com>
 Date:   Sat Aug 15 10:15:22 2026 -0700
@@ -1515,9 +1635,15 @@ Date:   Sat Aug 15 10:15:22 2026 -0700
     + TWO_FILE_DIFF
 )
 
-GIT_LOG_STDOUT = """b47462b7 feat(fleet): the newest one
-7edf8c2d feat(demo): the subject line
-cb4afb12 feat(host): an older one"""
+GIT_SHOW_STDOUT = show_document(GIT_SHOW_TEXT, ref="7edf8c2d")
+
+GIT_LOG_STDOUT = log_document(
+    (
+        ("b47462b7", "feat(fleet): the newest one"),
+        ("7edf8c2d", "feat(demo): the subject line"),
+        ("cb4afb12", "feat(host): an older one"),
+    )
+)
 
 
 class TestRepoGrainChanges:
@@ -1611,18 +1737,21 @@ class TestRepoGrainChanges:
         assert mock_run.call_count == 0
 
 
-# Every code the face needs a chip for, in drone's own render. The two columns
-# are index-then-worktree, so 'A ' (staged new) and ' M' (modified, unstaged)
-# are DIFFERENT answers that both collapse to one letter if either is stripped.
-GIT_STATUS_CODES_STDOUT = """6 file(s) changed under src/aipass/demo
-   M src/aipass/demo/modified.txt
-  A  src/aipass/demo/staged_new.py
-  MM src/aipass/demo/both.py
-   D src/aipass/demo/gone.txt
-  R  src/aipass/demo/old.py -> src/aipass/demo/new.py
-  ?? src/aipass/demo/untracked.py
-  !! src/aipass/demo/ignored.log
-(showing demo scope)"""
+# Every code the face needs a chip for. The two columns are index-then-worktree,
+# so 'A ' (staged new) and ' M' (modified, unstaged) are DIFFERENT answers that
+# both collapse to one letter if either is stripped.
+GIT_STATUS_CODES_STDOUT = status_document(
+    (
+        (" M", "src/aipass/demo/modified.txt"),
+        ("A ", "src/aipass/demo/staged_new.py"),
+        ("MM", "src/aipass/demo/both.py"),
+        (" D", "src/aipass/demo/gone.txt"),
+        ("R ", "src/aipass/demo/old.py -> src/aipass/demo/new.py"),
+        ("??", "src/aipass/demo/untracked.py"),
+        ("!!", "src/aipass/demo/ignored.log"),
+    ),
+    message="6 file(s) changed under src/aipass/demo",
+)
 
 
 class TestStatusPerRow:
@@ -1750,6 +1879,228 @@ class TestStatusPerRow:
             result = host_git.read_git_changes("demo")
 
         assert all(len(row["status"]) == 2 for row in result["rows"])
+
+
+class TestStagedAndUnstagedAreDifferentAnswers:
+    """
+    THE BUG THIS ROUND WAS FOR, and it was bigger than the brief said.
+
+    Rows have carried git's two-column code verbatim since they existed, and
+    that contract was right. The DATA was not. drone's rendered status line is
+    built as `f"  {status.strip():>2} {path}"` — their own comment calls it "for
+    the screen only" — which right-aligns a one-letter code into the SECOND
+    column. So every index-only change reached this server already dressed as a
+    worktree one, and no parser could have recovered it:
+
+        git says 'M ' (staged edit)   -> rendered '   M' -> read as ' M'
+        git says ' M' (unstaged edit) -> rendered '   M' -> read as ' M'
+        git says 'A ' (staged new)    -> rendered '   A' -> read as ' A'
+        git says 'D ' (staged delete) -> rendered '   D' -> read as ' D'
+
+    Measured against the shipped parser on 2026-08-18, before the switch: of
+    six codes fed through drone's own renderer, three came back as something
+    git never said, and staged-vs-unstaged modify and staged-vs-unstaged delete
+    were each a single answer. The face could not have built its chips from
+    that, and neither could anything else.
+
+    The document reports index and worktree separately. These tests pin the
+    difference the old path could not express.
+    """
+
+    def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
+        result = MagicMock()
+        result.stdout = stdout
+        result.stderr = stderr
+        result.returncode = returncode
+        return result
+
+    def _rows(self, result: dict) -> dict:
+        return {row["path"]: row for row in result["rows"]}
+
+    STAGED_AND_UNSTAGED = (
+        ("M ", "src/aipass/demo/staged.py"),
+        (" M", "src/aipass/demo/unstaged.py"),
+    )
+
+    def test_a_staged_modification_and_an_unstaged_one_are_not_the_same_row(self, fake_repo: dict) -> None:
+        """
+        THE PIN. One file edited and added, one file edited and not — two
+        different facts about a repository, and for as long as this lane read
+        rendered lines they arrived as one.
+        """
+        document = status_document(self.STAGED_AND_UNSTAGED)
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["staged.py"]["status"] != rows["unstaged.py"]["status"]
+
+    def test_the_staged_one_says_staged_in_gits_own_spelling(self, fake_repo: dict) -> None:
+        """Not merely different — right. The index column is where git put it."""
+        document = status_document(self.STAGED_AND_UNSTAGED)
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["staged.py"]["status"] == "M "
+        assert rows["unstaged.py"]["status"] == " M"
+
+    def test_the_two_columns_arrive_split_as_well_as_whole(self, fake_repo: dict) -> None:
+        """
+        What the four VS Code chips are actually derived from. The verbatim code
+        stays because it is git's own answer; the split rides beside it because
+        every consumer was going to do this slice anyway, and a slice done once
+        here cannot be done differently by two faces.
+        """
+        document = status_document(self.STAGED_AND_UNSTAGED)
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["staged.py"]["index"] == "M"
+        assert rows["staged.py"]["worktree"] == " "
+        assert rows["unstaged.py"]["index"] == " "
+        assert rows["unstaged.py"]["worktree"] == "M"
+
+    def test_a_staged_delete_is_not_an_unstaged_delete(self, fake_repo: dict) -> None:
+        """The same collapse, on the code a phone most needs to get right."""
+        document = status_document(
+            (
+                ("D ", "src/aipass/demo/removed_and_staged.py"),
+                (" D", "src/aipass/demo/removed_only.py"),
+            )
+        )
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["removed_and_staged.py"]["index"] == "D"
+        assert rows["removed_only.py"]["worktree"] == "D"
+        assert rows["removed_and_staged.py"]["status"] != rows["removed_only.py"]["status"]
+
+    def test_a_file_staged_and_then_edited_again_carries_both_columns(self, fake_repo: dict) -> None:
+        """
+        'MM' is the one code the rendered surface DID survive, because both its
+        columns were already full. It must keep working — the fix must not have
+        traded one collapse for another.
+        """
+        document = status_document((("MM", "src/aipass/demo/both.py"),))
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["both.py"]["index"] == "M"
+        assert rows["both.py"]["worktree"] == "M"
+
+    def test_the_split_is_derived_from_the_code_when_the_door_omits_it(self, fake_repo: dict) -> None:
+        """
+        An older drone answers with `status` and no columns. Deriving them from
+        the verbatim code is not a guess — those columns ARE the code, by
+        porcelain's definition — so the lane restates the same fact rather than
+        dropping the field and leaving a face to invent one.
+        """
+        document = json.dumps(
+            {
+                "ok": True,
+                "branch": "demo",
+                "scope": "branch",
+                "files": [{"status": "A ", "path": "src/aipass/demo/new.py"}],
+                "total": 1,
+                "message": "1 file(s) changed",
+            }
+        )
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            rows = self._rows(host_git.read_git_changes("demo"))
+
+        assert rows["new.py"]["index"] == "A"
+        assert rows["new.py"]["worktree"] == " "
+
+    def test_the_rendered_surface_could_not_have_carried_this(self, fake_repo: dict) -> None:
+        """
+        THE EVIDENCE, KEPT. Not a test of drone — a statement of why this lane
+        must never read their screen output again, written in their own
+        formatting rule so it stays true if anyone is tempted back.
+
+        A reader parsing those two rendered lines gets one answer for two
+        different states, whatever it does with the characters afterwards.
+        """
+        rendered = ["  %s %s" % (status.strip().rjust(2), path) for status, path in self.STAGED_AND_UNSTAGED]
+
+        assert rendered[0][:4] == rendered[1][:4]
+        assert len({line.split(" ")[-2] for line in rendered}) == 1
+
+
+class TestTheStatusDoorsVerdictIsHonoured:
+    """
+    The refusal split, on the lane a phone hits most.
+
+    A document that says `ok: false` is an ANSWER: drone reached git, git had
+    something to say, and the caller learns a true thing about their
+    repository. That is a 400 in their words. Output that is not a document at
+    all is nobody being able to tell, and that is a 503 — which is exactly the
+    shape drone's caller-verification refusal takes, since it never reaches the
+    door and leaves its sentence on stderr.
+    """
+
+    def _completed(self, stdout: str, returncode: int = 0, stderr: str = "") -> Any:
+        result = MagicMock()
+        result.stdout = stdout
+        result.stderr = stderr
+        result.returncode = returncode
+        return result
+
+    def test_a_refusing_document_is_the_callers_answer(self, fake_repo: dict) -> None:
+        """Their sentence, verbatim, at 400 — not a retry-later at 503."""
+        refusal = status_document((), ok=False, message="git status error: not a git repository")
+
+        with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)):
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_git_changes("demo")
+
+        assert "not a git repository" in str(caught.value)
+
+    def test_a_refusal_with_no_words_still_refuses_and_says_that(self, fake_repo: dict) -> None:
+        """
+        Inventing a reason would be this server deciding a meaning that is not
+        its to decide. Saying they gave none is a fact.
+        """
+        refusal = json.dumps({"ok": False, "files": [], "total": 0})
+
+        with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)):
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_git_changes("demo")
+
+        assert "without saying why" in str(caught.value)
+
+    def test_a_true_verdict_is_never_read_off_the_exit_code(self, fake_repo: dict) -> None:
+        """
+        THE VERDICT IS THEIRS TO GIVE. A door that answers ok with a non-zero
+        exit is answering; second-guessing it here would be this server
+        deciding for them, which is the thing D0 exists to stop.
+        """
+        document = status_document(((" M", "src/aipass/demo/hello.txt"),))
+
+        with patch.object(subprocess, "run", return_value=self._completed(document, returncode=1)):
+            result = host_git.read_git_changes("demo")
+
+        assert result["count"] == 1
+
+    def test_a_json_array_is_not_a_document(self, fake_repo: dict) -> None:
+        """
+        One JSON OBJECT or nothing. A list parses cleanly and has no verdict in
+        it at all, so reading one as an answer would mean trusting a shape that
+        never said ok.
+        """
+        with patch.object(subprocess, "run", return_value=self._completed("[]")):
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_changes("demo")
+
+    def test_a_half_written_document_is_a_could_not_tell(self, fake_repo: dict) -> None:
+        """A truncated answer is not a small answer."""
+        with patch.object(subprocess, "run", return_value=self._completed('{"ok": true, "files": [')):
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_changes("demo")
 
 
 class TestPerFileDiff:
@@ -2057,6 +2408,31 @@ class TestGitLog:
 
         assert [c["sha"] for c in result["commits"]] == ["b47462b7", "7edf8c2d", "cb4afb12"]
 
+    def test_a_row_with_no_object_name_is_not_a_commit(self, fake_repo: dict) -> None:
+        """
+        A commit is identified by its object name, and a row without one names
+        nothing a caller could ever ask for again. Passing it through would put
+        an untappable entry in the phone's history — the document equivalent of
+        the phantom commit the old rendered lane guarded against.
+        """
+        document = json.dumps(
+            {
+                "ok": True,
+                "commits": [
+                    {"sha": "b47462b7", "subject": "a real one"},
+                    {"sha": "", "subject": "carries no object name"},
+                ],
+                "count": 2,
+                "message": "2 commit(s)",
+            }
+        )
+
+        with patch.object(subprocess, "run", return_value=self._completed(document)):
+            result = host_git.read_git_log("demo")
+
+        assert result["count"] == 1
+        assert result["commits"] == [{"sha": "b47462b7", "subject": "a real one"}]
+
     def test_count_agrees_with_the_list(self, fake_repo: dict) -> None:
         """One number, derived from the list, never counted twice."""
         with patch.object(subprocess, "run", return_value=self._completed()):
@@ -2108,23 +2484,45 @@ class TestGitLog:
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_git_log("demo")
 
-    def test_a_failed_log_is_reported_not_returned_empty(self, fake_repo: dict) -> None:
-        """An empty commit list would read as a repo with no history."""
+    def test_a_log_that_answered_with_nothing_is_reported_not_returned_empty(self, fake_repo: dict) -> None:
+        """
+        An empty commit list would read as a repository with no history. No
+        document at all is the shape drone's caller-verification refusal takes,
+        because that one never reaches the door — so it is a 503, not a repo
+        that has never been committed to.
+        """
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1)):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_git_log("demo")
 
-    def test_prose_lines_are_not_commits(self, fake_repo: dict) -> None:
+    def test_prose_is_not_a_commit_list_it_is_a_could_not_tell(self, fake_repo: dict) -> None:
         """
-        Structure, not prose: an entry qualifies by leading with a hex sha, so
-        a header or footer drone might add cannot become a phantom commit.
+        THE OLD GUARD, STRENGTHENED. This lane used to read rendered lines and
+        had to check each one led with a hex sha, so a header drone might add
+        could not become a phantom commit. A document has no framing to
+        mistake — and output that is not a document is not a thin commit list,
+        it is nobody being able to tell, which is a 503.
         """
-        noisy = "Recent commits in the repository:\n" + GIT_LOG_STDOUT + "\n(showing 3 of many)"
+        rendered = "Recent commits in the repository:\nb47462b7 feat(fleet): the newest one"
 
-        with patch.object(subprocess, "run", return_value=self._completed(noisy)):
-            result = host_git.read_git_log("demo")
+        with patch.object(subprocess, "run", return_value=self._completed(rendered)):
+            with pytest.raises(host_reads.ReadUnavailable):
+                host_git.read_git_log("demo")
 
-        assert result["count"] == 3
+    def test_a_refusal_document_is_an_answer_not_a_breakdown(self, fake_repo: dict) -> None:
+        """
+        drone reached git and git said no. That is the CALLER learning
+        something true about their repository — a 400 in drone's own words —
+        and reporting it as a 503 would tell them to try again later for
+        something that will never change.
+        """
+        refusal = json.dumps({"ok": False, "commits": [], "count": 0, "message": "git log error: bad revision"})
+
+        with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)):
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_git_log("demo")
+
+        assert "bad revision" in str(caught.value)
 
 
 class TestCommitDetail:
@@ -2244,22 +2642,42 @@ class TestCommitDetail:
 
         assert mock_run.call_count == 0
 
-    def test_an_unknown_commit_is_reported_honestly(self, fake_repo: dict) -> None:
-        """git says fatal, drone exits non-zero, and this lane says so."""
-        failed = self._completed(stdout="", returncode=128, stderr="fatal: bad object deadbeef")
+    def test_an_unknown_commit_is_the_callers_answer_in_gits_own_words(self, fake_repo: dict) -> None:
+        """
+        MEASURED, 2026-08-18: the real door answers a bad revision with a
+        DOCUMENT — ok false, git's fatal in the message, exit 1. So this is a
+        400 now and not a 503: the caller named something that is not in this
+        repository, which is a fact about their request, not about this server.
+        """
+        refusal = show_document("", ref="deadbeef", ok=False, message="git show error: fatal: bad object deadbeef")
+
+        with patch.object(subprocess, "run", return_value=self._completed(refusal, returncode=1)):
+            with pytest.raises(host_reads.ReadRefused) as caught:
+                host_git.read_commit("demo", ref="deadbeef")
+
+        assert "bad object" in str(caught.value)
+
+    def test_a_door_that_leaves_no_document_is_still_a_503(self, fake_repo: dict) -> None:
+        """
+        The other half of the split, and the one that keeps a foreign project
+        honest: drone's caller check refuses before the door runs and puts its
+        sentence on stderr with nothing on stdout. Nobody could tell, so nobody
+        claims to.
+        """
+        failed = self._completed(stdout="", returncode=1, stderr="cannot verify caller")
 
         with patch.object(subprocess, "run", return_value=failed):
             with pytest.raises(host_reads.ReadUnavailable) as caught:
                 host_git.read_commit("demo", ref="deadbeef")
 
-        assert "bad object" in str(caught.value)
+        assert "cannot verify caller" in str(caught.value)
 
     def test_a_commit_that_changed_nothing_is_still_a_commit(self, fake_repo: dict) -> None:
         """
         An empty or merge commit has a header and no patch. Zero files is the
         honest answer, not a refusal and not a crash.
         """
-        header_only = "\n".join(GIT_SHOW_STDOUT.splitlines()[:6]) + "\n"
+        header_only = show_document("\n".join(GIT_SHOW_TEXT.splitlines()[:6]) + "\n")
 
         with patch.object(subprocess, "run", return_value=self._completed(header_only)):
             result = host_git.read_commit("demo", ref="7edf8c2d")
@@ -2280,7 +2698,7 @@ def _raise(error: Exception) -> Any:
 
 @pytest.fixture
 def remote_repo(tmp_path: Path):
-    """A repo whose configuration can be rewritten per test, with one branch."""
+    """A branch whose remote door can be made to answer anything, per test."""
     root = tmp_path / "RemoteRepo"
     branch = root / "src" / "aipass" / "demo"
     branch.mkdir(parents=True)
@@ -2302,10 +2720,17 @@ def remote_repo(tmp_path: Path):
         else _raise(_BranchNotFound(name))
     )
 
-    def configure(text: str) -> None:
-        (root / ".git" / "config").write_text(text, encoding="utf-8")
+    runner = MagicMock()
 
-    configure('[remote "origin"]\n\turl = https://github.com/AIOSAI/AIPass.git\n')
+    def serve(stdout: str, returncode: int = 0, stderr: str = "") -> None:
+        """What `drone @git remote --json` answers with, for this test."""
+        completed = MagicMock()
+        completed.stdout = stdout
+        completed.stderr = stderr
+        completed.returncode = returncode
+        runner.return_value = completed
+
+    serve(remote_document("https://github.com/AIOSAI/AIPass.git"))
 
     with (
         patch(PATCH_READS_DRONE, fake_drone),
@@ -2313,10 +2738,9 @@ def remote_repo(tmp_path: Path):
         patch(PATCH_READS_JSON),
         patch(PATCH_GIT_LOGGER),
         patch(PATCH_GIT_JSON),
-        patch(PATCH_REMOTES_LOGGER),
-        patch(PATCH_REMOTES_JSON),
+        patch.object(subprocess, "run", runner),
     ):
-        yield {"root": root, "branch": branch, "configure": configure}
+        yield {"root": root, "branch": branch, "serve": serve, "runner": runner}
 
 
 class TestGitRemote:
@@ -2324,18 +2748,19 @@ class TestGitRemote:
     Phase 4 wants link-cards out to the forge, zero-auth, from constructible
     URLs — so the face needs to be told the repository's remote.
 
-    MEASURED, 2026-08-17, before anything was designed: THERE IS NO REMOTE DOOR.
-    Not a verb on drone's git surface, not on drone's public Python surface, and
-    the fleet's own gate refuses both raw readers — neither is in its read-only
-    allowlist. So this lane invokes nothing and reads the repository's
-    configuration as the INI file it is. That keeps "git is drone-only, servers
-    included" intact rather than quietly carving an exception into it, and a
-    verb on drone retires every line of it. It has been asked for.
+    THE DOOR ARRIVED, 2026-08-18. When this lane was built there was none: not
+    a verb on drone's git surface, not on their public Python surface, and the
+    fleet gate refused both raw readers. So it read the repository's INI
+    configuration directly and followed worktree pointers by hand — the one
+    lane in this package that shelled nothing, kept in its own module so that
+    boundary stayed visible. `drone @git remote --json` retired all of it. The
+    lane now lives with the other drone-door readers and the old module is
+    archived beside them, which is why every test below drives a door.
     """
 
     def test_the_configured_remote_comes_back(self, remote_repo: dict) -> None:
         """The whole point of the lane."""
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["url"] == "https://github.com/AIOSAI/AIPass.git"
 
@@ -2344,44 +2769,44 @@ class TestGitRemote:
         What the face actually links. `/pulls` appended to a URL ending in the
         clone suffix is a 404 on every forge there is.
         """
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
 
     def test_the_configured_url_is_never_rewritten(self, remote_repo: dict) -> None:
         """
-        `url` is what was configured, verbatim; `web` is what a browser can
-        open. Two fields because they are two facts, and collapsing them would
-        make the lane lie about one of them.
+        Two fields, two jobs: `url` is what the repository actually says, `web`
+        is what a person can open. Collapsing them would leave an operator
+        unable to compare this answer to their own configuration.
         """
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["url"].endswith(".git")
         assert not answer["web"].endswith(".git")
 
     def test_it_names_which_remote_answered(self, remote_repo: dict) -> None:
-        """A repository may have several. Which one spoke is part of the answer."""
-        answer = host_remotes.read_git_remote("demo")
-
-        assert answer["remote"] == "origin"
+        """A card labelled with the wrong remote's URL is worse than no card."""
+        assert host_git.read_git_remote("demo")["remote"] == "origin"
 
     def test_a_remote_is_a_repository_fact_and_says_so(self, remote_repo: dict) -> None:
         """
         Same vocabulary as the log and commit lanes: the branch names WHICH
-        repository, never a scope inside it.
+        repository, never a scope inside one.
         """
-        answer = host_remotes.read_git_remote("demo")
-
-        assert answer["grain"] == "repo"
+        assert host_git.read_git_remote("demo")["grain"] == "repo"
 
     def test_origin_wins_when_several_are_configured(self, remote_repo: dict) -> None:
         """The convention, honoured — and still named rather than assumed."""
-        remote_repo["configure"](
-            '[remote "upstream"]\n\turl = https://github.com/other/thing.git\n'
-            '[remote "origin"]\n\turl = https://github.com/AIOSAI/AIPass.git\n'
+        remote_repo["serve"](
+            remotes_document(
+                [
+                    {"name": "upstream", "fetch": "https://github.com/other/thing.git", "redacted": False},
+                    {"name": "origin", "fetch": "https://github.com/AIOSAI/AIPass.git", "redacted": False},
+                ]
+            )
         )
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["remote"] == "origin"
         assert "AIPass" in answer["url"]
@@ -2392,51 +2817,93 @@ class TestGitRemote:
         be this lane inventing a rule that does not exist. It answers, and the
         `remote` field is what stops that being a guess the caller cannot see.
         """
-        remote_repo["configure"]('[remote "upstream"]\n\turl = https://github.com/other/thing.git\n')
+        remote_repo["serve"](remote_document("https://github.com/other/thing.git", name="upstream"))
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["remote"] == "upstream"
         assert answer["web"] == "https://github.com/other/thing"
 
+    def test_a_push_only_remote_still_answers(self, remote_repo: dict) -> None:
+        """
+        The door reports fetch and push separately. A remote carrying only the
+        second one is unusual, not broken, and refusing it would hide a real
+        repository behind a shape assumption.
+        """
+        remote_repo["serve"](
+            remotes_document([{"name": "origin", "push": "https://github.com/AIOSAI/AIPass.git", "redacted": False}])
+        )
+
+        assert host_git.read_git_remote("demo")["web"] == "https://github.com/AIOSAI/AIPass"
+
     def test_a_repository_with_no_remote_is_refused_in_words(self, remote_repo: dict) -> None:
         """
-        NOT hypothetical: two projects in the real tree have none at all. An
-        empty string would render as a link card pointing nowhere.
+        NOT hypothetical: projects in the real tree have none at all. An empty
+        string would render as a link card pointing nowhere.
         """
-        remote_repo["configure"]("[core]\n\tbare = false\n")
+        remote_repo["serve"](remotes_document([]))
 
         with pytest.raises(host_reads.ReadRefused) as caught:
-            host_remotes.read_git_remote("demo")
+            host_git.read_git_remote("demo")
 
         assert "remote" in str(caught.value)
 
-    def test_a_branch_in_no_repository_is_unavailable_not_refused(self, remote_repo: dict, tmp_path: Path) -> None:
-        """
-        Consistent with the changes lane: not-a-repository is a 503, because
-        nothing about the caller's request was wrong.
-        """
-        loose = tmp_path / "Loose" / "src" / "thing" / "br"
-        loose.mkdir(parents=True)
+    def test_a_remote_carrying_no_url_is_refused_rather_than_served_empty(self, remote_repo: dict) -> None:
+        """A named remote with nothing to point at is a link card to nowhere."""
+        remote_repo["serve"](remotes_document([{"name": "origin", "fetch": "", "push": "", "redacted": False}]))
 
-        census = MagicMock()
-        census.FleetUnavailable = host_fleet.FleetUnavailable
-        census.resolve_branch.return_value = {"name": "br", "path": str(loose)}
+        with pytest.raises(host_reads.ReadRefused):
+            host_git.read_git_remote("demo")
 
-        with patch(PATCH_HOST_FLEET, census):
-            with pytest.raises(host_reads.ReadUnavailable):
-                host_remotes.read_git_remote("br", project="LOOSE")
-
-    def test_no_subprocess_is_ever_spawned_on_this_lane(self, remote_repo: dict) -> None:
+    def test_a_refusing_door_travels_in_its_own_words(self, remote_repo: dict) -> None:
         """
-        THE DOCTRINE PIN. The gate refuses both raw readers, so this lane shells
-        nothing at all. A subprocess appearing here later would be an exception
-        carved into "git is drone-only" without anyone deciding to carve it.
+        D0. drone reached git and git said no; that sentence is theirs and it
+        arrives unrewritten, because this server owns the pipe and not the
+        meaning.
         """
-        with patch.object(subprocess, "run") as mock_run:
-            host_remotes.read_git_remote("demo")
+        remote_repo["serve"](
+            json.dumps({"ok": False, "remotes": [], "count": 0, "message": "git remote error: not a repository"}),
+            returncode=1,
+        )
 
-        mock_run.assert_not_called()
+        with pytest.raises(host_reads.ReadRefused) as caught:
+            host_git.read_git_remote("demo")
+
+        assert "not a repository" in str(caught.value)
+
+    def test_a_door_that_leaves_no_document_is_unavailable_not_refused(self, remote_repo: dict) -> None:
+        """
+        drone's caller check refuses before the door runs, with nothing on
+        stdout and the reason on stderr. Nobody could tell — so this is a 503
+        and it carries their sentence rather than inventing "no remote".
+        """
+        remote_repo["serve"]("", returncode=1, stderr="cannot verify caller")
+
+        with pytest.raises(host_reads.ReadUnavailable) as caught:
+            host_git.read_git_remote("demo")
+
+        assert "cannot verify caller" in str(caught.value)
+
+    def test_this_lane_routes_through_drone_like_every_other(self, remote_repo: dict) -> None:
+        """
+        THE DOCTRINE PIN, INVERTED BY THE DOOR ARRIVING. It used to read that no
+        subprocess was ever spawned here, because there was nothing to spawn.
+        Now "git is drone-only, servers included" means this lane must go
+        through drone exactly like the rest — and ask in machine mode, because
+        a rendered answer is the thing this round was spent getting away from.
+        """
+        host_git.read_git_remote("demo")
+
+        command = remote_repo["runner"].call_args[0][0]
+
+        assert command[:3] == ["drone", "@git", "remote"]
+        assert "--json" in command
+
+    def test_it_runs_in_the_branch_directory(self, remote_repo: dict) -> None:
+        """Exactly as an operator standing in that branch would run it."""
+        host_git.read_git_remote("demo")
+
+        assert remote_repo["runner"].call_args.kwargs["cwd"] == str(remote_repo["branch"].resolve())
 
 
 class TestRemoteURLForms:
@@ -2447,8 +2914,8 @@ class TestRemoteURLForms:
     """
 
     def _web(self, remote_repo: dict, url: str) -> Any:
-        remote_repo["configure"]('[remote "origin"]\n\turl = %s\n' % url)
-        return host_remotes.read_git_remote("demo")["web"]
+        remote_repo["serve"](remote_document(url))
+        return host_git.read_git_remote("demo")["web"]
 
     def test_the_scp_short_form_becomes_browsable(self, remote_repo: dict) -> None:
         """The form every forge offers by default."""
@@ -2476,9 +2943,9 @@ class TestRemoteURLForms:
         constructed scheme in front of a filesystem path would be a link card
         leading somewhere that has never existed.
         """
-        remote_repo["configure"]('[remote "origin"]\n\turl = /srv/mirrors/aipass.git\n')
+        remote_repo["serve"](remote_document("/srv/mirrors/aipass.git"))
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["web"] is None
         assert answer["url"] == "/srv/mirrors/aipass.git"
@@ -2498,45 +2965,82 @@ class TestRemoteURLForms:
 
 class TestRemoteCredentialsNeverTravel:
     """
-    NOT IN THE ASK, and shipped anyway because the alternative is a credential
-    on a phone. A remote URL may carry `user:token@` — that is how a machine
-    clones a private repository without an agent — and this lane's entire job is
-    to hand that URL to a client over the network.
+    THE DOCTRINE THAT OUTLIVED THE MODULE THAT CARRIED IT.
+
+    A remote URL may carry `user:token@` — that is how a machine clones a
+    private repository without an agent — and this lane's entire job is to hand
+    that URL to a client over the network.
+
+    drone redacts on their side too, and these tests do not re-test that. Every
+    assertion here is about what THIS surface emits when handed a credentialed
+    URL, whatever upstream did or did not do with it first: a rule enforced
+    only by somebody else's code is a rule that leaves silently the day their
+    code changes, and this process is the last one a URL passes through before
+    it crosses a network.
     """
 
-    WITH_SECRET = '[remote "origin"]\n\turl = https://aiosai:ghp_supersecret@github.com/AIOSAI/AIPass.git\n'
+    SECRET = "ghp_supersecret"
+    WITH_SECRET = "https://aiosai:ghp_supersecret@github.com/AIOSAI/AIPass.git"
 
     def test_a_password_in_the_url_is_redacted(self, remote_repo: dict) -> None:
         """The secret never leaves this process, in any field."""
-        remote_repo["configure"](self.WITH_SECRET)
+        remote_repo["serve"](remote_document(self.WITH_SECRET))
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
-        assert "ghp_supersecret" not in json.dumps(answer)
+        assert self.SECRET not in json.dumps(answer)
+
+    def test_the_secret_is_stripped_even_when_upstream_says_it_already_did(self, remote_repo: dict) -> None:
+        """
+        THE PIN THE ARCHIVED MODULE HANDED OVER. A door that reports
+        `redacted: true` while still carrying the token is a door this server
+        must not take at its word — the answer is the only evidence, so the
+        answer is what is asserted.
+        """
+        remote_repo["serve"](remote_document(self.WITH_SECRET, redacted=True))
+
+        answer = host_git.read_git_remote("demo")
+
+        assert self.SECRET not in json.dumps(answer)
+        assert answer["redacted"] is True
 
     def test_the_redaction_is_announced_never_silent(self, remote_repo: dict) -> None:
         """
         An operator comparing this answer to their own configuration must be
         able to see that it was changed, or they will chase a phantom mismatch.
         """
-        remote_repo["configure"](self.WITH_SECRET)
+        remote_repo["serve"](remote_document(self.WITH_SECRET))
 
-        assert host_remotes.read_git_remote("demo")["redacted"] is True
+        assert host_git.read_git_remote("demo")["redacted"] is True
+
+    def test_a_clean_url_is_not_flagged_as_redacted(self, remote_repo: dict) -> None:
+        """A flag that is always true says nothing at all."""
+        assert host_git.read_git_remote("demo")["redacted"] is False
+
+    def test_upstreams_own_verdict_survives_even_when_nothing_is_left_to_strip(self, remote_repo: dict) -> None:
+        """
+        If drone already replaced the secret, this lane finds nothing to do —
+        and must still report that the URL was changed. Dropping their verdict
+        because our own pass was a no-op would silently un-announce it.
+        """
+        remote_repo["serve"](remote_document("https://***@github.com/AIOSAI/AIPass.git", redacted=True))
+
+        assert host_git.read_git_remote("demo")["redacted"] is True
 
     def test_the_url_keeps_its_shape_so_it_is_still_recognisable(self, remote_repo: dict) -> None:
         """Redacted, not deleted — the operator should still know which remote this is."""
-        remote_repo["configure"](self.WITH_SECRET)
+        remote_repo["serve"](remote_document(self.WITH_SECRET))
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert "aiosai" in answer["url"]
         assert "github.com/AIOSAI/AIPass" in answer["url"]
 
     def test_the_web_form_carries_no_user_at_all(self, remote_repo: dict) -> None:
         """A browsable link needs no identity in it, so it is given none."""
-        remote_repo["configure"](self.WITH_SECRET)
+        remote_repo["serve"](remote_document(self.WITH_SECRET))
 
-        answer = host_remotes.read_git_remote("demo")
+        answer = host_git.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
         assert "@" not in answer["web"]
@@ -2545,80 +3049,99 @@ class TestRemoteCredentialsNeverTravel:
         """
         `git@github.com` carries the standard ssh user and no secret. Flagging
         it would cry wolf on the single commonest remote form there is, and an
-        alarm that fires on everything is an alarm nobody reads.
+        alarm that fires on everything is an alarm nobody reads. drone draws
+        the same line on their side, independently — this asserts ours.
         """
-        remote_repo["configure"]('[remote "origin"]\n\turl = git@github.com:AIOSAI/AIPass.git\n')
+        remote_repo["serve"](remote_document("git@github.com:AIOSAI/AIPass.git"))
 
-        assert host_remotes.read_git_remote("demo")["redacted"] is False
+        assert host_git.read_git_remote("demo")["redacted"] is False
+
+    def test_the_ssh_user_is_not_a_credential_in_the_explicit_form_either(self, remote_repo: dict) -> None:
+        """
+        THE ONE THAT ACTUALLY REACHES THE RULE. The scp short form carries no
+        `://` and leaves the redactor at its first line, so it never exercises
+        the bare-user check at all — a mutation flagging every userinfo as a
+        secret survived the whole suite until this case existed. `ssh://git@`
+        has a scheme AND a colonless user, which is the only shape that does.
+        """
+        remote_repo["serve"](remote_document("ssh://git@github.com/AIOSAI/AIPass.git"))
+
+        answer = host_git.read_git_remote("demo")
+
+        assert answer["redacted"] is False
+        assert answer["url"] == "ssh://git@github.com/AIOSAI/AIPass.git"
 
 
-class TestRemoteInAWorktree:
+class TestTheRemoteLaneReadsNoConfiguration:
     """
-    A worktree carries its marker as a FILE pointing elsewhere, and its
-    configuration lives in the repository it was cut from — the same shape that
-    already bit the changed-file lane once.
+    WHAT THE ARCHIVED MODULE USED TO DO, pinned as something that must not come
+    back.
+
+    It parsed .git/config as an INI file and followed worktree pointer files by
+    hand to find the right one — necessary when there was no door, and a second
+    implementation of git's own resolution the moment there was. git resolves
+    commondir itself, so a worktree needs nothing special from this side now.
+
+    A file read reappearing here would be that resolution growing back quietly,
+    which is why the pin is on the behaviour rather than on the source.
     """
 
-    def _wire(self, tree: Path, branch: Path) -> Any:
+    def test_a_worktree_needs_nothing_special_from_this_side(self, tmp_path: Path) -> None:
+        """
+        The case that used to need pointer-following: a branch whose .git is a
+        FILE. The door answers for it like any other, because git resolved it.
+        """
+        tree = tmp_path / "Tree"
+        branch = tree / "src" / "aipass" / "demo"
+        branch.mkdir(parents=True)
+        (tree / ".git").write_text("gitdir: %s\n" % (tmp_path / "Main" / ".git" / "worktrees" / "wt"), encoding="utf-8")
+
         registry = tree / "AIPASS_REGISTRY.json"
         registry.write_text(
             json.dumps({"branches": [{"name": "DEMO", "path": str(branch), "email": "@demo"}]}),
             encoding="utf-8",
         )
+
         fake_drone = MagicMock()
         fake_drone.BranchNotFoundError = _BranchNotFound
         fake_drone.RegistryError = _RegistryBroken
         fake_drone.get_registry_path.return_value = str(registry)
         fake_drone.get_branch_info.return_value = {"name": "DEMO", "path": str(branch)}
-        return fake_drone
 
-    def test_a_pointer_file_is_followed_to_the_real_configuration(self, tmp_path: Path) -> None:
-        """Following the pointer is the difference between an answer and a 503."""
-        main = tmp_path / "Main"
-        (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
-        (main / ".git" / "config").write_text(
-            '[remote "origin"]\n\turl = https://github.com/AIOSAI/AIPass.git\n', encoding="utf-8"
-        )
-        (main / ".git" / "worktrees" / "wt" / "commondir").write_text("../..\n", encoding="utf-8")
+        completed = MagicMock()
+        completed.stdout = remote_document("https://github.com/AIOSAI/AIPass.git")
+        completed.stderr = ""
+        completed.returncode = 0
 
-        tree = tmp_path / "Tree"
-        branch = tree / "src" / "aipass" / "demo"
-        branch.mkdir(parents=True)
-        (tree / ".git").write_text("gitdir: %s\n" % (main / ".git" / "worktrees" / "wt"), encoding="utf-8")
-
-        fake_drone = self._wire(tree, branch)
         with (
             patch(PATCH_READS_DRONE, fake_drone),
             patch(PATCH_READS_LOGGER),
             patch(PATCH_READS_JSON),
             patch(PATCH_GIT_LOGGER),
             patch(PATCH_GIT_JSON),
-            patch(PATCH_REMOTES_LOGGER),
-            patch(PATCH_REMOTES_JSON),
+            patch.object(subprocess, "run", return_value=completed),
         ):
-            answer = host_remotes.read_git_remote("demo")
+            answer = host_git.read_git_remote("demo")
 
         assert answer["web"] == "https://github.com/AIOSAI/AIPass"
 
-    def test_a_pointer_to_nowhere_refuses_rather_than_guessing(self, tmp_path: Path) -> None:
-        """A dangling pointer is reported. A fallback here would invent a repository."""
-        tree = tmp_path / "Broken"
-        branch = tree / "src" / "aipass" / "demo"
-        branch.mkdir(parents=True)
-        (tree / ".git").write_text("gitdir: %s\n" % (tmp_path / "gone"), encoding="utf-8")
+    def test_a_repository_configuration_is_never_opened(self, remote_repo: dict) -> None:
+        """
+        The INI parse is gone and stays gone. Asserted by watching Path.open
+        across the whole call rather than by reading the source, because a
+        second resolution can be written with any spelling at all.
+        """
+        opened = []
+        real_open = Path.open
 
-        fake_drone = self._wire(tree, branch)
-        with (
-            patch(PATCH_READS_DRONE, fake_drone),
-            patch(PATCH_READS_LOGGER),
-            patch(PATCH_READS_JSON),
-            patch(PATCH_GIT_LOGGER),
-            patch(PATCH_GIT_JSON),
-            patch(PATCH_REMOTES_LOGGER),
-            patch(PATCH_REMOTES_JSON),
-        ):
-            with pytest.raises(host_reads.ReadUnavailable):
-                host_remotes.read_git_remote("demo")
+        def watched(self: Path, *args: Any, **kwargs: Any) -> Any:
+            opened.append(str(self))
+            return real_open(self, *args, **kwargs)
+
+        with patch.object(Path, "open", watched):
+            host_git.read_git_remote("demo")
+
+        assert opened == []
 
 
 class TestWhichRepositoryADirectoryIsIn:

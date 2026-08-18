@@ -23,6 +23,10 @@ permissions:
 jobs:
   windows-setup:
     runs-on: windows-latest
+    # A healthy run is ~9 minutes. Without this bound a hung test burns the
+    # runner for GitHub's 6h default — 2026-08-18 sat 1h57m until a push
+    # cancelled it (commons concurrent probe, os.replace sharing violation).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

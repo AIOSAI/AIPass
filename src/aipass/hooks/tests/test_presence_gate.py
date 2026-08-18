@@ -170,7 +170,79 @@ class TestHandle:
         ):
             result = presence_gate.handle({})
         assert result["exit_code"] == 0
-        assert result["sound"] == "presence gate"
+
+    def test_observe_only_plays_no_sound(self):
+        """Audio for a decision the gate is NOT making is worse noise than the log line."""
+        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        with (
+            patch.object(presence_gate, "_OBSERVE_ONLY", True),
+            patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+            patch("importlib.import_module", side_effect=router),
+        ):
+            result = presence_gate.handle({})
+        assert "sound" not in result
+
+    def test_observe_only_records_at_info_not_warning(self):
+        """Declining to act is chosen behavior — compass #277. Evidence kept, escalation dropped."""
+        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        with (
+            patch.object(presence_gate, "_OBSERVE_ONLY", True),
+            patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+            patch("importlib.import_module", side_effect=router),
+            patch.object(presence_gate, "logger") as mock_logger,
+        ):
+            presence_gate.handle({})
+        assert [c for c in mock_logger.info.call_args_list if c.args and "would-block" in c.args[0]]
+        assert not [c for c in mock_logger.warning.call_args_list if c.args and "would-block" in c.args[0]]
+
+    def test_real_block_still_warns(self):
+        """GUARD: only the observe-only path was quietened."""
+        _, _, router = _make_mocks(our_pid=1000, occupant=_OCCUPANT)
+        with (
+            _blocking(),
+            patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+            patch("importlib.import_module", side_effect=router),
+            patch.object(presence_gate, "logger") as mock_logger,
+        ):
+            presence_gate.handle({})
+        assert [c for c in mock_logger.warning.call_args_list if c.args and "BLOCKED" in c.args[0]]
+
+
+class TestRemedyIsSatisfiable:
+    """A gate must be satisfiable by an action it permits. cc_sessions._stop_session
+    refuses to stop bg sessions (no per-job stop in the CLI), so offering `reclaim`
+    against a bg occupant names a remedy that provably cannot work."""
+
+    BG_OCCUPANT = {
+        "pid": 434858,
+        "sessionId": "bdbc613b",
+        "cwd": "/tmp/branch",
+        "kind": "bg",
+        "name": "codeql debugging",
+    }
+
+    def _reason(self, occupant):
+        _, _, router = _make_mocks(our_pid=1000, occupant=occupant)
+        with (
+            _blocking(),
+            patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True),
+            patch("importlib.import_module", side_effect=router),
+        ):
+            result = presence_gate.handle({})
+        return json.loads(result["stdout"])["reason"]
+
+    def test_bg_occupant_does_not_offer_reclaim_as_the_remedy(self):
+        """It may NAME reclaim to say it will not work — it must not instruct you to run it."""
+        reason = self._reason(self.BG_OCCUPANT)
+        assert "drone @hooks sessions reclaim @" not in reason
+        assert "cannot stop it" in reason
+
+    def test_bg_occupant_says_why_it_cannot_be_stopped(self):
+        assert "no per-job stop" in self._reason(self.BG_OCCUPANT)
+
+    def test_interactive_occupant_still_offers_reclaim(self):
+        """GUARD: the remedy that DOES work must survive."""
+        assert "reclaim" in self._reason(_OCCUPANT)
 
     def test_gate_error_allows(self):
         with patch.dict(os.environ, {"AIPASS_SESSION_TYPE": "interactive"}, clear=True):

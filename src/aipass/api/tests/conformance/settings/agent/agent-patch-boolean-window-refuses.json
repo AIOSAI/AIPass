@@ -1,0 +1,26 @@
+{
+  "description": "The bool-is-an-int trap again, on the write side, where letting it through would store true as 1.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-boolean-window-refuses",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "auto_compact_window": true
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

@@ -11,11 +11,18 @@ file on disk parses as JSON and holds either the old document or the new one.
 """
 
 import json
+import re
 import threading
 
 import pytest
 
 from aipass.cli.apps.handlers.json import json_handler
+
+# A truncating write: open(..., <w|a|w+|wb|...>) in either quote style, or
+# Path.write_text. Case-insensitive so "W" cannot smuggle one past.
+_TRUNCATING_WRITE = re.compile(
+    r"""\bopen\s*\([^)]*['"][waWA]\+?b?['"]|\.write_text\s*\(""",
+)
 
 
 @pytest.fixture
@@ -116,14 +123,23 @@ class TestWriteSitesAreAtomic:
         assert calls == [corrupt]
 
     def test_no_write_site_truncates_with_mode_w(self, json_dir):
-        """Guard: a future edit reintroducing open(..., 'w') re-opens the race."""
+        """Guard: a future edit reintroducing a truncating write re-opens the race.
+
+        The first version of this guard matched the literal '"w"' and so let
+        single-quoted open(path, 'w') straight through — a guard with a hole the
+        exact shape of the bug it guards. Matches BOTH quote styles, the w/a/w+
+        family case-insensitively, and Path.write_text (which truncates too).
+        os.fdopen is exempt: that IS the atomic helper writing its own staged
+        temp file, which is the fix, not the defect.
+        """
         source = json_handler.__file__
         with open(source, "r", encoding="utf-8") as handle:
             body = handle.read()
+
         offenders = [
-            line.strip() for line in body.splitlines() if "open(" in line and '"w"' in line and "fdopen" not in line
+            line.strip() for line in body.splitlines() if _TRUNCATING_WRITE.search(line) and "fdopen" not in line
         ]
-        assert offenders == []
+        assert offenders == [], f"non-atomic write site(s): {offenders}"
 
 
 class TestConcurrentReadsStayParseable:

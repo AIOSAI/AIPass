@@ -1,0 +1,20 @@
+{
+  "description": "A settings document is an object here too.",
+  "document": "baud",
+  "expect": {
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "raw": "\"just a string\"",
+    "state": "raw"
+  },
+  "id": "baud-read-json-that-is-not-an-object-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

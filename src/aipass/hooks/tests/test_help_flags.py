@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps import sound
 from aipass.hooks.apps.handlers.cli.help_flags import HELP_FLAGS, is_help_flag, wants_help
 from aipass.hooks.apps.modules import (
     alert_dismiss,
@@ -164,24 +165,34 @@ class TestFeedbackNeverTogglesOnHelp:
 
 
 class TestHooksoundNeverTogglesOnHelp:
+    """The flag moved behind sound.mute/unmute, so these now patch the real
+    owner and run the true write path end to end rather than a local name."""
+
     def test_help_after_off_does_not_mute(self, tmp_path):
         flag = tmp_path / "mute"
-        with patch.object(hooksound, "MUTE_FLAG", flag):
+        with patch.object(sound, "MUTE_FLAG", flag):
             assert hooksound.handle_command("hooksound", ["off", "--help"]) is True
         assert not flag.exists(), "help request muted the fleet"
 
     def test_help_after_on_does_not_unmute(self, tmp_path):
         flag = tmp_path / "mute"
         flag.touch()
-        with patch.object(hooksound, "MUTE_FLAG", flag):
+        with patch.object(sound, "MUTE_FLAG", flag):
             assert hooksound.handle_command("hooksound", ["on", "--help"]) is True
         assert flag.exists(), "help request unmuted the fleet"
 
     def test_real_mute_still_runs(self, tmp_path):
         flag = tmp_path / "mute"
-        with patch.object(hooksound, "MUTE_FLAG", flag):
+        with patch.object(sound, "MUTE_FLAG", flag):
             assert hooksound.handle_command("hooksound", ["off"]) is True
         assert flag.exists()
+
+    def test_real_unmute_still_runs(self, tmp_path):
+        flag = tmp_path / "mute"
+        flag.touch()
+        with patch.object(sound, "MUTE_FLAG", flag):
+            assert hooksound.handle_command("hooksound", ["on"]) is True
+        assert not flag.exists()
 
 
 class TestEngineLogNeverDumpsOnHelp:
@@ -229,3 +240,45 @@ class TestHelpGateDoesNotHijackOtherModules:
 
     def test_verify_does_not_answer_for_another_command(self):
         assert wire_verify.handle_command("status", ["--help"]) is False
+
+
+class TestUnknownCommandNamesWhatFailed:
+    """`hooksound sideways` used to report "Unknown command: hooksound" — and
+    hooksound IS known, so the caller was told the wrong token was wrong. A
+    renamed sub-verb read as a missing top-level command. Exit was always 1;
+    only the wording lied. (@api read exit 0 through a pipe, where the shell
+    reports the last pipeline element's status, not drone's.)"""
+
+    def _main(self, argv):
+        import sys
+        from unittest.mock import patch
+
+        from aipass.hooks.apps import hooks
+
+        printed = []
+        with (
+            patch.object(sys, "argv", ["hooks", *argv]),
+            patch.object(hooks.console, "print", side_effect=lambda m="", **k: printed.append(str(m))),
+        ):
+            code = hooks.main()
+        return code, "\n".join(printed)
+
+    def test_unknown_subverb_exits_nonzero(self):
+        code, _ = self._main(["hooksound", "sideways"])
+        assert code == 1
+
+    def test_unknown_subverb_names_the_subverb(self):
+        _, out = self._main(["hooksound", "sideways"])
+        assert "hooksound sideways" in out
+
+    def test_unknown_top_level_command_still_named_alone(self):
+        code, out = self._main(["banana"])
+        assert code == 1
+        assert "Unknown command: banana" in out
+
+    def test_known_verbs_still_succeed(self):
+        from unittest.mock import patch
+
+        with patch("aipass.hooks.apps.sound.MUTE_FLAG"):
+            code, _ = self._main(["hooksound"])
+        assert code == 0

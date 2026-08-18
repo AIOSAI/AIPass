@@ -1,0 +1,41 @@
+{
+  "description": "BAUD's own document travels WHOLE. This lane owns no keys in it and interprets none of them — the pipe, never the meaning.",
+  "document": "baud",
+  "expect": {
+    "document": {
+      "panes": {
+        "left": 40,
+        "right": 60
+      },
+      "recent": [
+        "a",
+        "b"
+      ],
+      "theme": "dark"
+    },
+    "outcome": "ok"
+  },
+  "given": {
+    "content": {
+      "panes": {
+        "left": 40,
+        "right": 60
+      },
+      "recent": [
+        "a",
+        "b"
+      ],
+      "theme": "dark"
+    },
+    "path": ".aipass/baud.settings.json",
+    "state": "present"
+  },
+  "id": "baud-read-is-opaque",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

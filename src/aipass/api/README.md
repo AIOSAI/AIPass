@@ -5,16 +5,22 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (44/44) | **Tests:** 1308 pass | **Functions:** 202 public (183 tested)
-**Last Updated:** 2026-08-17
+**Seedgo:** 99% (44/45 at 100%) | **Tests:** 1382 pass | **Functions:** 201 public (185 tested)
+**Last Updated:** 2026-08-18
 
-*Back to 100 with nothing bypassed. The two long-standing exceptions are gone
-rather than documented: the attach route's nesting went when the room
-resolution and the PTY pump moved out of the app factory — both already took
-everything they used as arguments, so there was never a closure holding them
-in — and `settings.py`'s silent catches went when each one was given the
-honest answer it was hiding (an unreadable settings file is a fault, not a
-blank document).*
+*The one checker under 100 is seedgo's new gateway_boundary, and it names a
+single line: `settings.py` still writes `settings.local.json` by hand rather
+than through @aipass' door. That lane is separately planned. The hooks lane
+beside it no longer bypasses anything — the mute switch is flipped by
+@hooks' own registered command and read through their own `is_muted()`, so
+this branch no longer holds a second copy of where that flag lives.*
+
+*The two long-standing exceptions before that are gone rather than
+documented: the attach route's nesting went when the room resolution and the
+PTY pump moved out of the app factory — both already took everything they
+used as arguments, so there was never a closure holding them in — and
+`settings.py`'s silent catches went when each one was given the honest answer
+it was hiding (an unreadable settings file is a fault, not a blank document).*
 
 ---
 
@@ -98,14 +104,15 @@ api/
 │   │   ├── config/provider.py
 │   │   ├── google/auth.py, service_factory.py, retry.py
 │   │   ├── host/config.py, tokens.py, server.py, feed.py, fleet.py, face.py, verbs.py, attach.py, uploads.py
-│   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the git surface), remotes.py (where a repo points)
+│   │   ├── host/reads.py (resolution, files, dirs), git_reads.py (the whole git surface): patch, changes, log, commit, remote
 │   │   ├── integrations/list.py, call.py
 │   │   ├── json/json_handler.py
 │   │   ├── openrouter/caller.py, client.py, models.py, provision.py
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1250 test functions across 43 files
+└── tests/                             # 1263 test functions across 44 files
+    └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -234,8 +241,8 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/agent-settings` | operate | Patch those three. Three-state by JSON's nature: absent touches nothing, `null` removes, a value sets |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
 | `POST /v1/baud-settings` | operate | Shallow-merge into it — `null` removes, a nested object replaces |
-| `GET /v1/hooks-sound` | read | @hooks' mute switch, read live — the flag file is the only truth |
-| `POST /v1/hooks-sound` | operate | Flip machine-wide hook sounds. Idempotent both directions |
+| `GET /v1/hooks-sound` | read | @hooks' mute switch, read live through their own `is_muted()` |
+| `POST /v1/hooks-sound` | operate | Flip machine-wide hook sounds through @hooks' own command. Idempotent both directions |
 | `POST /v1/files/upload` | operate | Multipart image. The SERVER names the file; returns its absolute path |
 | `WS /v1/room/attach?branch=&project=&kind=` | operate\* | A real PTY. Bearer on the subprotocol. `kind=watch` is **read** scope; a watch with **no branch** is global mission control |
 | `GET /` | none | @baud's phone face, served from this same origin |
@@ -300,14 +307,17 @@ Matching a contract is not a reason to discard something already measured —
 @baud's own argument for their whole-project total is that a count hiding a new
 module reads as false calm, and that does not stop being true here.
 
-**This lane reads a rendered surface, and says so.** Git is drone-only, servers
-included, so it shells `drone @git status` and reads the porcelain codes drone
-passes through verbatim — keyed on that structure, never on the prose drone
-frames the list with. drone already has `get_branch_status()` returning
-`{ok, files, total}`, but only under `apps/handlers`, not on its public package
-surface, and reaching into another branch's internals is the layering mistake
-this package has made once already. A `--json` on `drone @git status`, or that
-function published, retires every line of the parsing. It has been asked for.
+**This lane read a rendered surface until 08-18, and that was the bug.** Git is
+drone-only, servers included, so it shells `drone @git status` — but it used to
+read the *screen* output and pass the porcelain codes through verbatim, which
+was faithful to a surface that had already flattened them. `get_branch_status()`
+existed under `apps/handlers` and returning to it would have meant reaching into
+another branch's internals, the layering mistake this package has made once
+already, so the ask was for a `--json` instead. **It shipped**, and it took
+every line of the parsing with it: the lane now reads
+`{ok, branch, scope, files[{status, path, index, worktree}], total, message}`
+and the two columns arrive as two columns. Asking for the right door beat
+parsing the wrong one more carefully, which is the whole lesson of the round.
 
 **It serves foreign projects, and a wrong belief here hid a real bug.** This
 section previously said no drone-routed lane could measure a foreign project:
@@ -343,9 +353,38 @@ would paint it clean when nothing was measured.
 *Where it lives: `git_reads.py`. The read lane started as one module and the
 git surface grew until it crossed the 1500-line cap, so it split along the seam
 that was already there — repository reads in `git_reads.py`, files and
-directories and the name fence in `reads.py`, and the remote in `remotes.py`
-because that lane shells nothing at all. The dependency runs one way: the
-repository reads lean on the resolution, never the reverse.*
+directories and the name fence in `reads.py`. The remote lane lived apart in
+`remotes.py` for one reason, that it shelled nothing at all; `drone @git remote
+--json` retired that reason on 08-18 and it moved in with the other drone-door
+readers. The dependency runs one way: the repository reads lean on the
+resolution, never the reverse.*
+
+**Every door here is asked in machine mode — and one of them had been lying.**
+Since 08-18 the status, log, show and remote lanes ask `--json` and read the
+document, with the document's own `ok` deciding refusals. That is not tidiness.
+drone's rendered status line is built as `f"  {status.strip():>2} {path}"` —
+their comment calls it *"for the screen only"* — which right-aligns a one-letter
+porcelain code into the **second** column. So every index-only change reached
+this server already dressed as a worktree one: `M ` arrived as ` M`, `A ` as
+` A`, `D ` as ` D`. Measured against the shipped parser before the switch: of
+six codes fed through drone's own renderer, **three came back as something git
+never said**, and staged-vs-unstaged modify and staged-vs-unstaged delete were
+each a single answer. No parsing could have recovered it — the columns were gone
+before this process saw them. The refusal split follows the @memory config
+precedent: `ok: false` is an **answer** and travels as a 400 in their words;
+output that is not one JSON object is a 503, which is also the shape drone's
+caller-verification refusal takes, since that one never reaches the door and
+leaves its sentence on stderr.
+
+**Measured shut, and said so rather than worked around:** `drone @git diff` has
+no `--json` at all, so that half still reads an exit code. `drone @git show
+--json` is an **envelope** — its `content` is git show's own text — so the
+commit lane still parses that text on structure, and only its failure detection
+moved. `drone @git show <ref> <path> --json` returns the file's *contents* at
+that ref, not a per-file diff, so the per-file split stays server-side. The
+brief for this round expected ~385 lines of scraping to retire; two of the three
+doors did not carry what that assumed, and reporting the smaller true number was
+cheaper than shipping against a shape nobody had measured.
 
 Patrick, on the phone's git screen: *"git diffs are pretty much useless. we need
 a real diff setup."* The wall of text was one 308KB response. Tapping one file
@@ -371,16 +410,20 @@ a lie told by omission.
 **Two doors were measured shut, and neither is worked around in silence:**
 
 - **`drone @git diff` takes no path and no `-U`.** `_handle_diff` recognises
-  exactly `--staged` and `--all`; everything else in argv is ignored, the same
-  trap as `status --json`. So `path` is served by generating the patch and
-  splitting it here, on the per-file headers — machine structure, the same
-  doctrine that keeps the status parser off drone's prose. The consequence
+  exactly `--staged` and `--all`; everything else in argv is ignored, `--json`
+  included — re-measured 08-18, still the one door with no machine mode. So
+  `path` is served by generating the patch and splitting it here, on the
+  per-file headers — machine structure, which is the only thing this file still
+  parses out of text anywhere. The consequence
   DPLAN-0303 needs to know: **context stays at three lines, not the `-U1` the
   design specified**, because context is baked in at generation time. Asked of
   @drone.
-- **`drone @git log` is `--oneline`.** A row carries a sha and a subject and
-  nothing else — no author, no relative date, however much a design asks for
-  them. Those live in `show`, one commit at a time, and fifty subprocesses each
+- **`drone @git log` is `--oneline` underneath, `--json` or not.** A row carries
+  a sha and a subject and nothing else — no author, no relative date, however
+  much a design asks for them; the document has exactly the two fields the
+  rendered line had. Re-measured 08-18, and the door does not clamp either:
+  asked for 99999 it answered with 1626, every commit in the repository, so this
+  lane's own 1–50 refusal is the only thing between a phone and a whole history. Those live in `show`, one commit at a time, and fifty subprocesses each
   dragging a whole patch is not a list lane. `/v1/git-log` ships what exists;
   `/v1/commit` carries the author and date for the one commit being looked at.
   Asked of @drone.
@@ -403,15 +446,17 @@ produces exactly `--- x`) can never be read as the file's name. A guard at the
 hunk boundary was written for that and then **deleted**: no mutation could kill
 it, which is what proved it unreachable rather than careful.
 
-**Status rides per row, in git's vocabulary and not a new one.** @devpulse
-measured the gap from the face while this was building: the lane read the
-porcelain code and then *discarded* it, and untracked files never left the server
-as anything but a number. So of the four VS Code chips (M/A/D/U) only two were
-derivable, and a staged-new file was indistinguishable from a modified one.
-`rows[]` now carries every changed path with its code **verbatim and unstripped**
-— the two columns are index-then-worktree, so `A ` (staged new) and ` M`
-(modified, unstaged) stay two different answers instead of collapsing into one
-letter. Which code means which chip is the face's decision, made once in their
+**Status rides per row, in git's vocabulary and not a new one — and since
+08-18 the data finally honours the contract.** @devpulse measured the first half
+of the gap from the face: the lane read the porcelain code and then *discarded*
+it, and untracked files never left the server as anything but a number. `rows[]`
+carries every changed path with its code **verbatim and unstripped**, plus
+`index` and `worktree` split out beside it. The second half was worse and took
+the `--json` door to find: the code being passed through verbatim had *already*
+been flattened by drone's screen rendering, so `A ` (staged new) and ` M`
+(modified, unstaged) had been the same answer here for as long as rows existed.
+All four VS Code chips (M/A/D/U) are derivable from `index` and `worktree` now,
+and staged-vs-unstaged is a difference the phone can finally see. Which code means which chip is the face's decision, made once in their
 `buildRows`; a letter invented here would be a second vocabulary for a fact git
 has already stated. Untracked paths appear in `rows` by name and stay **out** of
 `files` and `count` — additive, so @baud's desktop consumer parses exactly what
@@ -420,22 +465,28 @@ disagreement this lane exists to avoid. Ignored paths are in no list at all.
 
 ### The remote lane (DPLAN-0303 phase 4)
 
-*Where it lives: `remotes.py`.*
+*Where it lives: `git_reads.py`. It used to be `remotes.py`; that module is
+archived under `apps/handlers/host/.archive/`, kept rather than deleted.*
 
 Phase 4 goes links-first — zero-auth link-cards out to GitHub, built from
 constructible URLs — so the face has to be told the repository's remote.
 
-**There is no door for this, and that was measured before anything was designed.**
-Not a verb on drone's git surface. Not on drone's public Python surface (checked
-directly — the module exports branch resolution and routing, nothing about
-configuration). And the fleet's own gate refuses **both** raw readers: neither is
-in its read-only allowlist, which is the fleet declining to call them reads. So
-this lane **shells nothing at all** and reads the repository's configuration as
-the INI file it is. That leaves the drone-only rule this file documents intact
-instead of quietly carving an exception into it for one lane — a test asserts no
-subprocess is ever spawned here, so a future one would be a decision somebody has
-to make on purpose. A verb on drone retires every line of it, and it has been
-asked for.
+**There was no door for this, which is why the lane existed apart.** Measured
+before anything was designed: not a verb on drone's git surface, not on their
+public Python surface, and the fleet's own gate refused **both** raw readers,
+which is the fleet declining to call them reads. So the lane shelled nothing at
+all, read the repository's configuration as the INI file it is, and followed
+`.git` pointer files by hand to find it in a worktree. It lived in its own
+module so that boundary stayed visible rather than buried under the git roof.
+
+**`drone @git remote --json` shipped on 08-18 and retired all of it** —
+including the worktree pointer-following, because git resolves commondir itself.
+127 lines of functions went outright: the INI parse, the pointer chase, the
+remote selection off raw config. What replaced them is a door call like every
+other lane's, so the pin inverted with it: the test that used to assert *no
+subprocess is ever spawned here* now asserts this lane routes through drone in
+machine mode, and a second pin watches `Path.open` across the whole call to
+catch git's own resolution growing back by any spelling.
 
 **Two fields because they are two facts.** `url` is what was configured,
 verbatim; `web` is what a browser can open. Collapsing them would make the lane
@@ -459,10 +510,16 @@ two projects in the real tree have none.** Verified live against the real
 Sentinel repo, which answers `400 read_refused` with the sentence. An empty
 string would render as a link card pointing nowhere.
 
-**Credentials never travel, which was not in the ask.** A remote URL may carry
-`user:token@` — that is how a machine clones a private repository with no human
-present — and this lane's entire job is handing that URL to a client over a
-network. The password half is replaced and the user half survives, so an operator
+**Credentials never travel, which was not in the ask — and the doctrine
+outlived the module that carried it.** drone redacts on their side too; this
+lane redacts again on ours, because this process is the last one a URL passes
+through before it crosses a network and a rule enforced only by somebody else's
+code leaves silently the day their code changes. Every pin asserts what **this**
+surface emits, never what upstream sent — including one that hands the lane a
+document claiming `redacted: true` while still carrying the token. A remote URL
+may carry `user:token@` — that is how a machine clones a private repository with
+no human present — and this lane's entire job is handing that URL to a client
+over a network. The password half is replaced and the user half survives, so an operator
 still recognises their own configuration, and `redacted` is what stops the change
 being silent. The browsable form carries no userinfo at all. A bare `git@` is the
 standard ssh user and is **not** flagged: an alarm that fires on the commonest
@@ -475,6 +532,16 @@ census) both return their GitHub URLs; Sentinel refuses; eight mutations against
 this lane all bite. One of those eight first appeared to survive — its anchor had
 not matched, so the mutation never applied and the green run proved nothing. It
 was re-run properly before being counted.
+
+Re-verified after the move to the door (08-18): 16 mutations across the whole
+`--json` parse layer, all 16 biting under `PYTHONDONTWRITEBYTECODE`. **Two of
+them survived the first pass and were real gaps, not harness noise.** One flagged
+every userinfo as a credential and lived, because the only `git@` test used the
+scp short form — which carries no `://` and leaves the redactor at its first
+line, so it never reached the rule it was meant to pin; an explicit `ssh://git@`
+case now does. The other dropped the log's object-name requirement and lived,
+because nothing fed it a commit row without a sha. Both pins were added and both
+mutations then bit.
 
 Sixteen mutations were run against the finished lanes and all sixteen bite,
 `PYTHONDONTWRITEBYTECODE` set so a same-length mutation cannot serve a stale
@@ -738,6 +805,31 @@ Requires the optional `[host]` extra (`fastapi`, `uvicorn`); commands fail with
 install instructions if it is absent.
 
 ---
+
+### The settings conformance corpus (FPLAN-0438)
+
+The settings lane is a faithful mirror of @baud's `settings.rs`, and a mirror
+drifts. @baud measured six real divergences in one night — by *running* both
+implementations, not by reading each other's source — and every one was a place
+where the two faces would have written the operator's own config differently
+while each believed it was correct.
+
+Prose cannot hold a mirror straight; shared **data** can. `tests/conformance/settings/`
+holds 39 cases in plain JSON — starting file state, the operation, the expected
+outcome — that each runtime proves it satisfies in its own suite. The python
+runner is `tests/test_settings_conformance.py`; a rust `#[test]` walks the same
+files with `serde` and no translation, which is the whole design constraint.
+
+Cases carry a per-runtime verdict, so a divergence one side has not closed yet
+is **skipped and reported**, never quietly passed. Two differences are recorded
+rather than forced: the desktop still accepts a zero compaction window and still
+drops unknown patch keys (both freeze-gated on their side), and file mode
+genuinely differs — python stages through `mkstemp` and lands `0600` whatever
+the umask is, rust inherits it.
+
+The corpus guards itself, because the failure that matters reports as success: a
+manifest pins every case by digest and by count, so an empty corpus and a stale
+one are both loud. See its own README for the format.
 
 ## Integration Contract System (DPLAN-0133)
 

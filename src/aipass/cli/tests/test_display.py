@@ -174,8 +174,27 @@ class TestHeader:
         ):
             display.header("Solo Title")
         output = get_output()
-        # Should have the title but not a key-value separator pattern
         assert "Solo Title" in output
+        # The OMISSION half — the behaviour this test is named for. Without it
+        # the name promised something no assertion checked. header() renders a
+        # detail as "  <key>: <value>", so with no details no such line exists.
+        detail_lines = [line for line in output.splitlines() if line.startswith("  ") and ":" in line]
+        assert detail_lines == [], f"header rendered detail rows with no details: {detail_lines}"
+
+    def test_header_with_details_renders_the_kv_rows(self):
+        """The positive control — proves the omission assert above can fail."""
+        cons, get_output = _make_capture_console()
+        with (
+            patch.object(display, "CONSOLE", cons),
+            patch.object(display, "_TRIGGER", None),
+            patch.object(display, "_TRIGGER_LOADED", True),
+        ):
+            display.header("Solo Title", {"Name": "feature", "Type": "module"})
+        output = get_output()
+        detail_lines = [line for line in output.splitlines() if line.startswith("  ") and ":" in line]
+        assert len(detail_lines) == 2
+        assert "Name: feature" in output
+        assert "Type: module" in output
 
     def test_header_fires_trigger_when_available(self):
         cons, _get_output = _make_capture_console()

@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: hooksound.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Hook sound control — mute/unmute all hook audio
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-08-18
 # =============================================
 
 """Hook sound control — mute and unmute all hook audio via drone @hooks hooksound."""
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.hooks.apps.sound import MUTE_FLAG, is_muted
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
+from aipass.hooks.apps.sound import is_muted, mute, unmute
+from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
@@ -47,14 +47,21 @@ def handle_command(command: str, args: list) -> bool:
             CONSOLE.print("  drone @hooks hooksound off    Mute all hook sounds")
             return True
 
+        # The flag is written through sound.py, not touched here: one writer. This
+        # module used to import the logger and never call it (noqa: F401), so a
+        # state change nobody could audit left no trace at all. The split is real:
+        # the door logs that the CLI was used, sound.py logs the effect — @api now
+        # imports mute()/unmute() directly, and those two callers look different.
+        if sub in ("on", "off"):
+            logger.info("[HOOKS] hooksound: '%s' requested via CLI", sub)
+
         if sub == "off":
-            MUTE_FLAG.touch()
+            mute()
             CONSOLE.print("[yellow]Hook sounds MUTED[/yellow]")
             return True
 
         if sub == "on":
-            if MUTE_FLAG.exists():
-                MUTE_FLAG.unlink()
+            unmute()
             CONSOLE.print("[green]Hook sounds ACTIVE[/green]")
             return True
 

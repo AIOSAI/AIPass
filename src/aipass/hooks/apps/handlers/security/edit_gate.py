@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Cross-project, cross-branch and inbox write protection (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-08-12
+# Modified: 2026-08-18
 # =============================================
 
 """Blocks unsafe edits: inbox writes, cross-project and cross-branch writes, daemon confinement, diagnostics state."""
@@ -172,6 +172,12 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
         lines = ["Over-limit .trinity entries (shorten before saving):"]
         for v in over:
             lines.append(f"  {v['entry_type']} [{v['key']}]: {v['length']}/{v['cap']} chars (+{v['over_by']})")
+        # Say what this gate can actually see. It is a PreToolUse hook on Edit/Write,
+        # so a write made through Bash (python -c, heredoc, sed) never reaches it and
+        # is not checked. Three branches have drifted over cap through that lane —
+        # @baud to 2529/300 for a week, @api to 12 sessions + 16 learnings. Claiming
+        # enforcement it does not have is what let the drift read as compliance.
+        lines.append("  (Edit/Write only — writes made through Bash are NOT checked. Caps are yours to keep there.)")
         return {
             "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
             "exit_code": 2,

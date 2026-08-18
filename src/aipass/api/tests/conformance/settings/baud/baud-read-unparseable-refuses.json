@@ -1,0 +1,20 @@
+{
+  "description": "Same doctrine as the other document: exists but unreadable is an error, never blank.",
+  "document": "baud",
+  "expect": {
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "raw": "}{",
+    "state": "raw"
+  },
+  "id": "baud-read-unparseable-refuses",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

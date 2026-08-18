@@ -1,0 +1,23 @@
+{
+  "description": "The file exists and this process may not read it. Answering blank would let a later patch write a fresh document over settings that were only ever unreadable.",
+  "document": "agent",
+  "expect": {
+    "outcome": "unavailable"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "unreadable"
+  },
+  "id": "agent-read-unreadable-file-refuses",
+  "notes": "Divergence 1. Both runtimes refuse; rust was fixed red-first the same night.",
+  "operation": {
+    "kind": "read"
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

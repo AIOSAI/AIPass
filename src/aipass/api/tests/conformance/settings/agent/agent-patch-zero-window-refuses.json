@@ -1,0 +1,27 @@
+{
+  "description": "A zero-token compaction window is not a setting, it is a mistake with a number in it.",
+  "document": "agent",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "content": {
+      "model": "opus"
+    },
+    "path": ".claude/settings.local.json",
+    "state": "present"
+  },
+  "id": "agent-patch-zero-window-refuses",
+  "notes": "Divergence 3. Rust accepts zero today; their fix is freeze-gated.",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "auto_compact_window": 0
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "pending"
+  }
+}

@@ -14,10 +14,51 @@ never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
 
 import json
 import os
+import subprocess
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
+
+
+def _ok() -> subprocess.CompletedProcess:
+    """What the door returns when it is happy — and, as it turns out, also when
+    it has no idea what you asked for. See the test that pins that."""
+    return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+
+@pytest.fixture
+def muted_elsewhere(tmp_path, monkeypatch):
+    """
+    @hooks' flag, relocated into this test's own directory, plus a stand-in for
+    the door that moves it.
+
+    The machine's real flag is the OPERATOR's — muting a sleeping developer's
+    fleet from a test suite is not a side effect anyone signed up for, and this
+    file's tests run on every suite. So the owner's own constant is redirected
+    and the subprocess is replaced by one that does to that file exactly what
+    the real command does to the real one.
+
+    Returns:
+        (flag, calls) — the relocated flag, and every command the lane sent.
+    """
+    flag = tmp_path / "aipass-hooks-muted"
+    calls: list = []
+
+    def fake_door(command, **kwargs):
+        calls.append(list(command))
+        verb = command[-1]
+        if verb == "off":
+            flag.touch()
+        elif verb == "on":
+            flag.unlink(missing_ok=True)
+        return _ok()
+
+    monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
+    monkeypatch.setattr(host_settings.subprocess, "run", fake_door)
+    return flag, calls
 
 
 def agent_file(root):
@@ -122,17 +163,114 @@ class TestBaudSettings:
 
 
 class TestHooksSound:
-    """The mute flag: a file, inverted on purpose, idempotent both ways."""
+    """
+    The mute flag: @hooks' file, @hooks' door, idempotent both ways.
 
-    def test_active_means_no_flag_and_flips_are_idempotent(self, tmp_path) -> None:
-        flag = tmp_path / "aipass-hooks-muted"
+    The CONTRACT here is unchanged from the hand-written version — sounds are
+    active when the flag is absent, and both directions of the flip are no-ops
+    when they are already true, because two faces may race on the same file.
+    Only the mechanism moved: this lane no longer knows where that file lives
+    or how to write it.
+    """
 
-        assert host_settings.hooks_sound_get(flag) is True
-        assert host_settings.hooks_sound_set(False, flag) is False
-        assert host_settings.hooks_sound_set(False, flag) is False
+    def test_this_module_does_not_know_where_the_mute_flag_lives(self) -> None:
+        """
+        The boundary, stated as a fact about this file's source.
+
+        Patrick's ruling: api is api. The flag's location is @hooks' knowledge —
+        it is declared once, at aipass/hooks/apps/sound.py, and a second copy
+        here is a second truth that drifts the first time they move it. This
+        lane had one: a module constant holding the file name and a helper
+        rebuilding the path beside it, both written before the door existed.
+        """
+        source = Path(host_settings.__file__).read_text(encoding="utf-8")
+
+        assert "aipass-hooks-muted" not in source
+        assert "hooks_mute_flag" not in source
+
+    def test_the_flip_goes_through_the_hooks_door(self, muted_elsewhere) -> None:
+        """
+        The WRITE is the registered command, not a touch and an unlink.
+
+        'drone @hooks hooksound on|off' has existed the whole time — this
+        module's own docstring named it while bypassing it. What travels is the
+        command; nothing here opens the file for writing.
+        """
+        flag, calls = muted_elsewhere
+
+        host_settings.hooks_sound_set(False)
+        host_settings.hooks_sound_set(True)
+
+        assert [call[-2:] for call in calls] == [["hooksound", "off"], ["hooksound", "on"]]
+        assert all(call[:2] == ["drone", "@hooks"] for call in calls)
+
+    def test_active_means_no_flag_and_flips_are_idempotent(self, muted_elsewhere) -> None:
+        """
+        The behaviour that was true before and is still true — same assertions,
+        new mechanism underneath.
+        """
+        flag, _ = muted_elsewhere
+
+        assert host_settings.hooks_sound_get() is True
+        assert host_settings.hooks_sound_set(False) is False
+        assert host_settings.hooks_sound_set(False) is False
         assert flag.exists()
-        assert host_settings.hooks_sound_set(True, flag) is True
-        assert host_settings.hooks_sound_set(True, flag) is True
+        assert host_settings.hooks_sound_set(True) is True
+        assert host_settings.hooks_sound_set(True) is True
+        assert not flag.exists()
+
+    def test_a_door_that_answers_but_does_not_flip_is_a_failure(self, muted_elsewhere) -> None:
+        """
+        MEASURED, and the reason this lane re-reads instead of trusting a zero.
+
+        'drone @hooks hooksound sideways' prints 'Unknown command' and exits
+        ZERO. So does a real flip. An exit code is therefore not evidence that
+        anything moved, and a lane that returned success on it would tell a
+        face the sound was muted while the fleet kept ringing. The flag itself
+        is the only witness, so it is read back and disagreement is a refusal.
+        """
+        flag, _ = muted_elsewhere
+        host_settings.hooks_sound_set(False)
+
+        # The door answers, exits zero, and does nothing at all.
+        with patch.object(host_settings.subprocess, "run", return_value=_ok()):
+            with pytest.raises(host_settings.SettingsUnavailable) as refusal:
+                host_settings.hooks_sound_set(True)
+
+        assert "hook sounds" in str(refusal.value).lower()
+
+    def test_a_door_that_cannot_be_reached_refuses_rather_than_writing_the_file(self, muted_elsewhere) -> None:
+        """
+        No silent fallback to hand-writing. If the door is gone, say so — the
+        one thing this lane must never do is quietly become the thing it
+        replaced.
+        """
+        flag, _ = muted_elsewhere
+
+        with patch.object(host_settings.subprocess, "run", side_effect=FileNotFoundError("drone")):
+            with pytest.raises(host_settings.SettingsUnavailable):
+                host_settings.hooks_sound_set(False)
+
+        assert not flag.exists()
+
+    def test_the_door_really_answers_to_this_command(self, tmp_path, monkeypatch) -> None:
+        """
+        NOT hermetic, on purpose, and the only test here that is.
+
+        Every other test in this class mocks the subprocess, which pins what
+        this lane SENDS and nothing about whether anyone is listening. If
+        @hooks renames the verb tomorrow, those tests all still pass and the
+        phone's toggle silently stops working. This one runs the real command
+        with TMPDIR pointed at a directory of its own, so the flag it moves is
+        this test's flag and the machine's own is never touched.
+        """
+        flag = tmp_path / "aipass-hooks-muted"
+        monkeypatch.setenv("TMPDIR", str(tmp_path))
+        monkeypatch.setattr(host_settings.hooks_sound, "MUTE_FLAG", flag)
+
+        assert host_settings.hooks_sound_set(False) is False
+        assert flag.exists()
+        assert host_settings.hooks_sound_set(True) is True
         assert not flag.exists()
 
 
@@ -212,3 +350,48 @@ class TestAFailedWriteLeavesNothingBehind:
 
         assert complaints, "a failed cleanup left no trace at all"
         assert any("staged" in line for line in complaints)
+
+
+class TestTheCorpusForcedTwoFixes:
+    """
+    Both ruled by the conformance corpus (FPLAN-0438 R3), both red first.
+
+    @baud measured every divergence between the two settings implementations
+    against real rust, and the strict side wins by doctrine. On these two, rust
+    was the strict side and this lane was the lenient one.
+    """
+
+    def test_a_parent_that_is_a_FILE_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
+        """
+        Divergence 2. A missing directory on the way to the file means nobody
+        has written settings yet. A FILE standing where a directory belongs
+        means the tree is broken, and reading that as 'no settings yet' invites
+        a patch to write a document into a path that cannot hold one.
+        """
+        blocking = tmp_path / "claude-settings"
+        blocking.write_text("I am a file, not a directory", encoding="utf-8")
+
+        with pytest.raises(host_settings.SettingsUnavailable):
+            host_settings.read_object(blocking / "settings.local.json")
+
+    def test_a_negative_window_reads_as_null_not_as_a_negative(self, tmp_path) -> None:
+        """
+        Divergence 5, and the one where rust was already right: their as_u64
+        declines a negative outright, while this view checked only that the
+        value was an int. A dial cannot show minus five thousand tokens, and
+        handing it to the face as a number says it can.
+        """
+        view = host_settings.agent_settings_view({"autoCompactWindow": -5})
+
+        assert view["auto_compact_window"] is None
+
+    def test_a_window_of_zero_still_reads_as_zero(self, tmp_path) -> None:
+        """
+        The boundary the fix must not overshoot. Zero is a representable u64,
+        so a file containing it reads back honestly — the refusal on zero
+        belongs to the WRITE path, where the value is being created, not to the
+        read that reports what is already there.
+        """
+        view = host_settings.agent_settings_view({"autoCompactWindow": 0})
+
+        assert view["auto_compact_window"] == 0

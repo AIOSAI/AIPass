@@ -1,0 +1,24 @@
+{
+  "description": "Read-then-error-then-write on the second document too.",
+  "document": "baud",
+  "expect": {
+    "file_unchanged": true,
+    "outcome": "refused"
+  },
+  "given": {
+    "path": ".aipass/baud.settings.json",
+    "raw": "not json",
+    "state": "raw"
+  },
+  "id": "baud-patch-onto-an-unparseable-file-refuses-before-writing",
+  "operation": {
+    "kind": "patch",
+    "patch": {
+      "theme": "light"
+    }
+  },
+  "runtimes": {
+    "python": "supported",
+    "rust": "supported"
+  }
+}

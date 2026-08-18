@@ -15,12 +15,23 @@ the whole surface and crossed the 1500-line cap; the seam is the one @devpulse
 named — repository reads here, file and directory reads there.
 
 WHAT MAKES THIS A MODULE AND NOT A SECTION. Every lane in here answers by
-running @drone's own door and parsing what comes back, so the whole file lives
-under one discipline: parse on STRUCTURE, never on prose. Patch blocks are found
-by their file headers, commits by a hex sha at the head of a row, changes by
-porcelain's own two-column codes. A reworded footer upstream can then never
-become a phantom file. reads.py answers from the filesystem directly and needs
-none of that.
+running @drone's own door, so the whole file lives under one discipline: read
+the MACHINE surface, never the rendered one. Since 2026-08-18 that means --json
+on every door that has it — status, log, show, remote — and the document's own
+`ok` verdict decides whether an answer is a refusal. Only the patch itself is
+still text, because a patch IS text: its per-file headers and hunk markers are
+git's own machine framing, and those are parsed on structure, never on prose.
+reads.py answers from the filesystem directly and needs none of this.
+
+WHY THE RENDERED SURFACE WAS NOT GOOD ENOUGH, measured 2026-08-18. drone's
+status renderer right-aligns the porcelain code into two columns — their own
+comment calls it "for the screen only" — so every INDEX-only change arrives
+looking like a WORKTREE one: 'A ' as ' A', 'M ' as ' M', 'D ' as ' D'. This
+lane read that and passed it on, which meant a staged file and an unstaged one
+were the same answer here for as long as rows have existed. No amount of
+careful parsing could have recovered it; the columns were gone before this
+process saw them. The document carries index and worktree separately, and that
+is the whole reason this file no longer reads a rendered line anywhere.
 
 GRAIN. Every answer here names its own scope. Branch grain means the seat's own
 subtree; repo grain means the whole repository the branch lives in. A log and a
@@ -35,8 +46,10 @@ Functions:
     read_git_changes() - Changed files, at branch grain or repo grain
     read_git_log()     - The repository's recent commits
     read_commit()      - One commit's facts and per-file stat list
+    read_git_remote()  - The repository's remote, for the phone's link-cards
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -64,12 +77,38 @@ MAX_DIFF_BYTES = 512 * 1024
 
 DIFF_TIMEOUT_SECONDS = 30
 
-# Porcelain's two status columns, as drone re-renders them: two spaces, the
-# code right-aligned in two, one space, then the path. Keyed on that structure
-# and on git's own codes — never on the prose drone frames the list with.
-STATUS_INDENT = "  "
-STATUS_CODE_SLICE = slice(2, 4)
-STATUS_PATH_FROM = 5
+# THE MACHINE DOOR. Asking for it is what makes every lane below a reader of
+# facts rather than of sentences, and it is not optional politeness: the
+# rendered surface cannot express the difference between a staged change and an
+# unstaged one (see the note in the module docstring), so a lane without this
+# flag is a lane that cannot be correct however well it parses.
+JSON_FLAG = "--json"
+
+# The envelope every one of drone's --json git doors answers with. The verdict
+# is theirs to give and ours to honour — never re-derived from an exit code.
+OK_KEY = "ok"
+MESSAGE_KEY = "message"
+
+# The payload field each door fills, and the fields inside one row.
+FILES_KEY = "files"
+COMMITS_KEY = "commits"
+REMOTES_KEY = "remotes"
+CONTENT_KEY = "content"
+
+STATUS_KEY = "status"
+PATH_KEY = "path"
+INDEX_KEY = "index"
+WORKTREE_KEY = "worktree"
+SHA_KEY = "sha"
+SUBJECT_KEY = "subject"
+
+# One remote's row. `fetch` is the URL a clone came from and the one a link-card
+# is built on; `push` answers only when they genuinely differ.
+NAME_KEY = "name"
+FETCH_KEY = "fetch"
+PUSH_KEY = "push"
+REDACTED_KEY = "redacted"
+DEFAULT_REMOTE = "origin"
 
 # git's own words for "not in the repository" and "ignored". Everything else in
 # a porcelain listing is a TRACKED path that differs from HEAD — which is
@@ -113,9 +152,142 @@ DEFAULT_LOG_COMMITS = 20
 # an ordinary character mid-name and an option at the front.
 SAFE_REF_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/~^@{}-")
 MAX_REF_LENGTH = 200
-MIN_SHA_LENGTH = 7
-MAX_SHA_LENGTH = 40
-HEX_CHARS = frozenset("0123456789abcdef")
+
+# A remote URL's shape, and what may be shown of one. THE REDACTION STAYS EVEN
+# THOUGH DRONE REDACTS TOO: this is the last process a URL passes through before
+# it crosses a network, and a doctrine that only holds while upstream keeps
+# holding it is not a doctrine. Belt and braces, cheap, and pinned by its own
+# tests against what THIS surface emits — never against what upstream sent.
+SCHEME_SEPARATOR = "://"
+BROWSABLE_SCHEMES = ("http", "https")
+SSH_SCHEMES = ("ssh", "git", "git+ssh")
+WEB_SCHEME = "https"
+CLONE_SUFFIX = ".git"
+REDACTION = "***"
+
+
+def _ran(command: Any, root: Path, lane: str) -> Any:
+    """
+    Run one of drone's doors, or fail in words naming which lane could not.
+
+    Args:
+        command: The argv list.
+        root: The directory to run in — the branch, exactly as an operator
+            standing in it would.
+        lane: The lane's own name, for a message a reader can act on.
+
+    Returns:
+        The completed process, whatever its exit code. Reading the OUTCOME is
+        the caller's job: for a --json door that is the document's verdict, and
+        for the patch door it is the exit code, because there is no document.
+
+    Raises:
+        ReadUnavailable: drone could not be run at all, or did not finish.
+    """
+    try:
+        return subprocess.run(
+            command,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=DIFF_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as e:
+        logger.error("[host_api] drone not found for the %s lane: %s", lane, e)
+        raise ReadUnavailable(f"drone is not available on PATH — the {lane} lane routes through it") from e
+    except subprocess.TimeoutExpired as e:
+        logger.error("[host_api] the %s lane timed out after %ss", lane, DIFF_TIMEOUT_SECONDS)
+        raise ReadUnavailable(f"The {lane} lane timed out after {DIFF_TIMEOUT_SECONDS}s") from e
+
+
+def _document(command: Any, root: Path, lane: str) -> Dict[str, Any]:
+    """
+    One of drone's git doors, asked in machine mode, with its verdict honoured.
+
+    THE SPLIT, and it is the whole design of this function. A document that
+    says `ok: false` is an ANSWER — drone reached git, git had something to
+    say, and the caller asked for something that is not there. That is a 400
+    carrying their sentence. Output that is not one JSON object is a different
+    thing entirely: nobody could tell, and that is a 503. The precedent is this
+    branch's own @memory config lane, which draws the same line.
+
+    Args:
+        command: The argv list WITHOUT the machine flag — it is added here so
+            no lane can forget it.
+        root: The branch directory.
+        lane: The lane's own name, for the messages.
+
+    Returns:
+        The document, already known to carry a true verdict.
+
+    Raises:
+        ReadRefused: The door answered and said no.
+        ReadUnavailable: The door could not be run, did not finish, or did not
+            answer with one JSON object — which is the shape drone's own
+            caller-verification refusal takes, since that one never reaches the
+            door at all and puts its sentence on stderr instead.
+    """
+    result = _ran(list(command) + [JSON_FLAG], root, lane)
+    document = _parsed(result, lane)
+
+    if not document.get(OK_KEY):
+        # D0: their sentence, verbatim. This server owns the pipe, never the
+        # meaning, and a refusal is the half of the meaning most worth keeping.
+        raise ReadRefused(_sentence(document, lane))
+
+    return document
+
+
+def _parsed(result: Any, lane: str) -> Dict[str, Any]:
+    """
+    The one JSON object a machine door answers with, or an honest could-not-tell.
+
+    Args:
+        result: The completed process.
+        lane: The lane's own name.
+
+    Returns:
+        The document.
+
+    Raises:
+        ReadUnavailable: There was no document. drone's OWN sentence travels
+            when it left one on stderr — which is exactly the foreign-project
+            case, where the caller-verification check refuses before the door
+            runs and prints its reason there. An empty change list invented
+            here would paint such a branch as clean when nothing was measured.
+    """
+    stderr = (result.stderr or "").strip()
+
+    try:
+        document = json.loads(result.stdout or "")
+    except ValueError:
+        logger.warning("[host_api] the %s lane got no document (exit %s): %s", lane, result.returncode, stderr)
+        reason = stderr or "no document and no reason given"
+        raise ReadUnavailable(f"The {lane} lane could not tell: {reason}") from None
+
+    if not isinstance(document, dict):
+        logger.warning("[host_api] the %s lane got a %s, not a document", lane, type(document).__name__)
+        raise ReadUnavailable(f"The {lane} lane answered with a {type(document).__name__}, not one JSON object")
+
+    return document
+
+
+def _sentence(document: Dict[str, Any], lane: str) -> str:
+    """
+    A refusal document's own words, never reworded here.
+
+    Args:
+        document: The refusing document.
+        lane: The lane's own name, for the one case where there are no words.
+
+    Returns:
+        Their message, or a plain statement that they gave none. Inventing a
+        reason would be this server deciding a meaning that is not its to
+        decide; saying they gave none is a fact.
+    """
+    message = str(document.get(MESSAGE_KEY) or "").strip()
+
+    return message or f"The {lane} lane refused without saying why"
 
 
 def read_diff(
@@ -177,34 +349,26 @@ def read_diff(
         grain = _checked_grain(grain)
 
     root = resolve_branch_root(branch, project)
-    command = _patch_command(staged=staged, grain=grain, ref=ref)
-
-    try:
-        result = subprocess.run(
-            command,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=DIFF_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as e:
-        logger.error("[host_api] drone not found for the diff lane: %s", e)
-        raise ReadUnavailable("drone is not available on PATH — the diff lane routes through it") from e
-    except subprocess.TimeoutExpired as e:
-        logger.error("[host_api] diff timed out for %s after %ss", branch, DIFF_TIMEOUT_SECONDS)
-        raise ReadUnavailable(f"Diff timed out after {DIFF_TIMEOUT_SECONDS}s") from e
-
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        logger.warning("[host_api] diff returned %s for %s: %s", result.returncode, branch, stderr)
-        raise ReadUnavailable(f"Diff failed: {stderr or 'no detail'}")
-
-    diff = result.stdout or ""
 
     if ref:
-        # The header belongs to the commit lane. A renderer handed it would
+        # A commit comes through the machine door, so a bad revision is a
+        # REFUSAL in git's own words rather than a 503 — the caller named
+        # something that is not there, and that is their answer to have.
+        # The header belongs to the commit lane: a renderer handed it would
         # paint a phantom first file named after the word 'commit'.
-        diff = _patch_of(diff)
+        diff = _patch_of(str(_document(["drone", "@git", "show", ref], root, "commit").get(CONTENT_KEY) or ""))
+    else:
+        # MEASURED SHUT, 2026-08-18: the diff door has no --json. There is no
+        # document to read a verdict from, so this half still reads the exit
+        # code — and says so rather than pretending the two halves are alike.
+        result = _ran(_patch_command(staged=staged, grain=grain), root, "diff")
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
+            logger.warning("[host_api] diff returned %s for %s: %s", result.returncode, branch, stderr)
+            raise ReadUnavailable(f"Diff failed: {stderr or 'no detail'}")
+
+        diff = result.stdout or ""
 
     if path:
         diff = _one_files_patch(diff, path)
@@ -250,21 +414,23 @@ def read_diff(
     }
 
 
-def _patch_command(staged: bool, grain: str, ref: str) -> Any:
+def _patch_command(staged: bool, grain: str) -> Any:
     """
-    The drone command for a patch — only the flags its door actually recognises.
+    The drone command for a working-tree patch — only the flags its door has.
 
     Args:
         staged: Whether the staged patch was asked for.
         grain: Which scope, already checked.
-        ref: A commit, or empty for the working tree.
 
     Returns:
         The argv list to run.
-    """
-    if ref:
-        return ["drone", "@git", "show", ref]
 
+    Note:
+        A commit is NOT built here. It goes through the machine door with the
+        rest of them, and keeping one command builder that sometimes returned
+        a machine command and sometimes a rendered one would hide exactly the
+        distinction this file now turns on.
+    """
     command = ["drone", "@git", "diff"]
 
     if staged:
@@ -301,14 +467,15 @@ def read_git_changes(branch: str, project: str = "", grain: str = "") -> Dict[st
     @baud's own argument for their project total — that a count hiding a new
     module reads as false calm — does not stop being true here.
 
-    GIT IS DRONE-ONLY, servers included. This shells `drone @git status`, the
-    same door /v1/diff uses, and reads the porcelain codes drone passes through
-    verbatim. It is a rendered surface and this file says so: drone publishes
-    get_branch_status(), which already returns {ok, files, total}, but only
-    from apps/handlers — not from drone's public package surface, and reaching
-    into another branch's internals is the layering mistake this package has
-    made once already. A --json on `drone @git status`, or that function
-    published, retires every line of parsing below. It has been asked for.
+    GIT IS DRONE-ONLY, servers included. This shells `drone @git status
+    --json`, the same door /v1/diff uses, and reads the document it answers
+    with. THE FLAG ARRIVED AND IT FIXED A BUG, 2026-08-18: this lane used to
+    read drone's rendered lines, which right-align the porcelain code into two
+    columns for the screen, so every index-only change reached the phone
+    dressed as a worktree one. Rows have carried git's codes verbatim since
+    they existed — the contract was right all along; the data was not, and now
+    is. Each row also carries `index` and `worktree` split out, because that is
+    the fact the face's chips are actually built from.
 
     Args:
         branch: Branch name, resolved through the same two doors as every
@@ -340,33 +507,12 @@ def read_git_changes(branch: str, project: str = "", grain: str = "") -> Dict[st
         # drone's own flag for the repository root — the app's question.
         command.append(ALL_FLAG)
 
-    try:
-        result = subprocess.run(
-            command,
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=DIFF_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as e:
-        logger.error("[host_api] drone not found for the git-changes lane: %s", e)
-        raise ReadUnavailable("drone is not available on PATH — the git lane routes through it") from e
-    except subprocess.TimeoutExpired as e:
-        logger.error("[host_api] git status timed out for %s after %ss", branch, DIFF_TIMEOUT_SECONDS)
-        raise ReadUnavailable(f"Git status timed out after {DIFF_TIMEOUT_SECONDS}s") from e
-
-    if result.returncode != 0:
-        # drone exits non-zero on a failed status precisely so a caller cannot
-        # read an error as a clean tree — their own fix, for a bug that
-        # false-greened scripts for months. Honouring it is the whole point.
-        stderr = (result.stderr or "").strip()
-        logger.warning("[host_api] git status returned %s for %s: %s", result.returncode, branch, stderr)
-        raise ReadUnavailable(f"Git status failed: {stderr or 'no detail'}")
+    document = _document(command, root, "git status")
 
     # At repo grain the paths already ARE repo-relative, so there is no prefix
     # to strip — stripping one would eat the very part that distinguishes one
     # branch's file from another's, which is all the app is there to show.
-    files, untracked, rows = _changed_files(result.stdout or "", root if grain == GRAIN_BRANCH else None)
+    files, untracked, rows = _changed_files(document, root if grain == GRAIN_BRANCH else None)
 
     json_handler.log_operation(
         "host_api_git_changes_read",
@@ -383,20 +529,20 @@ def read_git_changes(branch: str, project: str = "", grain: str = "") -> Dict[st
     }
 
 
-def _changed_files(stdout: str, root: Optional[Path]) -> Any:
+def _changed_files(document: Dict[str, Any], root: Optional[Path]) -> Any:
     """
-    Split drone's rendered status into the card's file list and a spare count.
+    Split the status document into the card's file list and a spare count.
 
     Args:
-        stdout: `drone @git status` output — a header line, one line per file
-            shaped `f"  {status:>2} {path}"`, and a scope footer.
+        document: The `drone @git status --json` document, already verified.
         root: The branch directory, used to make repo-relative paths local —
             or None at repo grain, where those names ARE the answer.
 
     Returns:
         (files, untracked, rows) — tracked paths that differ from HEAD named
         relative to the branch, how many untracked ones were set aside, and
-        EVERY changed path with git's own two-column code beside it.
+        EVERY changed path with git's own two-column code beside it, plus that
+        code split into the columns it is made of.
 
         `rows` is additive and `files` is untouched by it: @baud's desktop
         consumer parses the older pair, and untracked names appearing in the
@@ -404,30 +550,27 @@ def _changed_files(stdout: str, root: Optional[Path]) -> Any:
         The code travels VERBATIM AND UNSTRIPPED — the two columns are index
         then worktree, so 'A ' (staged new) and ' M' (modified, unstaged) are
         different answers that collapse into one letter the moment either is
-        trimmed. @devpulse measured that collapse from the face: of four VS
-        Code chips only two could be built. Which code means which chip is
-        THEIR decision, made once in their buildRows; a letter invented here
-        would be a second vocabulary for a fact git has already stated.
+        trimmed. Which code means which chip is THEIR decision, made once in
+        their buildRows; a letter invented here would be a second vocabulary
+        for a fact git has already stated.
 
     Note:
-        A line qualifies on STRUCTURE, not on prose: it must carry the indent
-        and a non-empty status code where porcelain puts one. drone's header
-        and footer are ordinary sentences and fail that test without this
-        function needing to know a word of what they say — which is what keeps
-        a reworded footer from becoming a phantom changed file.
+        `index` and `worktree` come from the document, and fall back to the two
+        halves of the verbatim code when they do not. That fallback is not a
+        guess: those columns ARE the code, by porcelain's definition, so
+        deriving them is restating the same fact rather than inventing a
+        second one — and it keeps this lane honest against an older drone.
     """
     prefix = _repo_relative_prefix(root) if root is not None else ""
     files = []
     rows = []
     untracked = 0
 
-    for line in stdout.splitlines():
-        if not line.startswith(STATUS_INDENT):
-            continue
-
+    for entry in document.get(FILES_KEY) or []:
         # UNSTRIPPED: the two columns are the answer, not noise around it.
-        code = line[STATUS_CODE_SLICE]
-        path = line[STATUS_PATH_FROM:].strip()
+        code = str(entry.get(STATUS_KEY) or "")
+        path = str(entry.get(PATH_KEY) or "").strip()
+
         if not code.strip() or not path:
             continue
 
@@ -435,21 +578,26 @@ def _changed_files(stdout: str, root: Optional[Path]) -> Any:
             # Ignored is not a change. It is in no list, old or new.
             continue
 
-        # A rename is one line naming two paths. The card shows the name the
-        # file has NOW: passing the arrow through would put ' -> ' inside a
-        # filename, and a phone tapping the row would ask for a file that
-        # cannot exist.
+        # A rename names two paths. The card shows the name the file has NOW:
+        # passing the arrow through would put ' -> ' inside a filename, and a
+        # phone tapping the row would ask for a file that cannot exist.
         if RENAME_ARROW in path:
             path = path.split(RENAME_ARROW)[-1].strip()
 
-        local = _branch_local(path, prefix)
-        rows.append({"path": local, "status": code})
+        rows.append(
+            {
+                "path": _branch_local(path, prefix),
+                "status": code,
+                "index": str(entry.get(INDEX_KEY, code[:1])),
+                "worktree": str(entry.get(WORKTREE_KEY, code[1:2])),
+            }
+        )
 
         if code.strip() == UNTRACKED_CODE:
             untracked += 1
             continue
 
-        files.append(local)
+        files.append(rows[-1]["path"])
 
     return files, untracked, rows
 
@@ -548,11 +696,18 @@ def read_git_log(branch: str, project: str = "", limit: int = DEFAULT_LOG_COMMIT
     repository and never narrows the history to itself. Reporting branch grain
     here would be a straight lie about what was measured.
 
-    MEASURED GAP, 2026-08-17: that door is --oneline, so a row carries an object
-    name and a subject and NOTHING else. No author, no date, however much a
-    design asks for them — those live in the commit door, one commit at a time,
-    and fifty subprocesses each dragging a whole patch is not a list lane. Asked
-    of @drone; until then this ships what exists instead of inventing it.
+    MEASURED GAP, still open on 2026-08-18: the door is --oneline underneath, so
+    a row carries an object name and a subject and NOTHING else — the --json
+    document has exactly the two fields the rendered line had. No author, no
+    date, however much a design asks for them: those live in the commit door,
+    one commit at a time, and fifty subprocesses each dragging a whole patch is
+    not a list lane. Asked of @drone; until then this ships what exists.
+
+    THE CAP IS THIS LANE'S, not theirs. Measured 2026-08-18: their door does not
+    clamp — asked for 99999 it answered with 1626, every commit in the
+    repository. So the refusal below is the only thing standing between a phone
+    and a whole history, and it refuses rather than clamps for the reason it
+    always did: a clamp lets a caller believe 50 was all there was.
 
     Args:
         branch: Branch name — which repository, not which history.
@@ -572,28 +727,8 @@ def read_git_log(branch: str, project: str = "", limit: int = DEFAULT_LOG_COMMIT
         raise ReadRefused(f"Asked for {limit} commits — this lane serves 1 to {MAX_LOG_COMMITS}")
 
     root = resolve_branch_root(branch, project)
-
-    try:
-        result = subprocess.run(
-            ["drone", "@git", "log", str(limit)],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=DIFF_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as e:
-        logger.error("[host_api] drone not found for the log lane: %s", e)
-        raise ReadUnavailable("drone is not available on PATH — the log lane routes through it") from e
-    except subprocess.TimeoutExpired as e:
-        logger.error("[host_api] log timed out for %s after %ss", branch, DIFF_TIMEOUT_SECONDS)
-        raise ReadUnavailable(f"Log timed out after {DIFF_TIMEOUT_SECONDS}s") from e
-
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        logger.warning("[host_api] log returned %s for %s: %s", result.returncode, branch, stderr)
-        raise ReadUnavailable(f"Log failed: {stderr or 'no detail'}")
-
-    commits = _commits_of(result.stdout or "")
+    document = _document(["drone", "@git", "log", str(limit)], root, "log")
+    commits = _commits_of(document)
 
     json_handler.log_operation(
         "host_api_git_log_read",
@@ -626,34 +761,21 @@ def read_commit(branch: str, ref: str, project: str = "") -> Dict[str, Any]:
         additions, deletions) and count.
 
     Raises:
-        ReadRefused: Unknown branch, or a ref outside a revision's vocabulary.
-        ReadUnavailable: drone could not be run, timed out, or could not read
-            the commit — an unknown object included, in their own words.
+        ReadRefused: Unknown branch, a ref outside a revision's vocabulary, or a
+            revision that is not in this repository — that last one is git's own
+            sentence, travelling verbatim out of the refusal document.
+        ReadUnavailable: drone could not be run, timed out, or answered with
+            something that was not a document at all.
     """
     ref = _checked_ref(ref)
     root = resolve_branch_root(branch, project)
 
-    try:
-        result = subprocess.run(
-            ["drone", "@git", "show", ref],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            timeout=DIFF_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as e:
-        logger.error("[host_api] drone not found for the commit lane: %s", e)
-        raise ReadUnavailable("drone is not available on PATH — the commit lane routes through it") from e
-    except subprocess.TimeoutExpired as e:
-        logger.error("[host_api] commit read timed out for %s after %ss", ref, DIFF_TIMEOUT_SECONDS)
-        raise ReadUnavailable(f"Commit read timed out after {DIFF_TIMEOUT_SECONDS}s") from e
-
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        logger.warning("[host_api] commit read returned %s for %s: %s", result.returncode, ref, stderr)
-        raise ReadUnavailable(f"Commit read failed: {stderr or 'no detail'}")
-
-    shown = result.stdout or ""
+    # MEASURED, 2026-08-18: this door's --json is an ENVELOPE, not a structured
+    # commit. Its `content` is git show's own text — header, then patch — so
+    # the parsing below stays exactly as it was and only the FAILURE detection
+    # moved. Saying so here is cheaper than a later reader assuming the flag
+    # bought more than it did.
+    shown = str(_document(["drone", "@git", "show", ref], root, "commit").get(CONTENT_KEY) or "")
     facts = _commit_facts(shown)
     files = []
 
@@ -904,44 +1026,35 @@ def _stat_of_block(block: str) -> Any:
     return additions, deletions
 
 
-def _commits_of(stdout: str) -> Any:
+def _commits_of(document: Dict[str, Any]) -> Any:
     """
-    Rows from the log door's rendering: an object name, one space, a subject.
+    The commits in a log document: an object name and a subject, in order.
 
     Args:
-        stdout: The log door's whole output.
+        document: The `drone @git log --json` document, already verified.
 
     Returns:
         A list of {sha, subject}, newest first because that is the order given.
 
     Note:
-        A row qualifies on STRUCTURE — it must LEAD with something shaped like an
-        abbreviated object name — so a header or footer sentence cannot become a
-        phantom commit, however it is worded. Splitting on the FIRST space is
-        what keeps a colon-heavy subject intact.
+        A row qualifies by CARRYING AN OBJECT NAME, and nothing else is asked
+        of it. The old rendered lane had to check the shape of that name to
+        keep a framing sentence from becoming a phantom commit; a document has
+        no framing to mistake, so the check is gone with the thing it guarded
+        against. An empty subject is a real commit and travels as one — the
+        rendered lane silently dropped those, which was a small lie of its own.
     """
     commits = []
 
-    for line in stdout.splitlines():
-        sha, _, subject = line.strip().partition(" ")
-        if not _looks_like_sha(sha) or not subject.strip():
+    for entry in document.get(COMMITS_KEY) or []:
+        sha = str(entry.get(SHA_KEY) or "").strip()
+
+        if not sha:
             continue
-        commits.append({"sha": sha, "subject": subject.strip()})
+
+        commits.append({"sha": sha, "subject": str(entry.get(SUBJECT_KEY) or "").strip()})
 
     return commits
-
-
-def _looks_like_sha(token: str) -> bool:
-    """
-    Whether a token could be an abbreviated object name.
-
-    Args:
-        token: The first word of a row.
-
-    Returns:
-        True if it is hex and of a plausible length.
-    """
-    return MIN_SHA_LENGTH <= len(token) <= MAX_SHA_LENGTH and set(token) <= HEX_CHARS
 
 
 def _commit_facts(shown: str) -> Dict[str, str]:
@@ -1023,3 +1136,254 @@ def _labelled(line: str) -> Any:
             return key, line[len(prefix) :].strip()
 
     return "", ""
+
+
+# ==============================================
+# THE LINK CARDS
+# ==============================================
+
+
+def read_git_remote(branch: str, project: str = "") -> Dict[str, Any]:
+    """
+    The repository's remote — what the phone's link-cards are built from.
+
+    THE DOOR ARRIVED, 2026-08-18, and this lane came home. It used to live in
+    its own module for one reason: there WAS no door. No verb on drone's git
+    surface, nothing on their public Python surface, and the fleet's gate
+    refused both raw readers — so it read the repository's configuration as the
+    INI file it is, and followed worktree pointers by hand to find it. That was
+    the only lane in this package that shelled nothing, and the module existed
+    to keep that boundary visible. `drone @git remote --json` retires all of
+    it, including the pointer-following, because git resolves commondir itself.
+    The old module is archived, not deleted, next to this one.
+
+    THE REDACTION DID NOT GO WITH IT. drone redacts credentials on their side
+    too, and this lane redacts again on ours. That is not distrust and not
+    duplication for its own sake: this process is the last one a URL passes
+    through before it crosses a network, and a rule enforced only by somebody
+    else's code is a rule that leaves silently when their code changes. The
+    pins for it assert what THIS surface emits, never what upstream sent.
+
+    A REMOTE IS A REPOSITORY FACT, so the grain says repo and the branch names
+    WHICH repository — the same vocabulary the log and commit lanes use.
+
+    Args:
+        branch: Branch name, resolved through the same two doors as every other
+            read — the local citizen registry for the seat, @baud's census for
+            any foreign project.
+        project: Optional project name. Empty means the seat.
+
+    Returns:
+        Dict with branch, grain, remote (which one answered), url (any password
+        redacted), web (a browsable form, or None) and redacted.
+
+    Raises:
+        ReadRefused: Unknown branch, a repository the door refuses to speak
+            for, or a repository with no remote at all — which is not
+            hypothetical, real projects in this tree have none.
+        ReadUnavailable: drone could not be run, timed out, or answered with
+            something that was not a document.
+    """
+    root = resolve_branch_root(branch, project)
+    document = _document(["drone", "@git", "remote"], root, "remote")
+
+    name, configured, upstream_redacted = _chosen_remote(document)
+    url, redacted = _without_credentials(configured)
+
+    json_handler.log_operation(
+        "host_api_git_remote_read",
+        # The URL itself never reaches an audit line: it is the one field here
+        # that can carry a secret, and a redacted copy is still not a fact worth
+        # writing to disk on every read.
+        {"branch": branch, "remote": name, "redacted": redacted or upstream_redacted},
+    )
+
+    return {
+        "branch": branch,
+        "grain": GRAIN_REPO,
+        "remote": name,
+        "url": url,
+        # Built from the REDACTED url on purpose. _url_parts drops userinfo
+        # anyway, so the two agree — and if it ever stopped agreeing, the safe
+        # one is the input that already has no secret in it.
+        "web": _browsable(url),
+        "redacted": redacted or upstream_redacted,
+    }
+
+
+def _chosen_remote(document: Dict[str, Any]) -> Any:
+    """
+    Which remote answers, and the URL to answer with.
+
+    Args:
+        document: The `drone @git remote --json` document, already verified.
+
+    Returns:
+        (name, url, redacted) — the remote's name, its fetch URL (falling back
+        to push when a remote is push-only), and whether the door says it
+        already redacted something.
+
+    Raises:
+        ReadRefused: No remote at all, or one carrying no URL to offer. Both
+            are the caller learning a fact about their repository, not this
+            server failing — and an empty string handed to a link-card would
+            render as a link to nowhere.
+
+    Note:
+        ORIGIN WINS, and otherwise the first one answers AND IS NAMED. The
+        answer always says which remote it spoke for, because a card labelled
+        with the wrong remote's URL is worse than no card.
+    """
+    remotes = [entry for entry in (document.get(REMOTES_KEY) or []) if isinstance(entry, dict)]
+
+    if not remotes:
+        raise ReadRefused("This repository has no remote configured")
+
+    chosen = remotes[0]
+    for entry in remotes:
+        if str(entry.get(NAME_KEY) or "") == DEFAULT_REMOTE:
+            chosen = entry
+            break
+
+    name = str(chosen.get(NAME_KEY) or "")
+    url = str(chosen.get(FETCH_KEY) or chosen.get(PUSH_KEY) or "").strip()
+
+    if not url:
+        raise ReadRefused(f"The remote {name or 'this repository has'} carries no URL")
+
+    return name, url, bool(chosen.get(REDACTED_KEY, False))
+
+
+def _without_credentials(url: str) -> Any:
+    """
+    The URL with any password replaced, and whether one was there.
+
+    Args:
+        url: The URL as it arrived.
+
+    Returns:
+        (url, redacted).
+
+    Note:
+        A remote may carry user:token@ — that is how a machine clones a private
+        repository with no human present — and this lane's whole job is handing
+        that URL to a client over a network. The user survives so an operator
+        still recognises their own configuration; only the secret half is
+        replaced, and the boolean is what stops the change being silent.
+
+        A BARE USER WITH NO COLON IS NOT A CREDENTIAL. That is the standard ssh
+        form, git@ on every repository anyone has ever cloned, and flagging it
+        would cry wolf on the commonest remote there is — an alarm that fires
+        on everything is an alarm nobody reads. drone draws the same line on
+        their side, independently.
+    """
+    separator = url.find(SCHEME_SEPARATOR)
+    if separator == -1:
+        return url, False
+
+    scheme = url[:separator]
+    rest = url[separator + len(SCHEME_SEPARATOR) :]
+
+    at = rest.rfind("@")
+    if at == -1:
+        return url, False
+
+    userinfo = rest[:at]
+    if ":" not in userinfo:
+        return url, False
+
+    user = userinfo.split(":", 1)[0]
+    logger.info("[host_api] a credential in a remote URL was redacted before it left this process")
+
+    return f"{scheme}{SCHEME_SEPARATOR}{user}:{REDACTION}@{rest[at + 1 :]}", True
+
+
+def _browsable(url: str) -> Optional[str]:
+    """
+    A URL a person can open, or None when there honestly is not one.
+
+    Args:
+        url: The remote's URL.
+
+    Returns:
+        The browsable form, or None for anything that is not a web address —
+        a filesystem path is a directory, not a page, and putting a scheme in
+        front of one would be a link card leading somewhere that never existed.
+    """
+    scheme, host, path = _url_parts(url)
+
+    if scheme is None:
+        return None
+
+    if scheme in BROWSABLE_SCHEMES:
+        # http is NOT upgraded. ssh has no browsable form of its own so
+        # converting it is forced; http already is one, and changing it would be
+        # this lane deciding something about a host it cannot know.
+        target = scheme
+    elif scheme in SSH_SCHEMES:
+        target = WEB_SCHEME
+    else:
+        logger.info("[host_api] no browsable form for a %r remote", scheme)
+        return None
+
+    trimmed = path[: -len(CLONE_SUFFIX)] if path.endswith(CLONE_SUFFIX) else path
+
+    return f"{target}{SCHEME_SEPARATOR}{host}/{trimmed}"
+
+
+def _url_parts(url: str) -> Any:
+    """
+    Split a remote URL into scheme, host and path.
+
+    Args:
+        url: The remote's URL.
+
+    Returns:
+        (scheme, host, path), or (None, "", "") for anything with no host in it.
+        Any userinfo is dropped here — a browsable link needs no identity, and
+        this is the one place that guarantees none reaches one.
+    """
+    separator = url.find(SCHEME_SEPARATOR)
+
+    if separator == -1:
+        return _short_form_parts(url)
+
+    scheme = url[:separator]
+    authority, _, path = url[separator + len(SCHEME_SEPARATOR) :].partition("/")
+
+    return scheme, authority.rsplit("@", 1)[-1], path
+
+
+def _short_form_parts(url: str) -> Any:
+    """
+    The scp-like form, host-colon-path, told apart from a filesystem path.
+
+    Args:
+        url: The remote's URL.
+
+    Returns:
+        (scheme, host, path), or (None, "", "").
+
+    Note:
+        THE TRAP: a Windows path carries a colon too, so both halves are checked
+        rather than assumed. The host half may hold no separator and the path
+        half may not START with one — which is exactly what a drive letter
+        followed by a backslash does, and reading that as a host would emit a
+        link card pointing at a machine named C.
+    """
+    host_part, separator, path = url.partition(":")
+
+    if not separator or not path:
+        return None, "", ""
+
+    if "/" in host_part or "\\" in host_part:
+        return None, "", ""
+
+    if path[0] in ("/", "\\"):
+        return None, "", ""
+
+    host = host_part.rsplit("@", 1)[-1]
+    if not host:
+        return None, "", ""
+
+    return WEB_SCHEME, host, path

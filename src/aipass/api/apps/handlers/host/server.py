@@ -115,7 +115,6 @@ from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
-from aipass.api.apps.handlers.host import remotes as host_remotes
 from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import uploads as host_uploads
@@ -918,7 +917,7 @@ def create_app() -> Any:
     ) -> dict:
         """The repository's remote — what the face's link-cards are built from."""
         try:
-            return host_remotes.read_git_remote(branch=branch, project=project)
+            return host_git.read_git_remote(branch=branch, project=project)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:

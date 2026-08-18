@@ -41,7 +41,7 @@ cli/
 │   └── handlers/
 │       ├── json/         # JSON lifecycle (CRUD, validation, atomic writes, rotation)
 │       └── cli/          # help_flags.py — whole-sequence help detection
-└── tests/                # 177 tests across 10 files (185 pass, 1 skip at runtime)
+└── tests/                # 188 tests across 9 files (197 pass, 0 skip)
 ```
 
 Two-tier design: `apps/modules/` is the public API. `apps/handlers/` is internal — don't import directly. See README for full tree.

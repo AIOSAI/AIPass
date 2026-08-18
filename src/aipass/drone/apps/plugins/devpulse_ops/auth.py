@@ -33,7 +33,19 @@ from aipass.drone.apps.modules.registry import (
 
 GIT_ACCESS_TIERS: dict[str, dict] = {
     "global": {
-        "commands": ["status", "diff", "log", "show", "lock", "issue", "run", "workflow", "branches", "tag-list"],
+        "commands": [
+            "status",
+            "diff",
+            "log",
+            "show",
+            "remote",
+            "lock",
+            "issue",
+            "run",
+            "workflow",
+            "branches",
+            "tag-list",
+        ],
         "description": "Read-only — available to all branches",
     },
     "owner": {

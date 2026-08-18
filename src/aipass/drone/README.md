@@ -52,12 +52,19 @@ drone @git log                   # Show recent git log (default: 10)
 drone @git log 20                # Show last 20 commits
 drone @git show <ref>            # Show a commit
 drone @git show <ref> <path>     # Read a file's contents AT that commit
+drone @git remote                # List remotes + urls (credentials redacted)
 drone @git lock                  # Check lock status
 drone @git tag --list            # List all tags (newest first)
 drone @git issue list            # Passthrough to gh issue list
 drone @git issue view 42         # Passthrough to gh issue view 42
 drone @git run list              # Passthrough to gh run list
 drone @git workflow list         # Passthrough to gh workflow list
+
+# Git read doors — machine output (--json rides in ANY slot)
+drone @git status --json         # {ok, branch, scope, files[], total, message}
+drone @git log 20 --json         # {ok, commits[{sha, subject}], count, message}
+drone @git show <ref> --json     # {ok, ref, path, content, message}
+drone @git remote --json         # {ok, remotes[{name,fetch,push,redacted}], count}
 
 # Git workflow — owner tier (the project's registry-declared owner)
 drone @git commit "message"      # Commit whatever is already staged
@@ -270,7 +277,7 @@ Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py
 
 | Tier | Who | Commands |
 |------|-----|----------|
-| **Global** | All branches | `status`, `diff`, `log`, `show`, `lock`, `branches`, `tag --list`, `issue`, `run`, `workflow` |
+| **Global** | All branches | `status`, `diff`, `log`, `show`, `remote`, `lock`, `branches`, `tag --list`, `issue`, `run`, `workflow` |
 | **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | `pr`, `commit`, `checkout`, `dev-pr`, `delete-branch`, `prune-temp`, `close-pr`, `sync`, `unlock`, `merge`, `smart-sync`, `fix`, `tag` |
 
 - Auth is checked once at the top of `git_module.handle_command()` before any handler is called
@@ -317,6 +324,30 @@ Why it mattered: the old gate read only `command` or `args[0]`, so `drone rm not
 `show` sits at global tier because reading history is not a write. It is deliberately **not** scoped to the caller's branch directory the way `status`, `diff` and `log` are: those scope for convenience, hiding other branches' noise, whereas scoping `show` would refuse the case it exists for — one citizen auditing another's past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
 
 Both the ref and the optional path are refused before any argv is built if git would read them as a flag (empty or leading `-`), the same guard the tag lanes use.
+
+### Machine output — `--json` on the read doors
+
+`status`, `log`, `show` and `remote` answer in prose by default and in one JSON document with `--json`. The flag rides in **any slot** and is stripped before positional parsing, so `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is still a question.
+
+Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can parse why it failed rather than getting a bare sentence it has to guess at. The exit code still goes non-zero, so a shell script reading only `$?` is told the same truth.
+
+Consumers were previously scraping the rendered output (@api's host lane carried ~385 lines of it, keyed on the *shape* of a status row). Prose output is unchanged by design — every existing reader keeps working — but new callers should take the document.
+
+**`status --json` reports git's two porcelain columns, which the rendered view cannot.** The columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M` an unstaged one. The rendered row shows one right-aligned letter and always has, so those two collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
+
+```json
+{"status": "M ", "path": "src/x.py", "index": "M", "worktree": " "}
+```
+
+### Where a repository points — `remote`
+
+`remote` is global tier: listing remotes writes nothing. It exists because there was no door for the question at all — @api's host lane read `.git/config` as an INI file and hand-rolled its own worktree-following to locate it. Shelling the question through git resolves a worktree's common directory for free.
+
+**Credentials never travel.** An `http(s)` URL configured with credentials is answered with its *entire* userinfo component replaced by `***`, and the raw value reaches no return, no log line and no audit record. The whole component goes, not just a password: the common personal-access-token form is `https://<TOKEN>@host/path`, where the secret sits in the username slot.
+
+SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
+
+A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error — two projects in the live tree have none.
 
 ### Deleting — every delete leaves a record
 
