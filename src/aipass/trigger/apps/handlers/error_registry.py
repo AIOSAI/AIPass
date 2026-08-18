@@ -44,7 +44,7 @@ from typing import Dict, List, Optional
 
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock
+from aipass.trigger.apps.config import TRIGGER_ROOT, atomic_write_json, json_file_lock, read_text_with_retry
 from aipass.trigger.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
@@ -599,10 +599,18 @@ def _load_registry() -> dict:
     Returns:
         Registry dict with 'errors' and 'metadata' keys.
         Returns empty registry structure on read failure.
+
+    Note:
+        The read is retried through read_text_with_retry because a Windows
+        sharing violation during another writer's os.replace is transient, and
+        the blank returned below is written straight back by every caller —
+        json_handler lost whole documents to exactly that (Windows CI
+        32167459635). A refusal that NEVER clears still returns blank here;
+        that residual is recorded as a todo, not fixed in this pass.
     """
     try:
         if REGISTRY_FILE.exists():
-            raw = REGISTRY_FILE.read_text(encoding="utf-8").strip()
+            raw = read_text_with_retry(REGISTRY_FILE).strip()
             if not raw:
                 return {"errors": {}, "metadata": {"version": "1.0.0", "last_updated": datetime.now().isoformat()}}
             data = json.loads(raw)

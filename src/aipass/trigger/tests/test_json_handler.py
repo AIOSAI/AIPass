@@ -12,6 +12,8 @@ import json
 import pytest
 from pathlib import Path
 
+from aipass.trigger.apps import config
+
 
 @pytest.fixture
 def json_handler(tmp_path, monkeypatch):
@@ -422,3 +424,187 @@ class TestConcurrentReadModifyWrite:
         data = json.loads((tmp_path / "racemetrics_data.json").read_text(encoding="utf-8"))
         written = [k for k in data if k.startswith("k_")]
         assert len(written) == self.WORKERS * self.PER_WORKER
+
+
+# ---------------------------------------------------------------------------
+# transient read failures: a read that could not happen must not become a write
+# ---------------------------------------------------------------------------
+
+
+class _FlakyRead:
+    """Path.read_text that refuses ONE path with a Windows sharing violation.
+
+    Models the exact condition os.replace already retries for, seen from the
+    OTHER side: while one thread swaps a document into place, another thread's
+    read of that same document can be refused by Windows. The read is the half
+    nobody hardened. Patched at Path.read_text rather than builtins.open so it
+    bites wherever the handler reads, not only where it happens to use open().
+    """
+
+    def __init__(self, real_read_text, target, times):
+        self._real = real_read_text
+        self._target = str(target)
+        self.remaining = times
+        self.refusals = 0
+
+    def as_method(self):
+        """A plain function, so Path binds it as a method rather than a value."""
+        flaky = self
+
+        def read_text(path_self, *args, **kwargs):
+            if str(path_self) == flaky._target and flaky.remaining:
+                flaky.remaining -= 1
+                flaky.refusals += 1
+                raise PermissionError(
+                    13, "The process cannot access the file because it is being used by another process"
+                )
+            return flaky._real(path_self, *args, **kwargs)
+
+        return read_text
+
+
+class TestATransientReadFailureNeverDestroysTheDocument:
+    """Windows CI, run 32167459635: 98 of 100 concurrent appends survived —
+    two entries gone, silently, with the byte-lock working correctly.
+
+    The lock was never the hole. `ensure_module_jsons()` runs OUTSIDE the
+    critical section, and `ensure_json_exists()` treated ANY exception while
+    reading as "this document is corrupt, replace it with a fresh template".
+    On Windows an open() during another writer's os.replace is refused, so a
+    routine timing event was read as corruption and the whole document was
+    thrown away. Reproduced on Linux: 2 entries on disk, ONE refused open,
+    both entries gone.
+
+    Unreadable is not corrupt. A read that could not be performed must never
+    be turned into a write.
+    """
+
+    def _seed(self, json_handler, tmp_path, module="flaky"):
+        json_handler.log_operation("first", module_name=module)
+        json_handler.log_operation("second", module_name=module)
+        path = tmp_path / f"{module}_log.json"
+        assert len(json.loads(path.read_text(encoding="utf-8"))) == 2
+        return path
+
+    def test_a_refused_read_does_not_empty_the_document(self, json_handler, tmp_path):
+        """The CI defect, constructed: one refused open, nothing lost."""
+        path = self._seed(json_handler, tmp_path)
+        flaky = _FlakyRead(Path.read_text, path, times=1)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", flaky.as_method())
+            result = json_handler.log_operation("third", module_name="flaky")
+
+        assert flaky.refusals == 1, "fixture did not refuse anything — test is vacuous"
+        entries = [e["operation"] for e in json.loads(path.read_text(encoding="utf-8"))]
+        assert entries == ["first", "second", "third"], f"document was destroyed: {entries}"
+        assert result is True
+
+    def test_the_read_waits_out_the_sharing_window(self, json_handler, tmp_path):
+        """A refusal that clears is waited out, not surrendered to.
+
+        Without the bounded retry in read_text_with_retry this returns False
+        and the append is dropped — honest, but still an entry short of what
+        the caller asked for, and Windows CI counts entries.
+        """
+        path = self._seed(json_handler, tmp_path, module="window")
+        flaky = _FlakyRead(Path.read_text, path, times=5)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", flaky.as_method())
+            mp.setattr(config.time, "sleep", lambda _s: None)
+            result = json_handler.log_operation("third", module_name="window")
+
+        assert flaky.refusals == 5, "fixture did not refuse anything — test is vacuous"
+        assert result is True, "gave up on a refusal that would have cleared"
+        entries = [e["operation"] for e in json.loads(path.read_text(encoding="utf-8"))]
+        assert entries == ["first", "second", "third"]
+
+    def test_a_permanently_refused_read_refuses_the_write(self, json_handler, tmp_path):
+        """When it cannot read, it declines — it does not write a fresh one."""
+        path = self._seed(json_handler, tmp_path, module="stuck")
+        before = path.read_text(encoding="utf-8")
+        flaky = _FlakyRead(Path.read_text, path, times=10_000)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", flaky.as_method())
+            mp.setattr(config.time, "sleep", lambda _s: None)
+            result = json_handler.log_operation("third", module_name="stuck")
+
+        assert result is False, "reported success while writing nothing"
+        assert path.read_text(encoding="utf-8") == before, "clobbered a document it could not read"
+
+    def test_ensure_json_exists_declines_to_regenerate_what_it_cannot_read(self, json_handler, tmp_path):
+        """The destructive step itself, isolated from log_operation."""
+        path = self._seed(json_handler, tmp_path, module="ensure")
+        before = path.read_text(encoding="utf-8")
+        flaky = _FlakyRead(Path.read_text, path, times=10_000)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", flaky.as_method())
+            mp.setattr(config.time, "sleep", lambda _s: None)
+            json_handler.ensure_json_exists("ensure", "log")
+
+        assert path.read_text(encoding="utf-8") == before
+
+    def test_load_json_returns_none_rather_than_regenerating(self, json_handler, tmp_path):
+        """Cannot-read is reported as cannot-read, not as an empty document."""
+        path = self._seed(json_handler, tmp_path, module="loadfail")
+        before = path.read_text(encoding="utf-8")
+        flaky = _FlakyRead(Path.read_text, path, times=10_000)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "read_text", flaky.as_method())
+            mp.setattr(config.time, "sleep", lambda _s: None)
+            result = json_handler.load_json("loadfail", "log")
+
+        assert result is None, "an unreadable document must not read as empty"
+        assert path.read_text(encoding="utf-8") == before
+
+    def test_genuinely_corrupt_json_is_still_regenerated(self, json_handler, tmp_path):
+        """The contract that made the bad path look reasonable stays intact.
+
+        Undecodable bytes ARE a known-bad document and regenerating is the
+        right answer. Only 'I could not read it' changed meaning.
+        """
+        path = tmp_path / "rotten_log.json"
+        path.write_text("{{{ not json", encoding="utf-8")
+        json_handler.ensure_json_exists("rotten", "log")
+        assert json.loads(path.read_text(encoding="utf-8")) == []
+
+
+class TestTheLockOutlastsTheWrite:
+    """devpulse's second hypothesis for the Windows loss (2564f815): the lock
+    released before the staged file was moved into place, leaving a window
+    between write and replace. It does not — `return save_json(...)` is the
+    last statement INSIDE the critical section, so the move completes before
+    the context manager exits. Unpinned until now, which is why it was a
+    reasonable thing to suspect.
+    """
+
+    def test_the_replace_happens_between_acquire_and_release(self, json_handler, monkeypatch):
+        events: list = []
+        real_acquire = config._acquire_lock
+        real_release = config._release_lock
+        real_replace = config.replace_with_retry
+
+        def acquire(lock_file):
+            events.append("acquire")
+            return real_acquire(lock_file)
+
+        def release(lock_file):
+            events.append("release")
+            return real_release(lock_file)
+
+        def replace(source, destination):
+            events.append(
+                "replace" if str(destination).endswith("ordering_log.json") else f"replace:{Path(destination).name}"
+            )
+            return real_replace(source, destination)
+
+        # Seed first: ensure_module_jsons creates the three documents on the
+        # first call, and those writes are legitimately outside the lock.
+        json_handler.log_operation("seed", module_name="ordering")
+
+        monkeypatch.setattr(config, "_acquire_lock", acquire)
+        monkeypatch.setattr(config, "_release_lock", release)
+        monkeypatch.setattr(config, "replace_with_retry", replace)
+
+        json_handler.log_operation("guarded", module_name="ordering")
+
+        assert events == ["acquire", "replace", "release"], f"replace outside the lock: {events}"

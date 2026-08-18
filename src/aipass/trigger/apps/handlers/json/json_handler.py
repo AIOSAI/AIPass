@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import inspect
 
-from aipass.trigger.apps.config import atomic_write_json, json_file_lock, trail_logger
+from aipass.trigger.apps.config import atomic_write_json, json_file_lock, read_text_with_retry, trail_logger
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -123,15 +123,23 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
 
     if json_path.exists():
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = json.loads(read_text_with_retry(json_path))
 
             if validate_json_structure(data, json_type):
                 return True
-            # If corrupted, fall through to regenerate
+            # Known bad: it parsed and the shape is wrong. Regenerate.
+        except OSError as exc:
+            # COULD NOT READ is not KNOWN BAD. Windows refuses an open while
+            # another writer's os.replace is in flight, and regenerating here
+            # threw away whole documents: 2 concurrent appends on disk, one
+            # refused open, both gone (Windows CI 32167459635, 98 of 100).
+            # The file exists; leave it exactly as it is and let the caller's
+            # own read — inside the lock — decide.
+            logger.warning(f"ensure_json_exists could not read {module_name}_{json_type}, NOT regenerating: {exc}")
+            return True
         except Exception as exc:
-            # If unreadable, fall through to regenerate
-            logger.warning(f"ensure_json_exists failed for {module_name}_{json_type}: {exc}")
+            # Undecodable bytes: genuinely corrupt, regenerate.
+            logger.warning(f"ensure_json_exists found {module_name}_{json_type} corrupt, regenerating: {exc}")
 
     template = _get_default_template(json_type, module_name)
 
@@ -150,17 +158,23 @@ def load_json(module_name: str, json_type: str) -> Optional[Any]:
     json_path = get_json_path(module_name, json_type)
 
     try:
-        content = json_path.read_text(encoding="utf-8").strip()
+        content = read_text_with_retry(json_path).strip()
         if not content:
             logger.warning(f"load_json empty file for {module_name}_{json_type}, will regenerate")
             ensure_json_exists(module_name, json_type)
-            content = json_path.read_text(encoding="utf-8").strip()
+            content = read_text_with_retry(json_path).strip()
         return json.loads(content)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(f"load_json failed for {module_name}_{json_type}: {exc}")
+    except OSError as exc:
+        # Cannot-read is reported as cannot-read. Regenerating here would hand
+        # the caller an empty document that it would then save over the real
+        # one — the read failure laundered into data loss. See ensure_json_exists.
+        logger.warning(f"load_json could not read {module_name}_{json_type}, declining: {exc}")
+        return None
+    except json.JSONDecodeError as exc:
+        logger.warning(f"load_json found {module_name}_{json_type} corrupt, regenerating: {exc}")
         ensure_json_exists(module_name, json_type)
         try:
-            return json.loads(json_path.read_text(encoding="utf-8"))
+            return json.loads(read_text_with_retry(json_path))
         except Exception as regen_exc:
             # Regeneration itself came back unreadable — the caller still gets a
             # usable shape, but the disk is in a state somebody should know about.
@@ -227,10 +241,13 @@ def log_operation(operation: str, data: Dict[str, Any] | None = None, module_nam
         if config and "config" in config:
             max_entries = config["config"].get("max_log_entries", 100)
 
-        # Load existing log
+        # Load existing log. None means the read could not be performed —
+        # writing here would put a one-entry document over a full one, which
+        # is exactly how Windows CI lost two appends. increment_counter and
+        # update_data_metrics already refuse; this path did not.
         log = load_json(module_name, "log")
         if log is None:
-            log = []
+            return False
 
         # Create new entry
         entry = {"timestamp": datetime.now().isoformat(), "operation": operation}

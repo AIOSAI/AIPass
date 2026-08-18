@@ -185,6 +185,37 @@ def replace_with_retry(source: str, destination: str) -> None:
             time.sleep(_REPLACE_BACKOFF_SECONDS)
 
 
+def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
+    """Read a document, tolerating Windows sharing violations.
+
+    The mirror of replace_with_retry, and the half that was missing. While one
+    writer swaps a document into place, another process opening that same
+    document is refused by Windows with PermissionError — the identical
+    transient, seen from the reading side. Hardening only the write left every
+    reader exposed, and json_handler's readers answered a refused open by
+    regenerating the file from a template.
+
+    Args:
+        path: Document to read.
+        encoding: Text encoding.
+
+    Returns:
+        The file's contents.
+
+    Raises:
+        PermissionError: Still refused after every attempt.
+        OSError: Any non-sharing failure, immediately.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            return path.read_text(encoding=encoding)
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+    raise AssertionError("unreachable: the loop above either returns or raises")
+
+
 def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
     """Write JSON data to a file atomically using write-to-tmp + os.replace.
 
