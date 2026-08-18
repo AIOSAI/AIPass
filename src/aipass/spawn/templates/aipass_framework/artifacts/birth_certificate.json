@@ -5,10 +5,10 @@
   "creator": "SYSTEM",
   "owner": "{{BRANCHNAME}}",
   "rarity": "unique",
-  "description": "Official birth certificate for {{BRANCHNAME}}. Citizen #{{CITIZEN_NUMBER}}, {{CITIZEN_CLASS}} class. Purpose: {{PURPOSE_BRIEF}}",
+  "description": "Official birth certificate for {{BRANCHNAME}}. Citizen #{{CITIZEN_NUMBER}}, registered using '{{PROFILE}}' template. Purpose: {{PURPOSE_BRIEF}}",
   "metadata": {
     "citizen_number": "{{CITIZEN_NUMBER}}",
-    "citizen_class": "{{CITIZEN_CLASS}}",
+    "template": "{{PROFILE}}",
     "purpose": "{{PURPOSE_BRIEF}}"
   },
   "created_at": "{{DATE}}"

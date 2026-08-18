@@ -5,8 +5,8 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 99% (42/44 at 100%) | **Tests:** 1191 pass | **Functions:** 193 public (171 tested)
-**Last Updated:** 2026-08-16
+**Seedgo:** 99% (42/44 at 100%) | **Tests:** 1298 pass | **Functions:** 201 public (179 tested)
+**Last Updated:** 2026-08-17
 
 *The two categories under 100% are both in the host lane and both known:
 `server.py`'s attach route is genuinely deeply nested (a PTY pump inside a
@@ -101,7 +101,7 @@ api/
 │   │   └── usage/aggregation.py, cleanup.py, tracking.py
 │   └── integrations/                  # Private driver space (gitignored)
 │       └── {project}/driver.py
-└── tests/                             # 1114 test functions across 45 files
+└── tests/                             # 1240 test functions across 43 files
 ```
 
 Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`.
@@ -210,10 +210,14 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/feed?since=&limit=` | read | Cursor is a **timestamp**, clamped both ends, `gap` flagged |
 | `GET /v1/files?branch=&file=&project=` | read | Branch by NAME, file relative to it; 512KB cap **refuses**, never trims. Any project |
 | `GET /v1/dir?branch=&dir=&project=` | read | One directory level, the phone's file browser. Any project |
-| `GET /v1/diff?branch=&staged=&project=` | read | Routed through `drone @git`, never raw git; truncation is reported. Any project |
-| `GET /v1/git-changes?branch=&project=` | read | A branch's changed-file list in @baud's desktop card contract — tracked only, branch-local names |
+| `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB); `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
+| `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repository. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name** |
+| `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |
+| `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
+| `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered |
 | `GET /v1/fleet?project=` | read | @baud's snapshot envelope, unchanged. `project` is case-sensitive |
 | `GET /v1/rooms?project=` | read | A filter over that same snapshot — never a room judgment of its own |
+| `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
@@ -222,6 +226,12 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/verbs/wake` | operate | `{branch, project, message?, fresh?}` → `@ai_mail dispatch wake` |
 | `POST /v1/verbs/kill` | operate | `{branch, project}` → `baud --end-room`. Returns `room` and `ended` |
 | `POST /v1/verbs/lock` | operate | Empty body. Proxied to `@skills`' screen_lock. Never gated |
+| `GET /v1/agent-settings?branch=` | read | One branch's three owned claude settings — an absent key reads `null` |
+| `POST /v1/agent-settings` | operate | Patch those three. Three-state by JSON's nature: absent touches nothing, `null` removes, a value sets |
+| `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
+| `POST /v1/baud-settings` | operate | Shallow-merge into it — `null` removes, a nested object replaces |
+| `GET /v1/hooks-sound` | read | @hooks' mute switch, read live — the flag file is the only truth |
+| `POST /v1/hooks-sound` | operate | Flip machine-wide hook sounds. Idempotent both directions |
 | `POST /v1/files/upload` | operate | Multipart image. The SERVER names the file; returns its absolute path |
 | `WS /v1/room/attach?branch=&project=&kind=` | operate\* | A real PTY. Bearer on the subprotocol. `kind=watch` is **read** scope; a watch with **no branch** is global mission control |
 | `GET /` | none | @baud's phone face, served from this same origin |
@@ -295,13 +305,172 @@ surface, and reaching into another branch's internals is the layering mistake
 this package has made once already. A `--json` on `drone @git status`, or that
 function published, retires every line of the parsing. It has been asked for.
 
-**Its measured limit is drone's, and it is not hidden.** drone verifies a caller
-by finding a passport in the cwd hierarchy, so it refuses outright in any
-foreign project — exit 1, and no AIPass passport exists at `projects/baud` or
-anywhere external. This route resolves a foreign branch root perfectly well and
-then cannot ask git about it: `503` carrying drone's own sentence. An empty
-change list would paint a foreign branch as clean when nothing was ever
-measured. `/v1/diff` has the same limit for the same reason.
+**It serves foreign projects, and a wrong belief here hid a real bug.** This
+section previously said no drone-routed lane could measure a foreign project:
+drone verifies its caller by finding a passport in the cwd hierarchy, and a
+refusal had been measured in `projects/baud/src/baud`. @baud's live sweep then
+served five foreign projects with real data. The reconciliation is that the
+probe path was never a census-known **branch** — the registered one sits a level
+deeper and, like every census branch, carries its own passport, so the caller
+check passes. The command measurement was true; the inference from it to the
+route was not. What remains true is narrower: drone cannot be invoked *from* a
+cwd with no passport above it, which affects agents working inside external
+trees, not this lane.
+
+The bug that belief concealed: paths were stripped against **the seat's** repo
+root, so a foreign branch fell out of `relative_to` and its rows kept the prefix
+drone printed — `src/vera_studio/vera/CLAUDE.md` where the contract says
+`CLAUDE.md`. Nested tenants were wrong the same way and worse: `projects/baud`
+carries its own `.git`, so the seat-relative prefix *resolves cleanly* and is
+still the wrong one — nothing raises, and every row silently keeps its prefix.
+The prefix is now the repository **discovered** by walking up for a `.git`
+marker, which is the only one guaranteed to match what was printed; the seat is
+a fallback. Verified against a real foreign tree: 7 files, identical to @baud's
+own command. Two mutations — restoring seat-first, and requiring the marker to
+be a directory rather than the file a worktree carries — survived the suite
+before the tests that now catch them.
+
+A genuinely unreachable project still refuses honestly: a non-git one answers
+`503` with git's own sentence, *not a git repository*. An empty change list
+would paint it clean when nothing was measured.
+
+### The git surface (DPLAN-0303)
+
+Patrick, on the phone's git screen: *"git diffs are pretty much useless. we need
+a real diff setup."* The wall of text was one 308KB response. Tapping one file
+in the same repository is now 5.8KB — **53× less**, measured on a real tree.
+
+**Two grains, and every answer names its own.** The card's git tile is per-branch;
+the git *app* is per-repository (Patrick's ruling, 08-17). Both are honest and
+they are not the same number, so `grain` is a parameter *and* a response field —
+a file list that does not state its scope is one a client can silently read at
+the wrong one. `grain=branch` keeps @baud's card contract untouched, including
+its branch-local names. `grain=repo` reaches every branch in the repository and
+**keeps the repo-relative names**, because there the prefix *is* the part that
+distinguishes one branch's file from another's. A typo'd grain is refused naming
+both, before any subprocess exists — falling back to a scope nobody asked for is
+how a phone shows one branch while believing it shows a repository.
+
+**A commit is always repo-wide, and the answer says so rather than obeying.**
+Asking `/v1/git-log` or a `ref` for branch grain is *refused*, not silently
+ignored: drone's log door runs from the repo root with no pathspec, so a branch
+names *which repository*, never which history. Silently ignoring a parameter is
+a lie told by omission.
+
+**Two doors were measured shut, and neither is worked around in silence:**
+
+- **`drone @git diff` takes no path and no `-U`.** `_handle_diff` recognises
+  exactly `--staged` and `--all`; everything else in argv is ignored, the same
+  trap as `status --json`. So `path` is served by generating the patch and
+  splitting it here, on the per-file headers — machine structure, the same
+  doctrine that keeps the status parser off drone's prose. The consequence
+  DPLAN-0303 needs to know: **context stays at three lines, not the `-U1` the
+  design specified**, because context is baked in at generation time. Asked of
+  @drone.
+- **`drone @git log` is `--oneline`.** A row carries a sha and a subject and
+  nothing else — no author, no relative date, however much a design asks for
+  them. Those live in `show`, one commit at a time, and fifty subprocesses each
+  dragging a whole patch is not a list lane. `/v1/git-log` ships what exists;
+  `/v1/commit` carries the author and date for the one commit being looked at.
+  Asked of @drone.
+
+**The 512KB cap changes meaning per file, deliberately.** The whole-tree case
+still truncates and *reports* it, because a wall of text degrades into a shorter
+wall. One file cannot: half a patch is not a small patch, it is a severed hunk
+that renders as nonsense, so an over-cap single file is **refused** with its
+size and the cap in words. A file with no changes in the patch is likewise
+refused naming it — an empty string would read as "no changes, rendered fine",
+and a tap on a stale list is a real event.
+
+**± counts come from inside the hunks only.** The two file-header lines start
+with the same characters as a changed line; counting them adds one phantom
+addition and one phantom deletion to *every file in every commit*. Verified
+against `git show --numstat` on a real 20-file commit: **20 of 20 rows
+identical**. The same ordering rule protects filenames — a block's header is
+emitted before its first hunk, so a deletion of a line reading `-- x` (which
+produces exactly `--- x`) can never be read as the file's name. A guard at the
+hunk boundary was written for that and then **deleted**: no mutation could kill
+it, which is what proved it unreachable rather than careful.
+
+**Status rides per row, in git's vocabulary and not a new one.** @devpulse
+measured the gap from the face while this was building: the lane read the
+porcelain code and then *discarded* it, and untracked files never left the server
+as anything but a number. So of the four VS Code chips (M/A/D/U) only two were
+derivable, and a staged-new file was indistinguishable from a modified one.
+`rows[]` now carries every changed path with its code **verbatim and unstripped**
+— the two columns are index-then-worktree, so `A ` (staged new) and ` M`
+(modified, unstaged) stay two different answers instead of collapsing into one
+letter. Which code means which chip is the face's decision, made once in their
+`buildRows`; a letter invented here would be a second vocabulary for a fact git
+has already stated. Untracked paths appear in `rows` by name and stay **out** of
+`files` and `count` — additive, so @baud's desktop consumer parses exactly what
+it always did, and untracked names leaking into the tracked list is the precise
+disagreement this lane exists to avoid. Ignored paths are in no list at all.
+
+### The remote lane (DPLAN-0303 phase 4)
+
+Phase 4 goes links-first — zero-auth link-cards out to GitHub, built from
+constructible URLs — so the face has to be told the repository's remote.
+
+**There is no door for this, and that was measured before anything was designed.**
+Not a verb on drone's git surface. Not on drone's public Python surface (checked
+directly — the module exports branch resolution and routing, nothing about
+configuration). And the fleet's own gate refuses **both** raw readers: neither is
+in its read-only allowlist, which is the fleet declining to call them reads. So
+this lane **shells nothing at all** and reads the repository's configuration as
+the INI file it is. That leaves the drone-only rule this file documents intact
+instead of quietly carving an exception into it for one lane — a test asserts no
+subprocess is ever spawned here, so a future one would be a decision somebody has
+to make on purpose. A verb on drone retires every line of it, and it has been
+asked for.
+
+**Two fields because they are two facts.** `url` is what was configured,
+verbatim; `web` is what a browser can open. Collapsing them would make the lane
+lie about one of the two. `web` drops the clone suffix, because `/pulls` appended
+to a URL ending in `.git` is a 404 on every forge there is; the ssh forms
+(scp-short, `ssh://`, `git://`) convert to `https` because they have no browsable
+shape of their own, while **`http` is left exactly as configured** — upgrading it
+would be this lane deciding something about a host it cannot know. A
+filesystem-path remote gets `web: null`, since a directory is not a page. The
+trap in that parsing: a Windows path carries a colon exactly like `host:path`, so
+both halves are checked — reading `C:\repos\thing` as a remote would emit a link
+card pointing at a machine named C.
+
+**Which remote answered is part of the answer.** `origin` wins by convention when
+several exist, but the `remote` field travels either way — refusing a repository
+that simply named its remote something else would be inventing a rule that does
+not exist, and choosing silently would hide the choice from the caller.
+
+**A repository with no remote is refused in words, and that is not hypothetical:
+two projects in the real tree have none.** Verified live against the real
+Sentinel repo, which answers `400 read_refused` with the sentence. An empty
+string would render as a link card pointing nowhere.
+
+**Credentials never travel, which was not in the ask.** A remote URL may carry
+`user:token@` — that is how a machine clones a private repository with no human
+present — and this lane's entire job is handing that URL to a client over a
+network. The password half is replaced and the user half survives, so an operator
+still recognises their own configuration, and `redacted` is what stops the change
+being silent. The browsable form carries no userinfo at all. A bare `git@` is the
+standard ssh user and is **not** flagged: an alarm that fires on the commonest
+remote form there is would be an alarm nobody reads. The URL also never reaches
+an audit line — the log records which remote answered and whether redaction
+fired, and nothing else.
+
+Verified live: the seat and a foreign project (`AIPL`, resolved through @baud's
+census) both return their GitHub URLs; Sentinel refuses; eight mutations against
+this lane all bite. One of those eight first appeared to survive — its anchor had
+not matched, so the mutation never applied and the green run proved nothing. It
+was re-run properly before being counted.
+
+Sixteen mutations were run against the finished lanes and all sixteen bite,
+`PYTHONDONTWRITEBYTECODE` set so a same-length mutation cannot serve a stale
+`.pyc`. Live-verified end to end: repo grain identical to raw porcelain **path
+and code**, 15 of 15; log shas identical to raw; one file of one commit carrying
+no commit header; and an untracked probe file arriving named with `??` at both
+grains while staying out of the tracked list. One probe first came back invisible
+and the cause was checked rather than assumed — `.tmp` is gitignored here, so the
+lane was right to drop it.
 
 **The one sentence this lane writes itself** is a write's `detail`. @memory's
 refusals carry prose and it travels verbatim; their success payloads carry facts

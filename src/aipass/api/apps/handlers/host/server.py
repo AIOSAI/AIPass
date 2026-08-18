@@ -34,7 +34,26 @@ Endpoints in Phase 1:
 Endpoints added in Phase 2 (read lane):
     GET /v1/feed    - read scope. Cursor-first, clamped both ends, gap flagged.
     GET /v1/files   - read scope. Names not paths, 512KB cap, cap is reported.
-    GET /v1/diff    - read scope. Routed through drone's git lane, never raw git.
+    GET /v1/diff    - read scope. One patch, routed through drone, never raw:
+                      a working tree, a whole repository, or one commit, and
+                      optionally ONE file out of any of them.
+
+Phase 6 grows that read lane into the phone's git surface (DPLAN-0303). Every
+answer NAMES ITS OWN GRAIN, because a file list that does not say its scope is
+one a client can silently read at the wrong one:
+    GET /v1/git-changes - read scope. Changed files. Branch grain is @baud's
+                          desktop card contract; repo grain is the app's
+                          question, every changed file in the repository.
+    GET /v1/git-log     - read scope. Recent commits. ALWAYS repo grain — the
+                          branch names which repository, never which history.
+    GET /v1/commit      - read scope. One commit's facts and per-file stats.
+                          Its patch rides on /v1/diff, one file at a time, so a
+                          phone never loads a whole commit at once.
+    GET /v1/git-remote  - read scope. The repository's remote, so the face can
+                          build link-cards out to the forge with no auth and no
+                          network call. Shells NOTHING: there is no door for it
+                          on drone and the fleet gate refuses both raw readers,
+                          so the configuration is read as the file it is.
 
 Phase 5 adds the phone face itself, served from this same origin (see face.py):
     GET /             - @baud's bundle. NO auth: a browser navigating to a URL
@@ -634,11 +653,21 @@ def create_app() -> Any:
         branch: str,
         staged: bool = False,
         project: str = "",
+        path: str = "",
+        grain: str = "",
+        ref: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """A branch's diff, routed through drone's git lane."""
+        """One patch: a working tree, a whole repository, or one commit."""
         try:
-            return host_reads.read_diff(branch=branch, staged=staged, project=project)
+            return host_reads.read_diff(
+                branch=branch,
+                staged=staged,
+                project=project,
+                path=path,
+                grain=grain,
+                ref=ref,
+            )
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -648,11 +677,56 @@ def create_app() -> Any:
     async def git_changes(
         branch: str,
         project: str = "",
+        grain: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """A branch's changed-file list, in @baud's desktop card contract."""
+        """Changed files — @baud's card contract at branch grain, the repo's at repo."""
         try:
-            return host_reads.read_git_changes(branch=branch, project=project)
+            return host_reads.read_git_changes(branch=branch, project=project, grain=grain)
+        except host_reads.ReadRefused as e:
+            raise _deny(400, "read_refused", str(e)) from e
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "read_unavailable", str(e)) from e
+
+    @app.get("/v1/git-log")
+    async def git_log(
+        branch: str,
+        project: str = "",
+        limit: int = host_reads.DEFAULT_LOG_COMMITS,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """The repository's recent commits. The branch names WHICH repository."""
+        try:
+            return host_reads.read_git_log(branch=branch, project=project, limit=limit)
+        except host_reads.ReadRefused as e:
+            raise _deny(400, "read_refused", str(e)) from e
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "read_unavailable", str(e)) from e
+
+    @app.get("/v1/git-remote")
+    async def git_remote(
+        branch: str,
+        project: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """The repository's remote — what the face's link-cards are built from."""
+        try:
+            return host_reads.read_git_remote(branch=branch, project=project)
+        except host_reads.ReadRefused as e:
+            raise _deny(400, "read_refused", str(e)) from e
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "read_unavailable", str(e)) from e
+
+    @app.get("/v1/commit")
+    async def commit(
+        branch: str,
+        ref: str,
+        project: str = "",
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """One commit's facts and per-file stats. Its patch rides on /v1/diff."""
+        try:
+            return host_reads.read_commit(branch=branch, ref=ref, project=project)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:

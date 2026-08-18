@@ -19,6 +19,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
  - Prototype to explore shape, hand the real build to a sub-agent.
  - Investigate other branches freely: read, debug, test, fix small bugs. CWD stays devpulse.
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
+ - **Watchdog EVERY dispatch, same breath:** `drone @devpulse watchdog agent @target` right after the dispatch command. Wake-back cannot wake a manager — without the watchdog the reply lands as silent mail and you wait forever. Patrick caught the silent wait TWICE on 2026-08-17 — the first day this seat ran a NEW model (fable, pinned in settings.local.json the day before). The old model's unwritten reflex was not inherited: a model change carries FILES across, never habits. This line is the durable copy — when the seat's model changes again, expect other unwritten reflexes to be missing too.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - If a raw command is blocked, drone is the fix — not a workaround.
  - Lean on branches for expertise. Email the owner for architecture questions.

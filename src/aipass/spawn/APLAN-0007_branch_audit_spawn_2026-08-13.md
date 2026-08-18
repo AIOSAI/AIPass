@@ -33,9 +33,9 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 | Metric | Value |
 |--------|-------|
 | **Health** | GREEN |
-| **Last verified** | 2026-08-16 (S119) |
-| **Open items** | 0 |
-| **Tests** | 471 pass, 1 skipped, 0 fail |
+| **Last verified** | 2026-08-17 (S120) |
+| **Open items** | 1 (escalated, not mine to rule -- cert `id`/`citizen_number` has no authoritative source) |
+| **Tests** | 475 pass, 1 skipped, 0 fail |
 | **Seedgo** | 100% (44 standards) |
 | **Bypass entries** | 16 (+1 S119: `atomic_write.py`/`json_structure`, measured load-bearing in both lanes before adding) |
 | **Live command sweep** | unknown-class refusal live-verified S118 (`create wizard` -> exit 1, no branch made) |
@@ -73,10 +73,68 @@ class helpers for that reason.
 
 ### Open
 
-None -- all 4 items opened at S117 closed at S118 (see Resolved).
+- [ ] **Cert `id` / `metadata.citizen_number` has no authoritative source and is
+  corrupt fleet-wide** (S120, escalated to devpulse/Patrick -- a fleet numbering
+  ruling, not a spawn implementation choice). No source of truth exists anywhere:
+  not `AIPASS_REGISTRY.json` (entry keys are admin, created, description, email,
+  last_active, name, owner, path, profile, registry_id, status -- no
+  citizen_number), not `.trinity/passport.json`, not `.spawn/.branch_meta.json`.
+  `get_next_citizen_number()` returns `len(branches) + 1`, so it is birth-order at
+  mint time and unstable forever after. Measured live: `id` mirrors
+  `metadata.citizen_number` in every cert, and the values are `"0"` x5,
+  `"13"` x2, the registry UUID on ai_mail/seedgo/spawn, and the string
+  `"devpulse"` on devpulse. spawn's own cert therefore renders "Citizen
+  #7087bb93". I did NOT normalize these (out of scope, and any scheme is a fleet
+  ruling) and did NOT fabricate numbers for the 5 fresh mints -- omitted the field
+  so honest-absence renders nothing rather than a false record. Needs: a ruling on
+  whether to renumber fleet-wide from registry `created` order, or drop the field.
 
 ### Resolved
 
+- [x] **Birth-certificate paperwork repaired fleet-wide + old schema killed at the
+  template** (S120, devpulse dispatch eb8354a2, Patrick-ruled). Before: 12 certs
+  populated, 6 carried `metadata.template`, 6 carried old `metadata.citizen_class`,
+  4 empty (commons/flow/memory/skills), 1 missing (prax). After: **17/17 populated,
+  17/17 `metadata.template`, 0 `citizen_class`**.
+  ROOT CAUSE was mine and it was the template: BOTH `templates/*/artifacts/
+  birth_certificate.json` minted `metadata.citizen_class`, so every future citizen
+  was born old-schema. Fixed to `metadata.template: "{{PROFILE}}"` with the
+  description reworded to the current phrasing, red-first via
+  `test_citizen_classes.py::TestBirthCertificateSchema` (4 cases through the real
+  `_spawn_agent` path; seen red with `KeyError: 'template'`). Template registry
+  hashes regenerated after (documented gotcha) -- cert hash `b089aef46e8c` ->
+  `1ec401f4e397` in both class registries.
+  Also fixed a latent bug found on the way: `placeholders.py` already HAD a
+  `PROFILE` placeholder, but defaulted to the hardcoded literal `"AIPass Workshop"`,
+  and `update_ops.py:127` passes no profile override -- so a `/business/` branch
+  would have rendered the wrong profile. Now derives via `detect_profile(target_dir)`.
+  5 certs minted (prax, commons, flow, memory, skills) with `created_at` from the
+  registry and `purpose` from each citizen's OWN passport (all 5 -- registry
+  fallback never needed). 6 migrated (aipass, backup, cli, hooks, seedgo, spawn):
+  retired `citizen_class: "builder"` dropped, `template` added, key order and every
+  other field preserved. Normalized `owner` casing on seedgo + spawn (`seedgo` ->
+  `SEEDGO`) since the renderer prints `owner` and 14 of 17 were already uppercase.
+  **devpulse's cert never touched** -- it carries the signed hmac-sha256 admin grant.
+  Verified by git (no diff vs HEAD) and by SHA256 identical before and after:
+  `278de0a91d49ab50e05d27981b356345948966f02e662b5fde62eaed15bb7a16`. Its lowercase
+  `owner` and `id: "devpulse"` therefore stay as permanent documented exceptions.
+  Repair tool: `tools/birth_certificate_repair.py` (sweep/repair, idempotent --
+  verified byte-identical on a second run), all writes through `atomic_write_text`.
+- [x] **registry_id "duplication" ruled DELIBERATE, not a defect** (S120) -- the
+  dispatch reported identical `registry_id` on "at least 8" passports and asked for
+  unique ids. Measured: it is **all 17**, and it is correct BY DESIGN.
+  `AIPASS_REGISTRY.json` `metadata.id` IS `7087bb93-570f-4b9a-b035-4fd7f570200e` --
+  the registry's own id -- and a passport's `citizenship.registry_id` is meant to
+  equal it (it answers "which registry do I belong to", the same answer for every
+  citizen of one project). My own `check_owner_identity()`
+  (`sync_registry_ops.py:375-376`) documents this: flag `passport_mismatch` fires
+  when a passport does NOT equal `metadata.id`, and flag `entry_rid_stale` treats a
+  registry ENTRY whose id EQUALS `metadata.id` as the error. Per-citizen identity
+  already lives in the entries: all 17 unique, none missing, none equal to
+  metadata.id. Minting unique ids into passports would have broken my own health
+  check on all 17 and been healed straight back by `sync-registry --fix`. Zero
+  passports modified. The phone's "Passport No." should render the registry ENTRY
+  id, not `citizenship.registry_id` -- a renderer fix on baud's side.
 - [x] **Torn-write defect across spawn's own JSON/text write sites** (S119, fleet
   error 90c9e40d, devpulse dispatch) -- `Path.write_text()` truncates in place, so
   a concurrent reader lands on an empty or partial file. Spawn was NOT in the
@@ -199,6 +257,7 @@ silently dropped.
 | 2026-08-13 | Fleet audit round (DPLAN-0291), wave 3 | YELLOW -- 4 open, 6 resolved |
 | 2026-08-15 | Closed all 4 open items per devpulse's mail ruling (bfba4f0a) | GREEN -- 0 open, 11 resolved |
 | 2026-08-16 | Torn-write template+live fix (devpulse dispatch bc4e48f9, error 90c9e40d) | GREEN -- templates already clean, 6 live sites fixed, 38%->0% unusable |
+| 2026-08-17 | Birth cert + passport repair round (devpulse dispatch eb8354a2) | GREEN -- 12->17 certs, 6->17 template key, registry_id ruled deliberate, 1 escalated |
 
 ## Relationships
 - **Related DPLANs:** DPLAN-0291 (fleet audit round), DPLAN-0288 (admin ceremony)
@@ -254,6 +313,21 @@ Not changed, and flagged to devpulse: the shared `write_json` returns `False` on
 `OSError` rather than raising. That is @aipass's contract on another branch's file,
 not mine to alter.
 
+**S120 (2026-08-17):** Birth cert repair round. Third session running where a
+fleet dispatch's premise needed correcting before building -- but this time the
+template WAS the root cause (S119 it wasn't), so the lesson is to measure, not to
+assume either way. Two of four findings landed as reported (5 certs, 6 old-schema);
+one was a misread of which field means what (registry_id -- ruled deliberate with
+the design docstring as evidence); one was already satisfied (template passports
+carry `identity.traits`). Found two things the sweep missed: the `PROFILE`
+placeholder's hardcoded default (latent wrong-profile bug for `/business/` paths)
+and the fleet-wide corrupt `id`/`citizen_number`, escalated rather than guessed.
+
+Declined to fabricate: the 5 fresh mints carry NO `citizen_number`, because no
+authoritative source for it exists anywhere in the system. Honest-absence renders
+nothing; an invented number would render as provenance. Also refused to normalize
+the existing corrupt ids -- any numbering scheme is a fleet ruling, not mine.
+
 ## Listen (TTS-friendly summary)
 
 Spawn's audit is signed yellow. Every number is green: four hundred thirty five tests
@@ -299,8 +373,32 @@ back empty or unreadable. After fixing: zero, across two and a half million read
 Every write now stages to a temp file beside the target and swaps atomically, and a
 source guard fails the suite if anyone reintroduces the unsafe shape.
 
-Last verified 2026-08-16.
+Update at session one twenty: the fleet's birth certificates are repaired. Five
+branches had no certificate to draw and now have real ones, built only from facts
+that could be verified: the date from the registry, the purpose in each citizen's own
+words from their passport. Six more carried an old schema field holding a class name
+that was retired months ago, now corrected. The important fix was upstream: both of
+my templates minted that old field, so every future citizen would have been born with
+it. That is fixed and the template hashes regenerated.
+
+Two things in the request were wrong and I checked before building rather than after.
+The identical passport numbers across every branch are not a defect. That field names
+the registry a citizen belongs to, so every citizen of one project shares it by
+design, and my own health check treats a passport that does not match as the error.
+The per citizen numbers already exist and are all unique. And the traits field the
+request asked me to add to the template was already there.
+
+One thing I refused to do. The certificates hold a citizen number that has no
+authoritative source anywhere in the system, and the existing values are already
+corrupt, holding registry identifiers and even a branch name instead of numbers. I
+did not invent numbers for the new certificates. A missing field draws nothing, but a
+made up number would read as a record. That needs a ruling, and it is escalated.
+
+Devpulse's certificate was never touched. It carries a signed grant that one changed
+byte would break, and its checksum is identical before and after.
+
+Last verified 2026-08-17.
 
 ---
 *Created: 2026-08-13*
-*Updated: 2026-08-16*
+*Updated: 2026-08-17*
