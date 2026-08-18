@@ -84,6 +84,14 @@ dev = [
     "coverage",
     "pyright",
     "Pygments>=2.20.0",
+    # starlette's TestClient (the host-lane test suites) imports httpx at setup
+    # but starlette does not declare it — it is an optional extra there. Every
+    # green run before this line was riding a transitive install (chromadb →
+    # httpx on the setup.sh lanes, a hand-installed copy in the local venv);
+    # the ubuntu CI job installs only .[dev,host] and had neither, which is
+    # exactly the env-inherited-test-deps species from 1b56b5ce. Declared here
+    # because it is a test-time dependency, not a server runtime one.
+    "httpx>=0.28",
 ]
 
 [project.scripts]
