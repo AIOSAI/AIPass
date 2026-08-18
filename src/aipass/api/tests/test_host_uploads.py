@@ -37,6 +37,7 @@ three.
 
 import os
 import stat
+import sys
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -357,6 +358,10 @@ class TestTheCapRefusesAndNeverTruncates:
 class TestTheFileOnDisk:
     """What the stored object actually is, checked on a real filesystem."""
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
+    )
     def test_it_is_created_private_not_narrowed_afterwards(self, landing: Path) -> None:
         """
         0o600 via os.open rather than chmod-after: a file created readable and

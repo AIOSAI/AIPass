@@ -457,7 +457,20 @@ class TestAnUnreadableFileIsNeverBlank:
 
         assert "settings.local.json" in str(refusal.value)
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root reads everything; the mode says nothing to it")
+    # Both guards evaluate at COLLECTION time, so neither may touch a
+    # POSIX-only os attribute bare — a bare os.geteuid() here killed this whole
+    # file's collection on the Windows lane (2026-08-18), the same import-time
+    # species as attach.py's os.setsid. The platform skip is not a dodge: chmod
+    # 0o000 does not construct unreadability on Windows (no POSIX mode bits),
+    # so the fixture this test needs cannot exist there.
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="chmod 0o000 cannot construct an unreadable file here - no POSIX mode bits",
+    )
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root reads everything; the mode says nothing to it",
+    )
     def test_a_file_we_may_not_read_is_a_fault_not_a_blank(self, tmp_path) -> None:
         """The one that would have cost real settings: unreadable, not empty."""
         secret = tmp_path / "settings.local.json"
@@ -496,7 +509,9 @@ class TestAFailedWriteLeavesNothingBehind:
 
         monkeypatch.setattr(host_settings.os, "unlink", refuse_to_unlink)
         monkeypatch.setattr(
-            host_settings.logger, "warning", lambda *a, **k: complaints.append(a[0] % a[1:] if len(a) > 1 else a[0])
+            host_settings.logger,
+            "warning",
+            lambda *a, **k: complaints.append(a[0] % a[1:] if len(a) > 1 else a[0] if a else ""),
         )
 
         with pytest.raises(TypeError):

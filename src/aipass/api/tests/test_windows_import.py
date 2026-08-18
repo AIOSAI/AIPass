@@ -37,6 +37,16 @@ WHY A META_PATH FINDER RATHER THAN A PATCHED __import__. Wrapping
 cross-branch import gate reads that stack to decide who is calling. The
 simulation would then be blocked by the gate instead of measuring anything. A
 finder leaves the stack alone.
+
+THE SPECIES CAME BACK THE SAME DAY, IN A TEST FILE. The lane's second complete
+run reported test_host_settings.py failing to COLLECT: a class-level
+`@pytest.mark.skipif(os.geteuid() == 0, ...)` — a decorator argument is
+evaluated when pytest imports the file, and `os.geteuid` does not exist on
+win32 either. apps/ was already swept by this pin; tests/ was not, so the
+defect landed in the one place the pin could not see. The child now also
+executes every test file top to bottom, which is exactly what pytest
+collection does — a module-level `pytest.skip` is collection working as
+designed and is not a failure.
 """
 
 import json
@@ -75,7 +85,7 @@ ABSENT_OS_ATTRS = (
 )
 
 CHILD = '''
-import importlib, json, os, pathlib, sys
+import importlib, importlib.util, json, os, pathlib, sys
 
 ABSENT_MODULES = set(json.loads(sys.argv[2]))
 ABSENT_OS_ATTRS = json.loads(sys.argv[3])
@@ -123,7 +133,33 @@ for source in sorted(root.glob("apps/**/*.py")):
     except Exception as e:
         failures.append({"module": name, "why": type(e).__name__ + ": " + str(e).splitlines()[0][:200]})
 
-print("RESULT" + json.dumps({"hidden": hidden, "imported": len(imported), "failures": failures}))
+# The tests themselves, executed the way pytest collection executes them: the
+# whole file runs top to bottom, so a POSIX-only attribute in a decorator or a
+# module constant fails HERE the way it failed on the real lane.
+collected, collection_failures = 0, []
+
+for index, source in enumerate(sorted(root.glob("tests/**/*.py"))):
+    if "__pycache__" in source.parts or ".archive" in source.parts:
+        continue
+    spec = importlib.util.spec_from_file_location("winprobe_%d_%s" % (index, source.stem), source)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    collected += 1
+    try:
+        spec.loader.exec_module(module)
+    except BaseException as e:  # noqa: BLE001 - Skipped and SystemExit both matter here
+        if type(e).__name__ == "Skipped":
+            continue
+        why = type(e).__name__ + ": " + str(e).splitlines()[0][:200]
+        collection_failures.append({"module": source.name, "why": why})
+
+print("RESULT" + json.dumps({
+    "hidden": hidden,
+    "imported": len(imported),
+    "failures": failures,
+    "collected": collected,
+    "collection_failures": collection_failures,
+}))
 '''
 
 
@@ -195,3 +231,18 @@ class TestEveryModuleImportsWithoutPosix:
         being large enough that the sweep is obviously still finding the tree.
         """
         assert without_posix["imported"] > 40
+
+    def test_every_test_file_still_collects_without_posix(self, without_posix: dict) -> None:
+        """
+        The 2026-08-18 second-round species: a POSIX-only attribute evaluated
+        at COLLECTION time in a test file.
+
+        Verified to bite: restoring the bare `os.geteuid() == 0` skipif on
+        test_host_settings.py reproduces the lane's exact error here — one
+        decorator, the whole file's tests gone.
+        """
+        assert without_posix["collection_failures"] == []
+
+    def test_the_collection_sweep_actually_finds_the_test_tree(self, without_posix: dict) -> None:
+        """Same guard-on-the-guard as apps/: an empty glob passes vacuously."""
+        assert without_posix["collected"] > 20

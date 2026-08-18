@@ -38,6 +38,7 @@ a reader sees the old file or the new one, never half of either.
 
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -370,6 +371,10 @@ class TestTheStoreIsNeverSeenHalfWritten:
         leftovers = [item.name for item in (store / "host_api").iterdir() if item.name != "tokens.json"]
         assert leftovers == []
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
+    )
     def test_the_store_file_stays_owner_only(self, store: Path) -> None:
         """
         0o600 survives the rename.

@@ -1535,6 +1535,7 @@ class TestGlobalMissionControlIsReachable:
         """
         assert not host_attach.valid_monitor_target("")
 
+    @pty_required
     def test_the_global_watch_actually_opens(self, quiet: Any, tmp_path: Path) -> None:
         """End to end through open_monitor, with no target at all."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
@@ -1546,6 +1547,7 @@ class TestGlobalMissionControlIsReachable:
         finally:
             session.hangup()
 
+    @pty_required
     def test_a_targetless_watch_is_named_not_blank(self, quiet: Any, tmp_path: Path) -> None:
         """
         'watch-' with nothing after it reads as a truncated name. A watch over
@@ -1564,19 +1566,40 @@ class TestGlobalMissionControlIsReachable:
         "garbage",
         ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all"],
     )
-    def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str) -> None:
+    def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str, monkeypatch) -> None:
         """
         Making absence reachable must not make anything ELSE reachable.
 
         The phone picks targets off the fleet snapshot; it never composes a
         command line. These all still die in front of the PTY.
+
+        PTY_AVAILABLE is forced True so the FENCE is what answers on every
+        platform: the platform gate stands in front of it, and without this a
+        Windows runner gets AttachUnavailable before the fence ever sees the
+        garbage — the subject here is the fence, and Popen stays patched so
+        nothing can spawn regardless.
         """
+        monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         with patch.object(host_attach.subprocess, "Popen") as spawn:
             with pytest.raises(host_attach.AttachRefused):
                 host_attach.open_monitor(garbage)
 
         spawn.assert_not_called()
 
+    def test_a_pty_less_platform_is_refused_in_words_before_the_fence(self, quiet: Any) -> None:
+        """
+        The Windows contract, pinned from every platform: no PTY means the
+        honest sentence, raised before the fence or any spawn is consulted.
+        """
+        with patch.object(host_attach, "PTY_AVAILABLE", False):
+            with patch.object(host_attach.subprocess, "Popen") as spawn:
+                with pytest.raises(host_attach.AttachUnavailable) as refusal:
+                    host_attach.open_monitor("seedgo")
+
+        assert "PTY is a POSIX object" in str(refusal.value)
+        spawn.assert_not_called()
+
+    @pty_required
     def test_whitespace_is_absence_not_a_target(self, quiet: Any, tmp_path: Path) -> None:
         """A target of spaces is nobody named, which is the global form."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
@@ -1614,6 +1637,7 @@ class TestAWatchIsNotAnchorTooling:
     replaced an accurate live warning with a guess.
     """
 
+    @pty_required
     def test_a_tenant_project_watch_is_not_refused(self, quiet: Any, tmp_path: Path) -> None:
         """BAUD lives in projects/ and @prax scopes to it. Measured, not assumed."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
