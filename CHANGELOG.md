@@ -9,10 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
-## [2026-08-19] — v2.7.17: one-brain enforced, first green board, fleet perf night, phone file explorer
+## [2026-08-19] — v2.7.17: one-brain enforced, CI green campaign, fleet perf night, phone file explorer
 
-**fix(ci)** — the PR #734 green campaign: six owner rounds to the first fully
-green 21/21 board. The Windows lane's first complete runs unmasked platform
+**fix(ci)** — the PR #734 green campaign: six owner rounds took the PR's own
+board from red to 21/21. Main was never red — the merge gate forbids it; these
+failures lived only on the PR, where the new Windows/macOS lanes' first
+complete runs unmasked platform
 assumptions suite by suite (a bare `os.geteuid()` in a decorator killing a whole
 file at collection, POSIX-mode skips made honest, the parent-is-a-file corpus
 divergence, @trigger's reader-clobber where a refused read became a destructive
