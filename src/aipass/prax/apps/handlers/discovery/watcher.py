@@ -55,8 +55,8 @@ _observer: Any = None
 
 # Liveness state. The dispatcher dying is silent by construction (watchdog lets
 # the thread die and logs nothing to us), so the only way anyone learns about it
-# is if we look. `_death_reported` makes the report fire ONCE per death rather
-# than once per check — prax owns the runaway-log detector, so a health check
+# is if we look. `_LIVENESS.death_reported` makes the report fire ONCE per death
+# rather than once per check — prax owns the runaway-log detector, so a health check
 # that floods the log it monitors would be its own bug.
 _LIVENESS_CHECK_INTERVAL_SEC = 60.0
 

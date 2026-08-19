@@ -16,7 +16,13 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 import inspect
 
-from aipass.trigger.apps.config import atomic_write_json, json_file_lock, read_text_with_retry, trail_logger
+from aipass.trigger.apps.config import (
+    atomic_create_json,
+    atomic_write_json,
+    json_file_lock,
+    read_text_with_retry,
+    trail_logger,
+)
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -141,9 +147,17 @@ def ensure_json_exists(module_name: str, json_type: str) -> bool:
             # Undecodable bytes: genuinely corrupt, regenerate.
             logger.warning(f"ensure_json_exists found {module_name}_{json_type} corrupt, regenerating: {exc}")
 
-    template = _get_default_template(json_type, module_name)
+        # A document we READ and judged bad: replacing it is the whole point.
+        atomic_write_json(json_path, _get_default_template(json_type, module_name), ensure_ascii=False)
+        return True
 
-    atomic_write_json(json_path, template, ensure_ascii=False)
+    # Missing: CREATE, never overwrite — and decide that from what we observed
+    # above, not from a second exists() check, which is the same check-then-act
+    # race one line further down. Two callers can both arrive here with the
+    # document still absent, and this runs outside every lock, so a replacing
+    # write lets the slower one bury whatever a lock holder has written since.
+    # Linux CI 32228159169: 99 of 100. Reproduced locally, 3 losses in 400.
+    atomic_create_json(json_path, _get_default_template(json_type, module_name), ensure_ascii=False)
     return True
 
 

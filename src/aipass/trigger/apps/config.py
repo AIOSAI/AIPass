@@ -359,6 +359,63 @@ def json_file_lock(path: Path):
             _release_lock(lock_f)
 
 
+def atomic_create_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> bool:
+    """Create a JSON document ONLY if nothing is there. Never overwrites.
+
+    "Ensure this file exists" and "write this file" are different operations,
+    and implementing the first as the second loses data: two callers that both
+    find a document missing both stage a template, and the loser's empty
+    template lands on top of whatever the winner has written in between.
+
+    Measured on Linux before this existed — 4 threads x 25 appends through
+    log_operation, 3 losing runs in 400, one of them the 99-of-100 signature CI
+    reported (run 32228159169). The write order proved it: two empty-template
+    writes staged first, and one of them completed AFTER a lock holder's first
+    real entry. No lock could have stopped it; the template write is outside
+    every critical section by construction.
+
+    The staged file is LINKED into place rather than replaced, so the document
+    is complete the instant it appears and a second creator is refused instead
+    of overwriting.
+
+    Args:
+        path: Document to create.
+        data: Contents to write if this call wins the create.
+        indent: json.dump indent.
+        ensure_ascii: json.dump ensure_ascii.
+        encoding: Text encoding.
+
+    Returns:
+        True if this call created the file, False if it was already there.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
+        try:
+            os.link(tmp_path, str(path))
+            return True
+        except FileExistsError:
+            return False
+        except OSError as exc:
+            # No hard links here (some network mounts, FAT). Create-or-fail is
+            # not available, so this degrades to the replacing write and the
+            # race above is open again on such a filesystem. Said out loud
+            # rather than hidden: a silent fallback is how the first version
+            # of this looked correct.
+            logger.warning(f"atomic_create_json: no link support at {path.parent}, falling back to replace: {exc}")
+            replace_with_retry(tmp_path, str(path))
+            return True
+    except BaseException:
+        raise
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _archive_legacy_file(path: Path) -> bool:
     """Move a retired state file into a sibling .archive/ directory.
 

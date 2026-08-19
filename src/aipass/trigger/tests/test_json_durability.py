@@ -18,8 +18,11 @@ These pins exercise the win32 branch FROM LINUX by injecting a fake msvcrt, so
 the platform this branch cannot run on is still covered by construction.
 """
 
+import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -336,3 +339,75 @@ class TestWindowsLockIsPositionAware:
                 fake.locking(b.fileno(), fake.LK_NBLCK, 1)
 
         assert fake.grants == [(0, 1), (64, 1)], f"model did not show drift: {fake.grants}"
+
+
+class TestAtomicCreateJsonNeverOverwrites:
+    """ "Ensure this file exists" and "write this file" are different
+    operations, and implementing the first as the second cost a concurrent
+    append on Linux CI (32228159169, 99 of 100). Reproduced locally at 3 losing
+    runs in 400 before the fix, 0 in 1500 after — with the same loop still
+    losing when the replacing write is put back, so the loop has power.
+    """
+
+    def test_it_creates_when_nothing_is_there(self, tmp_path):
+        path = tmp_path / "new.json"
+        assert config.atomic_create_json(path, {"a": 1}) is True
+        assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1}
+
+    def test_it_refuses_and_changes_nothing_when_the_document_exists(self, tmp_path):
+        """The whole point: the loser of a create race writes NOTHING."""
+        path = tmp_path / "taken.json"
+        path.write_text(json.dumps({"written": "by someone else"}), encoding="utf-8")
+
+        assert config.atomic_create_json(path, {"a": 1}) is False
+        assert json.loads(path.read_text(encoding="utf-8")) == {"written": "by someone else"}
+
+    def test_it_leaves_no_staged_file_behind_either_way(self, tmp_path):
+        """Both paths clean up their temp file — a create that loses the race
+        still has one staged, and .tmp litter in the state dir is what the
+        trio machinery would later try to interpret.
+        """
+        path = tmp_path / "clean.json"
+        config.atomic_create_json(path, {"a": 1})
+        config.atomic_create_json(path, {"a": 2})
+        assert list(tmp_path.glob("*.tmp")) == []
+
+
+class TestThePosixLockArmIsRealToo:
+    """The win32 arm is pinned by injection; the POSIX arm was only pinned
+    through its callers. devpulse asked outright whether the byte-lock is
+    msvcrt-only with no fcntl twin (2564f815 follow-up, Linux CI 32228159169).
+
+    It is not: fcntl.flock is taken on a fresh open file description per call,
+    and separate descriptions conflict even inside ONE process — which is what
+    makes threads serialise. Measured rather than asserted.
+    """
+
+    def test_four_threads_never_hold_it_at_once(self, tmp_path):
+        if config.sys.platform == "win32":  # pragma: no cover - POSIX arm only
+            pytest.skip("POSIX arm; the win32 arm is pinned by injection above")
+
+        doc = tmp_path / "doc.json"
+        state = {"inside": 0, "peak": 0, "overlaps": 0}
+        guard = threading.Lock()
+
+        def worker():
+            for _ in range(60):
+                with config.json_file_lock(doc):
+                    with guard:
+                        state["inside"] += 1
+                        state["peak"] = max(state["peak"], state["inside"])
+                        if state["inside"] > 1:
+                            state["overlaps"] += 1
+                    time.sleep(0.0002)
+                    with guard:
+                        state["inside"] -= 1
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert state["peak"] == 1, f"{state['peak']} threads held the lock at once"
+        assert state["overlaps"] == 0

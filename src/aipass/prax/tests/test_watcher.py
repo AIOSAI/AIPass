@@ -517,6 +517,14 @@ class TestDispatcherSurvivesHandlerFailure:
 
         A vacuity floor: if on_created silently stopped working, every test above
         would still pass. This one fails if the handler no longer registers.
+
+        The size is written in BINARY and asserted against the file's own
+        `stat().st_size`. The first version of this pin compared the recorded size
+        to `len("y = 2\n")` — the length of the Python string — and went red on
+        Windows CI with `assert 7 == 6`, because `write_text` translates `\n` to
+        `\r\n` there. Production was honest the whole time: the handler records
+        the true on-disk size. The pin was the platform-naive half, and what it
+        should say is "the registered size is the REAL size", not "the size is 6".
         """
         mod = self._real_watcher_module()
         monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
@@ -527,7 +535,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
 
         real_file = tmp_path / "keeper.py"
-        real_file.write_text("y = 2\n")
+        real_file.write_bytes(b"y = 2\n")  # binary: exactly 6 bytes on every platform
 
         handler = mod.PythonFileWatcher()
         event = MagicMock()
@@ -537,7 +545,44 @@ class TestDispatcherSurvivesHandlerFailure:
         handler.dispatch(event)
 
         assert "keeper" in saved, "a perfectly good new module was not registered"
-        assert saved["keeper"]["size"] == len("y = 2\n")
+        assert saved["keeper"]["size"] == real_file.stat().st_size
+        assert saved["keeper"]["size"] == 6, "binary write should be 6 bytes on every platform"
+
+    def test_the_recorded_size_is_the_real_size_under_crlf(self, tmp_path, monkeypatch):
+        """The Windows half of the size pin, run on Linux.
+
+        Windows text mode turns `\n` into `\r\n`, so a file whose Python string
+        is 6 characters occupies 7 bytes on disk. That difference is exactly what
+        reddened CI. Writing CRLF explicitly reproduces the Windows byte layout on
+        any platform, so the property — the registry records what the OS actually
+        holds, whatever the line ending — is proven in both worlds from one lane.
+
+        Same split as the 2026-08-08 Windows path work: run the platform branch by
+        name rather than claiming a platform the suite never executes.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+
+        saved = {}
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: saved.update(modules))
+
+        crlf_file = tmp_path / "crlf.py"
+        crlf_file.write_bytes(b"y = 2\r\n")  # what Windows text mode produces
+        assert crlf_file.stat().st_size == 7, "fixture broken: CRLF file should be 7 bytes"
+
+        handler = mod.PythonFileWatcher()
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(crlf_file)
+        handler.dispatch(event)
+
+        assert "crlf" in saved
+        assert saved["crlf"]["size"] == crlf_file.stat().st_size == 7, (
+            "the registry must record the bytes the OS holds, not the length of a Python string"
+        )
 
     def test_the_file_is_stat_ed_once_not_twice(self, tmp_path, monkeypatch):
         """Two stats are two chances to lose the same race the guard now catches.

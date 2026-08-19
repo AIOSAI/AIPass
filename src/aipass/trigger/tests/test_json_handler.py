@@ -608,3 +608,52 @@ class TestTheLockOutlastsTheWrite:
         json_handler.log_operation("guarded", module_name="ordering")
 
         assert events == ["acquire", "replace", "release"], f"replace outside the lock: {events}"
+
+
+class TestEnsureNeverOverwritesADocumentThatArrivedFirst:
+    """CI run 32228159169, ubuntu / py3.12 / xdist gw1: 99 of 100 concurrent
+    appends survived. Linux, so NOT the Windows sharing-violation species that
+    round 5 closed — a different door.
+
+    `ensure_module_jsons()` runs OUTSIDE the critical section, and its
+    create-if-missing branch was implemented as a plain overwriting write. Two
+    threads that both find the log missing both stage an empty template, and
+    the loser's template completes AFTER a lock holder has written its first
+    real entry. Reproduced before changing anything: 3 losing runs in 400
+    (4 threads x 25 appends), and the write order named the culprit — two
+    empty-template writes staged first, one landing after a 1-entry write.
+
+    No lock could have prevented this: the template write is outside every
+    critical section by construction. "Ensure this exists" and "write this"
+    are different operations.
+    """
+
+    def test_a_document_created_while_the_template_was_staged_survives(self, json_handler, tmp_path):
+        """The race window, made deterministic.
+
+        _get_default_template runs between the exists() check and the write,
+        which is exactly the window another writer creates and fills the
+        document in. Writing real content from inside it models that writer
+        without threads or timing.
+        """
+        path = tmp_path / "race_log.json"
+        real_template = json_handler._get_default_template
+
+        def template_and_a_racing_writer(json_type, module_name):
+            if module_name == "race" and json_type == "log":
+                path.write_text(json.dumps([{"timestamp": "t", "operation": "kept"}]), encoding="utf-8")
+            return real_template(json_type, module_name)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(json_handler, "_get_default_template", template_and_a_racing_writer)
+            json_handler.ensure_json_exists("race", "log")
+
+        entries = [e["operation"] for e in json.loads(path.read_text(encoding="utf-8"))]
+        assert entries == ["kept"], f"a template landed on top of real content: {entries}"
+
+    def test_it_still_creates_the_document_when_nothing_is_there(self, json_handler, tmp_path):
+        """The contract the create path exists for, unchanged."""
+        path = tmp_path / "fresh_log.json"
+        assert not path.exists()
+        json_handler.ensure_json_exists("fresh", "log")
+        assert json.loads(path.read_text(encoding="utf-8")) == []

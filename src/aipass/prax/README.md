@@ -57,18 +57,37 @@ written by the logging handlers whether or not a monitor is running. Start it
 when you want to watch, quit it when you are done.
 
 The `prax-monitor.service` systemd unit that used to run it always-on is
-**retired** — archived (not deleted) at
-`.archive/prax-monitor.service.retired-2026-08-18` with the reasoning beside it.
-(That archive is currently **local-only**: the root `.gitignore` ignores
-`.archive/`, so git records the move as a plain deletion and a fresh clone would
-have neither the unit nor the note. A selective un-ignore is owed — same
-exception @api and @memory already carry — and is reported to @devpulse rather
-than edited into the shared file unilaterally.)
-Its stated purpose was the Telegram relay, and Telegram is retired too (same
-day's ruling: BAUD is the surface going forward). It was also one of the six
-processes the DPLAN-0305 watcher leak grew to ~2.3GB. Any future always-on
-proposal has to answer log rotation and the ecosystem-observer question first —
-both written down in the archived note.
+**retired and deleted from the repo**, which under Patrick's archive doctrine
+(2026-08-18) is what retired means: *`.archive/` is always ignored, no
+exceptions — and files there are not safe, they get cleaned without warning.*
+So the retirement record lives here, in tracked prose, rather than in an archive
+directory that neither ships nor survives. A convenience copy may sit in
+`.archive/` on any given machine; nothing depends on it.
+
+**Why it was retired.** Two rulings the same day landed on the one file. First,
+the on-request ruling above. Second, Telegram was retired — and this unit's
+entire stated purpose was `Description=AIPass Prax Monitor — Telegram relay`,
+setting `AIPASS_PRAX_MONITOR_RELAY=1`; BAUD is the surface going forward. It was
+also expensive: 3h23m of CPU consumed, 2.29GB RSS at the end, and it was one of
+the six processes that lost their watchdog dispatcher at 02:19 that day and grew
+unbounded (DPLAN-0305, fixed above).
+
+**What the unit was**, for anyone reconstructing it: a `Type=simple` user unit
+running `python3 -m aipass.prax.apps.modules.monitor run` with
+`Restart=always`, `WorkingDirectory` at the repo root, `AIPASS_PRAX_MONITOR_RELAY=1`,
+and both stdout and stderr appended to `~/.aipass/prax-monitor.service.log` —
+deliberately *outside* `system_logs/`, because the monitor tails `system_logs/*.log`
+and @trigger watches it too, so writing its own output there is a feedback loop.
+
+**If an always-on monitor is ever wanted again**, two questions have to be
+answered before reinstalling anything:
+
+- **Log rotation.** `StandardOutput=append:` has no rotation. That log reached
+  **117MB unrotated** before it was archived. A long-lived unit needs a rotation
+  story first.
+- **The ecosystem observer.** Any long-lived process that logs still lazy-starts
+  a recursive ~1413-watch observer over `src/aipass` (see DPLAN-0307). That design
+  is under review precisely because always-on processes multiply it.
 
 Real-time unified console showing:
 - File changes, log events, drone commands, agent activity
@@ -242,6 +261,33 @@ same second; `stat()` on the vanished path raised `FileNotFoundError` from
 `on_created`; **six** long-running processes lost their dispatcher at the same
 instant and grew to ~2.3GB RSS each — 13.7 of 15GB with swap full — over the
 next 15 hours, with nothing logged. Diagnosed by @devpulse in DPLAN-0305.
+
+The evidence is reproduced here rather than referenced, because the log it came
+from lives in an archive directory and plans are not tracked either — under the
+archive doctrine, a record that must survive belongs in tracked prose:
+
+```
+Exception in thread Thread-1:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File ".../watchdog/observers/api.py", line 213, in run
+    self.dispatch_events(self.event_queue)
+  File ".../watchdog/observers/api.py", line 391, in dispatch_events
+    handler.dispatch(event)
+  File ".../watchdog/events.py", line 217, in dispatch
+    getattr(self, f"on_{event.event_type}")(event)
+  File ".../prax/apps/handlers/discovery/watcher.py", line 88, in on_created
+    "size": py_file.stat().st_size,
+            ^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 842, in stat
+    return os.stat(self, follow_symlinks=follow_symlinks)
+FileNotFoundError: [Errno 2] No such file or directory:
+  '.../src/aipass/api/apps/handlers/host/.archive/probe.py'
+```
+
+Note the last frame: `run` catches `queue.Empty` and nothing else, so the thread
+simply ends. Nothing above it ever hears about it.
 
 Two things came out of it, both pinned by tests that run against a **real**
 watchdog observer (a mocked dispatcher cannot die, so a mocked test would pass

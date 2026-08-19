@@ -5,7 +5,7 @@
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events, registered handlers react. Medic watches logs for errors, fingerprints them, gates dispatch through an 8-stage pipeline, and notifies the responsible branch.
 **Module:** `aipass.trigger`
 **Version:** 2.6.0
-**Last Updated:** 2026-08-18
+**Last Updated:** 2026-08-19
 
 ## Quick Start
 
@@ -358,7 +358,7 @@ trigger/
 │       │   └── memory_pool.py     # Pool auto-process observability
 │       └── watchers/
 │           └── log_watcher.py      # system_logs reader — observer withdrawn, see below
-├── tests/                          # 1062 tests across 27 modules
+├── tests/                          # 1068 tests across 27 modules
 ├── trigger_json/                   # Runtime state files
 │   ├── medic_state.json            # Medic state, muted branches, breaker
 │   ├── error_catchup.json          # Startup catch-up scan position + hashes
@@ -398,11 +398,12 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 - **Atomic writes:** All JSON state files use `config.atomic_write_json()` — writes to a temp file in the same directory, then an atomic rename. No partial writes on crash.
   The rename goes through `config.replace_with_retry()`, not a bare `os.replace()`: on Windows an antivirus scanner or the search indexer can hold a transient handle on the destination and `os.replace` raises `PermissionError`. 40 attempts, 5ms apart, `PermissionError` only — any other `OSError` propagates on the first attempt, and exhaustion raises rather than reporting a write that did not happen. Fleet-canonical shape, matching `@commons`.
-- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. Prevents concurrent corruption from watcher + CLI.
+- **File locking:** All read-modify-write cycles wrapped in `config.json_file_lock()` with `.lock` sidecar files — `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. Prevents concurrent corruption from watcher + CLI. Both arms are pinned: the win32 one by an injected fake, the POSIX one by measurement (4 threads x 60 entries, peak 1 holder — `flock` takes a fresh open file description per call, so it conflicts even inside one process).
   This line said "all" from the day it was written and was **not true until 2026-08-16**: `json_handler`'s own `log_operation`, `increment_counter` and `update_data_metrics` read a document, changed it in memory and wrote it back with no lock at all. Atomic is not serialised — `atomic_write_json` stops a *torn* file, not a *lost* one, and having the atomic helper is exactly what made the gap look closed. Measured on the unfixed handler across 4 processes: **100 appends asked, 62 on disk, 38 lost silently, every call returning `True`.** After the fix, 100 of 100. Found by checking my own paths against a defect @api reported in theirs (`6cd8f22c`), not by anyone auditing this claim.
 - **The Windows lock was a silent no-op until 2026-08-18.** `json_file_lock` carried `if sys.platform == "win32": yield` with the comment "single-user typical" — on Windows the context manager returned having taken *nothing*, and every caller ran unserialised while the code read as locked. Windows has no blocking `flock`, so the fix polls: `msvcrt.locking(..., LK_NBLCK, 1)` on one byte of the sidecar, 100 attempts 50ms apart, and the final attempt is deliberately unguarded so the caller gets the OS's own `OSError` instead of running unlocked. The sidecar opens `"a+"`, not `"w"` — truncating a file another process byte-locks is a sharing violation on Windows. Proven **from Linux** by a fake `msvcrt` injected into `sys.modules` with `sys.platform` patched: acquires and releases, retries-then-succeeds (exactly 3 waits, 4 lock calls), and refuses rather than yielding unlocked. A source-inspection test pins that the words "single-user typical" never come back.
 
 - **The read side was the other half, and it was the one that lost data (2026-08-18).** `os.replace` was hardened against the Windows sharing window; every *reader* was left exposed to the identical transient. `ensure_json_exists` caught `OSError` alongside decode errors and answered both by writing a fresh template over the document — so a 5ms timing event was read as corruption and the file was thrown away. Windows CI counted it: **98 of 100** concurrent appends survived, the two lost being exactly the two on disk when one read was refused. Reproduced on Linux in three lines. Reads now go through `config.read_text_with_retry` (the mirror of `replace_with_retry`), **unreadable is no longer treated as corrupt**, and `log_operation` refuses rather than writing `[]` over a document it could not read. The lock was never involved — the destructive write lived outside the critical section, where no lock could reach it.
+- **"Ensure this exists" is not "write this", and the difference was a lost entry (2026-08-19).** `ensure_json_exists` implemented create-if-missing as a replacing write, and it runs outside every lock — so two callers that both find a document missing both stage an empty template, and the loser's completes after a lock holder has written its first real entry. Linux CI counted **99 of 100**; reproduced locally at 3 losing runs in 400, with the instrumented write order naming the culprit outright (two empty-template writes staged first, one landing after a 1-entry write). No lock could have prevented it — the template write is outside every critical section by construction. Creation now goes through `config.atomic_create_json`: the staged file is **linked** into place, so a second creator is refused rather than overwriting, and the document is complete the instant it appears. 0 losses in 1500 runs after — with the same loop still losing when the replacing write is put back, so the loop has power. A filesystem without hard links degrades to the replacing write and says so in the log.
 - **Circuit breaker persistence:** Trip state, recent errors, per-fingerprint tracking all survive restarts via `trigger_cb_state.json`.
 - **Off the trio path:** Hand-written live state uses filenames `json_handler`'s trio machinery does not own — see the Architecture section.
 
@@ -420,7 +421,7 @@ leaves an unreadable legacy file in place for a human rather than guessing.
 
 ## Testing
 
-1062 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
+1068 tests across 27 test modules, all passing. Coverage: 106/106 public functions (100%).
 
 ```bash
 cd src/aipass/trigger && pytest    # Run all tests
@@ -443,7 +444,7 @@ The largest single deduction is `handlers` on `handlers/escalation.py`: its five
 
 ---
 
-*Last Updated: 2026-08-18*
+*Last Updated: 2026-08-19*
 
 ---
 [← Back to AIPass](../../../README.md)
