@@ -5,15 +5,22 @@
 > Centralized external API gateway — authenticated service clients for all external APIs
 
 **Module:** `aipass.api` | **Role:** `api_gateway`
-**Seedgo:** 100% (45/45) | **Tests:** 1394 pass | **Functions:** 201 public (185 tested)
+**Seedgo:** 100% (45/45) | **Tests:** 1458 pass | **Functions:** 205 public (189 tested)
 **Last Updated:** 2026-08-18
 
-*The one checker under 100 is seedgo's new gateway_boundary, and it names a
-single line: `settings.py` still writes `settings.local.json` by hand rather
-than through @aipass' door. That lane is separately planned. The hooks lane
-beside it no longer bypasses anything — the mute switch is flipped by
-@hooks' own registered command and read through their own `is_muted()`, so
-this branch no longer holds a second copy of where that flag lives.*
+*The name fence gained ROOTS (FPLAN-0443). It answered exactly one kind of
+word — a citizen name — which is why the phone could only ever stand in
+agent-land; it answers four now (`branch`, `home`, `project`, `aipass`) and
+`GET /v1/roots` publishes the roster so the face renders what the server
+holds rather than a list it guessed. The widening is the roster and not the
+rule: the client still sends a NAME, the server still resolves it, and the
+same containment runs under all four. A request that names no root gets the
+branch answer it always got, key for key.*
+
+*The gateway_boundary line is answered by a bypass entry with its own
+retirement clause (no owner door exists at @aipass yet, ruling pending), so
+the audit reads 100 with the standing exception on the record rather than
+hidden.*
 
 *The two long-standing exceptions before that are gone rather than
 documented: the attach route's nesting went when the room resolution and the
@@ -219,8 +226,9 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/ping` | none | 204, no body — separates "tunnel down" from "token bad" |
 | `GET /v1/whoami` | read | Enrollment check; returns only what the caller already holds |
 | `GET /v1/feed?since=&limit=` | read | Cursor is a **timestamp**, clamped both ends, `gap` flagged |
-| `GET /v1/files?branch=&file=&project=` | read | Branch by NAME, file relative to it; 512KB cap **refuses**, never trims. Any project |
-| `GET /v1/dir?branch=&dir=&project=` | read | One directory level, the phone's file browser. Any project |
+| `GET /v1/roots` | read | Every place the file lane may stand: `home`, every project in @baud's census, this server's own repo. Rows of `{kind, name, label}`. No census, no roster — 503, never a short list |
+| `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
+| `GET /v1/dir?branch=&dir=&project=&root=` | read | One directory level, the phone's file browser. Same optional `root`; `branch` carries the name WITHIN that kind — and a kind that names nothing may name *itself* (`branch=home&root=home`), any other name refused. Answers carry `floor`, and `floor` + an entry's path is that entry's real location |
 | `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB); `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
 | `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repository. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name** |
 | `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |

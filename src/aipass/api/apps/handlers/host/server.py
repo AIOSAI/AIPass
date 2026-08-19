@@ -33,7 +33,10 @@ Endpoints in Phase 1:
 
 Endpoints added in Phase 2 (read lane):
     GET /v1/feed    - read scope. Cursor-first, clamped both ends, gap flagged.
+    GET /v1/roots   - read scope. Every place the file lane may stand: home,
+                      every project in @baud's census, this server's own repo.
     GET /v1/files   - read scope. Names not paths, 512KB cap, cap is reported.
+                      Optional root kind; absent is the branch meaning always.
     GET /v1/diff    - read scope. One patch, routed through drone, never raw:
                       a working tree, a whole repository, or one commit, and
                       optionally ONE file out of any of them.
@@ -783,16 +786,29 @@ def create_app() -> Any:
         except host_feed.FeedUnavailable as e:
             raise _deny(503, "feed_unavailable", str(e)) from e
 
+    @app.get("/v1/roots")
+    async def roots(record: dict = Depends(require_scope("read"))) -> dict:
+        """Every place the file lane may stand. 503 rather than a short list
+        when the census is gone — reads.list_roots carries the reasoning."""
+        try:
+            return host_reads.list_roots()
+        except host_reads.ReadUnavailable as e:
+            raise _deny(503, "roots_unavailable", str(e)) from e
+
     @app.get("/v1/files")
     async def files(
-        branch: str,
         file: str,
+        branch: str = "",
         project: str = "",
+        root: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """Read a file by NAME under a branch. No path parameter exists here."""
+        """Read a file by NAME under a root — no path parameter exists here.
+        `branch` is the name WITHIN the kind `root` names, and is no longer
+        signature-required (home and aipass name nothing), so omitting it on
+        the branch lane is refused by the fence (400), not validation (422)."""
         try:
-            return host_reads.read_file(branch=branch, file=file, project=project)
+            return host_reads.read_file(branch=branch, file=file, project=project, root=root)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -800,14 +816,15 @@ def create_app() -> Any:
 
     @app.get("/v1/dir")
     async def dir_listing(
-        branch: str,
+        branch: str = "",
         dir: str = "",
         project: str = "",
+        root: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """One directory level under a branch, by NAME. The phone's file browser."""
+        """One directory level under a root, by NAME. The phone's file browser."""
         try:
-            return host_reads.list_dir(branch=branch, dir=dir, project=project)
+            return host_reads.list_dir(branch=branch, dir=dir, project=project, root=root)
         except host_reads.ReadRefused as e:
             raise _deny(400, "read_refused", str(e)) from e
         except host_reads.ReadUnavailable as e:
@@ -1430,25 +1447,11 @@ def create_app() -> Any:
         # Not fatal: the API is the product, the face is a client of it.
         logger.warning("[host_api] phone face not built — / will report it. %s", host_face.BUILD_HINT)
 
-    routes = [
-        "/v1/ping",
-        "/v1/whoami",
-        "/v1/feed",
-        "/v1/files",
-        "/v1/files/upload",
-        "/v1/diff",
-        "/v1/fleet",
-        "/v1/roster",
-        "/v1/rooms",
-        "/v1/memory-config",
-        "/v1/memory-config/set",
-        "/v1/memory-config/set-default",
-        "/v1/memory-config/push",
-        "/v1/verbs/wake",
-        "/v1/verbs/kill",
-        "/v1/verbs/lock",
-        "/v1/room/attach",
-    ]
+    # DERIVED FROM THE APP, never written down. The hand-kept list this
+    # replaces named 18 doors while the app registered nearly forty — /v1/dir,
+    # /v1/projects, every git route and every settings route had been missing
+    # since the day they were added, and the log line kept reading as complete.
+    routes = sorted({path for path in (getattr(route, "path", "") for route in app.routes) if path.startswith("/v1")})
     logger.info("[host_api] app created (read lane + verb lane: %s)", ", ".join(routes))
     json_handler.log_operation("host_api_app_created", {"phase": 3, "routes": routes})
     return app

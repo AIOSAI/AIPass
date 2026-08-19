@@ -657,6 +657,12 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         """
         Every route, not just the one that was hit. The hole was in the layer,
         so the fix has to be in the layer.
+
+        `branch` USED TO BE NAMED HERE TOO and no longer is: FPLAN-0443 made it
+        optional because the `home` and `aipass` roots name nothing, so a
+        request that omits it is now refused by the fence in words (400) rather
+        than by validation (422) — pinned in test_host_roots.py. `file` is
+        still required, which is what this test is actually about.
         """
         from fastapi.testclient import TestClient
 
@@ -667,8 +673,8 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
             response = client.get("/v1/files", headers={"Authorization": f"Bearer {raw}"})
 
         body = response.json()
+        assert response.status_code == 422
         assert body["error"]["code"] == "invalid_request"
-        assert "branch" in body["error"]["message"]
         assert "file" in body["error"]["message"]
 
     def test_the_raw_detail_shape_is_gone(self, store: Any) -> None:
@@ -692,6 +698,10 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
         """
         `fields` carries the loc/msg pairs, so this widens the envelope rather
         than narrowing it — a client that wanted the structure still has it.
+
+        Reads `file` rather than `branch` since FPLAN-0443 made the latter
+        optional; the assertion is about the loc/msg pairs surviving, and any
+        still-required query field proves that.
         """
         from fastapi.testclient import TestClient
 
@@ -702,7 +712,7 @@ class TestValidationErrorsUseTheDocumentedEnvelope:
             body = client.get("/v1/files", headers={"Authorization": f"Bearer {raw}"}).json()
 
         locations = [field["loc"] for field in body["error"]["fields"]]
-        assert ["query", "branch"] in locations
+        assert ["query", "file"] in locations
 
     def test_the_message_is_never_empty(self) -> None:
         """

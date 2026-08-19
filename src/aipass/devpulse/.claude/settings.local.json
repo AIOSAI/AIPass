@@ -2,7 +2,7 @@
   "autoCompactEnabled": true,
   "autoCompactWindow": 350000,
   "enabledMcpjsonServers": [],
-  "model": "fable",
+  "model": "opus",
   "teammateMode": "in-process",
   "permissions": {
     "allow": [],

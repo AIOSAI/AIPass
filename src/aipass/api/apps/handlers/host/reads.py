@@ -3,7 +3,7 @@
 # Description: Host API Read Handler — file and directory reads behind the name fence
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-08-18
 # =============================================
 
 """
@@ -29,15 +29,37 @@ Branch names resolve through the citizen registry — the system's own catalog o
 who exists and where. This handler reads that catalog; it never decides what a
 branch is. Same D0 line as everywhere else in this package.
 
+THE FENCE GAINED ROOTS — FPLAN-0443, 2026-08-18
+------------------------------------------------------------------------
+Patrick: "rn I can only see into agent files... I cant explore home. or project
+files outside agents." The fence answered exactly one kind of word, so
+agent-land was the whole of where a phone could stand. It answers four now
+(ROOT_KINDS), and the widening is the ROSTER, not the rule: the client still
+sends a name, the server still decides what it means, and the same containment
+runs underneath all four. resolve_branch_root is the branch arm of resolve_root
+and every caller of it is untouched.
+
+Where each floor comes from stays a lookup, never a composition: the registry
+for a branch, @baud's census for a project, Path.home() for home, this server's
+own registry parent for aipass.
+
+THE EXPOSURE IS ON THE RECORD (FPLAN-0443 Notes, Patrick's ruling): fully open,
+no deny-list and no extra scope gate, so a read-scope token reads ~/.ssh and
+friends over the tailnet. The cheap reversal is a name deny-list here plus
+require_scope("operate") on the home arm; nothing in this shape forecloses it.
+
 Caps: 512KB on both files and diffs, matching BAUD's read fence. A cap that is
 hit is REPORTED, never a silent truncation.
 
 Functions:
+    resolve_root()        - Any of the four kinds of name to an absolute floor
     resolve_branch_root() - Registry lookup, branch name to absolute path
-    read_file()           - Read one file under a branch, fenced and capped
+    list_roots()          - The roster of every place the file lane may stand
+    read_file()           - Read one file under a root, fenced and capped
     list_dir()            - One level of one directory, fenced and capped
     seated_project()      - The project this server is seated in
     repo_root()           - The seat's repository root
+    home_root()           - The operator's home directory
 
 The repository-shaped reads used to live here too, and this file crossed the
 1500-line cap carrying them. They now sit in git_reads.py (the patch, the change
@@ -77,6 +99,29 @@ GRAIN_BRANCH = "branch"
 GRAIN_REPO = "repo"
 GRAINS = (GRAIN_BRANCH, GRAIN_REPO)
 
+# ROOT KINDS — the whole vocabulary of the fence (FPLAN-0443).
+#
+# For as long as it existed the fence answered exactly ONE kind of word, a
+# citizen name, which is why browsing stopped at agent-land. Patrick named the
+# cost on 2026-08-18: "rn I can only see into agent files... I cant explore
+# home. or project files outside agents."
+#
+# These four are the words it answers now, and they are a CLOSED set resolved
+# server-side. A kind is not a path and no arrangement of kinds composes one —
+# the client still sends a NAME, the server still decides what it means, and
+# the containment below still catches a name that lies. The fence widened; it
+# was never removed.
+ROOT_BRANCH = "branch"
+ROOT_HOME = "home"
+ROOT_PROJECT = "project"
+ROOT_AIPASS = "aipass"
+ROOT_KINDS = (ROOT_BRANCH, ROOT_HOME, ROOT_PROJECT, ROOT_AIPASS)
+
+# The kinds that name nothing: there is one home directory and one repository
+# this server is seated in. A name alongside either is a caller error, and it
+# is REFUSED rather than dropped — see resolve_root.
+_NAMELESS_KINDS = (ROOT_HOME, ROOT_AIPASS)
+
 
 class ReadRefused(Exception):
     """A read was refused. Carries the reason the caller is allowed to know."""
@@ -112,6 +157,24 @@ def repo_root() -> Path:
         Absolute path to the repo root.
     """
     return _registry_path().parent
+
+
+def home_root() -> Path:
+    """
+    The operator's home directory — the root Patrick named first.
+
+    A location primitive like repo_root(), and deliberately as plain: whether
+    the directory exists is resolve_root's question, not this one's.
+
+    Returns:
+        Absolute path to the home directory.
+
+    Raises:
+        RuntimeError: The platform could not name a home directory at all.
+            Left to the caller, which turns it into ReadUnavailable — a home
+            that cannot be found is this machine's problem, never the phone's.
+    """
+    return Path.home().resolve()
 
 
 def seated_project() -> str:
@@ -245,11 +308,223 @@ def resolve_branch_root(branch: str, project: str = "") -> Path:
         logger.error("[host_api] citizen registry could not be read: %s", e)
         raise ReadUnavailable(f"Citizen registry could not be read: {e}") from e
 
-    root = Path(str(info.get("path", ""))).resolve()
+    listed = str(info.get("path", "")).strip()
+    if not listed:
+        # Path("") resolves to the process's CWD, which IS a real directory —
+        # so a citizen registered without a path would have resolved to
+        # wherever this server happens to be standing and read as that
+        # branch's root. Found while widening the fence, fixed here.
+        raise ReadUnavailable(f"Registry lists {branch!r} without a path")
+
+    root = Path(listed).resolve()
     if not root.is_dir():
         raise ReadUnavailable(f"Registry lists {branch!r} at a path that does not exist: {root}")
 
     return root
+
+
+def _project_root(name: str) -> Path:
+    """
+    Resolve a project name to its root, through @baud's census.
+
+    This server never composes a filesystem path for a project — the row comes
+    from BAUD's own discovery, the same engine the desktop and the attach lane
+    trust, so there is one implementation of "where does this project live".
+
+    THE MATCH IS EXACT, on purpose. The name arrives from a roster this server
+    published FROM this census, so an exact comparison is a comparison against
+    the census's own spelling. This module already documents three different
+    project-matching rules (the seat is case-insensitive, foreign branches
+    travel verbatim, the fleet lane is @baud's); a fourth invented here would
+    make the file's behaviour indefensible as a whole. The refusal names where
+    the right spelling comes from instead.
+
+    Args:
+        name: Census name, exactly as /v1/roots published it.
+
+    Returns:
+        Absolute path to the project root — existence is the caller's check.
+
+    Raises:
+        ReadRefused: No name, or no project by that name in the census.
+        ReadUnavailable: The census could not be produced, or lists the project
+            without a path.
+    """
+    wanted = name.strip()
+    if not wanted:
+        raise ReadRefused(f"A project name is required for the {ROOT_PROJECT!r} root")
+
+    # Imported HERE for the same cycle reason _external_branch_root documents.
+    from aipass.api.apps.handlers.host import fleet as host_fleet
+
+    try:
+        census = host_fleet.list_projects()
+    except host_fleet.FleetUnavailable as e:
+        logger.info("[host_api] census could not be produced for root %r: %s", wanted, e)
+        raise ReadUnavailable(str(e)) from e
+
+    for row in census.get("projects") or []:
+        if str(row.get("name", "")) != wanted:
+            continue
+
+        listed = str(row.get("root", "")).strip()
+        if not listed:
+            # Path("") resolves to the CWD, which is a real directory — a blank
+            # row would otherwise serve wherever this process is standing.
+            raise ReadUnavailable(f"The census lists {wanted!r} without a path")
+
+        return Path(listed).resolve()
+
+    raise ReadRefused(f"No project named {wanted!r} in the roster — the names come from /v1/roots")
+
+
+def resolve_root(kind: str, name: str = "", project: str = "") -> Path:
+    """
+    Resolve one of the fence's four kinds of word to an absolute floor.
+
+    resolve_branch_root is the BRANCH ARM of this function and keeps every
+    existing caller bit-identical — there is no second implementation of
+    "where does a citizen live" and no caller had to change to gain three more
+    kinds of place to stand.
+
+    A PARAMETER THAT CANNOT MEAN ANYTHING IS REFUSED, NEVER DROPPED. The kinds
+    that name nothing take no name, and only the branch kind is qualified by a
+    project. Silently ignoring either would let a caller believe an answer was
+    scoped when it was not — the same reason /v1/roster refuses every parameter
+    rather than filtering on the ones it understands.
+
+    Args:
+        kind: One of ROOT_KINDS. There is no default here on purpose: "absent
+            means branch" is the READ LANE's rule, because absent is a request
+            that named no root. A resolver that guessed would turn every typo
+            into somebody's branch.
+        name: The name within that kind — a citizen name, a census project
+            name, or empty for the kinds that name nothing.
+        project: Only meaningful for the branch kind, where it qualifies which
+            project's branch is meant.
+
+    Returns:
+        Absolute path to the floor a read may stand on.
+
+    Raises:
+        ReadRefused: Unknown kind, a missing name, or a parameter this kind
+            cannot use.
+        ReadUnavailable: The floor could not be produced or is not a directory.
+    """
+    if kind not in ROOT_KINDS:
+        raise ReadRefused(f"Unknown root kind: {kind!r}. The fence answers {', '.join(ROOT_KINDS)}")
+
+    if kind == ROOT_BRANCH:
+        return resolve_branch_root(name, project)
+
+    # Past this line nothing resolves a branch, so a project qualifies nothing.
+    if project.strip():
+        raise ReadRefused(f"The {kind!r} root does not live inside a project — send no project")
+
+    if kind in _NAMELESS_KINDS and name.strip() and name.strip() != kind:
+        # THE ROOT MAY NAME ITSELF — @devpulse's ruling, 2026-08-18, after
+        # @baud's picker was measured against this fence. Their browser sends
+        # the first path component for EVERY root, and a kind that names
+        # nothing stands in for itself rather than send an empty component
+        # that composes a leading slash their own transport refuses. A word
+        # equal to the kind is not a parameter that cannot mean anything: it
+        # names the root, straight off the roster row this server published.
+        # Any OTHER name is still refused, so the doctrine is intact —
+        # nothing meaningless is dropped, nothing meaningful is refused.
+        # Exact, like the project names, and for the same reason.
+        raise ReadRefused(f"The {kind!r} root names nothing — send no name, or the kind itself; received {name!r}")
+
+    if kind == ROOT_HOME:
+        try:
+            root = home_root()
+        except RuntimeError as e:
+            # A machine that cannot name a home directory is our fault to
+            # report, not a request the phone got wrong.
+            logger.error("[host_api] the home directory could not be determined: %s", e)
+            raise ReadUnavailable(f"The home directory could not be determined: {e}") from e
+    elif kind == ROOT_AIPASS:
+        root = repo_root().resolve()
+    else:
+        root = _project_root(name)
+
+    if not root.is_dir():
+        raise ReadUnavailable(f"The {kind!r} root is not a directory: {root}")
+
+    return root
+
+
+def list_roots() -> Dict[str, Any]:
+    """
+    Every place the file lane may stand — the roster the phone's picker renders.
+
+    A face that hardcoded this list would be a face that lies the day a project
+    is added, which is the whole reason this is a door rather than a constant.
+
+    NO BRANCH ROWS. Agents already have their own door (the wheel resolves a
+    citizen and browses it), and a branch row could not carry the project that
+    qualifies it — so a roster of branches would be true only at the seat.
+
+    ONE ROW PER FLOOR. The anchor project and the aipass root are the SAME
+    directory; publishing both would be a roster that lies about how many
+    places there are. The duplicate row goes, and BOTH selectors still resolve.
+
+    A BROKEN CENSUS REFUSES THE WHOLE ROSTER rather than serving the two rows
+    that need no census. Measured against the consumer rather than assumed:
+    @baud's RootsScreen renders `body.roots` and ignores every other field, so
+    a partial roster carrying an error nobody reads would print as "there are
+    no projects". Their screen shows a refusal in our own words instead.
+
+    Returns:
+        Dict with `roots`: rows of {kind, name, label}, in the order home,
+        aipass, then the census's own order.
+
+    Raises:
+        ReadUnavailable: The census could not be produced.
+    """
+    from aipass.api.apps.handlers.host import fleet as host_fleet
+
+    aipass = repo_root().resolve()
+
+    # 'home' prints the word for the place rather than the directory's own name,
+    # which is a username and not what anyone calls it.
+    roots: list = [
+        {"kind": ROOT_HOME, "name": "", "label": "home"},
+        {"kind": ROOT_AIPASS, "name": "", "label": aipass.name},
+    ]
+
+    try:
+        census = host_fleet.list_projects()
+    except host_fleet.FleetUnavailable as e:
+        logger.info("[host_api] roots roster refused — no census: %s", e)
+        raise ReadUnavailable(str(e)) from e
+
+    dropped = []
+    for row in census.get("projects") or []:
+        name = str(row.get("name", "")).strip()
+        listed = str(row.get("root", "")).strip()
+
+        if not name or not listed:
+            # Named, never silent: a row the fence could not be handed is a row
+            # this roster must not draw, and a drop nobody logs reads as a
+            # census that returned fewer projects.
+            dropped.append(row)
+            continue
+
+        root = Path(listed).resolve()
+        if root == aipass:
+            continue
+
+        # The label is what a person calls the place; the name is what the
+        # fence will actually be handed. @baud's row prints the second under
+        # the first when they differ.
+        roots.append({"kind": ROOT_PROJECT, "name": name, "label": root.name or name})
+
+    if dropped:
+        logger.warning("[host_api] roots roster dropped %s census row(s) with no name or path", len(dropped))
+
+    json_handler.log_operation("host_api_roots_roster", {"roots": len(roots), "dropped": len(dropped)})
+
+    return {"roots": roots}
 
 
 # ==============================================
@@ -257,27 +532,36 @@ def resolve_branch_root(branch: str, project: str = "") -> Path:
 # ==============================================
 
 
-def read_file(branch: str, file: str, project: str = "") -> Dict[str, Any]:
+def read_file(branch: str, file: str, project: str = "", root: str = "") -> Dict[str, Any]:
     """
-    Read one file under a branch.
+    Read one file under a named root.
 
     Args:
-        branch: Branch name — resolved through the registry, never a path.
-        file: Path RELATIVE to the branch root, e.g. "apps/api.py".
-        project: Optional project name. Empty means the seat; any project
-            @baud's census knows is served.
+        branch: The name WITHIN the root kind — a citizen name on the branch
+            lane (the default), a census project name under the project root,
+            and empty for the kinds that name nothing. Resolved, never a path.
+        file: Path RELATIVE to that root, e.g. "apps/api.py".
+        project: Optional project name, qualifying a branch. Empty means the
+            seat; any project @baud's census knows is served.
+        root: Which KIND of root to stand on — see ROOT_KINDS. ABSENT MEANS
+            BRANCH, which is not a default invented here: it is the only
+            meaning this verb has ever had, so a caller written before roots
+            existed asks for exactly what it always asked for.
 
     Returns:
         Dict with branch, file, bytes, truncated (always False — a cap hit is an
-        error here, not a quiet trim) and content.
+        error here, not a quiet trim), content, and `floor`: the absolute path
+        of the root this read stood on, which the caller needs to build a path
+        that pastes into a terminal. A request that NAMED a root also gets it
+        echoed back.
 
     Raises:
-        ReadRefused: Fence violation, unknown branch, missing file, over cap, or
-            a file that is not UTF-8 text.
-        ReadUnavailable: Registry or filesystem failure.
+        ReadRefused: Fence violation, unknown root or branch, missing file,
+            over cap, or a file that is not UTF-8 text.
+        ReadUnavailable: Registry, census or filesystem failure.
     """
-    root = resolve_branch_root(branch, project)
-    target = _fence(root, file)
+    floor = resolve_root(root or ROOT_BRANCH, branch, project)
+    target = _fence(floor, file)
 
     if not target.is_file():
         raise ReadRefused(f"Not a file: {file!r}")
@@ -295,44 +579,65 @@ def read_file(branch: str, file: str, project: str = "") -> Dict[str, Any]:
         logger.error("[host_api] file read failed for %s: %s", target, e)
         raise ReadUnavailable(f"File could not be read: {e}") from e
 
-    json_handler.log_operation("host_api_file_read", {"branch": branch, "file": file, "bytes": size})
+    # The trail names the root: a home read and a branch read must not be the
+    # same line in the audit, because the exposure this widening carries is on
+    # the record (FPLAN-0443 Notes) and a record has to carry it.
+    audit: Dict[str, Any] = {"branch": branch, "file": file, "bytes": size}
+    if root:
+        audit["root"] = root
+    json_handler.log_operation("host_api_file_read", audit)
 
-    return {
+    answer = {
         "branch": branch,
         "file": file,
         "bytes": size,
         "truncated": False,
         "content": content,
+        # THE FLOOR — the absolute path of the root this answer stood on
+        # (@devpulse's rider, 2026-08-18). The face knows <root>/<relative> and
+        # nothing about where the root sits on disk, so a copy-path button has
+        # to be handed the absolute half; composing it there would mean the
+        # phone holding a second opinion about where anything lives.
+        "floor": str(floor),
     }
+    if root:
+        answer["root"] = root
+
+    return answer
 
 
-def list_dir(branch: str, dir: str = "", project: str = "") -> Dict[str, Any]:
+def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "") -> Dict[str, Any]:
     """
-    List one directory level under a branch — the phone's file browser.
+    List one directory level under a named root — the phone's file browser.
 
     Mirrors the desktop's `list_dir`: dirs first, then files, both
     alphabetical, noise directories filtered at the source. One level only;
     the caller descends by asking again.
 
     Args:
-        branch: Branch name — resolved through the registry, never a path.
-        dir: Directory RELATIVE to the branch root, empty for the root itself.
-        project: Optional project name. Empty means the seat; any project
-            @baud's census knows is served.
+        branch: The name WITHIN the root kind — see read_file. Empty is now a
+            legitimate request rather than a malformed one, because `home` and
+            `aipass` name nothing.
+        dir: Directory RELATIVE to that root, empty for the root itself.
+        project: Optional project name, qualifying a branch.
+        root: Which KIND of root to stand on. Absent means branch.
 
     Returns:
-        Dict with branch, dir, entries (name, path relative to the branch
-        root, is_dir) and truncated — True when the level was over the cap
-        and the tail was dropped.
+        Dict with branch, dir, entries (name, path relative to the root,
+        is_dir), truncated — True when the level was over the cap and the tail
+        was dropped — and `floor`, the absolute path of the root. `floor` plus
+        an entry's path is that entry's real location on disk, which is the
+        join the phone's copy-path button performs. A named root is echoed back.
 
     Raises:
-        ReadRefused: Fence violation, unknown branch, or not a directory.
-        ReadUnavailable: Registry or filesystem failure.
+        ReadRefused: Fence violation, unknown root or branch, or not a
+            directory.
+        ReadUnavailable: Registry, census or filesystem failure.
     """
-    root = resolve_branch_root(branch, project)
-    # The fence requires a name; the branch root itself is the one level the
-    # caller may name with nothing.
-    target = _fence(root, dir) if dir.strip() else root
+    floor = resolve_root(root or ROOT_BRANCH, branch, project)
+    # The fence requires a name; the root itself is the one level the caller
+    # may name with nothing.
+    target = _fence(floor, dir) if dir.strip() else floor
 
     if not target.is_dir():
         raise ReadRefused(f"Not a directory: {dir!r}")
@@ -351,7 +656,7 @@ def list_dir(branch: str, dir: str = "", project: str = "") -> Dict[str, Any]:
         entries.append(
             {
                 "name": child.name,
-                "path": str(child.relative_to(root)),
+                "path": str(child.relative_to(floor)),
                 "is_dir": is_child_dir,
             }
         )
@@ -361,17 +666,25 @@ def list_dir(branch: str, dir: str = "", project: str = "") -> Dict[str, Any]:
     if truncated:
         entries = entries[:MAX_DIR_ENTRIES]
 
-    json_handler.log_operation(
-        "host_api_dir_list",
-        {"branch": branch, "dir": dir or ".", "entries": len(entries), "truncated": truncated},
-    )
+    audit: Dict[str, Any] = {"branch": branch, "dir": dir or ".", "entries": len(entries), "truncated": truncated}
+    if root:
+        audit["root"] = root
+    json_handler.log_operation("host_api_dir_list", audit)
 
-    return {
+    answer = {
         "branch": branch,
         "dir": dir,
         "entries": entries,
         "truncated": truncated,
+        # The ROOT's absolute path, not the listed directory's: entry paths are
+        # already relative to the root, so a floor that walked with `dir` would
+        # double-count the relative part on the face's own join.
+        "floor": str(floor),
     }
+    if root:
+        answer["root"] = root
+
+    return answer
 
 
 # ==============================================
@@ -418,7 +731,9 @@ def _fence(root: Path, file: str) -> Path:
          catches a symlink pointing out of the tree, which (1) and (2) cannot.
 
     Args:
-        root: Absolute, resolved branch root.
+        root: Absolute, resolved floor — any of the fence's kinds. This gate
+            never asks which kind it is standing on, which is why widening the
+            roster did not widen the containment.
         file: Caller-supplied relative name.
 
     Returns:
@@ -433,7 +748,7 @@ def _fence(root: Path, file: str) -> Path:
     candidate = file.strip()
 
     if candidate.startswith(("/", "\\")) or (len(candidate) > 1 and candidate[1] == ":"):
-        raise ReadRefused("File must be relative to the branch, not an absolute path")
+        raise ReadRefused("File must be relative to the root, not an absolute path")
 
     parts = Path(candidate).parts
     if ".." in parts:
@@ -445,7 +760,7 @@ def _fence(root: Path, file: str) -> Path:
     # of it, and only a post-resolution check sees that.
     if resolved != root and root not in resolved.parents:
         logger.warning("[host_api] fence blocked a read outside %s: %r", root, file)
-        raise ReadRefused("File resolves outside the branch")
+        raise ReadRefused("File resolves outside the root")
 
     if not resolved.exists():
         raise ReadRefused(f"No such file: {file!r}")
